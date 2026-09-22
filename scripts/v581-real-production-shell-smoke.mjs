@@ -9,6 +9,16 @@ import {fileURLToPath} from 'node:url';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const publicDir=path.join(root,'public');
+process.env.CE_QC_RECOVERY_SAFE_MODE='1';
+process.env.CE_QC_BACKGROUND_MAINTENANCE_ENABLED='0';
+process.env.CE_QC_SKIP_STARTUP_POD_REPAIR='1';
+process.env.DATA_DIR=path.join(os.tmpdir(),'ce-qc-v581-data');
+process.env.DB_FILE=path.join(process.env.DATA_DIR,'v581.db');
+const [{buildV509InjectedHtmlForTest},{applyV330UiHtmlForTest}]=await Promise.all([
+  import('../src/v44WhppUiPatch.js'),
+  import('../src/v231MetricTruthUiInjectionPatch.js')
+]);
+const productionHtml=applyV330UiHtmlForTest(buildV509InjectedHtmlForTest());
 
 function freePort(){return new Promise((resolve,reject)=>{const s=net.createServer();s.once('error',reject);s.listen(0,'127.0.0.1',()=>{const p=s.address().port;s.close(()=>resolve(p));});});}
 function browserExecutable(){
@@ -59,6 +69,11 @@ const server=http.createServer((req,res)=>{
   let file=u.pathname;
   if(routeLike.includes(file))file='/index.html';
   file=String(file||''); while(file.startsWith('/')) file=file.slice(1);
+  if(file==='index.html'){
+    res.writeHead(200,{'content-type':'text/html; charset=utf-8','cache-control':'no-store'});
+    res.end(productionHtml);
+    return;
+  }
   const abs=path.normalize(path.join(publicDir,file));
   if(!abs.startsWith(publicDir)||!fs.existsSync(abs)||fs.statSync(abs).isDirectory()){res.writeHead(404);res.end('not found');return;}
   res.writeHead(200,{'content-type':typeFor(abs),'cache-control':'no-store'});
@@ -81,36 +96,43 @@ try{
   console.log('[V581_PROD_SHELL_PROBE]',JSON.stringify({navResult,probe}));
   assert.equal(probe.sidebar,true,'actual production index did not load a sidebar; probe='+JSON.stringify(probe));
   assert.equal(probe.appBody,true,'actual production index did not load app-body; probe='+JSON.stringify(probe));
-  await new Promise(r=>setTimeout(r,1000));
-  const state=await cdp.eval(`(()=>{const q=s=>document.querySelector(s);const cs=s=>q(s)?getComputedStyle(q(s)):null;const rect=s=>q(s)?q(s).getBoundingClientRect():null;return {
-    readyState:document.readyState,\n    appReady:!!window.__CE_QC_V575_COORDINATE_OWNER__,
-    v580:!!window.__CE_QC_V580_VISIBLE_SHELL__,
-    navType:q('.side-link[data-page="ce"]')?.tagName,
-    appBody:{display:cs('.app-body')?.display,visibility:cs('.app-body')?.visibility,opacity:cs('.app-body')?.opacity,rect:rect('.app-body')},
-    topbar:{display:cs('.topbar')?.display,visibility:cs('.topbar')?.visibility,rect:rect('.topbar')},
-    main:{display:cs('.main-content')?.display,visibility:cs('.main-content')?.visibility,rect:rect('.main-content')},
-    homeHidden:q('#homePage')?.hidden,
-    title:q('#pageTitle')?.textContent,
-    homeText:q('#homePage')?.innerText?.slice(0,250),
-    cards:q('#homeBusinessCards')?.children?.length||0
-  }})()`);
-  console.log('[V581_PROD_SHELL_STATE]',JSON.stringify(state));
-  assert.notEqual(state.appBody.display,'none','production app body must be visible');
-  assert.notEqual(state.topbar.display,'none','production topbar must be visible');
-  assert.notEqual(state.main.display,'none','production main must be visible');
+  const snapshot=async label=>{
+    const state=await cdp.eval(`(()=>{const q=s=>document.querySelector(s);const cs=s=>q(s)?getComputedStyle(q(s)):null;const rr=s=>{const r=q(s)?.getBoundingClientRect();return r?{left:r.left,top:r.top,width:r.width,height:r.height}:null};const ce=q('.side-link[data-page="ce"]');const cr=ce?.getBoundingClientRect();const hit=cr?document.elementFromPoint(cr.left+cr.width/2,cr.top+cr.height/2):null;return {
+      readyState:document.readyState,compat:document.documentElement.dataset.v554Compatibility||'',appReady:!!window.__CE_QC_V575_COORDINATE_OWNER__,v580:!!window.__CE_QC_V580_VISIBLE_SHELL__,
+      appBody:{display:cs('.app-body')?.display,visibility:cs('.app-body')?.visibility,opacity:cs('.app-body')?.opacity,rect:rr('.app-body')},
+      topbar:{display:cs('.topbar')?.display,visibility:cs('.topbar')?.visibility,rect:rr('.topbar')},
+      main:{display:cs('.main-content')?.display,visibility:cs('.main-content')?.visibility,rect:rr('.main-content')},
+      homeHidden:q('#homePage')?.hidden,title:q('#pageTitle')?.textContent,homeText:q('#homePage')?.innerText?.slice(0,250),
+      ceRect:cr?{left:cr.left,top:cr.top,width:cr.width,height:cr.height}:null,hit:{tag:hit?.tagName||'',id:hit?.id||'',cls:String(hit?.className||''),page:hit?.closest?.('[data-page]')?.dataset?.page||''}
+    }})()`);
+    console.log('[V581_PROD_SHELL_STATE:'+label+']',JSON.stringify(state));return state;
+  };
+  await new Promise(r=>setTimeout(r,500));
+  await snapshot('0.5s');
+  await waitFor(()=>cdp.eval("document.documentElement.dataset.v554Compatibility==='ready'"),20000).catch(()=>false);
+  const state=await snapshot('compat-ready');
+  assert.notEqual(state.appBody.display,'none','production app body must be visible after all injected compatibility scripts');
+  assert.notEqual(state.topbar.display,'none','production topbar must be visible after all injected compatibility scripts');
+  assert.notEqual(state.main.display,'none','production main must be visible after all injected compatibility scripts');
   assert.equal(state.homeHidden,false,'production home page must be visible');
   assert.ok((state.appBody.rect?.width||0)>500,'production app body must occupy viewport');
   assert.ok((state.topbar.rect?.height||0)>20,'production topbar must have height');
   assert.ok((state.main.rect?.height||0)>100,'production main content must have height');
-  assert.match(state.homeText||'',/总看板日期范围|核心指标总览/,'production home static content must be visible');
-  await cdp.eval("document.querySelector('.side-link[data-page=ce]').click()");
+  assert.match(state.homeText||'',/核心指标总览/,'production home static content must be visible');
+  assert.equal(state.hit.page,'ce','native hit-test must reach CE sidebar control, not an overlay');
+  const clickNative=async page=>{
+    const p=await cdp.eval(`(()=>{const e=document.querySelector('.side-link[data-page="${page}"]');const r=e.getBoundingClientRect();return{x:r.left+r.width/2,y:r.top+r.height/2}})()`);
+    await cdp.send('Input.dispatchMouseEvent',{type:'mousePressed',x:p.x,y:p.y,button:'left',clickCount:1});
+    await cdp.send('Input.dispatchMouseEvent',{type:'mouseReleased',x:p.x,y:p.y,button:'left',clickCount:1});
+  };
+  await clickNative('ce');
   await waitFor(()=>cdp.eval("!document.getElementById('ccslPage').hidden&&document.querySelector('.side-link[data-page=ce]').classList.contains('active')"),5000);
-  await cdp.eval("document.querySelector('.side-link[data-page=import]').click()");
+  await clickNative('import');
   await waitFor(()=>cdp.eval("!document.getElementById('importPage').hidden&&document.querySelector('.side-link[data-page=import]').classList.contains('active')"),5000);
   const exceptions=cdp.events.filter(e=>e.method==='Runtime.exceptionThrown').map(e=>e.params?.exceptionDetails?.exception?.description||e.params?.exceptionDetails?.text||'').filter(Boolean);
   console.log('[V581_PROD_SHELL_EXCEPTIONS]',JSON.stringify(exceptions.slice(0,10)));
   assert.equal(exceptions.length,0,'production shell emitted runtime exceptions: '+exceptions.join(' | '));
-  console.log('[V581_PROD_SHELL] actual public/index.html + actual frontend scripts passed in real Chromium/Edge: home visible, CE/import navigation works, zero runtime exceptions');
+  console.log('[V581_PROD_SHELL] exact V509+V330 delivered production HTML passed in real Chromium/Edge after all deferred compatibility assets: home/topbar visible, native CE/import clicks work, zero runtime exceptions');
 }finally{
   try{cdp?.close()}catch{}
   try{child.kill('SIGKILL')}catch{}
