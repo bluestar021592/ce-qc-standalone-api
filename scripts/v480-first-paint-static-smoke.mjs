@@ -3,14 +3,15 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import { spawnSync } from 'node:child_process';
 
-for(const file of ['src/v89StaticAssetCachePatch.js','src/exportJobAtomicJson.js','public/dashboard-fixture-v18.js','public/v569-final-interaction-owner.js']){
+for(const file of ['src/v89StaticAssetCachePatch.js','src/exportJobAtomicJson.js','public/dashboard-fixture-v18.js','public/v581-stable-shell-owner.js','src/v581StableShellResponsePatch.js']){
   const checked=spawnSync(process.execPath,['--check',file],{encoding:'utf8'});
   assert.equal(checked.status,0,`${file} syntax failed: ${checked.stderr||checked.stdout}`);
 }
 const source=fs.readFileSync('src/v89StaticAssetCachePatch.js','utf8');
 const atomic=fs.readFileSync('src/exportJobAtomicJson.js','utf8');
 const startup=fs.readFileSync('public/dashboard-fixture-v18.js','utf8');
-const interaction=fs.readFileSync('public/v569-final-interaction-owner.js','utf8');
+const stableShell=fs.readFileSync('public/v581-stable-shell-owner.js','utf8');
+const stableResponse=fs.readFileSync('src/v581StableShellResponsePatch.js','utf8');
 const indexHtml=fs.readFileSync('public/index.html','utf8');
 const purgeConsole=fs.readFileSync('public/purge-console.html','utf8');
 const server=fs.readFileSync('server.js','utf8');
@@ -54,18 +55,21 @@ assert.doesNotMatch(startup,/typeof global\.refresh === 'function'/,'startup cli
 assert.match(startup,/does NOT clear the startup timer here/,'V535 must keep the timeout armed after response headers arrive');
 assert.doesNotMatch(startup,/\/api\/admin\/data-purge|\/api\/import\/unified-daily-report/i,'first-paint guard must not own destructive or import endpoints');
 assert.doesNotMatch(startup,/method\s*:\s*['"`](?:POST|PUT|PATCH|DELETE)['"`]/i,'first-paint guard must not create write requests');
-assert.match(indexHtml,/2026-09-21-v575-coordinate-nav-owner-v1/,'V575 coordinate interaction owner must be embedded in the normal dashboard shell');
-assert.match(indexHtml,/function actionByCoordinates\(x,y,sidebarOnly\)/,'V575 must resolve intended controls by geometry when an overlay owns event.target');
-assert.match(indexHtml,/global\.addEventListener\('pointerdown',onPointerDown,true\)/,'V575 must own pointerdown at window capture before legacy handlers');
-assert.match(indexHtml,/global\.addEventListener\('mousedown',onMouseDown,true\)/,'V575 must also cover ordinary mouse input');
-assert.match(indexHtml,/global\.addEventListener\('pointerup',onPointerUp,true\)/,'V575 must own dashboard button release when an overlay blocks native click targeting');
-assert.match(indexHtml,/replayWhenReady/,'V575 must paint locally and replay into app.js rather than performing a full-page reload');
-assert.doesNotMatch(indexHtml,/v569-final-interaction-owner\.js/,'retired V570 interaction owner must no longer be shipped alongside V575');
-assert.match(indexHtml,/data-page="whpp"/,'canonical static sidebar must contain WHPP before any runtime mutation');
-const v575At=indexHtml.indexOf('2026-09-21-v575-coordinate-nav-owner-v1');
-const firstExternal=indexHtml.indexOf('<link rel="stylesheet"');
-assert.ok(v575At>=0&&firstExternal>v575At,'V575 interaction owner must install before external page assets');
-
+assert.doesNotMatch(indexHtml,/installV575CoordinateOwner/,'V581 static shell must retire the V575 capture owner');
+assert.doesNotMatch(indexHtml,/v580-visible-shell-recovery\.js/,'V581 static shell must retire layered V580 recovery');
+assert.match(indexHtml,/v581-stable-shell-owner\.js\?v=20260922-v581-1/,'V581 stable shell must ship in the normal dashboard HTML');
+assert.match(indexHtml,/<a class="side-link active" data-page="home"[^>]*href="\/?\?auth=v581"/,'HOME must be a native anchor');
+assert.match(indexHtml,/<a class="side-link" data-page="ce"[^>]*href="\/ce\?auth=v581"/,'CE must be a native hard-navigation anchor');
+assert.match(indexHtml,/<a class="side-link" data-page="whpp"[^>]*href="\/whpp\?auth=v581"/,'WHPP must remain a native first-class route');
+assert.match(indexHtml,/<a class="side-link" data-page="import"[^>]*href="\/import\?auth=v581"/,'data import must remain reachable without SPA click ownership');
+assert.match(stableShell,/2026-09-22-v581-stable-shell-rebase-v1/);
+assert.match(stableShell,/data-v581-active/,'V581 must own route visibility deterministically');
+assert.match(stableShell,/renderFallbackHomeIfStillEmpty/,'V581 must recover a blank HOME container');
+assert.match(stableShell,/native sidebar links/i,'V581 must explicitly keep native sidebar navigation');
+assert.match(stableResponse,/2026-09-22-v581-stable-shell-response-v1/);
+assert.match(stableResponse,/stripInlineV575/,'final delivered HTML must remove V575 even if an older response wrapper re-injects it');
+assert.match(stableResponse,/v580-visible-shell-recovery\.js/,'final delivered HTML must remove V580 layered recovery');
+assert.match(stableResponse,/V581_TAG/,'final response pass must append exactly one V581 owner');
 
 assert.match(purgeConsole,/CE QC 直接清空业务数据/,'recovery page must expose the direct no-backup purge mode');
 assert.match(purgeConsole,/onclick="window\.openDirectDataPurge\?\.\(\)"/,'recovery page must delegate direct purge to the V560 owner');
@@ -171,4 +175,4 @@ const nativePost=await context.fetch('/api/admin/data-purge/prepare',{method:'PO
 assert.equal(nativePost.native,true,'write requests must bypass startup guard unchanged');
 assert.equal(nativeCalls.at(-1)?.init?.method,'POST');
 
-console.log('[V480/V533/V535/V564/V565/V575] first-paint/lifecycle smoke passed · CSS/JS/images/fonts before auth · HTML/API stay protected · startup headers+body reads are bounded · clickability is toast-free + self-healing against stale full-screen blockers · no automatic rescue refresh/re-render · writes stay untouched · export descendants self-release when direct parent disappears');
+console.log('[V480/V533/V535/V564/V565/V581] first-paint/lifecycle smoke passed · CSS/JS/images/fonts before auth · HTML/API stay protected · startup reads bounded · V581 single stable shell/native navigation shipped · writes stay untouched · export descendants self-release when direct parent disappears');
