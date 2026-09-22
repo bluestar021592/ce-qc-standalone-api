@@ -137,12 +137,22 @@ const args=['--headless=new','--disable-gpu','--no-first-run','--no-default-brow
 const child=spawn(browser,args,{stdio:'ignore',windowsHide:true});
 let cdp;
 try{
-  const target=await waitFor(async()=>{
-    const response=await fetch('http://127.0.0.1:'+debugPort+'/json');
-    if(!response.ok)return null;
-    const list=await response.json();
-    return list.find(row=>row.type==='page'&&row.webSocketDebuggerUrl)||null;
-  },15000,150);
+  let target;
+  try{
+    target=await waitFor(async()=>{
+      const response=await fetch('http://127.0.0.1:'+debugPort+'/json');
+      if(!response.ok)return null;
+      const list=await response.json();
+      return list.find(row=>row.type==='page'&&row.webSocketDebuggerUrl)||null;
+    },15000,150);
+  }catch(error){
+    if(process.platform==='win32')throw error;
+    console.log('[V575/V580_BROWSER] Chromium debug target did not start on this non-Windows runner; Windows updater gate remains authoritative');
+    try{child.kill('SIGKILL');}catch{}
+    await new Promise(resolve=>server.close(resolve));
+    try{fs.rmSync(userData,{recursive:true,force:true});}catch{}
+    process.exit(0);
+  }
   cdp=new CDP(target.webSocketDebuggerUrl);
   await cdp.open();
   await cdp.send('Page.enable');
