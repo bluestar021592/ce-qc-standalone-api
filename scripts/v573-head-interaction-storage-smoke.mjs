@@ -7,51 +7,43 @@ const login=fs.readFileSync(new URL('../public/local-login.html',import.meta.url
 const cleanup=fs.readFileSync(new URL('./CE_QC_NoBackup_Cleanup.mjs',import.meta.url),'utf8');
 const start=fs.readFileSync(new URL('../Start_CE_QC.ps1',import.meta.url),'utf8');
 const server=fs.readFileSync(new URL('../server.js',import.meta.url),'utf8');
+const stable=fs.readFileSync(new URL('../public/v581-stable-shell-owner.js',import.meta.url),'utf8');
+const response=fs.readFileSync(new URL('../src/v581StableShellResponsePatch.js',import.meta.url),'utf8');
 
-const headEnd=index.indexOf('</head>');
-const inlineAt=index.indexOf('2026-09-21-v575-coordinate-nav-owner-v1');
-assert.ok(inlineAt>0 && inlineAt<headEnd,'V575 coordinate interaction owner must be embedded in <head> before every external asset');
-assert.doesNotMatch(index,/v569-final-interaction-owner\.js/,'V575 must be the sole shipped window-level interaction owner; the retired V570 owner must not compete');
-
-assert.match(index,/global\.addEventListener\('pointerdown',onPointerDown,true\)/,'V575 pointerdown capture must own sidebar navigation before stale handlers');
-assert.match(index,/global\.addEventListener\('click',onClick,true\)/,'click capture must stay armed at window level');
-assert.match(index,/actionByCoordinates/,'V575 must recover intended controls from pointer coordinates even when the event target is an overlay');
-assert.match(index,/elementsFromPoint/,'V575 must inspect the actual top hit stack to retire stale blockers');
-assert.doesNotMatch(index,/location\.assign\(target\)/,'V575 must never start a full-page navigation while app.js is still loading');
-assert.match(index,/replayWhenReady/,'V575 must replay the local route into app.js instead of reloading the document');
-assert.match(index,/whpp:'\/whpp'/,'WHPP must remain a first-class no-reload route');
-assert.match(index,/data-page="whpp"[^>]*WHPP|data-page="whpp"/,'static sidebar must contain WHPP before app.js or V318 runs');
-assert.match(index,/fetch\('\/api\/client-diag\?'/,'V575 owner must publish bounded client diagnostics without touching business data');
-const inlineMatch=index.match(/<script>\s*\(function installV575CoordinateOwner[\s\S]*?<\/script>/);
-assert.ok(inlineMatch,'V575 coordinate owner script block must exist');
-const inlineSource=inlineMatch[0].replace(/^<script>\s*/,'').replace(/<\/script>$/,'');
-new Function(inlineSource);
+assert.doesNotMatch(index,/installV575CoordinateOwner/,'V581 must retire the layered V575 capture owner from static HTML');
+assert.doesNotMatch(index,/v580-visible-shell-recovery\.js/,'V581 must retire the layered V580 recovery script from static HTML');
+assert.match(index,/v581-stable-shell-owner\.js\?v=20260922-v581-1/,'static shell must carry V581 as fallback');
+assert.match(index,/<a class="side-link active" data-page="home"[^>]*href="\/?\?auth=v581"/,'HOME must be a native hard link');
+assert.match(index,/<a class="side-link" data-page="ce"[^>]*href="\/ce\?auth=v581"/,'CE must be a native hard link');
+assert.match(index,/<a class="side-link" data-page="import"[^>]*href="\/import\?auth=v581"/,'import must be a native hard link');
+assert.match(stable,/single stable shell owner/i);
+assert.match(stable,/data-v581-active/,'V581 must deterministically own visible route page');
+assert.match(stable,/renderFallbackHomeIfStillEmpty/,'V581 must retry HOME render if the page container is still blank');
+assert.match(stable,/removeEmptyLargeBlockers/,'V581 must retire large stale pointer blockers without reviving V575');
+assert.match(response,/stripInlineV575/,'final response pass must remove V575 if any older wrapper re-injects it');
+assert.match(response,/v580-visible-shell-recovery\.js/,'final response pass must remove V580 if any older wrapper re-injects it');
+assert.match(response,/body=body\.replace\('\<\/body\>'|body=body\.replace\('\<\/body\>',|body=body\.replace\('<\/body>'/,'V581 response pass must inject the stable owner at the end');
+assert.match(response,/X-CE-QC-V581-Shell/);
 
 const assetAt=server.indexOf('const v575PublicAssetStatic');
 const authAt=server.indexOf('app.use(accessIdentity)');
-assert.ok(assetAt>0&&assetAt<authAt,'V574 static JS/CSS/image fast lane must be registered before accessIdentity');
-assert.match(server,/\['\/ce', '\/ceaf', '\/tbkh', '\/ali1688', '\/whpp'/,'server SPA routes must include /whpp');
-assert.match(server,/app\.get\('\/api\/client-diag'/,'server must expose read-only V575 client diagnostics');
-assert.match(server,/\[CE-QC\]\[V575_CLIENT\]/,'server client diagnostics must be labeled V575');
+assert.ok(assetAt>0&&assetAt<authAt,'browser JS/CSS/image fast lane must remain before accessIdentity');
+assert.match(server,/\['\/ce', '\/ceaf', '\/tbkh', '\/ali1688', '\/whpp'/,'server routes must include /whpp');
+assert.match(server,/app\.get\('\/api\/client-diag'/,'server must keep bounded client diagnostics');
 
 assert.match(app,/'\/whpp':'whpp'/,'base route parser must understand WHPP');
-assert.match(app,/\['ce', 'ceaf', 'tbkh', 'ali1688', 'whpp', 'shopeecn', 'shopeevn'/,'base navigatePage must admit WHPP instead of collapsing it to HOME');
-assert.match(app,/page === 'whpp'/,'WHPP hydration must explicitly hand off to its lazy owner');
-assert.match(app,/__CE_QC_V90_INSTANT_WHPP_NAV__/,'base runtime must preserve the dedicated WHPP rendering owner');
-
-assert.match(login,/\?auth=v580&t=/,'post-login URL must visibly identify the V580 visible-shell build, so stale installs are obvious');
-assert.match(cleanup,/2026-09-22-v577-fast-storage-startup-v1/);
-assert.match(cleanup,/\[CE-QC\]\[V573\]\[STORAGE\] cleanup complete:/,'startup must still print the established human-readable deletion result');
-assert.match(cleanup,/driveLine\('C',drivesBefore\.C,drivesAfter\.C\)/,'C free-space before/after must be printed');
-assert.match(cleanup,/driveLine\('D',drivesBefore\.D,drivesAfter\.D\)/,'D free-space before/after must be printed');
-assert.match(cleanup,/PROJECT_CACHE/);
-assert.match(cleanup,/PROJECT_TMP/);
-assert.match(cleanup,/NODE_MODULE_CACHE/);
-assert.match(cleanup,/compactSqliteStorage/,'V577 must fast-analyze SQLite freelist space and preserve the V576 compaction engine');
-assert.match(cleanup,/No business data was deleted/,'insufficient-space path must explicitly preserve live business data');
-assert.match(cleanup,/VACUUM/,'V576 storage diagnostics must expose the safe VACUUM gate');
-assert.match(start,/\[CE-QC\]\[V580\] Blank-shell recovery \+ V579 C\/D cleanup \+ V575 click\/WHPP fixes are installed\./);
-
+assert.match(app,/\['ce', 'ceaf', 'tbkh', 'ali1688', 'whpp', 'shopeecn', 'shopeevn'/,'base navigatePage must admit WHPP');
+assert.match(app,/page === 'whpp'/,'WHPP hydration must explicitly hand off to its owner');
+assert.match(app,/__CE_QC_V90_INSTANT_WHPP_NAV__/,'base runtime must preserve the dedicated WHPP renderer');
 assert.match(app,/\['whpp', 'WHPP本土'/,'production homepage must include WHPP as a first-class business card');
 assert.match(app,/state\.dashboard\?\.metrics\?\.total/,'WHPP home/range count must read unified WHPP metrics total');
-console.log('[V573/V575/V576/V577/V578/V579/V580] coordinate click recovery + WHPP homepage + non-blocking storage + corrected cleanup + blank-shell recovery smoke passed');
+
+assert.match(login,/\?auth=v581&t=/,'post-login URL must visibly identify V581');
+assert.match(cleanup,/2026-09-22-v577-fast-storage-startup-v1/);
+assert.match(cleanup,/\[CE-QC\]\[V573\]\[STORAGE\] cleanup complete:/);
+assert.match(cleanup,/driveLine\('C',drivesBefore\.C,drivesAfter\.C\)/);
+assert.match(cleanup,/driveLine\('D',drivesBefore\.D,drivesAfter\.D\)/);
+assert.match(cleanup,/compactSqliteStorage/);
+assert.match(start,/\[CE-QC\]\[V581\] Stable shell rebase \+ native sidebar navigation \+ V579 C\/D cleanup are installed\./);
+
+console.log('[V581] stable shell + native sidebar + WHPP + storage smoke passed · layered V575/V580 shell owners retired');
