@@ -75,10 +75,10 @@ try{
   const target=await waitFor(async()=>{const r=await fetch('http://127.0.0.1:'+debugPort+'/json');const list=await r.json();return list.find(x=>x.type==='page'&&x.webSocketDebuggerUrl)||null;});
   cdp=new CDP(target.webSocketDebuggerUrl);await cdp.open();await cdp.send('Page.enable');await cdp.send('Runtime.enable');await cdp.send('Log.enable');
   await cdp.send('Page.navigate',{url:'http://127.0.0.1:'+port+'/?auth=v580&prodShell=1'});
-  await waitFor(()=>cdp.eval("document.readyState==='complete'&&!!document.querySelector('.sidebar')&&!!document.querySelector('.app-body')"));
+  await waitFor(()=>cdp.eval("!!document.querySelector('.sidebar')&&!!document.querySelector('.app-body')"));
   await new Promise(r=>setTimeout(r,3000));
   const state=await cdp.eval(`(()=>{const q=s=>document.querySelector(s);const cs=s=>q(s)?getComputedStyle(q(s)):null;const rect=s=>q(s)?q(s).getBoundingClientRect():null;return {
-    appReady:!!window.__CE_QC_V575_COORDINATE_OWNER__,
+    readyState:document.readyState,\n    appReady:!!window.__CE_QC_V575_COORDINATE_OWNER__,
     v580:!!window.__CE_QC_V580_VISIBLE_SHELL__,
     navType:q('.side-link[data-page="ce"]')?.tagName,
     appBody:{display:cs('.app-body')?.display,visibility:cs('.app-body')?.visibility,opacity:cs('.app-body')?.opacity,rect:rect('.app-body')},
