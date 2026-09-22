@@ -205,7 +205,9 @@ function Remove-ValidationWorktree([string]$Path, [bool]$SafeToRecurse = $false)
 }
 
 function Test-RemoteCandidate([string]$RemoteCommit, [string]$CurrentCommit) {
-  $tempRoot = Join-Path $env:TEMP ("CE_QC_UPDATE_VERIFY_{0}_{1}" -f $PID, (Get-Date -Format 'yyyyMMddHHmmss'))
+  $verifyBase = if (Test-Path -LiteralPath 'D:\') { 'D:\CE_QC_TEST_TEMP\worktrees' } else { $env:TEMP }
+  New-Item -ItemType Directory -Path $verifyBase -Force | Out-Null
+  $tempRoot = Join-Path $verifyBase ("CE_QC_UPDATE_VERIFY_{0}_{1}" -f $PID, (Get-Date -Format 'yyyyMMddHHmmss'))
   $linkedModules = $false
   $junctionCleanupOk = $true
   $oldBackupRoot = $env:CE_QC_BACKUP_PROJECT_ROOT
@@ -221,7 +223,11 @@ function Test-RemoteCandidate([string]$RemoteCommit, [string]$CurrentCommit) {
     New-Item -ItemType Directory -Path $candidateScratch -Force | Out-Null
     $env:TEMP = $candidateScratch
     $env:TMP = $candidateScratch
-    Write-ManagedLog "[UPDATE] Candidate test scratch redirected to $candidateScratch so C: does not accumulate CE-QC test data." DarkCyan
+    if (Test-Path -LiteralPath 'D:\') {
+      $env:NPM_CONFIG_CACHE = 'D:\CE_QC_NPM_CACHE'
+      New-Item -ItemType Directory -Path $env:NPM_CONFIG_CACHE -Force | Out-Null
+    }
+    Write-ManagedLog "[UPDATE] Candidate worktree/test scratch/npm cache use D: when available so C: does not accumulate update data." DarkCyan
 
     $dependencyFiles = Get-GitText @('diff','--name-only',$CurrentCommit,$RemoteCommit,'--','package.json','package-lock.json')
     $currentModules = Join-Path $ProjectRoot 'node_modules'
@@ -310,6 +316,10 @@ function Invoke-SafeAutoUpdate {
   $script:NpmExe = $npm.Source
   $script:NodeExe = $node.Source
   $script:GitHubCurlResolve = $null
+  if (Test-Path -LiteralPath 'D:\') {
+    $env:NPM_CONFIG_CACHE = 'D:\CE_QC_NPM_CACHE'
+    New-Item -ItemType Directory -Path $env:NPM_CONFIG_CACHE -Force | Out-Null
+  }
 
   if (-not (Test-TrackedTreeClean)) {
     Write-ManagedLog '[UPDATE] Tracked project files have local changes; automatic update is skipped to avoid overwriting work.' Yellow
