@@ -240,12 +240,15 @@
     if(typeof MutationObserver==='function'){
       observer=new MutationObserver(records=>{
         if(enforcing)return;
-        if(records.some(r=>r.type==='attributes'||[...r.addedNodes].some(n=>n?.nodeType===1))){
-          queueMicrotask(()=>enforce('mutation'));
+        // Only structural replacement needs an observer. Route visibility is
+        // reasserted by the finite timers/pageshow path; observing our own style/
+        // hidden writes would create a mutation feedback loop.
+        if(records.some(r=>[...r.addedNodes].some(n=>n?.nodeType===1)||[...r.removedNodes].some(n=>n?.nodeType===1))){
+          queueMicrotask(()=>enforce('childlist-mutation'));
         }
       });
       const root=doc.querySelector('.app-shell')||doc.body;
-      if(root)observer.observe(root,{subtree:true,childList:true,attributes:true,attributeFilter:['hidden','style','class','inert']});
+      if(root)observer.observe(root,{subtree:true,childList:true});
     }
   }
 
