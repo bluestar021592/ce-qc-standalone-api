@@ -25,7 +25,7 @@ function browserExecutable(){
 }
 function typeFor(file){
   const ext=path.extname(file).toLowerCase();
-  return ext==='.js'||ext==='.mjs'?'application/javascript; charset=utf-8':ext==='.css'?'text/css; charset=utf-8':ext==='.svg'?'image/svg+xml':ext==='.json'?'application/json; charset=utf-8':ext==='.png'?'image/png':ext==='.jpg'||ext==='.jpeg'?'image/jpeg':'application/octet-stream';
+  return ext==='.html'?'text/html; charset=utf-8':ext==='.js'||ext==='.mjs'?'application/javascript; charset=utf-8':ext==='.css'?'text/css; charset=utf-8':ext==='.svg'?'image/svg+xml':ext==='.json'?'application/json; charset=utf-8':ext==='.png'?'image/png':ext==='.jpg'||ext==='.jpeg'?'image/jpeg':'application/octet-stream';
 }
 function sendJson(res,obj){res.writeHead(200,{'content-type':'application/json; charset=utf-8','cache-control':'no-store'});res.end(JSON.stringify(obj));}
 
