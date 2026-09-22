@@ -81,26 +81,30 @@ function prepareOwnerHtml(body) {
     .replace(/\/v58-drilldown-runtime\.js\?v=[^"']+/g, DRILLDOWN_MARKER);
 }
 
+export function applyV330UiHtmlForTest(body) {
+  if (!(typeof body === 'string' && body.includes('</body>') && body.includes('CE Express'))) return body;
+  body = prepareOwnerHtml(body);
+  const headTags=[];
+  if (!body.includes(GUARD_MARKER)) headTags.push(`  <script src="${GUARD_MARKER}"></script>`);
+  if (!body.includes(COALESCER_MARKER)) headTags.push(`  <script src="${COALESCER_MARKER}"></script>`);
+  if (!body.includes(V253_FAST_MARKER)) headTags.push(`  <script src="${V253_FAST_MARKER}"></script>`);
+  if(headTags.length) body = body.replace('</head>', `${headTags.join('\n')}\n</head>`);
+  const tags = [];
+  if (!body.includes(CHART_MARKER)) tags.push(`  <script src="${CHART_MARKER}"></script>`);
+  if (!body.includes(V246_TRACKING_MARKER)) tags.push(`  <script src="${V246_TRACKING_MARKER}"></script>`);
+  if (!body.includes(V249_WHPP_DETAIL_MARKER)) tags.push(`  <script src="${V249_WHPP_DETAIL_MARKER}"></script>`);
+  if (!body.includes(V267_REPORT_MARKER)) tags.push(`  <script src="${V267_REPORT_MARKER}"></script>`);
+  if (!body.includes(V268_LIFECYCLE_EXPORT_MARKER)) tags.push(`  <script src="${V268_LIFECYCLE_EXPORT_MARKER}"></script>`);
+  if (!body.includes(V272_LAYOUT_TREND_MARKER)) tags.push(`  <script src="${V272_LAYOUT_TREND_MARKER}"></script>`);
+  if (!body.includes(V274_TREND_SPEED_MARKER)) tags.push(`  <script src="${V274_TREND_SPEED_MARKER}"></script>`);
+  if (tags.length) body = body.replace('</body>', `${tags.join('\n')}\n</body>`);
+  return body;
+}
+
 express.response.send = function v330MetricTruthUiSend(body) {
-  if (typeof body === 'string' && body.includes('</body>') && body.includes('CE Express')) {
-    body = prepareOwnerHtml(body);
-    const headTags=[];
-    if (!body.includes(GUARD_MARKER)) headTags.push(`  <script src="${GUARD_MARKER}"></script>`);
-    if (!body.includes(COALESCER_MARKER)) headTags.push(`  <script src="${COALESCER_MARKER}"></script>`);
-    if (!body.includes(V253_FAST_MARKER)) headTags.push(`  <script src="${V253_FAST_MARKER}"></script>`);
-    if(headTags.length) body = body.replace('</head>', `${headTags.join('\n')}\n</head>`);
-    const tags = [];
-    if (!body.includes(CHART_MARKER)) tags.push(`  <script src="${CHART_MARKER}"></script>`);
-    // Stability: V272 owns all visible board trends. V263 generic stays source-compatible but is not injected live.
-    if (!body.includes(V246_TRACKING_MARKER)) tags.push(`  <script src="${V246_TRACKING_MARKER}"></script>`);
-    if (!body.includes(V249_WHPP_DETAIL_MARKER)) tags.push(`  <script src="${V249_WHPP_DETAIL_MARKER}"></script>`);
-    if (!body.includes(V267_REPORT_MARKER)) tags.push(`  <script src="${V267_REPORT_MARKER}"></script>`);
-    if (!body.includes(V268_LIFECYCLE_EXPORT_MARKER)) tags.push(`  <script src="${V268_LIFECYCLE_EXPORT_MARKER}"></script>`);
-    // V330: V271 is compatibility source only. It used a 9s network timeout and
-    // automatic retries that competed with the cache-only V329/V330 trend owner.
-    if (!body.includes(V272_LAYOUT_TREND_MARKER)) tags.push(`  <script src="${V272_LAYOUT_TREND_MARKER}"></script>`);
-    if (!body.includes(V274_TREND_SPEED_MARKER)) tags.push(`  <script src="${V274_TREND_SPEED_MARKER}"></script>`);
-    if (tags.length) body = body.replace('</body>', `${tags.join('\n')}\n</body>`);
+  const matchesShell = typeof body === 'string' && body.includes('</body>') && body.includes('CE Express');
+  if (matchesShell) {
+    body = applyV330UiHtmlForTest(body);
     this.setHeader?.('X-CE-QC-V240-UI', V240_DAILY_RATE_UI_INJECTION_ID);
     this.setHeader?.('X-CE-QC-V245-UI', V245_SHOPEE_TREND_UI_INJECTION_ID);
     this.setHeader?.('X-CE-QC-V246-UI', V246_TRACKING_UI_INJECTION_ID);
