@@ -50,8 +50,8 @@ assert.match(cleanup,/NODE_MODULE_CACHE/);
 assert.match(cleanup,/compactSqliteStorage/,'V577 must fast-analyze SQLite freelist space and preserve the V576 compaction engine');
 assert.match(cleanup,/No business data was deleted/,'insufficient-space path must explicitly preserve live business data');
 assert.match(cleanup,/VACUUM/,'V576 storage diagnostics must expose the safe VACUUM gate');
-assert.match(start,/\[CE-QC\]\[V579\] Dedicated C\/D storage cleanup parse fix \+ V575 click\/WHPP fixes are installed\./);
+assert.match(start,/\[CE-QC\]\[V580\] Blank-shell recovery \+ V579 C\/D cleanup \+ V575 click\/WHPP fixes are installed\./);
 
 assert.match(app,/\['whpp', 'WHPP本土'/,'production homepage must include WHPP as a first-class business card');
 assert.match(app,/state\.dashboard\?\.metrics\?\.total/,'WHPP home/range count must read unified WHPP metrics total');
-console.log('[V573/V575/V576/V577/V578/V579] coordinate click recovery + WHPP homepage + non-blocking large-DB storage startup + corrected dedicated-drive cleanup smoke passed');
+console.log('[V573/V575/V576/V577/V578/V579/V580] coordinate click recovery + WHPP homepage + non-blocking storage + corrected cleanup + blank-shell recovery smoke passed');
