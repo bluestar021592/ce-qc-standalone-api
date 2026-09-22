@@ -1,11 +1,16 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
+import {spawnSync} from 'node:child_process';
+import {fileURLToPath} from 'node:url';
 
 const cleanup=fs.readFileSync(new URL('../tools/CE_QC_Dedicated_Drive_Cleanup.ps1',import.meta.url),'utf8');
 const launcher=fs.readFileSync(new URL('../tools/CE_QC_Managed_Launcher.ps1',import.meta.url),'utf8');
 const start=fs.readFileSync(new URL('../Start_CE_QC.ps1',import.meta.url),'utf8');
 
-assert.match(cleanup,/2026-09-22-v578-dedicated-drive-cleanup-v1/);
+assert.match(cleanup,/2026-09-22-v579-dedicated-drive-cleanup-parsefix-v1/);
+assert.doesNotMatch(cleanup,/\$Letter:/,'PowerShell must delimit drive-letter variable before colon');
+assert.match(cleanup,/DeviceID='\$\{Letter\}:'/,'drive query must use ${Letter}: interpolation safely');
 for(const required of [
   'CE_QC_LAUNCHER\\backups',
   'CE_QC_LAUNCHER\\temp',
@@ -34,7 +39,13 @@ assert.match(launcher,/D:\\CE_QC_NPM_CACHE/,'npm cache must move to D');
 assert.match(launcher,/Candidate worktree\/test scratch\/npm cache use D:/);
 
 assert.match(start,/CE_QC_Dedicated_Drive_Cleanup\.ps1/,'startup must invoke dedicated cleanup');
-assert.match(start,/\[CE-QC\]\[V578\] Dedicated C\/D storage cleanup/);
+assert.match(start,/\[CE-QC\]\[V579\] Dedicated C\/D storage cleanup parse fix/);
 assert.match(start,/D:\\CE_QC_NPM_CACHE/);
 
-console.log('[V578] dedicated-drive cleanup smoke passed · C clears safe CE/user/browser caches + recycle bin · D owns update/runtime/npm scratch · no Documents/Downloads/system directories are blindly deleted');
+if(os.platform()==='win32'){
+  const psPath=fileURLToPath(new URL('../tools/CE_QC_Dedicated_Drive_Cleanup.ps1',import.meta.url)).replace(/'/g,"''");
+  const command="$e=$null;$t=$null;[System.Management.Automation.Language.Parser]::ParseFile('"+psPath+"',[ref]$t,[ref]$e)|Out-Null;if($e.Count -gt 0){$e|ForEach-Object{$_.Message};exit 1}";
+  const parsed=spawnSync('powershell.exe',['-NoLogo','-NoProfile','-Command',command],{encoding:'utf8'});
+  assert.equal(parsed.status,0,'PowerShell parser rejected dedicated cleanup script: '+(parsed.stdout||'')+(parsed.stderr||''));
+}
+console.log('[V578/V579] dedicated-drive cleanup smoke passed · PowerShell syntax parsed on Windows · C clears safe CE/user/browser caches + recycle bin · D owns update/runtime/npm scratch · no Documents/Downloads/system directories are blindly deleted');
