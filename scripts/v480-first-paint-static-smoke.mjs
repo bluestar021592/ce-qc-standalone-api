@@ -3,13 +3,15 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import { spawnSync } from 'node:child_process';
 
-for(const file of ['src/v89StaticAssetCachePatch.js','src/exportJobAtomicJson.js','public/dashboard-fixture-v18.js','public/v581-stable-shell-owner.js','src/v581StableShellResponsePatch.js']){
+for(const file of ['src/v89StaticAssetCachePatch.js','src/exportJobAtomicJson.js','public/dashboard-fixture-v18.js','public/v14-geometry-fixture.js','public/v304-unified-upload-owner.js','public/v581-stable-shell-owner.js','src/v581StableShellResponsePatch.js']){
   const checked=spawnSync(process.execPath,['--check',file],{encoding:'utf8'});
   assert.equal(checked.status,0,`${file} syntax failed: ${checked.stderr||checked.stdout}`);
 }
 const source=fs.readFileSync('src/v89StaticAssetCachePatch.js','utf8');
 const atomic=fs.readFileSync('src/exportJobAtomicJson.js','utf8');
 const startup=fs.readFileSync('public/dashboard-fixture-v18.js','utf8');
+const v14=fs.readFileSync('public/v14-geometry-fixture.js','utf8');
+const v304=fs.readFileSync('public/v304-unified-upload-owner.js','utf8');
 const stableShell=fs.readFileSync('public/v581-stable-shell-owner.js','utf8');
 const stableResponse=fs.readFileSync('src/v581StableShellResponsePatch.js','utf8');
 const indexHtml=fs.readFileSync('public/index.html','utf8');
@@ -55,6 +57,12 @@ assert.doesNotMatch(startup,/typeof global\.refresh === 'function'/,'startup cli
 assert.match(startup,/does NOT clear the startup timer here/,'V535 must keep the timeout armed after response headers arrive');
 assert.doesNotMatch(startup,/\/api\/admin\/data-purge|\/api\/import\/unified-daily-report/i,'first-paint guard must not own destructive or import endpoints');
 assert.doesNotMatch(startup,/method\s*:\s*['"`](?:POST|PUT|PATCH|DELETE)['"`]/i,'first-paint guard must not create write requests');
+assert.doesNotMatch(startup,/observe\(document\.body,\s*\{\s*childList:\s*true,\s*subtree:\s*true\s*\}\)/,'first-paint guard must not observe the whole dashboard subtree');
+assert.doesNotMatch(v14,/observe\(document\.body,\s*\{\s*childList:\s*true,\s*subtree:\s*true\s*\}\)/,'V14 must not install a body-wide dashboard MutationObserver');
+assert.doesNotMatch(v304,/observe\(document\.body,\s*\{\s*childList:\s*true,\s*subtree:\s*true\s*\}\)/,'V304 upload owner must not observe unrelated dashboard mutations');
+assert.match(indexHtml,/dashboard-fixture-v18\.js\?v=20260925-v582-1/,'V582 first-paint observer fix must be cache-busted');
+assert.match(indexHtml,/v14-geometry-fixture\.js\?v=20260925-v582-1/,'V582 V14 observer fix must be cache-busted');
+assert.match(v14,/v304-unified-upload-owner\.js\?v=20260925-v582-1/,'V582 V304 upload owner must be cache-busted by the runtime loader');
 assert.doesNotMatch(indexHtml,/installV575CoordinateOwner/,'V581 static shell must retire the V575 capture owner');
 assert.doesNotMatch(indexHtml,/v580-visible-shell-recovery\.js/,'V581 static shell must retire layered V580 recovery');
 assert.match(indexHtml,/v581-stable-shell-owner\.js\?v=20260925-v582-1/,'V581 stable shell must ship in the normal dashboard HTML');
