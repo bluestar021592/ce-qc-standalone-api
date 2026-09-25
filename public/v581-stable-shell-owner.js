@@ -332,5 +332,5 @@
   if(doc.querySelector('.side-nav')&&doc.querySelector('.main-content'))bind();
   else if(doc.readyState==='loading')doc.addEventListener('DOMContentLoaded',bind,{once:true});
   else bind();
-  console.info('[CE-QC][V581_STABLE_SHELL]',VERSION,'single stable shell owner: topmost native sidebar + pointerdown-first direct routing + deterministic route visibility before app bootstrap.');
+  console.info('[CE-QC][V581_STABLE_SHELL]',VERSION,'single stable shell owner: topmost native sidebar links + pointerdown-first direct routing + deterministic route visibility before app bootstrap.');
 })(window);
