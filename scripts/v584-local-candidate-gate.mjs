@@ -14,6 +14,7 @@ const TIMEOUT_MS=120_000;
 // because a slower workstation/antivirus cannot finish a 3-minute synthetic worker
 // scenario inside the desktop updater.
 const TASKS=[
+  ['node',['scripts/v584-local-update-gate-smoke.mjs']],
   ['node',['--check','bootstrap.js']],
   ['node',['--check','server.js']],
   ['node',['--check','src/v581StableShellResponsePatch.js']],
