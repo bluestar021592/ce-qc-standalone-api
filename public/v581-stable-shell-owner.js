@@ -1,7 +1,7 @@
 (function installV581StableShell(global){
   'use strict';
   if(global.__CE_QC_V581_STABLE_SHELL__)return;
-  const VERSION='2026-09-25-v583-direct-route-owner-v1';
+  const VERSION='2026-09-25-v585-pointerdown-route-owner-v1';
   const doc=global.document;
   const NAV=[
     ['home','首页总看板','home','/'],
@@ -26,6 +26,8 @@
   let observer=null;
   let structuralRepairTimer=0;
   let navigatingHref='';
+  let lastSidebarRouteHref='';
+  let lastSidebarRouteAt=0;
   let diagCount=0;
 
   function currentPage(){
@@ -100,8 +102,8 @@
     style.textContent=[
       'html,body,.app-stage,.app-shell{visibility:visible!important;opacity:1!important}',
       '.app-stage,.app-shell{display:block!important;min-height:100vh!important}',
-      '.sidebar{pointer-events:auto!important;z-index:2000!important}',
-      '.side-nav,.side-link{pointer-events:auto!important}',
+      '.sidebar{pointer-events:auto!important;z-index:2147483000!important}',
+      '.side-nav,.side-link{pointer-events:auto!important;position:relative!important;z-index:2147483001!important;touch-action:manipulation!important}',
       '.side-nav a.side-link{display:flex!important;text-decoration:none!important;box-sizing:border-box!important;cursor:pointer!important}',
       '.app-body{display:flex!important;flex-direction:column!important;visibility:visible!important;opacity:1!important;min-height:100vh!important;margin-left:228px!important;padding-top:64px!important;pointer-events:auto!important}',
       '.topbar{display:flex!important;visibility:visible!important;opacity:1!important;position:fixed!important;left:228px!important;right:0!important;top:0!important;height:64px!important;z-index:1000!important;pointer-events:auto!important}',
@@ -231,35 +233,45 @@
   }
   function hardNavigateSidebar(event){
     if(event?.metaKey||event?.ctrlKey||event?.shiftKey||event?.altKey)return;
+    if((event?.type==='pointerdown'||event?.type==='mousedown')&&Number(event?.button||0)!==0)return;
+    if(event?.type==='keydown'&&!['Enter',' '].includes(String(event.key||'')))return;
     const link=sidebarLinkForEvent(event);
     if(!link)return;
     const page=String(link.dataset?.page||'home');
     const path=String(link.dataset?.path||'/');
     const href=navHref(path);
+    const now=Date.now();
+    if(lastSidebarRouteHref===href&&now-lastSidebarRouteAt<900){
+      event.preventDefault?.();
+      event.stopImmediatePropagation?.();
+      return;
+    }
     if(navigatingHref===href){
       event.preventDefault?.();
       event.stopImmediatePropagation?.();
       return;
     }
     navigatingHref=href;
+    lastSidebarRouteHref=href;
+    lastSidebarRouteAt=now;
     event.preventDefault?.();
     event.stopImmediatePropagation?.();
-    safeDiag('V583_SIDEBAR_DIRECT_ROUTE',page+'|'+String(event?.type||''));
+    safeDiag('V585_SIDEBAR_EARLY_ROUTE',page+'|'+String(event?.type||''));
     try{
       if(typeof global.navigatePage==='function'){
         global.navigatePage(page);
-        enforce('sidebar-direct-route');
+        enforce('sidebar-early-direct-route');
         navigatingHref='';
         return;
       }
-    }catch(error){safeDiag('V583_NAVIGATE_PAGE_ERROR',error?.message||error);}
+    }catch(error){safeDiag('V585_NAVIGATE_PAGE_ERROR',error?.message||error);}
     try{
       const u=new URL(href,global.location?.href||'http://127.0.0.1/');
       global.history?.pushState?.({},'',u.pathname+u.search+u.hash);
-      enforce('sidebar-early-route');
+      enforce('sidebar-early-history-route');
       navigatingHref='';
       return;
-    }catch(error){safeDiag('V583_HISTORY_ROUTE_ERROR',error?.message||error);}
+    }catch(error){safeDiag('V585_HISTORY_ROUTE_ERROR',error?.message||error);}
     try{global.location.href=href;}catch{}
     setTimeout(()=>{navigatingHref='';},1500);
   }
@@ -281,10 +293,14 @@
   function bind(){
     enforce('bind');
     [50,250,800,1800,3500,7000].forEach(ms=>setTimeout(()=>{enforce('timer-'+ms);renderFallbackHomeIfStillEmpty();},ms));
-    // One owner, one behavior: completed sidebar clicks route synchronously in this
-    // document. Coordinate fallback is sidebar-only so a stale transparent hit layer
-    // cannot make the visible menu inert. app.js hydratePageData still owns data reads.
+    // V585 routes on the earliest left-button pointer event, before legacy handlers can
+    // swallow the completed click. Click/keyboard remain fallbacks. Same-document routing
+    // makes pointerdown safe: there is no unload race, and a short de-dupe prevents double
+    // hydration when the later click is also delivered.
+    doc.addEventListener('pointerdown',hardNavigateSidebar,true);
+    doc.addEventListener('mousedown',hardNavigateSidebar,true);
     doc.addEventListener('click',hardNavigateSidebar,true);
+    doc.addEventListener('keydown',hardNavigateSidebar,true);
     global.addEventListener('pageshow',()=>enforce('pageshow'),true);
     global.addEventListener('popstate',()=>enforce('popstate'),true);
     if(typeof MutationObserver==='function'){
@@ -316,5 +332,5 @@
   if(doc.querySelector('.side-nav')&&doc.querySelector('.main-content'))bind();
   else if(doc.readyState==='loading')doc.addEventListener('DOMContentLoaded',bind,{once:true});
   else bind();
-  console.info('[CE-QC][V581_STABLE_SHELL]',VERSION,'single stable shell owner: early native sidebar links + deterministic route visibility + direct in-document routing before app bootstrap.');
+  console.info('[CE-QC][V581_STABLE_SHELL]',VERSION,'single stable shell owner: topmost native sidebar links + pointerdown-first direct routing + deterministic route visibility before app bootstrap.');
 })(window);
