@@ -70,7 +70,7 @@ assert.match(indexHtml,/<a class="side-link active" data-page="home"[^>]*href="\
 assert.match(indexHtml,/<a class="side-link" data-page="ce"[^>]*href="\/ce\?auth=v581"/,'CE must be a native hard-navigation anchor');
 assert.match(indexHtml,/<a class="side-link" data-page="whpp"[^>]*href="\/whpp\?auth=v581"/,'WHPP must remain a native first-class route');
 assert.match(indexHtml,/<a class="side-link" data-page="import"[^>]*href="\/import\?auth=v581"/,'data import must remain reachable without SPA click ownership');
-assert.match(stableShell,/2026-09-25-v582-stable-shell-no-observer-storm-v1/);
+assert.match(stableShell,/2026-09-25-v582-early-stable-shell-v2/);
 assert.match(stableShell,/data-v581-active/,'V581 must own route visibility deterministically');
 assert.match(stableShell,/renderFallbackHomeIfStillEmpty/,'V581 must recover a blank HOME container');
 assert.match(stableShell,/native sidebar links/i,'V581 must explicitly keep native sidebar navigation');
@@ -79,10 +79,10 @@ assert.match(stableShell,/shell-structure-mutation/,'stable shell must keep boun
 assert.match(stableShell,/function sidebarLinkForEvent\(event\)/,'V582 must resolve sidebar intent by direct target or pointer coordinates');
 assert.match(stableShell,/global\.addEventListener\('pointerdown',hardNavigateSidebar,true\)/,'V582 must capture primary sidebar activation at the single stable owner');
 assert.match(stableShell,/global\.location\.assign\(href\)/,'V582 must hard-navigate sidebar routes even when a stale transparent layer owns the hit');
-assert.match(stableResponse,/2026-09-22-v581-stable-shell-response-v1/);
+assert.match(stableResponse,/2026-09-25-v582-early-stable-shell-response-v2/);
 assert.match(stableResponse,/stripInlineV575/,'final delivered HTML must remove V575 even if an older response wrapper re-injects it');
 assert.match(stableResponse,/v580-visible-shell-recovery\.js/,'final delivered HTML must remove V580 layered recovery');
-assert.match(stableResponse,/V581_TAG/,'final response pass must append exactly one V581 owner');
+assert.match(stableResponse,/V581_TAG/,'final response pass must preserve exactly one V581 owner');\nassert.match(stableResponse,/appTag/,'final response pass must locate app.js as the bootstrap boundary');\nassert.match(stableResponse,/V581_TAG\+'\\\\n'\+match/,'stable shell must be injected immediately before app.js');\nconst stableAt=indexHtml.indexOf('/v581-stable-shell-owner.js?v=20260925-v582-1');\nconst appAt=indexHtml.indexOf('/app.js?v=20260921-v564-1');\nassert.ok(stableAt>0&&appAt>stableAt,'static V581 owner must load before app.js so navigation does not wait for app bootstrap');
 
 assert.match(purgeConsole,/CE QC 直接清空业务数据/,'recovery page must expose the direct no-backup purge mode');
 assert.match(purgeConsole,/onclick="window\.openDirectDataPurge\?\.\(\)"/,'recovery page must delegate direct purge to the V560 owner');
