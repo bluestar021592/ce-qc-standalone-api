@@ -125,9 +125,15 @@ $cacheRoots = @(
   (Join-Path $env:LOCALAPPDATA 'Microsoft\Edge\User Data\Default\Cache'),
   (Join-Path $env:LOCALAPPDATA 'Microsoft\Edge\User Data\Default\Code Cache'),
   (Join-Path $env:LOCALAPPDATA 'Microsoft\Edge\User Data\Default\GPUCache'),
+  (Join-Path $env:LOCALAPPDATA 'Microsoft\Edge\User Data\Default\Service Worker\CacheStorage'),
+  (Join-Path $env:LOCALAPPDATA 'Microsoft\Edge\User Data\GrShaderCache'),
+  (Join-Path $env:LOCALAPPDATA 'Microsoft\Edge\User Data\ShaderCache'),
   (Join-Path $env:LOCALAPPDATA 'Google\Chrome\User Data\Default\Cache'),
   (Join-Path $env:LOCALAPPDATA 'Google\Chrome\User Data\Default\Code Cache'),
-  (Join-Path $env:LOCALAPPDATA 'Google\Chrome\User Data\Default\GPUCache')
+  (Join-Path $env:LOCALAPPDATA 'Google\Chrome\User Data\Default\GPUCache'),
+  (Join-Path $env:LOCALAPPDATA 'Google\Chrome\User Data\Default\Service Worker\CacheStorage'),
+  (Join-Path $env:LOCALAPPDATA 'Google\Chrome\User Data\GrShaderCache'),
+  (Join-Path $env:LOCALAPPDATA 'Google\Chrome\User Data\ShaderCache')
 )
 foreach ($p in $cacheRoots) { Remove-CeTarget $p 0 }
 
@@ -161,10 +167,10 @@ $AfterC = Get-DriveFree 'C'
 $AfterD = if (Test-Path -LiteralPath 'D:\') { Get-DriveFree 'D' } else { [int64]0 }
 function GiB([int64]$Bytes) { return [math]::Round($Bytes / 1GB, 2) }
 
-Write-CeLog "[CE-QC][V578][DEDICATED] safe cleanup complete: deleted=$DeletedEntries entries, measured=$([math]::Round($DeletedBytes / 1GB, 2)) GiB, failures=$Failures."
-Write-CeLog "[CE-QC][V578][DEDICATED] C free: $(GiB $BeforeC) GiB -> $(GiB $AfterC) GiB; reclaimed=$(GiB ($AfterC-$BeforeC)) GiB."
+Write-CeLog "[CE-QC][V583][DEDICATED] safe cleanup complete: deleted=$DeletedEntries entries, measured=$([math]::Round($DeletedBytes / 1GB, 2)) GiB, failures=$Failures."
+Write-CeLog "[CE-QC][V583][DEDICATED] C free: $(GiB $BeforeC) GiB -> $(GiB $AfterC) GiB; reclaimed=$(GiB ($AfterC-$BeforeC)) GiB."
 if ($BeforeD -gt 0) {
-  Write-CeLog "[CE-QC][V578][DEDICATED] D free: $(GiB $BeforeD) GiB -> $(GiB $AfterD) GiB; reclaimed=$(GiB ($AfterD-$BeforeD)) GiB."
+  Write-CeLog "[CE-QC][V583][DEDICATED] D free: $(GiB $BeforeD) GiB -> $(GiB $AfterD) GiB; reclaimed=$(GiB ($AfterD-$BeforeD)) GiB."
 }
 
 # Surface protected system-file sizes so large C usage is explainable without deleting Windows.
@@ -173,7 +179,7 @@ foreach ($name in @('hiberfil.sys','pagefile.sys','swapfile.sys')) {
   if (Test-Path -LiteralPath $p) {
     try {
       $bytes = [int64](Get-Item -LiteralPath $p -Force).Length
-      Write-CeLog "[CE-QC][V578][DEDICATED] protected system file retained: $name = $(GiB $bytes) GiB."
+      Write-CeLog "[CE-QC][V583][DEDICATED] protected system file retained: $name = $(GiB $bytes) GiB."
     } catch {}
   }
 }
