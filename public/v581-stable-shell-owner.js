@@ -1,7 +1,7 @@
 (function installV581StableShell(global){
   'use strict';
   if(global.__CE_QC_V581_STABLE_SHELL__)return;
-  const VERSION='2026-09-22-v581-stable-shell-rebase-v1';
+  const VERSION='2026-09-25-v582-stable-shell-no-observer-storm-v1';
   const doc=global.document;
   const NAV=[
     ['home','首页总看板','home','/'],
@@ -24,6 +24,7 @@
   const PATH_TO_PAGE=Object.fromEntries(NAV.map(([p,, ,path])=>[path,p]));
   let enforcing=false;
   let observer=null;
+  let structuralRepairTimer=0;
   let diagCount=0;
 
   function currentPage(){
@@ -240,15 +241,22 @@
     if(typeof MutationObserver==='function'){
       observer=new MutationObserver(records=>{
         if(enforcing)return;
-        // Only structural replacement needs an observer. Route visibility is
-        // reasserted by the finite timers/pageshow path; observing our own style/
-        // hidden writes would create a mutation feedback loop.
-        if(records.some(r=>[...r.addedNodes].some(n=>n?.nodeType===1)||[...r.removedNodes].some(n=>n?.nodeType===1))){
-          queueMicrotask(()=>enforce('childlist-mutation'));
-        }
+        const structural=records.some(r=>[...r.addedNodes].some(n=>n?.nodeType===1)||[...r.removedNodes].some(n=>n?.nodeType===1));
+        if(!structural||structuralRepairTimer)return;
+        // Do not observe the whole dashboard subtree. Business-card/table/chart rendering
+        // produces many childList mutations and a microtask-level shell repair loop can
+        // starve Chromium's main thread, which looks exactly like a blank/dead UI.
+        structuralRepairTimer=setTimeout(()=>{
+          structuralRepairTimer=0;
+          enforce('shell-structure-mutation');
+        },80);
       });
-      const root=doc.querySelector('.app-shell')||doc.body;
-      if(root)observer.observe(root,{subtree:true,childList:true});
+      const roots=[
+        doc.querySelector('.app-shell'),
+        doc.querySelector('.sidebar'),
+        doc.querySelector('.side-nav')
+      ].filter(Boolean);
+      for(const root of roots)observer.observe(root,{childList:true});
     }
   }
 
