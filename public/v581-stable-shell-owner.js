@@ -1,7 +1,7 @@
 (function installV581StableShell(global){
   'use strict';
   if(global.__CE_QC_V581_STABLE_SHELL__)return;
-  const VERSION='2026-09-22-v581-stable-shell-rebase-v1';
+  const VERSION='2026-09-25-v582-early-stable-shell-v2';
   const doc=global.document;
   const NAV=[
     ['home','首页总看板','home','/'],
@@ -24,6 +24,8 @@
   const PATH_TO_PAGE=Object.fromEntries(NAV.map(([p,, ,path])=>[path,p]));
   let enforcing=false;
   let observer=null;
+  let structuralRepairTimer=0;
+  let navigatingHref='';
   let diagCount=0;
 
   function currentPage(){
@@ -39,7 +41,7 @@
     return page+'Page';
   }
   function safeDiag(event,extra=''){
-    if(diagCount>=16)return;
+    if(diagCount>=32)return;
     diagCount+=1;
     try{
       fetch('/api/client-diag?'+new URLSearchParams({
@@ -211,6 +213,50 @@
       }
     }catch{}
   }
+  function sidebarLinkForEvent(event){
+    try{
+      const direct=event?.target?.closest?.('.side-nav .side-link[data-page]');
+      if(direct&&!direct.hidden)return direct;
+      const x=Number(event?.clientX),y=Number(event?.clientY);
+      if(!Number.isFinite(x)||!Number.isFinite(y))return null;
+      for(const link of doc.querySelectorAll('.side-nav .side-link[data-page]')){
+        if(link.hidden)continue;
+        const cs=global.getComputedStyle?.(link);
+        if(cs&&(cs.display==='none'||cs.visibility==='hidden'||Number(cs.opacity||1)===0))continue;
+        const r=link.getBoundingClientRect?.();
+        if(r&&r.width>0&&r.height>0&&x>=r.left&&x<=r.right&&y>=r.top&&y<=r.bottom)return link;
+      }
+    }catch{}
+    return null;
+  }
+  function hardNavigateSidebar(event){
+    if(event?.type==='pointerdown'&&Number(event.button||0)!==0)return;
+    if(event?.metaKey||event?.ctrlKey||event?.shiftKey||event?.altKey)return;
+    const link=sidebarLinkForEvent(event);
+    if(!link)return;
+    const route=String(link.href||link.getAttribute?.('href')||link.dataset?.path||'');
+    if(!route)return;
+    let href=route;
+    try{
+      const u=new URL(route,global.location?.href||'http://127.0.0.1/');
+      u.searchParams.set('auth','v581');
+      u.searchParams.delete('t');
+      href=u.href;
+    }catch{}
+    if(navigatingHref===href){
+      event.preventDefault?.();
+      event.stopImmediatePropagation?.();
+      return;
+    }
+    navigatingHref=href;
+    event.preventDefault?.();
+    event.stopImmediatePropagation?.();
+    safeDiag('V582_SIDEBAR_HARD_NAV',String(link.dataset?.page||'')+'|'+String(event?.type||''));
+    try{global.location.assign(href);}
+    catch{try{global.location.href=href;}catch{}}
+    setTimeout(()=>{navigatingHref='';},1500);
+  }
+
   function enforce(reason='manual'){
     if(enforcing)return;
     enforcing=true;
@@ -228,31 +274,42 @@
   function bind(){
     enforce('bind');
     [50,250,800,1800,3500,7000].forEach(ms=>setTimeout(()=>{enforce('timer-'+ms);renderFallbackHomeIfStillEmpty();},ms));
-    doc.addEventListener('click',event=>{
-      const link=event.target?.closest?.('.side-nav a.side-link[href]');
-      if(!link)return;
-      // Native hard navigation is intentional. Do not preventDefault and do not call
-      // legacy SPA owners; a fresh document is more reliable than layered click routing.
-      safeDiag('V581_NATIVE_NAV',String(link.dataset.page||''));
-    },true);
+    // One owner, one behavior: sidebar activation always becomes a fresh document
+    // navigation. Coordinate fallback is sidebar-only and exists solely so a stale
+    // transparent hit layer cannot make the visible menu inert.
+    // V565 owns pointerdown blocker repair. Navigate only on the completed click:
+    // navigating during pointerdown can be cancelled by the remaining mouse sequence.
+    doc.addEventListener('click',hardNavigateSidebar,true);
     global.addEventListener('pageshow',()=>enforce('pageshow'),true);
     global.addEventListener('popstate',()=>enforce('popstate'),true);
     if(typeof MutationObserver==='function'){
       observer=new MutationObserver(records=>{
         if(enforcing)return;
-        // Only structural replacement needs an observer. Route visibility is
-        // reasserted by the finite timers/pageshow path; observing our own style/
-        // hidden writes would create a mutation feedback loop.
-        if(records.some(r=>[...r.addedNodes].some(n=>n?.nodeType===1)||[...r.removedNodes].some(n=>n?.nodeType===1))){
-          queueMicrotask(()=>enforce('childlist-mutation'));
-        }
+        const structural=records.some(r=>[...r.addedNodes].some(n=>n?.nodeType===1)||[...r.removedNodes].some(n=>n?.nodeType===1));
+        if(!structural||structuralRepairTimer)return;
+        // Do not observe the whole dashboard subtree. Business-card/table/chart rendering
+        // produces many childList mutations and a microtask-level shell repair loop can
+        // starve Chromium's main thread, which looks exactly like a blank/dead UI.
+        structuralRepairTimer=setTimeout(()=>{
+          structuralRepairTimer=0;
+          enforce('shell-structure-mutation');
+        },80);
       });
-      const root=doc.querySelector('.app-shell')||doc.body;
-      if(root)observer.observe(root,{subtree:true,childList:true});
+      const roots=[
+        doc.querySelector('.app-shell'),
+        doc.querySelector('.sidebar'),
+        doc.querySelector('.side-nav')
+      ].filter(Boolean);
+      for(const root of roots)observer.observe(root,{childList:true});
     }
   }
 
   global.__CE_QC_V581_STABLE_SHELL__={version:VERSION,enforce,normalizeNav,showRoute};
-  if(doc.readyState==='loading')doc.addEventListener('DOMContentLoaded',bind,{once:true});else bind();
-  console.info('[CE-QC][V581_STABLE_SHELL]',VERSION,'single stable shell owner: native sidebar links + deterministic route visibility + blank-shell recovery.');
+  // The owner is intentionally injected immediately before app.js, after the full
+  // dashboard markup has been parsed. Bind now instead of waiting for DOMContentLoaded,
+  // because a slow legacy bootstrap must never delay sidebar click ownership.
+  if(doc.querySelector('.side-nav')&&doc.querySelector('.main-content'))bind();
+  else if(doc.readyState==='loading')doc.addEventListener('DOMContentLoaded',bind,{once:true});
+  else bind();
+  console.info('[CE-QC][V581_STABLE_SHELL]',VERSION,'single stable shell owner: early native sidebar links + deterministic route visibility + hard navigation before app bootstrap.');
 })(window);

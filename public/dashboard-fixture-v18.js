@@ -290,11 +290,10 @@
   setTimeout(repairInteractionSurface, 3000);
 
   if (!clearNoticeWhenRendered()) {
-    const observer = new MutationObserver(() => {
-      if (clearNoticeWhenRendered()) observer.disconnect();
-    });
-    try { observer.observe(document.body, { childList: true, subtree: true }); } catch {}
-    setTimeout(() => observer.disconnect(), 30000);
+    // Do not watch the whole dashboard subtree. Rendering cards/tables can generate a
+    // large burst of childList mutations; a body-wide MutationObserver here adds no
+    // business value and can starve the renderer during first paint.
+    [100, 500, 1500, 3000, 5000].forEach(ms => setTimeout(clearNoticeWhenRendered, ms));
   }
 
   // V564: no automatic rescue refresh. Startup recovery stays read-only/lightweight

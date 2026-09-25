@@ -12,17 +12,24 @@ const response=fs.readFileSync(new URL('../src/v581StableShellResponsePatch.js',
 
 assert.doesNotMatch(index,/installV575CoordinateOwner/,'V581 must retire the layered V575 capture owner from static HTML');
 assert.doesNotMatch(index,/v580-visible-shell-recovery\.js/,'V581 must retire the layered V580 recovery script from static HTML');
-assert.match(index,/v581-stable-shell-owner\.js\?v=20260922-v581-1/,'static shell must carry V581 as fallback');
+assert.match(index,/v581-stable-shell-owner\.js\?v=20260925-v582-1/,'static shell must carry V581 as fallback');
 assert.match(index,/<a class="side-link active" data-page="home"[^>]*href="\/?\?auth=v581"/,'HOME must be a native hard link');
 assert.match(index,/<a class="side-link" data-page="ce"[^>]*href="\/ce\?auth=v581"/,'CE must be a native hard link');
 assert.match(index,/<a class="side-link" data-page="import"[^>]*href="\/import\?auth=v581"/,'import must be a native hard link');
 assert.match(stable,/single stable shell owner/i);
+assert.doesNotMatch(stable,/subtree:true/,'stable-shell observer must never watch the whole dashboard subtree');
+assert.match(stable,/shell-structure-mutation/,'bounded structural repair must remain available');
 assert.match(stable,/data-v581-active/,'V581 must deterministically own visible route page');
 assert.match(stable,/renderFallbackHomeIfStillEmpty/,'V581 must retry HOME render if the page container is still blank');
 assert.match(stable,/removeEmptyLargeBlockers/,'V581 must retire large stale pointer blockers without reviving V575');
+assert.match(stable,/function sidebarLinkForEvent\(event\)/,'V582 must resolve the intended sidebar route even when a stale layer owns event.target');
+assert.match(stable,/doc\.addEventListener\('click',hardNavigateSidebar,true\)/,'V582 must own completed sidebar clicks after pointer blocker repair');
+assert.doesNotMatch(stable,/global\.addEventListener\('pointerdown',hardNavigateSidebar,true\)/,'V582 must never hard-navigate on pointerdown');
+assert.match(stable,/global\.location\.assign\(href\)/,'V582 sidebar activation must use a fresh hard navigation instead of SPA repainting');
 assert.match(response,/stripInlineV575/,'final response pass must remove V575 if any older wrapper re-injects it');
 assert.match(response,/v580-visible-shell-recovery\.js/,'final response pass must remove V580 if any older wrapper re-injects it');
-assert.match(response,/body=body\.replace\('\<\/body\>',V581_TAG\+'\\n<\/body>'\)/,'V581 response pass must inject the stable owner at the end');
+assert.match(response,/const appTag=/,'V582 response pass must locate app.js as the bootstrap boundary');
+assert.match(response,/V581_TAG\+'\\n'\+match/,'V582 response pass must inject the stable owner before app.js');
 assert.match(response,/X-CE-QC-V581-Shell/);
 
 const assetAt=server.indexOf('const v575PublicAssetStatic');

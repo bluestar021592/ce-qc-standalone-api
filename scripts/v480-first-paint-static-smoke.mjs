@@ -3,13 +3,15 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import { spawnSync } from 'node:child_process';
 
-for(const file of ['src/v89StaticAssetCachePatch.js','src/exportJobAtomicJson.js','public/dashboard-fixture-v18.js','public/v581-stable-shell-owner.js','src/v581StableShellResponsePatch.js']){
+for(const file of ['src/v89StaticAssetCachePatch.js','src/exportJobAtomicJson.js','public/dashboard-fixture-v18.js','public/v14-geometry-fixture.js','public/v304-unified-upload-owner.js','public/v581-stable-shell-owner.js','src/v581StableShellResponsePatch.js']){
   const checked=spawnSync(process.execPath,['--check',file],{encoding:'utf8'});
   assert.equal(checked.status,0,`${file} syntax failed: ${checked.stderr||checked.stdout}`);
 }
 const source=fs.readFileSync('src/v89StaticAssetCachePatch.js','utf8');
 const atomic=fs.readFileSync('src/exportJobAtomicJson.js','utf8');
 const startup=fs.readFileSync('public/dashboard-fixture-v18.js','utf8');
+const v14=fs.readFileSync('public/v14-geometry-fixture.js','utf8');
+const v304=fs.readFileSync('public/v304-unified-upload-owner.js','utf8');
 const stableShell=fs.readFileSync('public/v581-stable-shell-owner.js','utf8');
 const stableResponse=fs.readFileSync('src/v581StableShellResponsePatch.js','utf8');
 const indexHtml=fs.readFileSync('public/index.html','utf8');
@@ -55,21 +57,38 @@ assert.doesNotMatch(startup,/typeof global\.refresh === 'function'/,'startup cli
 assert.match(startup,/does NOT clear the startup timer here/,'V535 must keep the timeout armed after response headers arrive');
 assert.doesNotMatch(startup,/\/api\/admin\/data-purge|\/api\/import\/unified-daily-report/i,'first-paint guard must not own destructive or import endpoints');
 assert.doesNotMatch(startup,/method\s*:\s*['"`](?:POST|PUT|PATCH|DELETE)['"`]/i,'first-paint guard must not create write requests');
+assert.doesNotMatch(startup,/observe\(document\.body,\s*\{\s*childList:\s*true,\s*subtree:\s*true\s*\}\)/,'first-paint guard must not observe the whole dashboard subtree');
+assert.doesNotMatch(v14,/observe\(document\.body,\s*\{\s*childList:\s*true,\s*subtree:\s*true\s*\}\)/,'V14 must not install a body-wide dashboard MutationObserver');
+assert.doesNotMatch(v304,/observe\(document\.body,\s*\{\s*childList:\s*true,\s*subtree:\s*true\s*\}\)/,'V304 upload owner must not observe unrelated dashboard mutations');
+assert.match(indexHtml,/dashboard-fixture-v18\.js\?v=20260925-v582-1/,'V582 first-paint observer fix must be cache-busted');
+assert.match(indexHtml,/v14-geometry-fixture\.js\?v=20260925-v582-1/,'V582 V14 observer fix must be cache-busted');
+assert.match(v14,/v304-unified-upload-owner\.js\?v=20260925-v582-1/,'V582 V304 upload owner must be cache-busted by the runtime loader');
 assert.doesNotMatch(indexHtml,/installV575CoordinateOwner/,'V581 static shell must retire the V575 capture owner');
 assert.doesNotMatch(indexHtml,/v580-visible-shell-recovery\.js/,'V581 static shell must retire layered V580 recovery');
-assert.match(indexHtml,/v581-stable-shell-owner\.js\?v=20260922-v581-1/,'V581 stable shell must ship in the normal dashboard HTML');
+assert.match(indexHtml,/v581-stable-shell-owner\.js\?v=20260925-v582-1/,'V581 stable shell must ship in the normal dashboard HTML');
 assert.match(indexHtml,/<a class="side-link active" data-page="home"[^>]*href="\/?\?auth=v581"/,'HOME must be a native anchor');
 assert.match(indexHtml,/<a class="side-link" data-page="ce"[^>]*href="\/ce\?auth=v581"/,'CE must be a native hard-navigation anchor');
 assert.match(indexHtml,/<a class="side-link" data-page="whpp"[^>]*href="\/whpp\?auth=v581"/,'WHPP must remain a native first-class route');
 assert.match(indexHtml,/<a class="side-link" data-page="import"[^>]*href="\/import\?auth=v581"/,'data import must remain reachable without SPA click ownership');
-assert.match(stableShell,/2026-09-22-v581-stable-shell-rebase-v1/);
+assert.match(stableShell,/2026-09-25-v582-early-stable-shell-v2/);
 assert.match(stableShell,/data-v581-active/,'V581 must own route visibility deterministically');
 assert.match(stableShell,/renderFallbackHomeIfStillEmpty/,'V581 must recover a blank HOME container');
 assert.match(stableShell,/native sidebar links/i,'V581 must explicitly keep native sidebar navigation');
-assert.match(stableResponse,/2026-09-22-v581-stable-shell-response-v1/);
+assert.doesNotMatch(stableShell,/subtree:true/,'stable-shell observer must not watch business-card/table/chart subtree mutations');
+assert.match(stableShell,/shell-structure-mutation/,'stable shell must keep bounded structural repair');
+assert.match(stableShell,/function sidebarLinkForEvent\(event\)/,'V582 must resolve sidebar intent by direct target or pointer coordinates');
+assert.match(stableShell,/doc\.addEventListener\('click',hardNavigateSidebar,true\)/,'V582 must hard-navigate only on completed sidebar click after V565 pointer repair');
+assert.doesNotMatch(stableShell,/global\.addEventListener\('pointerdown',hardNavigateSidebar,true\)/,'V582 must not navigate during pointerdown');
+assert.match(stableShell,/global\.location\.assign\(href\)/,'V582 must hard-navigate sidebar routes even when a stale transparent layer owns the hit');
+assert.match(stableResponse,/2026-09-25-v582-early-stable-shell-response-v2/);
 assert.match(stableResponse,/stripInlineV575/,'final delivered HTML must remove V575 even if an older response wrapper re-injects it');
 assert.match(stableResponse,/v580-visible-shell-recovery\.js/,'final delivered HTML must remove V580 layered recovery');
-assert.match(stableResponse,/V581_TAG/,'final response pass must append exactly one V581 owner');
+assert.match(stableResponse,/V581_TAG/,'final response pass must preserve exactly one V581 owner');
+assert.match(stableResponse,/appTag/,'final response pass must locate app.js as the bootstrap boundary');
+assert.match(stableResponse,/V581_TAG\+'\\n'\+match/,'stable shell must be injected immediately before app.js');
+const stableAt=indexHtml.indexOf('/v581-stable-shell-owner.js?v=20260925-v582-1');
+const appAt=indexHtml.indexOf('/app.js?v=20260921-v564-1');
+assert.ok(stableAt>0&&appAt>stableAt,'static V581 owner must load before app.js so navigation does not wait for app bootstrap');
 
 assert.match(purgeConsole,/CE QC 直接清空业务数据/,'recovery page must expose the direct no-backup purge mode');
 assert.match(purgeConsole,/onclick="window\.openDirectDataPurge\?\.\(\)"/,'recovery page must delegate direct purge to the V560 owner');

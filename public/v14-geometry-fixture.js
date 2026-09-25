@@ -156,7 +156,13 @@ if (new URLSearchParams(location.search).has('visualTest')) {
   }
 
   suppressLegacyTrends();
-  new MutationObserver(suppressLegacyTrends).observe(document.body,{childList:true,subtree:true});
+  try {
+    const style=document.createElement('style');
+    style.id='ce-qc-v582-no-live-trends';
+    style.textContent=trendSelectors.join(',')+'{display:none!important}';
+    document.head.appendChild(style);
+  } catch {}
+  [250,1000,3000].forEach(ms=>setTimeout(suppressLegacyTrends,ms));
 
   if (typeof renderHomeTrends === 'function') renderHomeTrends = function(){ return ''; };
   if (typeof renderShopeeRecipientTrends === 'function') renderShopeeRecipientTrends = function(){ return ''; };
@@ -196,7 +202,7 @@ if (new URLSearchParams(location.search).has('visualTest')) {
   }
 
   ensureManualRefreshButton();
-  new MutationObserver(ensureManualRefreshButton).observe(document.querySelector('.topbar')||document.body,{childList:true,subtree:true});
+  [250,1000,3000].forEach(ms=>setTimeout(ensureManualRefreshButton,ms));
 })();
 
 if (!new URLSearchParams(location.search).has('visualTest')) {
@@ -212,7 +218,7 @@ if (!new URLSearchParams(location.search).has('visualTest')) {
   loadRuntimeScript('/v505-data-purge-recovery.js?v=20260911-v505-8');
   loadRuntimeScript('/v502-multidrive-backup-ui.js?v=20260912-v502-3');
   loadRuntimeScript('/v303-authorized-clean-start.js?v=20260825-v303-direct-1', () => {
-    loadRuntimeScript('/v304-unified-upload-owner.js?v=20260825-v304-1', () => {
+    loadRuntimeScript('/v304-unified-upload-owner.js?v=20260925-v582-1', () => {
       loadRuntimeScript('/v27-dashboard-fix.js?v=20260808-v27-2', () => {
         // Live dashboard trends are intentionally not mounted. Trend/history
         // calculations remain available only through export/report workflows.
