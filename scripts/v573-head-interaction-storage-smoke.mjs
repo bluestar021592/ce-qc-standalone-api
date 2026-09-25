@@ -23,7 +23,7 @@ assert.match(stable,/data-v581-active/,'V581 must deterministically own visible 
 assert.match(stable,/renderFallbackHomeIfStillEmpty/,'V581 must retry HOME render if the page container is still blank');
 assert.match(stable,/removeEmptyLargeBlockers/,'V581 must retire large stale pointer blockers without reviving V575');
 assert.match(stable,/function sidebarLinkForEvent\(event\)/,'V582 must resolve the intended sidebar route even when a stale layer owns event.target');
-assert.match(stable,/global\.addEventListener\('pointerdown',hardNavigateSidebar,true\)/,'V582 must own primary sidebar activation before later handlers');
+assert.match(stable,/doc\.addEventListener\('click',hardNavigateSidebar,true\)/,'V582 must own completed sidebar clicks after pointer blocker repair');\nassert.doesNotMatch(stable,/global\.addEventListener\('pointerdown',hardNavigateSidebar,true\)/,'V582 must never hard-navigate on pointerdown');
 assert.match(stable,/global\.location\.assign\(href\)/,'V582 sidebar activation must use a fresh hard navigation instead of SPA repainting');
 assert.match(response,/stripInlineV575/,'final response pass must remove V575 if any older wrapper re-injects it');
 assert.match(response,/v580-visible-shell-recovery\.js/,'final response pass must remove V580 if any older wrapper re-injects it');
