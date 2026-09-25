@@ -130,7 +130,7 @@ function Clear-CeQcPort([int]$Port) {
 Write-Host 'Checking port 5177...' -ForegroundColor Cyan
 Clear-CeQcPort 5177
 Write-Host 'Port 5177 is stable and free.' -ForegroundColor Green
-Write-Host '[CE-QC][V583] Stable shell/navigation repair + aggressive safe C/D cleanup are installed.' -ForegroundColor Green
+Write-Host '[CE-QC][V584] Direct sidebar/dashboard repair + bounded updater gate + safe C/D cleanup are installed.' -ForegroundColor Green
 
 $DedicatedCleanup = Join-Path $ProjectRoot 'tools\CE_QC_Dedicated_Drive_Cleanup.ps1'
 if (Test-Path -LiteralPath $DedicatedCleanup) {
@@ -315,6 +315,21 @@ Write-Host 'Automatic backend restart: ENABLED (max 5 crashes / 10 minutes).' -F
 Write-Host 'Keep this window open while using CE QC.' -ForegroundColor Yellow
 Write-Host '===============================================' -ForegroundColor Green
 Write-Host ''
+
+# V584: explain unexpected C-drive usage without delaying startup or deleting unknown files.
+# The census is read-only and bounded; it writes a separate log while the backend is already ready.
+$CDriveCensus = Join-Path $ProjectRoot 'tools\CE_QC_C_Drive_Census.ps1'
+$CDriveCensusLog = Join-Path $LogDir 'c_drive_census_latest.log'
+if (-not $env:CI -and (Test-Path -LiteralPath $CDriveCensus)) {
+    try {
+        $quotedCensus = '"' + $CDriveCensus + '"'
+        $quotedOutput = '"' + $CDriveCensusLog + '"'
+        Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoLogo','-NoProfile','-ExecutionPolicy','Bypass','-File',$quotedCensus,'-OutputFile',$quotedOutput) -WorkingDirectory $ProjectRoot -WindowStyle Hidden | Out-Null
+        Write-Host "[CE-QC][V584] Read-only C-drive usage census started in background: $CDriveCensusLog" -ForegroundColor DarkCyan
+    } catch {
+        Write-Host ("[WARN] C-drive census could not start; app startup is unaffected. " + $_.Exception.Message) -ForegroundColor Yellow
+    }
+}
 
 if (-not $env:CI) {
     if ($RecoveryLaunchMode) {
