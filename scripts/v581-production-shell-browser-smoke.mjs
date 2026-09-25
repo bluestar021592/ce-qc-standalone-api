@@ -209,7 +209,9 @@ try{
   // in-page async timer loop alive here while app bootstrap is still settling; on
   // Windows Edge that can be throttled independently of real input dispatch and
   // produce a false Runtime.evaluate timeout before the click test even begins.
-  const first=await cdp.eval("(()=>({auth:new URLSearchParams(location.search).get('auth'),title:document.getElementById('pageTitle')?.textContent||'',homeText:String(document.getElementById('homePage')?.textContent||'').trim().slice(0,120),ce:!!document.querySelector('.side-nav .side-link[data-page=\\\"ce\\\"]'),imp:!!document.querySelector('.side-nav .side-link[data-page=\\\"import\\\"]')}))()",3000);
+  stage('capturing minimal live HOME/sidebar snapshot');
+  const first=await cdp.eval("(()=>({auth:new URLSearchParams(location.search).get('auth'),title:document.getElementById('pageTitle')?.textContent||'',homeText:String(document.getElementById('homePage')?.textContent||'').trim().slice(0,120),ce:!!document.querySelector('.side-nav .side-link[data-page=\\\"ce\\\"]'),imp:!!document.querySelector('.side-nav .side-link[data-page=\\\"import\\\"]')}))()",12000);
+  stage('minimal live HOME/sidebar snapshot captured');
   assert.equal(first.auth,'v581');
   assert.equal(first.title,'首页总看板');
   assert.equal(first.ce,true,'CE native sidebar route must exist in the live DOM');
