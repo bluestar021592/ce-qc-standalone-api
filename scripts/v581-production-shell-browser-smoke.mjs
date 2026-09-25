@@ -145,7 +145,7 @@ function signedCookie(secret){
   return body+'.'+sig;
 }
 async function click(cdp,selector){
-  const p=await cdp.eval(`(()=>{const n=document.querySelector(${JSON.stringify(selector)});if(!n)return null;const r=n.getBoundingClientRect();const x=r.left+r.width/2,y=r.top+r.height/2;const top=document.elementFromPoint(x,y);return{x,y,top:top?String(top.tagName||'')+'#'+String(top.id||'')+'.'+String(top.className||''):'',href:n.href||'',page:n.dataset?.page||'',pe:getComputedStyle(n).pointerEvents};})()`);
+  const p=await cdp.eval(`(()=>{const n=document.querySelector(${JSON.stringify(selector)});if(!n)return null;const r=n.getBoundingClientRect();const x=r.left+r.width/2,y=r.top+r.height/2;const top=document.elementFromPoint(x,y);return{x,y,top:top?String(top.tagName||'')+'#'+String(top.id||'')+'.'+String(top.className||''):'',href:n.href||'',page:n.dataset?.page||'',pe:getComputedStyle(n).pointerEvents};})()`,12000);
   assert.ok(p&&Number.isFinite(p.x)&&Number.isFinite(p.y),'missing clickable point for '+selector);
   stage('hit '+selector+' => '+p.top+' page='+p.page+' pointer='+p.pe);
   await cdp.send('Input.dispatchMouseEvent',{type:'mouseMoved',x:p.x,y:p.y,button:'none'});
@@ -219,19 +219,19 @@ try{
   assert.ok(first.homeText.length>10,'HOME must not be a blank rectangle');
 
   stage('forcing blank shell and testing deterministic recovery');
-  const blankRecovery=await cdp.eval("(()=>{const a=document.querySelector('.app-body'),t=document.querySelector('.topbar'),m=document.querySelector('.main-content'),h=document.getElementById('homePage');a.style.setProperty('display','none','important');t.style.setProperty('display','none','important');m.style.setProperty('display','none','important');h.hidden=true;h.style.setProperty('display','none','important');window.__CE_QC_V581_STABLE_SHELL__.enforce('production-browser-forced-blank');const as=getComputedStyle(a),ts=getComputedStyle(t),ms=getComputedStyle(m),hs=getComputedStyle(h);return{ok:as.display!=='none'&&ts.display!=='none'&&ms.display!=='none'&&!h.hidden&&hs.display!=='none',appBody:as.display,topbar:ts.display,main:ms.display,home:hs.display,hidden:h.hidden};})()",3500);
+  const blankRecovery=await cdp.eval("(()=>{const a=document.querySelector('.app-body'),t=document.querySelector('.topbar'),m=document.querySelector('.main-content'),h=document.getElementById('homePage');a.style.setProperty('display','none','important');t.style.setProperty('display','none','important');m.style.setProperty('display','none','important');h.hidden=true;h.style.setProperty('display','none','important');window.__CE_QC_V581_STABLE_SHELL__.enforce('production-browser-forced-blank');const as=getComputedStyle(a),ts=getComputedStyle(t),ms=getComputedStyle(m),hs=getComputedStyle(h);return{ok:as.display!=='none'&&ts.display!=='none'&&ms.display!=='none'&&!h.hidden&&hs.display!=='none',appBody:as.display,topbar:ts.display,main:ms.display,home:hs.display,hidden:h.hidden};})()",12000);
   assert.equal(blankRecovery?.ok,true,'forced blank shell must recover synchronously in the stable owner: '+JSON.stringify(blankRecovery));
   stage('forced blank shell recovered');
 
   stage('installing transparent sidebar blocker to prove coordinate hard navigation');
-  await cdp.eval("(()=>{document.getElementById('v582SidebarBlocker')?.remove();const b=document.createElement('div');b.id='v582SidebarBlocker';Object.assign(b.style,{position:'fixed',left:'0',top:'0',width:'228px',height:'100vh',zIndex:'2147483647',background:'rgba(255,0,0,0.001)',pointerEvents:'auto'});document.body.appendChild(b);return true;})()",2000);
+  await cdp.eval("(()=>{document.getElementById('v582SidebarBlocker')?.remove();const b=document.createElement('div');b.id='v582SidebarBlocker';Object.assign(b.style,{position:'fixed',left:'0',top:'0',width:'228px',height:'100vh',zIndex:'2147483647',background:'rgba(255,0,0,0.001)',pointerEvents:'auto'});document.body.appendChild(b);return true;})()",12000);
   stage('clicking CE link through transparent blocker');
   await click(cdp,'.side-nav .side-link[data-page="ce"]');
   await evalWait(cdp,"(()=>{const p=document.getElementById('ccslPage'),t=document.getElementById('pageTitle');return location.pathname==='/ce'&&p&&!p.hidden&&getComputedStyle(p).display!=='none'&&t?.textContent==='CE看板';})()",8000,100,'CE direct visible route');
   stage('CE direct route passed');
 
   stage('reinstalling transparent sidebar blocker before import click');
-  await cdp.eval("(()=>{document.getElementById('v582SidebarBlocker')?.remove();const b=document.createElement('div');b.id='v582SidebarBlocker';Object.assign(b.style,{position:'fixed',left:'0',top:'0',width:'228px',height:'100vh',zIndex:'2147483647',background:'rgba(0,0,255,0.001)',pointerEvents:'auto'});document.body.appendChild(b);return true;})()",2000);
+  await cdp.eval("(()=>{document.getElementById('v582SidebarBlocker')?.remove();const b=document.createElement('div');b.id='v582SidebarBlocker';Object.assign(b.style,{position:'fixed',left:'0',top:'0',width:'228px',height:'100vh',zIndex:'2147483647',background:'rgba(0,0,255,0.001)',pointerEvents:'auto'});document.body.appendChild(b);return true;})()",12000);
   stage('clicking import link through transparent blocker');
   await click(cdp,'.side-nav .side-link[data-page="import"]');
   await evalWait(cdp,"(()=>{const p=document.getElementById('importPage'),t=document.getElementById('pageTitle');return location.pathname==='/import'&&p&&!p.hidden&&getComputedStyle(p).display!=='none'&&t?.textContent==='数据导入';})()",8000,100,'import direct visible route');
