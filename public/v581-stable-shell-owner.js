@@ -277,7 +277,8 @@
     // One owner, one behavior: sidebar activation always becomes a fresh document
     // navigation. Coordinate fallback is sidebar-only and exists solely so a stale
     // transparent hit layer cannot make the visible menu inert.
-    global.addEventListener('pointerdown',hardNavigateSidebar,true);
+    // V565 owns pointerdown blocker repair. Navigate only on the completed click:
+    // navigating during pointerdown can be cancelled by the remaining mouse sequence.
     doc.addEventListener('click',hardNavigateSidebar,true);
     global.addEventListener('pageshow',()=>enforce('pageshow'),true);
     global.addEventListener('popstate',()=>enforce('popstate'),true);
