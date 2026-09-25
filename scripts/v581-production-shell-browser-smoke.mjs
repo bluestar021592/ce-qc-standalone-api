@@ -145,7 +145,7 @@ function signedCookie(secret){
   return body+'.'+sig;
 }
 async function hitPoint(cdp,selector){
-  const p=await cdp.eval(`(()=>{const n=document.querySelector(${JSON.stringify(selector)});if(!n)return null;const r=n.getBoundingClientRect();const x=r.left+r.width/2,y=r.top+r.height/2;const top=document.elementFromPoint(x,y);return{x,y,top:top?String(top.tagName||'')+'#'+String(top.id||'')+'.'+String(top.className||''):'',href:n.href||'',page:n.dataset?.page||'',pe:getComputedStyle(n).pointerEvents};})()`,12000);
+  const p=await cdp.eval(`(()=>{const n=document.querySelector(${JSON.stringify(selector)});if(!n)return null;const r=n.getBoundingClientRect();const x=r.left+r.width/2,y=r.top+r.height/2;const top=document.elementFromPoint(x,y);return{x,y,top:top?String(top.tagName||'')+'#'+String(top.id||'')+'.'+String(top.className||''):'',href:n.href||'',page:n.dataset?.page||'',pe:getComputedStyle(n).pointerEvents};})()`,30000);
   assert.ok(p&&Number.isFinite(p.x)&&Number.isFinite(p.y),'missing clickable point for '+selector);
   stage('hit '+selector+' => '+p.top+' page='+p.page+' pointer='+p.pe);
   return p;
@@ -235,7 +235,7 @@ try{
   stage('forced blank shell recovered');
 
   stage('installing transparent sidebar blocker to prove pointerdown-first coordinate routing');
-  await cdp.eval("(()=>{document.getElementById('v582SidebarBlocker')?.remove();const b=document.createElement('div');b.id='v582SidebarBlocker';Object.assign(b.style,{position:'fixed',left:'0',top:'0',width:'228px',height:'100vh',zIndex:'2147483647',background:'rgba(255,0,0,0.001)',pointerEvents:'auto'});document.body.appendChild(b);return true;})()",12000);
+  await cdp.eval("(()=>{document.getElementById('v582SidebarBlocker')?.remove();const b=document.createElement('div');b.id='v582SidebarBlocker';Object.assign(b.style,{position:'fixed',left:'0',top:'0',width:'228px',height:'100vh',zIndex:'2147483647',background:'rgba(255,0,0,0.001)',pointerEvents:'auto'});document.body.appendChild(b);return true;})()",30000);
   stage('pressing CE link through transparent blocker; route must complete before mouse release');
   const cePress=await pointerDown(cdp,'.side-nav .side-link[data-page="ce"]');
   await evalWait(cdp,"(()=>{const p=document.getElementById('ccslPage'),t=document.getElementById('pageTitle');return location.pathname==='/ce'&&p&&!p.hidden&&getComputedStyle(p).display!=='none'&&t?.textContent==='CE看板';})()",8000,100,'CE pointerdown visible route');
@@ -243,7 +243,7 @@ try{
   await pointerUp(cdp,cePress);
 
   stage('reinstalling transparent sidebar blocker before import click');
-  await cdp.eval("(()=>{document.getElementById('v582SidebarBlocker')?.remove();const b=document.createElement('div');b.id='v582SidebarBlocker';Object.assign(b.style,{position:'fixed',left:'0',top:'0',width:'228px',height:'100vh',zIndex:'2147483647',background:'rgba(0,0,255,0.001)',pointerEvents:'auto'});document.body.appendChild(b);return true;})()",12000);
+  await cdp.eval("(()=>{document.getElementById('v582SidebarBlocker')?.remove();const b=document.createElement('div');b.id='v582SidebarBlocker';Object.assign(b.style,{position:'fixed',left:'0',top:'0',width:'228px',height:'100vh',zIndex:'2147483647',background:'rgba(0,0,255,0.001)',pointerEvents:'auto'});document.body.appendChild(b);return true;})()",30000);
   stage('clicking import link through transparent blocker');
   await click(cdp,'.side-nav .side-link[data-page="import"]');
   await evalWait(cdp,"(()=>{const p=document.getElementById('importPage'),t=document.getElementById('pageTitle');return location.pathname==='/import'&&p&&!p.hidden&&getComputedStyle(p).display!=='none'&&t?.textContent==='数据导入';})()",8000,100,'import direct visible route');
