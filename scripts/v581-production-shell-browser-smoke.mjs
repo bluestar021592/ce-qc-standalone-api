@@ -212,7 +212,7 @@ try{
   stage('installing transparent sidebar blocker to prove coordinate hard navigation');
   await cdp.eval("(()=>{document.getElementById('v582SidebarBlocker')?.remove();const b=document.createElement('div');b.id='v582SidebarBlocker';Object.assign(b.style,{position:'fixed',left:'0',top:'0',width:'228px',height:'100vh',zIndex:'2147483647',background:'rgba(255,0,0,0.001)',pointerEvents:'auto'});document.body.appendChild(b);return true;})()",2000);
   stage('clicking CE link through transparent blocker');
-  await click(cdp,'.side-nav a[data-page="ce"]');
+  await click(cdp,'.side-nav .side-link[data-page="ce"]');
   cdp=await reattachAfterNavigation(cdp,debugPort,'/ce');
   await waitFor(()=>cdp.eval("(()=>{const p=document.getElementById('ccslPage'),t=document.getElementById('pageTitle');return location.pathname==='/ce'&&p&&!p.hidden&&getComputedStyle(p).display!=='none'&&t?.textContent==='CE看板';})()",1800),8000,100,'CE visible route');
   stage('CE hard navigation passed');
@@ -220,7 +220,7 @@ try{
   stage('reinstalling transparent sidebar blocker before import click');
   await cdp.eval("(()=>{document.getElementById('v582SidebarBlocker')?.remove();const b=document.createElement('div');b.id='v582SidebarBlocker';Object.assign(b.style,{position:'fixed',left:'0',top:'0',width:'228px',height:'100vh',zIndex:'2147483647',background:'rgba(0,0,255,0.001)',pointerEvents:'auto'});document.body.appendChild(b);return true;})()",2000);
   stage('clicking import link through transparent blocker');
-  await click(cdp,'.side-nav a[data-page="import"]');
+  await click(cdp,'.side-nav .side-link[data-page="import"]');
   cdp=await reattachAfterNavigation(cdp,debugPort,'/import');
   await waitFor(()=>cdp.eval("(()=>{const p=document.getElementById('importPage'),t=document.getElementById('pageTitle');return location.pathname==='/import'&&p&&!p.hidden&&getComputedStyle(p).display!=='none'&&t?.textContent==='数据导入';})()",1800),8000,100,'import visible route');
   stage('import hard navigation passed');
