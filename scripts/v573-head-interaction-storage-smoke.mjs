@@ -22,6 +22,9 @@ assert.match(stable,/shell-structure-mutation/,'bounded structural repair must r
 assert.match(stable,/data-v581-active/,'V581 must deterministically own visible route page');
 assert.match(stable,/renderFallbackHomeIfStillEmpty/,'V581 must retry HOME render if the page container is still blank');
 assert.match(stable,/removeEmptyLargeBlockers/,'V581 must retire large stale pointer blockers without reviving V575');
+assert.match(stable,/function sidebarLinkForEvent\(event\)/,'V582 must resolve the intended sidebar route even when a stale layer owns event.target');
+assert.match(stable,/global\.addEventListener\('pointerdown',hardNavigateSidebar,true\)/,'V582 must own primary sidebar activation before later handlers');
+assert.match(stable,/global\.location\.assign\(href\)/,'V582 sidebar activation must use a fresh hard navigation instead of SPA repainting');
 assert.match(response,/stripInlineV575/,'final response pass must remove V575 if any older wrapper re-injects it');
 assert.match(response,/v580-visible-shell-recovery\.js/,'final response pass must remove V580 if any older wrapper re-injects it');
 assert.match(response,/body=body\.replace\('\<\/body\>',V581_TAG\+'\\n<\/body>'\)/,'V581 response pass must inject the stable owner at the end');
