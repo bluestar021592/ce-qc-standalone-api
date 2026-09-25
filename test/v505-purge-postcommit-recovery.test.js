@@ -27,13 +27,16 @@ test('V505 exact commit receipt recovers a crash after DELETE commit without exe
     assert.ok(['QUEUED','RUNNING'].includes(String(queued.status||'').toUpperCase()));
     statusFile=path.join(getRuntimeConfig().projectRoot,'public',String(queued.statusUrl||'').replace(/^\//,''));
     let status=null;
-    const deadline=Date.now()+30_000;
+    // Local managed-updater validation can run on slower Windows disks / antivirus-heavy hosts.
+    // Keep the same fail-closed assertion, but allow the detached PREPARE worker enough time
+    // to finish instead of rejecting an otherwise valid candidate at an arbitrary 30s wall.
+    const deadline=Date.now()+90_000;
     while(Date.now()<deadline){
       try{status=JSON.parse(fs.readFileSync(statusFile,'utf8'));}catch{}
       if(['SUCCEEDED','FAILED'].includes(String(status?.status||'').toUpperCase()))break;
       await wait(100);
     }
-    assert.equal(status?.status,'SUCCEEDED',status?.error||'prepare worker did not finish');
+    assert.equal(status?.status,'SUCCEEDED',status?.error||`prepare worker did not finish within 90s (last=${String(status?.status||'UNKNOWN')})`);
     const challenge=await createPurgeChallenge(user,{activeRunIds:new Set()});
     assert.equal(challenge.status,'SUCCEEDED');
     const waitMs=Math.max(0,new Date(challenge.notBefore).getTime()-Date.now());
