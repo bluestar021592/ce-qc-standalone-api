@@ -1,7 +1,7 @@
 (function installV581StableShell(global){
   'use strict';
   if(global.__CE_QC_V581_STABLE_SHELL__)return;
-  const VERSION='2026-09-25-v582-stable-shell-no-observer-storm-v1';
+  const VERSION='2026-09-25-v582-early-stable-shell-v2';
   const doc=global.document;
   const NAV=[
     ['home','首页总看板','home','/'],
@@ -297,6 +297,11 @@
   }
 
   global.__CE_QC_V581_STABLE_SHELL__={version:VERSION,enforce,normalizeNav,showRoute};
-  if(doc.readyState==='loading')doc.addEventListener('DOMContentLoaded',bind,{once:true});else bind();
-  console.info('[CE-QC][V581_STABLE_SHELL]',VERSION,'single stable shell owner: native sidebar links + deterministic route visibility + blank-shell recovery.');
+  // The owner is intentionally injected immediately before app.js, after the full
+  // dashboard markup has been parsed. Bind now instead of waiting for DOMContentLoaded,
+  // because a slow legacy bootstrap must never delay sidebar click ownership.
+  if(doc.querySelector('.side-nav')&&doc.querySelector('.main-content'))bind();
+  else if(doc.readyState==='loading')doc.addEventListener('DOMContentLoaded',bind,{once:true});
+  else bind();
+  console.info('[CE-QC][V581_STABLE_SHELL]',VERSION,'single early stable shell owner: deterministic route visibility + hard sidebar navigation before app bootstrap.');
 })(window);
