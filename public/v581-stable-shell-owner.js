@@ -25,6 +25,7 @@
   let enforcing=false;
   let observer=null;
   let structuralRepairTimer=0;
+  let navigatingHref='';
   let diagCount=0;
 
   function currentPage(){
@@ -40,7 +41,7 @@
     return page+'Page';
   }
   function safeDiag(event,extra=''){
-    if(diagCount>=16)return;
+    if(diagCount>=32)return;
     diagCount+=1;
     try{
       fetch('/api/client-diag?'+new URLSearchParams({
@@ -212,6 +213,43 @@
       }
     }catch{}
   }
+  function sidebarLinkForEvent(event){
+    try{
+      const direct=event?.target?.closest?.('.side-nav a.side-link[href]');
+      if(direct&&!direct.hidden)return direct;
+      const x=Number(event?.clientX),y=Number(event?.clientY);
+      if(!Number.isFinite(x)||!Number.isFinite(y))return null;
+      for(const link of doc.querySelectorAll('.side-nav a.side-link[href]')){
+        if(link.hidden)continue;
+        const cs=global.getComputedStyle?.(link);
+        if(cs&&(cs.display==='none'||cs.visibility==='hidden'||Number(cs.opacity||1)===0))continue;
+        const r=link.getBoundingClientRect?.();
+        if(r&&r.width>0&&r.height>0&&x>=r.left&&x<=r.right&&y>=r.top&&y<=r.bottom)return link;
+      }
+    }catch{}
+    return null;
+  }
+  function hardNavigateSidebar(event){
+    if(event?.type==='pointerdown'&&Number(event.button||0)!==0)return;
+    if(event?.metaKey||event?.ctrlKey||event?.shiftKey||event?.altKey)return;
+    const link=sidebarLinkForEvent(event);
+    if(!link)return;
+    const href=String(link.href||link.getAttribute?.('href')||'');
+    if(!href)return;
+    if(navigatingHref===href){
+      event.preventDefault?.();
+      event.stopImmediatePropagation?.();
+      return;
+    }
+    navigatingHref=href;
+    event.preventDefault?.();
+    event.stopImmediatePropagation?.();
+    safeDiag('V582_SIDEBAR_HARD_NAV',String(link.dataset?.page||'')+'|'+String(event?.type||''));
+    try{global.location.assign(href);}
+    catch{try{global.location.href=href;}catch{}}
+    setTimeout(()=>{navigatingHref='';},1500);
+  }
+
   function enforce(reason='manual'){
     if(enforcing)return;
     enforcing=true;
@@ -229,13 +267,11 @@
   function bind(){
     enforce('bind');
     [50,250,800,1800,3500,7000].forEach(ms=>setTimeout(()=>{enforce('timer-'+ms);renderFallbackHomeIfStillEmpty();},ms));
-    doc.addEventListener('click',event=>{
-      const link=event.target?.closest?.('.side-nav a.side-link[href]');
-      if(!link)return;
-      // Native hard navigation is intentional. Do not preventDefault and do not call
-      // legacy SPA owners; a fresh document is more reliable than layered click routing.
-      safeDiag('V581_NATIVE_NAV',String(link.dataset.page||''));
-    },true);
+    // One owner, one behavior: sidebar activation always becomes a fresh document
+    // navigation. Coordinate fallback is sidebar-only and exists solely so a stale
+    // transparent hit layer cannot make the visible menu inert.
+    global.addEventListener('pointerdown',hardNavigateSidebar,true);
+    doc.addEventListener('click',hardNavigateSidebar,true);
     global.addEventListener('pageshow',()=>enforce('pageshow'),true);
     global.addEventListener('popstate',()=>enforce('popstate'),true);
     if(typeof MutationObserver==='function'){
