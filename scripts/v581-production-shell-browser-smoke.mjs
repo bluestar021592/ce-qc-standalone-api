@@ -37,6 +37,37 @@ async function fetchJsonBounded(url,ms=1500){
     return await response.json();
   }finally{clearTimeout(timer);}
 }
+async function waitForPageTarget(debugPort,expectedPath,timeout=10000){
+  return await waitFor(async()=>{
+    const list=await fetchJsonBounded('http://127.0.0.1:'+debugPort+'/json',1500);
+    if(!Array.isArray(list))return null;
+    for(const target of list){
+      if(target?.type!=='page'||!target?.webSocketDebuggerUrl)continue;
+      try{
+        const u=new URL(String(target.url||'about:blank'));
+        if(u.pathname===expectedPath)return target;
+      }catch{}
+    }
+    return null;
+  },timeout,80,'browser target path '+expectedPath);
+}
+async function attachTarget(target){
+  const next=new CDP(target.webSocketDebuggerUrl);
+  await next.open();
+  await next.send('Page.enable');
+  await next.send('Runtime.enable');
+  await next.send('Network.enable');
+  return next;
+}
+async function reattachAfterNavigation(current,debugPort,expectedPath){
+  const target=await waitForPageTarget(debugPort,expectedPath,10000);
+  stage('browser target observed '+expectedPath);
+  try{current?.close();}catch{}
+  await new Promise(r=>setTimeout(r,80));
+  const next=await attachTarget(target);
+  await waitFor(()=>next.eval('!!window.__CE_QC_V581_STABLE_SHELL__',1200),6000,80,'stable shell after '+expectedPath);
+  return next;
+}
 function killTree(child,label){
   if(!child?.pid)return;
   try{
@@ -157,11 +188,7 @@ try{
     return Array.isArray(list)?list.find(x=>x.type==='page'&&x.webSocketDebuggerUrl)||null:null;
   },15000,100,'Chromium remote-debug target');
   stage('attaching CDP');
-  cdp=new CDP(target.webSocketDebuggerUrl);
-  await cdp.open();
-  await cdp.send('Page.enable');
-  await cdp.send('Runtime.enable');
-  await cdp.send('Network.enable');
+  cdp=await attachTarget(target);
   await cdp.send('Network.setCookie',{name:'ce_qc_local_auth_v431',value:signedCookie(secret),url:'http://127.0.0.1:'+port+'/'});
   stage('navigating production shell');
   await cdp.send('Page.navigate',{url:'http://127.0.0.1:'+port+'/?auth=v581'},8000);
@@ -186,16 +213,16 @@ try{
   await cdp.eval("(()=>{document.getElementById('v582SidebarBlocker')?.remove();const b=document.createElement('div');b.id='v582SidebarBlocker';Object.assign(b.style,{position:'fixed',left:'0',top:'0',width:'228px',height:'100vh',zIndex:'2147483647',background:'rgba(255,0,0,0.001)',pointerEvents:'auto'});document.body.appendChild(b);return true;})()",2000);
   stage('clicking CE link through transparent blocker');
   await click(cdp,'.side-nav a[data-page="ce"]');
-  await waitFor(()=>cdp.eval("location.pathname==='/ce'&&!!window.__CE_QC_V581_STABLE_SHELL__",1500),8000,80,'CE hard navigation');
-  await waitFor(()=>cdp.eval("(()=>{const p=document.getElementById('ccslPage'),t=document.getElementById('pageTitle');return p&&!p.hidden&&getComputedStyle(p).display!=='none'&&t?.textContent==='CE看板';})()",2500),8000,100,'CE visible route');
+  cdp=await reattachAfterNavigation(cdp,debugPort,'/ce');
+  await waitFor(()=>cdp.eval("(()=>{const p=document.getElementById('ccslPage'),t=document.getElementById('pageTitle');return location.pathname==='/ce'&&p&&!p.hidden&&getComputedStyle(p).display!=='none'&&t?.textContent==='CE看板';})()",1800),8000,100,'CE visible route');
   stage('CE hard navigation passed');
 
   stage('reinstalling transparent sidebar blocker before import click');
   await cdp.eval("(()=>{document.getElementById('v582SidebarBlocker')?.remove();const b=document.createElement('div');b.id='v582SidebarBlocker';Object.assign(b.style,{position:'fixed',left:'0',top:'0',width:'228px',height:'100vh',zIndex:'2147483647',background:'rgba(0,0,255,0.001)',pointerEvents:'auto'});document.body.appendChild(b);return true;})()",2000);
   stage('clicking import link through transparent blocker');
   await click(cdp,'.side-nav a[data-page="import"]');
-  await waitFor(()=>cdp.eval("location.pathname==='/import'&&!!window.__CE_QC_V581_STABLE_SHELL__",1500),8000,80,'import hard navigation');
-  await waitFor(()=>cdp.eval("(()=>{const p=document.getElementById('importPage'),t=document.getElementById('pageTitle');return p&&!p.hidden&&getComputedStyle(p).display!=='none'&&t?.textContent==='数据导入';})()",2500),8000,100,'import visible route');
+  cdp=await reattachAfterNavigation(cdp,debugPort,'/import');
+  await waitFor(()=>cdp.eval("(()=>{const p=document.getElementById('importPage'),t=document.getElementById('pageTitle');return location.pathname==='/import'&&p&&!p.hidden&&getComputedStyle(p).display!=='none'&&t?.textContent==='数据导入';})()",1800),8000,100,'import visible route');
   stage('import hard navigation passed');
 
   stage('verifying final production HTML owner ordering');
