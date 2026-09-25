@@ -51,6 +51,6 @@ assert.match(cleanup,/\[CE-QC\]\[V573\]\[STORAGE\] cleanup complete:/);
 assert.match(cleanup,/driveLine\('C',drivesBefore\.C,drivesAfter\.C\)/);
 assert.match(cleanup,/driveLine\('D',drivesBefore\.D,drivesAfter\.D\)/);
 assert.match(cleanup,/compactSqliteStorage/);
-assert.match(start,/\[CE-QC\]\[V581\] Stable shell rebase \+ native sidebar navigation \+ V579 C\/D cleanup are installed\./);
+assert.match(start,/\[CE-QC\]\[V583\] Stable shell\/navigation repair \+ aggressive safe C\/D cleanup are installed\./);
 
-console.log('[V581] stable shell + native sidebar + WHPP + storage smoke passed · layered V575/V580 shell owners retired');
+console.log('[V583] stable shell + native sidebar + WHPP + aggressive safe C/D cleanup smoke passed · layered V575/V580 shell owners retired');
