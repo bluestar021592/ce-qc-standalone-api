@@ -60,7 +60,10 @@ async function attachTarget(target){
   return next;
 }
 async function reattachAfterNavigation(current,debugPort,expectedPath){
-  const target=await waitForPageTarget(debugPort,expectedPath,10000);
+  // Windows Edge can take longer to publish the same-page target URL under CI or
+  // antivirus load even after the click handler has fired. Keep the real click
+  // requirement, but do not turn a slow /json target refresh into a false failure.
+  const target=await waitForPageTarget(debugPort,expectedPath,25000);
   stage('browser target observed '+expectedPath);
   try{current?.close();}catch{}
   await new Promise(r=>setTimeout(r,80));
