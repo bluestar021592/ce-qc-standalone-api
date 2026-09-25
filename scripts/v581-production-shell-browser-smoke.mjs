@@ -196,7 +196,7 @@ try{
   stage('V581 owner loaded');
   await waitFor(()=>cdp.eval("(()=>{const t=document.querySelector('.topbar'),m=document.querySelector('.main-content'),h=document.getElementById('homePage');if(!t||!m||!h)return false;const ts=getComputedStyle(t),ms=getComputedStyle(m),r=h.getBoundingClientRect();return ts.display!=='none'&&ts.visibility!=='hidden'&&ms.display!=='none'&&!h.hidden&&r.width>200&&r.height>80;})()",2500),10000,100,'visible HOME shell');
   stage('HOME shell visible');
-  await waitFor(()=>cdp.eval("(()=>{const pages=['home','ce','ceaf','tbkh','ali1688','whpp','shopeecn','shopeevn','import','tracking','exceptions','reports','data-management','settings','logs'];return pages.every(page=>{const n=document.querySelector('.side-nav a.side-link[data-page="'+page+'"][href]');return !!n;});})()",1500),4000,80,'stable native sidebar normalization');
+  await waitFor(()=>cdp.eval(`(()=>{const pages=['home','ce','ceaf','tbkh','ali1688','whpp','shopeecn','shopeevn','import','tracking','exceptions','reports','data-management','settings','logs'];return pages.every(page=>{const n=document.querySelector('.side-nav a.side-link[data-page="'+page+'"][href]');return !!n;});})()`,1500),4000,80,'stable native sidebar normalization');
   const first=await cdp.eval("(()=>({auth:new URLSearchParams(location.search).get('auth'),title:document.getElementById('pageTitle')?.textContent||'',links:[...document.querySelectorAll('.side-nav .side-link')].map(n=>({tag:n.tagName,href:n.getAttribute('href'),page:n.dataset.page})),homeText:String(document.getElementById('homePage')?.textContent||'').trim().slice(0,120)}))()");
   assert.equal(first.auth,'v581');
   assert.equal(first.title,'首页总看板');
