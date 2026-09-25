@@ -50,4 +50,4 @@ if(os.platform()==='win32'){
   const parsed=spawnSync('powershell.exe',['-NoLogo','-NoProfile','-Command',command],{encoding:'utf8'});
   assert.equal(parsed.status,0,'PowerShell parser rejected dedicated cleanup script: '+(parsed.stdout||'')+(parsed.stderr||''));
 }
-console.log('[V583] dedicated-drive cleanup smoke passed · PowerShell syntax parsed on Windows · stale CE-QC temp/update roots + rebuildable browser caches are cleaned · active app/live D database/user Documents/Downloads stay protected');
+console.log('[V584] dedicated-drive cleanup smoke passed · PowerShell syntax parsed on Windows · stale CE-QC temp/update roots + rebuildable browser caches are cleaned · active app/live D database/user Documents/Downloads stay protected');
