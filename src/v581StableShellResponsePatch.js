@@ -1,7 +1,7 @@
 import express from 'express';
 
 export const V581_STABLE_SHELL_RESPONSE_ID='2026-09-22-v581-stable-shell-response-v1';
-const V581_TAG='  <script src="/v581-stable-shell-owner.js?v=20260922-v581-1"></script>';
+const V581_TAG='  <script src="/v581-stable-shell-owner.js?v=20260925-v582-1"></script>';
 
 const previousSend=express.response.send;
 
