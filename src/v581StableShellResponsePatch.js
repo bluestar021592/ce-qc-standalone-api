@@ -1,6 +1,6 @@
 import express from 'express';
 
-export const V581_STABLE_SHELL_RESPONSE_ID='2026-09-22-v581-stable-shell-response-v1';
+export const V581_STABLE_SHELL_RESPONSE_ID='2026-09-25-v582-early-stable-shell-response-v2';
 const V581_TAG='  <script src="/v581-stable-shell-owner.js?v=20260925-v582-1"></script>';
 
 const previousSend=express.response.send;
@@ -19,7 +19,13 @@ export function rewriteV581StableShellHtml(body){
     body=stripScriptSrc(body,file);
   }
   body=body.replace(/auth=v(?:575|578|579|580)/g,'auth=v581');
-  body=body.replace('</body>',V581_TAG+'\n</body>');
+  // V581 must own interaction before app.js starts its asynchronous bootstrap.
+  // The markup is already fully parsed at this point in index.html, so the owner
+  // can bind immediately and keep sidebar navigation available even if app startup
+  // is slow or a later compatibility script misbehaves.
+  const appTag=/<script\b[^>]*src=["']\/app\.js(?:\?[^"']*)?["'][^>]*><\/script>/i;
+  if(appTag.test(body))body=body.replace(appTag,match=>V581_TAG+'\n'+match);
+  else body=body.replace('</body>',V581_TAG+'\n</body>');
   return body;
 }
 
@@ -29,4 +35,4 @@ express.response.send=function v581StableShellSend(body){
   return previousSend.call(this,body);
 };
 
-console.info('[CE-QC][V581_STABLE_SHELL_RESPONSE]',V581_STABLE_SHELL_RESPONSE_ID,'final response pass retires V575/V580 shell owners and injects one stable shell owner last.');
+console.info('[CE-QC][V581_STABLE_SHELL_RESPONSE]',V581_STABLE_SHELL_RESPONSE_ID,'final response pass retires V575/V580 shell owners and injects one stable shell owner immediately before app.js.');
