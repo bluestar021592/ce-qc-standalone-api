@@ -215,11 +215,11 @@
   }
   function sidebarLinkForEvent(event){
     try{
-      const direct=event?.target?.closest?.('.side-nav a.side-link[href]');
+      const direct=event?.target?.closest?.('.side-nav .side-link[data-page]');
       if(direct&&!direct.hidden)return direct;
       const x=Number(event?.clientX),y=Number(event?.clientY);
       if(!Number.isFinite(x)||!Number.isFinite(y))return null;
-      for(const link of doc.querySelectorAll('.side-nav a.side-link[href]')){
+      for(const link of doc.querySelectorAll('.side-nav .side-link[data-page]')){
         if(link.hidden)continue;
         const cs=global.getComputedStyle?.(link);
         if(cs&&(cs.display==='none'||cs.visibility==='hidden'||Number(cs.opacity||1)===0))continue;
@@ -234,8 +234,15 @@
     if(event?.metaKey||event?.ctrlKey||event?.shiftKey||event?.altKey)return;
     const link=sidebarLinkForEvent(event);
     if(!link)return;
-    const href=String(link.href||link.getAttribute?.('href')||'');
-    if(!href)return;
+    const route=String(link.href||link.getAttribute?.('href')||link.dataset?.path||'');
+    if(!route)return;
+    let href=route;
+    try{
+      const u=new URL(route,global.location?.href||'http://127.0.0.1/');
+      u.searchParams.set('auth','v581');
+      u.searchParams.delete('t');
+      href=u.href;
+    }catch{}
     if(navigatingHref===href){
       event.preventDefault?.();
       event.stopImmediatePropagation?.();
