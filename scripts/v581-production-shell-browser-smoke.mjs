@@ -205,8 +205,8 @@ try{
   assert.ok(first.homeText.length>10,'HOME must not be a blank rectangle');
 
   stage('forcing blank shell and testing deterministic recovery');
-  await cdp.eval("(()=>{const a=document.querySelector('.app-body'),t=document.querySelector('.topbar'),m=document.querySelector('.main-content'),h=document.getElementById('homePage');a.style.setProperty('display','none','important');t.style.setProperty('display','none','important');m.style.setProperty('display','none','important');h.hidden=true;h.style.setProperty('display','none','important');window.__CE_QC_V581_STABLE_SHELL__.enforce('production-browser-forced-blank');return true;})()",3000);
-  await waitFor(()=>cdp.eval("(()=>{const a=getComputedStyle(document.querySelector('.app-body')),t=getComputedStyle(document.querySelector('.topbar')),m=getComputedStyle(document.querySelector('.main-content')),h=document.getElementById('homePage');return a.display!=='none'&&t.display!=='none'&&m.display!=='none'&&!h.hidden&&getComputedStyle(h).display!=='none';})()",2000),4000,80,'forced blank-shell recovery');
+  const blankRecovery=await cdp.eval("(()=>{const a=document.querySelector('.app-body'),t=document.querySelector('.topbar'),m=document.querySelector('.main-content'),h=document.getElementById('homePage');a.style.setProperty('display','none','important');t.style.setProperty('display','none','important');m.style.setProperty('display','none','important');h.hidden=true;h.style.setProperty('display','none','important');window.__CE_QC_V581_STABLE_SHELL__.enforce('production-browser-forced-blank');const as=getComputedStyle(a),ts=getComputedStyle(t),ms=getComputedStyle(m),hs=getComputedStyle(h);return{ok:as.display!=='none'&&ts.display!=='none'&&ms.display!=='none'&&!h.hidden&&hs.display!=='none',appBody:as.display,topbar:ts.display,main:ms.display,home:hs.display,hidden:h.hidden};})()",3500);
+  assert.equal(blankRecovery?.ok,true,'forced blank shell must recover synchronously in the stable owner: '+JSON.stringify(blankRecovery));
   stage('forced blank shell recovered');
 
   stage('installing transparent sidebar blocker to prove coordinate hard navigation');
