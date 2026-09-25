@@ -198,6 +198,6 @@ test('V568 no-backup cleanup script is syntax-valid and launcher wires it before
   assert.match(fs.readFileSync('src/storageCompaction.js','utf8'),/db\.exec\('VACUUM'\)/);
   assert.match(start,/CE_QC_NoBackup_Cleanup\.mjs/);
   assert.match(start,/CE_QC_NO_BACKUP_MODE = '1'/);
-  assert.match(start,/local-login\.html\?v=20260921-v575-1/,'launcher must cache-bust the installed V575 login shell');
+  assert.match(start,/local-login\.html\?v=20260922-v581-1/,'launcher must cache-bust the installed V581 stable login shell');
   assert.match(server,/local-login\.html/);
 });

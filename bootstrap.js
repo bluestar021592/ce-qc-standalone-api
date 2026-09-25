@@ -295,6 +295,8 @@ try {
   await importPhase('v161UnifiedImportRuntimeTruthPatch', './src/v161UnifiedImportRuntimeTruthPatch.js');
   const v167Repair = await importPhase('v167CcslPodLockFactRepair', './src/v167CcslPodLockFactRepair.js');
 
+  await importPhase('v581StableShellResponsePatch', './src/v581StableShellResponsePatch.js');
+
   const v92 = await importPhase('v92WhppTerminalAuthority', './src/v92WhppTerminalAuthorityOnce.js');
   await importPhase('v93ShopeeResumeResiliencePatch', './src/v93ShopeeResumeResiliencePatch.js');
   await importPhase('v73CeafSourceMarkerPatch', './src/v73CeafSourceMarkerPatch.js');

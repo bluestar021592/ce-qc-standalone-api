@@ -12,11 +12,10 @@
   })[path()]||'home';
   function adminVisible(){return /ADMIN/i.test(String(document.getElementById('headerUserRole')?.textContent||''));}
   function buildButton([page,label,icon,target],active,showAdmin){
-    const button=document.createElement('button');
+    const button=document.createElement('a');
     button.className=`side-link ${page===active?'active':''} ${page==='data-management'?'admin-only':''}`.trim();
-    button.dataset.page=page;button.dataset.path=target;
+    button.dataset.page=page;button.dataset.path=target;button.href=`${target}?auth=v581`;
     if(page==='data-management'&&!showAdmin)button.hidden=true;
-    button.setAttribute('onclick',`window.__CE_QC_V575_COORDINATE_OWNER__?.go('${page}','','v318-nav') || navigatePage('${page}')`);
     button.innerHTML=`<svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-${icon}"></use></svg><span class="side-label">${label}</span>`;
     return button;
   }
