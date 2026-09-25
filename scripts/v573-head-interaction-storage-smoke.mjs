@@ -27,7 +27,8 @@ assert.match(stable,/global\.addEventListener\('pointerdown',hardNavigateSidebar
 assert.match(stable,/global\.location\.assign\(href\)/,'V582 sidebar activation must use a fresh hard navigation instead of SPA repainting');
 assert.match(response,/stripInlineV575/,'final response pass must remove V575 if any older wrapper re-injects it');
 assert.match(response,/v580-visible-shell-recovery\.js/,'final response pass must remove V580 if any older wrapper re-injects it');
-assert.match(response,/const appTag=/,'V582 response pass must locate app.js as the bootstrap boundary');\nassert.match(response,/V581_TAG\+'\\n'\+match/,'V582 response pass must inject the stable owner before app.js');
+assert.match(response,/const appTag=/,'V582 response pass must locate app.js as the bootstrap boundary');
+assert.match(response,/V581_TAG\+'\\n'\+match/,'V582 response pass must inject the stable owner before app.js');
 assert.match(response,/X-CE-QC-V581-Shell/);
 
 const assetAt=server.indexOf('const v575PublicAssetStatic');
