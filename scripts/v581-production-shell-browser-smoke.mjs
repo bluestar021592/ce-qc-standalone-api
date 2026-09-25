@@ -65,7 +65,7 @@ async function reattachAfterNavigation(current,debugPort,expectedPath){
   try{current?.close();}catch{}
   await new Promise(r=>setTimeout(r,80));
   const next=await attachTarget(target);
-  await waitFor(()=>next.eval('!!window.__CE_QC_V581_STABLE_SHELL__',1200),6000,80,'stable shell after '+expectedPath);
+  await evalWait(next,'!!window.__CE_QC_V581_STABLE_SHELL__',6000,80,'stable shell after '+expectedPath);
   return next;
 }
 function killTree(child,label){
@@ -115,6 +115,12 @@ class CDP{
     return out.result&&out.result.value;
   }
   close(){try{this.ws.close()}catch{}}
+}
+async function evalWait(cdp,condition,timeout=8000,interval=80,label='browser condition'){
+  const source=`(async()=>{const end=Date.now()+${Number(timeout)};while(Date.now()<end){try{if((${condition}))return true;}catch{}await new Promise(r=>setTimeout(r,${Number(interval)}));}return false;})()`;
+  const ok=await cdp.eval(source,timeout+2500);
+  if(!ok)throw new Error('timeout waiting for '+label);
+  return true;
 }
 async function waitFor(fn,timeout=20000,interval=100,label='condition'){
   const end=Date.now()+timeout;
@@ -192,11 +198,11 @@ try{
   await cdp.send('Network.setCookie',{name:'ce_qc_local_auth_v431',value:signedCookie(secret),url:'http://127.0.0.1:'+port+'/'});
   stage('navigating production shell');
   await cdp.send('Page.navigate',{url:'http://127.0.0.1:'+port+'/?auth=v581'},8000);
-  await waitFor(()=>cdp.eval("!!window.__CE_QC_V581_STABLE_SHELL__",1500),8000,80,'V581 owner after production navigation');
+  await evalWait(cdp,'!!window.__CE_QC_V581_STABLE_SHELL__',8000,80,'V581 owner after production navigation');
   stage('V581 owner loaded');
-  await waitFor(()=>cdp.eval("(()=>{const t=document.querySelector('.topbar'),m=document.querySelector('.main-content'),h=document.getElementById('homePage');if(!t||!m||!h)return false;const ts=getComputedStyle(t),ms=getComputedStyle(m),r=h.getBoundingClientRect();return ts.display!=='none'&&ts.visibility!=='hidden'&&ms.display!=='none'&&!h.hidden&&r.width>200&&r.height>80;})()",2500),10000,100,'visible HOME shell');
+  await evalWait(cdp,"(()=>{const t=document.querySelector('.topbar'),m=document.querySelector('.main-content'),h=document.getElementById('homePage');if(!t||!m||!h)return false;const ts=getComputedStyle(t),ms=getComputedStyle(m),r=h.getBoundingClientRect();return ts.display!=='none'&&ts.visibility!=='hidden'&&ms.display!=='none'&&!h.hidden&&r.width>200&&r.height>80;})()",10000,100,'visible HOME shell');
   stage('HOME shell visible');
-  await waitFor(()=>cdp.eval(`(()=>{const pages=['home','ce','ceaf','tbkh','ali1688','whpp','shopeecn','shopeevn','import','tracking','exceptions','reports','data-management','settings','logs'];return pages.every(page=>!!document.querySelector('.side-nav .side-link[data-page="'+page+'"]'));})()`,1500),4000,80,'stable sidebar availability');
+  await evalWait(cdp,`(()=>{const pages=['home','ce','ceaf','tbkh','ali1688','whpp','shopeecn','shopeevn','import','tracking','exceptions','reports','data-management','settings','logs'];return pages.every(page=>!!document.querySelector('.side-nav .side-link[data-page="'+page+'"]'));})()`,6000,80,'stable sidebar availability');
   const first=await cdp.eval("(()=>({auth:new URLSearchParams(location.search).get('auth'),title:document.getElementById('pageTitle')?.textContent||'',links:[...document.querySelectorAll('.side-nav .side-link')].map(n=>({tag:n.tagName,href:n.getAttribute('href'),page:n.dataset.page})),homeText:String(document.getElementById('homePage')?.textContent||'').trim().slice(0,120)}))()");
   assert.equal(first.auth,'v581');
   assert.equal(first.title,'首页总看板');
@@ -214,7 +220,7 @@ try{
   stage('clicking CE link through transparent blocker');
   await click(cdp,'.side-nav .side-link[data-page="ce"]');
   cdp=await reattachAfterNavigation(cdp,debugPort,'/ce');
-  await waitFor(()=>cdp.eval("(()=>{const p=document.getElementById('ccslPage'),t=document.getElementById('pageTitle');return location.pathname==='/ce'&&p&&!p.hidden&&getComputedStyle(p).display!=='none'&&t?.textContent==='CE看板';})()",1800),8000,100,'CE visible route');
+  await evalWait(cdp,"(()=>{const p=document.getElementById('ccslPage'),t=document.getElementById('pageTitle');return location.pathname==='/ce'&&p&&!p.hidden&&getComputedStyle(p).display!=='none'&&t?.textContent==='CE看板';})()",8000,100,'CE visible route');
   stage('CE hard navigation passed');
 
   stage('reinstalling transparent sidebar blocker before import click');
@@ -222,7 +228,7 @@ try{
   stage('clicking import link through transparent blocker');
   await click(cdp,'.side-nav .side-link[data-page="import"]');
   cdp=await reattachAfterNavigation(cdp,debugPort,'/import');
-  await waitFor(()=>cdp.eval("(()=>{const p=document.getElementById('importPage'),t=document.getElementById('pageTitle');return location.pathname==='/import'&&p&&!p.hidden&&getComputedStyle(p).display!=='none'&&t?.textContent==='数据导入';})()",1800),8000,100,'import visible route');
+  await evalWait(cdp,"(()=>{const p=document.getElementById('importPage'),t=document.getElementById('pageTitle');return location.pathname==='/import'&&p&&!p.hidden&&getComputedStyle(p).display!=='none'&&t?.textContent==='数据导入';})()",8000,100,'import visible route');
   stage('import hard navigation passed');
 
   stage('verifying final production HTML owner ordering');
