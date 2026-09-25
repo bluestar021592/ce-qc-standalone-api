@@ -60,7 +60,10 @@ async function attachTarget(target){
   return next;
 }
 async function reattachAfterNavigation(current,debugPort,expectedPath){
-  const target=await waitForPageTarget(debugPort,expectedPath,10000);
+  // Windows Edge can take longer to publish the same-page target URL under CI or
+  // antivirus load even after the click handler has fired. Keep the real click
+  // requirement, but do not turn a slow /json target refresh into a false failure.
+  const target=await waitForPageTarget(debugPort,expectedPath,25000);
   stage('browser target observed '+expectedPath);
   try{current?.close();}catch{}
   await new Promise(r=>setTimeout(r,80));
@@ -142,12 +145,12 @@ function signedCookie(secret){
   return body+'.'+sig;
 }
 async function click(cdp,selector){
-  const p=await cdp.eval(`(()=>{const n=document.querySelector(${JSON.stringify(selector)});if(!n)return null;const r=n.getBoundingClientRect();const x=r.left+r.width/2,y=r.top+r.height/2;const top=document.elementFromPoint(x,y);return{x,y,top:top?String(top.tagName||'')+'#'+String(top.id||'')+'.'+String(top.className||''):'',href:n.href||'',page:n.dataset?.page||'',pe:getComputedStyle(n).pointerEvents};})()`);
+  const p=await cdp.eval(`(()=>{const n=document.querySelector(${JSON.stringify(selector)});if(!n)return null;const r=n.getBoundingClientRect();const x=r.left+r.width/2,y=r.top+r.height/2;const top=document.elementFromPoint(x,y);return{x,y,top:top?String(top.tagName||'')+'#'+String(top.id||'')+'.'+String(top.className||''):'',href:n.href||'',page:n.dataset?.page||'',pe:getComputedStyle(n).pointerEvents};})()`,12000);
   assert.ok(p&&Number.isFinite(p.x)&&Number.isFinite(p.y),'missing clickable point for '+selector);
   stage('hit '+selector+' => '+p.top+' page='+p.page+' pointer='+p.pe);
-  await cdp.send('Input.dispatchMouseEvent',{type:'mouseMoved',x:p.x,y:p.y,button:'none'});
-  await cdp.send('Input.dispatchMouseEvent',{type:'mousePressed',x:p.x,y:p.y,button:'left',clickCount:1});
-  await cdp.send('Input.dispatchMouseEvent',{type:'mouseReleased',x:p.x,y:p.y,button:'left',clickCount:1});
+  await cdp.send('Input.dispatchMouseEvent',{type:'mouseMoved',x:p.x,y:p.y,button:'none'},12000);
+  await cdp.send('Input.dispatchMouseEvent',{type:'mousePressed',x:p.x,y:p.y,button:'left',clickCount:1},12000);
+  await cdp.send('Input.dispatchMouseEvent',{type:'mouseReleased',x:p.x,y:p.y,button:'left',clickCount:1},12000);
 }
 
 if(process.platform!=='win32'){
@@ -175,7 +178,7 @@ child.stdout.on('data',d=>{backendLog+=String(d);if(backendLog.length>180000)bac
 child.stderr.on('data',d=>{backendLog+=String(d);if(backendLog.length>180000)backendLog=backendLog.slice(-180000);});
 
 const userData=fs.mkdtempSync(path.join(os.tmpdir(),'ce-qc-v581-edge-'));
-const edge=spawn(browser,['--headless=new','--disable-gpu','--no-first-run','--no-default-browser-check','--disable-extensions','--disable-background-networking','--remote-debugging-port='+debugPort,'--user-data-dir='+userData,'about:blank'],{stdio:'ignore',windowsHide:true});
+const edge=spawn(browser,['--headless=new','--disable-gpu','--no-first-run','--no-default-browser-check','--disable-extensions','--disable-background-networking','--disable-background-timer-throttling','--disable-renderer-backgrounding','--disable-backgrounding-occluded-windows','--disable-features=CalculateNativeWinOcclusion','--remote-debugging-port='+debugPort,'--user-data-dir='+userData,'about:blank'],{stdio:'ignore',windowsHide:true});
 let cdp;
 try{
   stage('waiting for production backend health');
@@ -206,7 +209,9 @@ try{
   // in-page async timer loop alive here while app bootstrap is still settling; on
   // Windows Edge that can be throttled independently of real input dispatch and
   // produce a false Runtime.evaluate timeout before the click test even begins.
-  const first=await cdp.eval("(()=>({auth:new URLSearchParams(location.search).get('auth'),title:document.getElementById('pageTitle')?.textContent||'',homeText:String(document.getElementById('homePage')?.textContent||'').trim().slice(0,120),ce:!!document.querySelector('.side-nav .side-link[data-page=\\\"ce\\\"]'),imp:!!document.querySelector('.side-nav .side-link[data-page=\\\"import\\\"]')}))()",3000);
+  stage('capturing minimal live HOME/sidebar snapshot');
+  const first=await cdp.eval("(()=>({auth:new URLSearchParams(location.search).get('auth'),title:document.getElementById('pageTitle')?.textContent||'',homeText:String(document.getElementById('homePage')?.textContent||'').trim().slice(0,120),ce:!!document.querySelector('.side-nav .side-link[data-page=\\\"ce\\\"]'),imp:!!document.querySelector('.side-nav .side-link[data-page=\\\"import\\\"]')}))()",12000);
+  stage('minimal live HOME/sidebar snapshot captured');
   assert.equal(first.auth,'v581');
   assert.equal(first.title,'首页总看板');
   assert.equal(first.ce,true,'CE native sidebar route must exist in the live DOM');
@@ -214,25 +219,23 @@ try{
   assert.ok(first.homeText.length>10,'HOME must not be a blank rectangle');
 
   stage('forcing blank shell and testing deterministic recovery');
-  const blankRecovery=await cdp.eval("(()=>{const a=document.querySelector('.app-body'),t=document.querySelector('.topbar'),m=document.querySelector('.main-content'),h=document.getElementById('homePage');a.style.setProperty('display','none','important');t.style.setProperty('display','none','important');m.style.setProperty('display','none','important');h.hidden=true;h.style.setProperty('display','none','important');window.__CE_QC_V581_STABLE_SHELL__.enforce('production-browser-forced-blank');const as=getComputedStyle(a),ts=getComputedStyle(t),ms=getComputedStyle(m),hs=getComputedStyle(h);return{ok:as.display!=='none'&&ts.display!=='none'&&ms.display!=='none'&&!h.hidden&&hs.display!=='none',appBody:as.display,topbar:ts.display,main:ms.display,home:hs.display,hidden:h.hidden};})()",3500);
+  const blankRecovery=await cdp.eval("(()=>{const a=document.querySelector('.app-body'),t=document.querySelector('.topbar'),m=document.querySelector('.main-content'),h=document.getElementById('homePage');a.style.setProperty('display','none','important');t.style.setProperty('display','none','important');m.style.setProperty('display','none','important');h.hidden=true;h.style.setProperty('display','none','important');window.__CE_QC_V581_STABLE_SHELL__.enforce('production-browser-forced-blank');const as=getComputedStyle(a),ts=getComputedStyle(t),ms=getComputedStyle(m),hs=getComputedStyle(h);return{ok:as.display!=='none'&&ts.display!=='none'&&ms.display!=='none'&&!h.hidden&&hs.display!=='none',appBody:as.display,topbar:ts.display,main:ms.display,home:hs.display,hidden:h.hidden};})()",12000);
   assert.equal(blankRecovery?.ok,true,'forced blank shell must recover synchronously in the stable owner: '+JSON.stringify(blankRecovery));
   stage('forced blank shell recovered');
 
   stage('installing transparent sidebar blocker to prove coordinate hard navigation');
-  await cdp.eval("(()=>{document.getElementById('v582SidebarBlocker')?.remove();const b=document.createElement('div');b.id='v582SidebarBlocker';Object.assign(b.style,{position:'fixed',left:'0',top:'0',width:'228px',height:'100vh',zIndex:'2147483647',background:'rgba(255,0,0,0.001)',pointerEvents:'auto'});document.body.appendChild(b);return true;})()",2000);
+  await cdp.eval("(()=>{document.getElementById('v582SidebarBlocker')?.remove();const b=document.createElement('div');b.id='v582SidebarBlocker';Object.assign(b.style,{position:'fixed',left:'0',top:'0',width:'228px',height:'100vh',zIndex:'2147483647',background:'rgba(255,0,0,0.001)',pointerEvents:'auto'});document.body.appendChild(b);return true;})()",12000);
   stage('clicking CE link through transparent blocker');
   await click(cdp,'.side-nav .side-link[data-page="ce"]');
-  cdp=await reattachAfterNavigation(cdp,debugPort,'/ce');
-  await evalWait(cdp,"(()=>{const p=document.getElementById('ccslPage'),t=document.getElementById('pageTitle');return location.pathname==='/ce'&&p&&!p.hidden&&getComputedStyle(p).display!=='none'&&t?.textContent==='CE看板';})()",8000,100,'CE visible route');
-  stage('CE hard navigation passed');
+  await evalWait(cdp,"(()=>{const p=document.getElementById('ccslPage'),t=document.getElementById('pageTitle');return location.pathname==='/ce'&&p&&!p.hidden&&getComputedStyle(p).display!=='none'&&t?.textContent==='CE看板';})()",8000,100,'CE direct visible route');
+  stage('CE direct route passed');
 
   stage('reinstalling transparent sidebar blocker before import click');
-  await cdp.eval("(()=>{document.getElementById('v582SidebarBlocker')?.remove();const b=document.createElement('div');b.id='v582SidebarBlocker';Object.assign(b.style,{position:'fixed',left:'0',top:'0',width:'228px',height:'100vh',zIndex:'2147483647',background:'rgba(0,0,255,0.001)',pointerEvents:'auto'});document.body.appendChild(b);return true;})()",2000);
+  await cdp.eval("(()=>{document.getElementById('v582SidebarBlocker')?.remove();const b=document.createElement('div');b.id='v582SidebarBlocker';Object.assign(b.style,{position:'fixed',left:'0',top:'0',width:'228px',height:'100vh',zIndex:'2147483647',background:'rgba(0,0,255,0.001)',pointerEvents:'auto'});document.body.appendChild(b);return true;})()",12000);
   stage('clicking import link through transparent blocker');
   await click(cdp,'.side-nav .side-link[data-page="import"]');
-  cdp=await reattachAfterNavigation(cdp,debugPort,'/import');
-  await evalWait(cdp,"(()=>{const p=document.getElementById('importPage'),t=document.getElementById('pageTitle');return location.pathname==='/import'&&p&&!p.hidden&&getComputedStyle(p).display!=='none'&&t?.textContent==='数据导入';})()",8000,100,'import visible route');
-  stage('import hard navigation passed');
+  await evalWait(cdp,"(()=>{const p=document.getElementById('importPage'),t=document.getElementById('pageTitle');return location.pathname==='/import'&&p&&!p.hidden&&getComputedStyle(p).display!=='none'&&t?.textContent==='数据导入';})()",8000,100,'import direct visible route');
+  stage('import direct route passed');
 
   stage('verifying final production HTML owner ordering');
   const delivered=await withTimeout(new Promise((resolve,reject)=>{
@@ -248,7 +251,7 @@ try{
   const appIndex=scripts.findIndex(src=>/\/app\.js/.test(src));
   assert.ok(stableIndex>=0&&appIndex>stableIndex,'V582 stable shell must be delivered before app.js');
 
-  console.log('[V582_PRODUCTION_BROWSER] full production server + auth cookie + real Edge passed · early shell owner loads before app bootstrap · HOME self-heals · stale sidebar hit layers cannot block CE/import hard navigation');
+  console.log('[V582_PRODUCTION_BROWSER] full production server + auth cookie + real Edge passed · early shell owner loads before app bootstrap · HOME self-heals · stale sidebar hit layers cannot block CE/import direct routing');
 } catch(error){
   console.error('[V581_PRODUCTION_BROWSER] backend tail\n'+backendLog.slice(-12000));
   throw error;

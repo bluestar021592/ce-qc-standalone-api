@@ -3,7 +3,7 @@ param(
 )
 
 $ErrorActionPreference = 'SilentlyContinue'
-$Patch = '2026-09-22-v579-dedicated-drive-cleanup-parsefix-v1'
+$Patch = '2026-09-25-v583-aggressive-safe-ce-cleanup-v1'
 $Now = Get-Date
 $DeletedBytes = [int64]0
 $DeletedEntries = 0
@@ -79,6 +79,41 @@ $ceC = @(
 )
 foreach ($p in $ceC) { Remove-CeTarget $p 0 }
 
+# V583: remove stale CE-QC-owned update/test/browser scratch immediately. These roots
+# are generated artifacts only; live database/business data never lives here.
+function Remove-CePattern([string]$Folder,[string[]]$Patterns) {
+  if (-not (Test-Path -LiteralPath $Folder)) { return }
+  foreach ($pattern in $Patterns) {
+    Get-ChildItem -LiteralPath $Folder -Force -Filter $pattern -ErrorAction SilentlyContinue | ForEach-Object {
+      try {
+        $bytes = Get-FileBytes $_.FullName
+        Remove-Item -LiteralPath $_.FullName -Recurse -Force -Confirm:$false -ErrorAction Stop
+        $script:DeletedBytes += $bytes
+        $script:DeletedEntries += 1
+      } catch { $script:Failures += 1 }
+    }
+  }
+}
+$ceTempPatterns = @(
+  'CE_QC_UPDATE_VERIFY_*',
+  'ce-qc-v581-*',
+  'ce-qc-v582-*',
+  'ce-qc-v583-*',
+  'ce-qc-v505-*',
+  'ce-qc-purge-*',
+  'ce-qc-export-*'
+)
+Remove-CePattern $env:TEMP $ceTempPatterns
+if ($env:LOCALAPPDATA) { Remove-CePattern (Join-Path $env:LOCALAPPDATA 'Temp') $ceTempPatterns }
+
+# Old launcher staging/update copies are disposable. The active app directory is
+# deliberately excluded, as are repository metadata and user documents.
+$launcherRoot = Join-Path $env:LOCALAPPDATA 'CE_QC_LAUNCHER'
+foreach ($name in @('staging','downloads','update','updates','worktrees','candidate','candidates','old','previous')) {
+  Remove-CeTarget (Join-Path $launcherRoot $name) 0
+}
+Remove-CePattern $launcherRoot @('app.old*','app_old*','app-prev*','app_previous*')
+
 # Safe user/application caches on C. Cookies, passwords, history, documents and downloads are not touched.
 $cacheRoots = @(
   (Join-Path $env:LOCALAPPDATA 'npm-cache'),
@@ -90,9 +125,15 @@ $cacheRoots = @(
   (Join-Path $env:LOCALAPPDATA 'Microsoft\Edge\User Data\Default\Cache'),
   (Join-Path $env:LOCALAPPDATA 'Microsoft\Edge\User Data\Default\Code Cache'),
   (Join-Path $env:LOCALAPPDATA 'Microsoft\Edge\User Data\Default\GPUCache'),
+  (Join-Path $env:LOCALAPPDATA 'Microsoft\Edge\User Data\Default\Service Worker\CacheStorage'),
+  (Join-Path $env:LOCALAPPDATA 'Microsoft\Edge\User Data\GrShaderCache'),
+  (Join-Path $env:LOCALAPPDATA 'Microsoft\Edge\User Data\ShaderCache'),
   (Join-Path $env:LOCALAPPDATA 'Google\Chrome\User Data\Default\Cache'),
   (Join-Path $env:LOCALAPPDATA 'Google\Chrome\User Data\Default\Code Cache'),
-  (Join-Path $env:LOCALAPPDATA 'Google\Chrome\User Data\Default\GPUCache')
+  (Join-Path $env:LOCALAPPDATA 'Google\Chrome\User Data\Default\GPUCache'),
+  (Join-Path $env:LOCALAPPDATA 'Google\Chrome\User Data\Default\Service Worker\CacheStorage'),
+  (Join-Path $env:LOCALAPPDATA 'Google\Chrome\User Data\GrShaderCache'),
+  (Join-Path $env:LOCALAPPDATA 'Google\Chrome\User Data\ShaderCache')
 )
 foreach ($p in $cacheRoots) { Remove-CeTarget $p 0 }
 
@@ -126,10 +167,10 @@ $AfterC = Get-DriveFree 'C'
 $AfterD = if (Test-Path -LiteralPath 'D:\') { Get-DriveFree 'D' } else { [int64]0 }
 function GiB([int64]$Bytes) { return [math]::Round($Bytes / 1GB, 2) }
 
-Write-CeLog "[CE-QC][V578][DEDICATED] safe cleanup complete: deleted=$DeletedEntries entries, measured=$([math]::Round($DeletedBytes / 1GB, 2)) GiB, failures=$Failures."
-Write-CeLog "[CE-QC][V578][DEDICATED] C free: $(GiB $BeforeC) GiB -> $(GiB $AfterC) GiB; reclaimed=$(GiB ($AfterC-$BeforeC)) GiB."
+Write-CeLog "[CE-QC][V583][DEDICATED] safe cleanup complete: deleted=$DeletedEntries entries, measured=$([math]::Round($DeletedBytes / 1GB, 2)) GiB, failures=$Failures."
+Write-CeLog "[CE-QC][V583][DEDICATED] C free: $(GiB $BeforeC) GiB -> $(GiB $AfterC) GiB; reclaimed=$(GiB ($AfterC-$BeforeC)) GiB."
 if ($BeforeD -gt 0) {
-  Write-CeLog "[CE-QC][V578][DEDICATED] D free: $(GiB $BeforeD) GiB -> $(GiB $AfterD) GiB; reclaimed=$(GiB ($AfterD-$BeforeD)) GiB."
+  Write-CeLog "[CE-QC][V583][DEDICATED] D free: $(GiB $BeforeD) GiB -> $(GiB $AfterD) GiB; reclaimed=$(GiB ($AfterD-$BeforeD)) GiB."
 }
 
 # Surface protected system-file sizes so large C usage is explainable without deleting Windows.
@@ -138,7 +179,7 @@ foreach ($name in @('hiberfil.sys','pagefile.sys','swapfile.sys')) {
   if (Test-Path -LiteralPath $p) {
     try {
       $bytes = [int64](Get-Item -LiteralPath $p -Force).Length
-      Write-CeLog "[CE-QC][V578][DEDICATED] protected system file retained: $name = $(GiB $bytes) GiB."
+      Write-CeLog "[CE-QC][V583][DEDICATED] protected system file retained: $name = $(GiB $bytes) GiB."
     } catch {}
   }
 }

@@ -1,7 +1,7 @@
 import express from 'express';
 
-export const V581_STABLE_SHELL_RESPONSE_ID='2026-09-25-v582-early-stable-shell-response-v2';
-const V581_TAG='  <script src="/v581-stable-shell-owner.js?v=20260925-v582-1"></script>';
+export const V581_STABLE_SHELL_RESPONSE_ID='2026-09-25-v583-direct-route-response-v1';
+const V581_TAG='  <script src="/v581-stable-shell-owner.js?v=20260925-v583-1"></script>';
 
 const previousSend=express.response.send;
 
@@ -35,4 +35,4 @@ express.response.send=function v581StableShellSend(body){
   return previousSend.call(this,body);
 };
 
-console.info('[CE-QC][V581_STABLE_SHELL_RESPONSE]',V581_STABLE_SHELL_RESPONSE_ID,'final response pass retires V575/V580 shell owners and injects one stable shell owner immediately before app.js.');
+console.info('[CE-QC][V581_STABLE_SHELL_RESPONSE]',V581_STABLE_SHELL_RESPONSE_ID,'final response pass retires V575/V580 shell owners and injects one V583 direct-route stable shell owner immediately before app.js.');

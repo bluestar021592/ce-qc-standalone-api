@@ -1,7 +1,7 @@
 (function installV581StableShell(global){
   'use strict';
   if(global.__CE_QC_V581_STABLE_SHELL__)return;
-  const VERSION='2026-09-25-v582-early-stable-shell-v2';
+  const VERSION='2026-09-25-v583-direct-route-owner-v1';
   const doc=global.document;
   const NAV=[
     ['home','首页总看板','home','/'],
@@ -230,19 +230,12 @@
     return null;
   }
   function hardNavigateSidebar(event){
-    if(event?.type==='pointerdown'&&Number(event.button||0)!==0)return;
     if(event?.metaKey||event?.ctrlKey||event?.shiftKey||event?.altKey)return;
     const link=sidebarLinkForEvent(event);
     if(!link)return;
-    const route=String(link.href||link.getAttribute?.('href')||link.dataset?.path||'');
-    if(!route)return;
-    let href=route;
-    try{
-      const u=new URL(route,global.location?.href||'http://127.0.0.1/');
-      u.searchParams.set('auth','v581');
-      u.searchParams.delete('t');
-      href=u.href;
-    }catch{}
+    const page=String(link.dataset?.page||'home');
+    const path=String(link.dataset?.path||'/');
+    const href=navHref(path);
     if(navigatingHref===href){
       event.preventDefault?.();
       event.stopImmediatePropagation?.();
@@ -251,9 +244,23 @@
     navigatingHref=href;
     event.preventDefault?.();
     event.stopImmediatePropagation?.();
-    safeDiag('V582_SIDEBAR_HARD_NAV',String(link.dataset?.page||'')+'|'+String(event?.type||''));
-    try{global.location.assign(href);}
-    catch{try{global.location.href=href;}catch{}}
+    safeDiag('V583_SIDEBAR_DIRECT_ROUTE',page+'|'+String(event?.type||''));
+    try{
+      if(typeof global.navigatePage==='function'){
+        global.navigatePage(page);
+        enforce('sidebar-direct-route');
+        navigatingHref='';
+        return;
+      }
+    }catch(error){safeDiag('V583_NAVIGATE_PAGE_ERROR',error?.message||error);}
+    try{
+      const u=new URL(href,global.location?.href||'http://127.0.0.1/');
+      global.history?.pushState?.({},'',u.pathname+u.search+u.hash);
+      enforce('sidebar-early-route');
+      navigatingHref='';
+      return;
+    }catch(error){safeDiag('V583_HISTORY_ROUTE_ERROR',error?.message||error);}
+    try{global.location.href=href;}catch{}
     setTimeout(()=>{navigatingHref='';},1500);
   }
 
@@ -274,11 +281,9 @@
   function bind(){
     enforce('bind');
     [50,250,800,1800,3500,7000].forEach(ms=>setTimeout(()=>{enforce('timer-'+ms);renderFallbackHomeIfStillEmpty();},ms));
-    // One owner, one behavior: sidebar activation always becomes a fresh document
-    // navigation. Coordinate fallback is sidebar-only and exists solely so a stale
-    // transparent hit layer cannot make the visible menu inert.
-    // V565 owns pointerdown blocker repair. Navigate only on the completed click:
-    // navigating during pointerdown can be cancelled by the remaining mouse sequence.
+    // One owner, one behavior: completed sidebar clicks route synchronously in this
+    // document. Coordinate fallback is sidebar-only so a stale transparent hit layer
+    // cannot make the visible menu inert. app.js hydratePageData still owns data reads.
     doc.addEventListener('click',hardNavigateSidebar,true);
     global.addEventListener('pageshow',()=>enforce('pageshow'),true);
     global.addEventListener('popstate',()=>enforce('popstate'),true);
@@ -311,5 +316,5 @@
   if(doc.querySelector('.side-nav')&&doc.querySelector('.main-content'))bind();
   else if(doc.readyState==='loading')doc.addEventListener('DOMContentLoaded',bind,{once:true});
   else bind();
-  console.info('[CE-QC][V581_STABLE_SHELL]',VERSION,'single stable shell owner: early native sidebar links + deterministic route visibility + hard navigation before app bootstrap.');
+  console.info('[CE-QC][V581_STABLE_SHELL]',VERSION,'single stable shell owner: early native sidebar links + deterministic route visibility + direct in-document routing before app bootstrap.');
 })(window);
