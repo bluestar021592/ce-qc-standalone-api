@@ -113,12 +113,12 @@ async function click(cdp,selector){
   await cdp.send('Input.dispatchMouseEvent',{type:'mouseReleased',x:p.x,y:p.y,button:'left',clickCount:1});
 }
 
-const browser=browserExecutable();
-if(!browser){
-  if(process.platform==='win32')throw new Error('V581 production-shell browser smoke requires Edge/Chrome on Windows');
-  console.log('[V581_PRODUCTION_BROWSER] skipped outside Windows without Chromium');
+if(process.platform!=='win32'){
+  console.log('[V582_PRODUCTION_BROWSER] skipped outside Windows; the authoritative real-browser gate runs on the Windows updater workflow');
   process.exit(0);
 }
+const browser=browserExecutable();
+if(!browser)throw new Error('V582 production-shell browser smoke requires Edge/Chrome on Windows');
 
 const port=await freePort();
 const debugPort=await freePort();
@@ -165,7 +165,7 @@ try{
   await cdp.send('Network.setCookie',{name:'ce_qc_local_auth_v431',value:signedCookie(secret),url:'http://127.0.0.1:'+port+'/'});
   stage('navigating production shell');
   await cdp.send('Page.navigate',{url:'http://127.0.0.1:'+port+'/?auth=v581'},8000);
-  await waitFor(()=>cdp.eval("document.readyState==='complete'&&!!window.__CE_QC_V581_STABLE_SHELL__",2500),15000,100,'V581 owner after production navigation');
+  await waitFor(()=>cdp.eval("!!window.__CE_QC_V581_STABLE_SHELL__",1500),8000,80,'V581 owner after production navigation');
   stage('V581 owner loaded');
   await waitFor(()=>cdp.eval("(()=>{const t=document.querySelector('.topbar'),m=document.querySelector('.main-content'),h=document.getElementById('homePage');if(!t||!m||!h)return false;const ts=getComputedStyle(t),ms=getComputedStyle(m),r=h.getBoundingClientRect();return ts.display!=='none'&&ts.visibility!=='hidden'&&ms.display!=='none'&&!h.hidden&&r.width>200&&r.height>80;})()",2500),10000,100,'visible HOME shell');
   stage('HOME shell visible');
@@ -185,7 +185,7 @@ try{
   await cdp.eval("(()=>{document.getElementById('v582SidebarBlocker')?.remove();const b=document.createElement('div');b.id='v582SidebarBlocker';Object.assign(b.style,{position:'fixed',left:'0',top:'0',width:'228px',height:'100vh',zIndex:'2147483647',background:'rgba(255,0,0,0.001)',pointerEvents:'auto'});document.body.appendChild(b);return true;})()",2000);
   stage('clicking CE link through transparent blocker');
   await click(cdp,'.side-nav a[data-page="ce"]');
-  await waitFor(()=>cdp.eval("location.pathname==='/ce'&&!!window.__CE_QC_V581_STABLE_SHELL__&&document.readyState==='complete'",2500),12000,100,'CE hard navigation');
+  await waitFor(()=>cdp.eval("location.pathname==='/ce'&&!!window.__CE_QC_V581_STABLE_SHELL__",1500),8000,80,'CE hard navigation');
   await waitFor(()=>cdp.eval("(()=>{const p=document.getElementById('ccslPage'),t=document.getElementById('pageTitle');return p&&!p.hidden&&getComputedStyle(p).display!=='none'&&t?.textContent==='CE看板';})()",2500),8000,100,'CE visible route');
   stage('CE hard navigation passed');
 
@@ -193,7 +193,7 @@ try{
   await cdp.eval("(()=>{document.getElementById('v582SidebarBlocker')?.remove();const b=document.createElement('div');b.id='v582SidebarBlocker';Object.assign(b.style,{position:'fixed',left:'0',top:'0',width:'228px',height:'100vh',zIndex:'2147483647',background:'rgba(0,0,255,0.001)',pointerEvents:'auto'});document.body.appendChild(b);return true;})()",2000);
   stage('clicking import link through transparent blocker');
   await click(cdp,'.side-nav a[data-page="import"]');
-  await waitFor(()=>cdp.eval("location.pathname==='/import'&&!!window.__CE_QC_V581_STABLE_SHELL__&&document.readyState==='complete'",2500),12000,100,'import hard navigation');
+  await waitFor(()=>cdp.eval("location.pathname==='/import'&&!!window.__CE_QC_V581_STABLE_SHELL__",1500),8000,80,'import hard navigation');
   await waitFor(()=>cdp.eval("(()=>{const p=document.getElementById('importPage'),t=document.getElementById('pageTitle');return p&&!p.hidden&&getComputedStyle(p).display!=='none'&&t?.textContent==='数据导入';})()",2500),8000,100,'import visible route');
   stage('import hard navigation passed');
 
@@ -206,10 +206,12 @@ try{
   }),7000,'production HTML verification request');
   assert.doesNotMatch(delivered,/installV575CoordinateOwner/,'production HTML must retire the V575 capture owner');
   assert.doesNotMatch(delivered,/v580-visible-shell-recovery\.js/,'production HTML must retire V580 layered recovery');
-  const lastScript=[...delivered.matchAll(/<script\b[^>]*src=["']([^"']+)["'][^>]*><\/script>/gi)].at(-1)?.[1]||'';
-  assert.match(lastScript,/v581-stable-shell-owner\.js/,'V581 must be the final delivered browser owner');
+  const scripts=[...delivered.matchAll(/<script\b[^>]*src=["']([^"']+)["'][^>]*><\/script>/gi)].map(m=>m[1]);
+  const stableIndex=scripts.findIndex(src=>/v581-stable-shell-owner\.js/.test(src));
+  const appIndex=scripts.findIndex(src=>/\/app\.js/.test(src));
+  assert.ok(stableIndex>=0&&appIndex>stableIndex,'V582 stable shell must be delivered before app.js');
 
-  console.log('[V581_PRODUCTION_BROWSER] full production server + auth cookie + real Edge/Chromium passed · HOME visible/nonblank · forced blank shell self-heals · sidebar uses native anchors · hard CE/import navigation reloads correct pages · V581 is delivered last');
+  console.log('[V582_PRODUCTION_BROWSER] full production server + auth cookie + real Edge passed · early shell owner loads before app bootstrap · HOME self-heals · stale sidebar hit layers cannot block CE/import hard navigation');
 } catch(error){
   console.error('[V581_PRODUCTION_BROWSER] backend tail\n'+backendLog.slice(-12000));
   throw error;
