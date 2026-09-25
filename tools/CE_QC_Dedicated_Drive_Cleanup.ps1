@@ -3,7 +3,7 @@ param(
 )
 
 $ErrorActionPreference = 'SilentlyContinue'
-$Patch = '2026-09-22-v579-dedicated-drive-cleanup-parsefix-v1'
+$Patch = '2026-09-25-v583-aggressive-safe-ce-cleanup-v1'
 $Now = Get-Date
 $DeletedBytes = [int64]0
 $DeletedEntries = 0
@@ -78,6 +78,41 @@ $ceC = @(
   (Join-Path $env:LOCALAPPDATA 'CE_QC_LAUNCHER\app\logs\crashes')
 )
 foreach ($p in $ceC) { Remove-CeTarget $p 0 }
+
+# V583: remove stale CE-QC-owned update/test/browser scratch immediately. These roots
+# are generated artifacts only; live database/business data never lives here.
+function Remove-CePattern([string]$Folder,[string[]]$Patterns) {
+  if (-not (Test-Path -LiteralPath $Folder)) { return }
+  foreach ($pattern in $Patterns) {
+    Get-ChildItem -LiteralPath $Folder -Force -Filter $pattern -ErrorAction SilentlyContinue | ForEach-Object {
+      try {
+        $bytes = Get-FileBytes $_.FullName
+        Remove-Item -LiteralPath $_.FullName -Recurse -Force -Confirm:$false -ErrorAction Stop
+        $script:DeletedBytes += $bytes
+        $script:DeletedEntries += 1
+      } catch { $script:Failures += 1 }
+    }
+  }
+}
+$ceTempPatterns = @(
+  'CE_QC_UPDATE_VERIFY_*',
+  'ce-qc-v581-*',
+  'ce-qc-v582-*',
+  'ce-qc-v583-*',
+  'ce-qc-v505-*',
+  'ce-qc-purge-*',
+  'ce-qc-export-*'
+)
+Remove-CePattern $env:TEMP $ceTempPatterns
+if ($env:LOCALAPPDATA) { Remove-CePattern (Join-Path $env:LOCALAPPDATA 'Temp') $ceTempPatterns }
+
+# Old launcher staging/update copies are disposable. The active app directory is
+# deliberately excluded, as are repository metadata and user documents.
+$launcherRoot = Join-Path $env:LOCALAPPDATA 'CE_QC_LAUNCHER'
+foreach ($name in @('staging','downloads','update','updates','worktrees','candidate','candidates','old','previous')) {
+  Remove-CeTarget (Join-Path $launcherRoot $name) 0
+}
+Remove-CePattern $launcherRoot @('app.old*','app_old*','app-prev*','app_previous*')
 
 # Safe user/application caches on C. Cookies, passwords, history, documents and downloads are not touched.
 $cacheRoots = @(
