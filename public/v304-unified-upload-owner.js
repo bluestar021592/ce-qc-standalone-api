@@ -143,10 +143,10 @@
   global.importUnifiedExcel=importUnifiedExcelV304;
   function install(){repairPicker();global.importUnifiedExcel=importUnifiedExcelV304;}
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
-  new MutationObserver(()=>{
-    clearTimeout(observerTimer);
-    observerTimer=setTimeout(install,60);
-  }).observe(document.body,{childList:true,subtree:true});
+  // App markup is static after parser load; a body-wide subtree observer only wakes
+  // on unrelated dashboard rendering. Finite repairs keep the file picker owner
+  // stable without adding a perpetual MutationObserver to the whole application.
+  [250,1000,3000].forEach(ms=>setTimeout(install,ms));
 
   global.__CE_QC_V304_UNIFIED_UPLOAD_OWNER__={version:VERSION,repair:install,importUnifiedExcel:importUnifiedExcelV304};
   console.info('[CE-QC][V304_UPLOAD]',VERSION,'native file picker restored with full clickable input surface; direct multipart upload owns combined daily import and shows visible progress/errors.');
