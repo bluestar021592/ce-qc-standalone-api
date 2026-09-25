@@ -87,7 +87,7 @@ assert.match(stableResponse,/v580-visible-shell-recovery\.js/,'final delivered H
 assert.match(stableResponse,/V581_TAG/,'final response pass must preserve exactly one V581 owner');
 assert.match(stableResponse,/appTag/,'final response pass must locate app.js as the bootstrap boundary');
 assert.match(stableResponse,/V581_TAG\+'\\n'\+match/,'stable shell must be injected immediately before app.js');
-const stableAt=indexHtml.indexOf('/v581-stable-shell-owner.js?v=20260925-v582-1');
+const stableAt=indexHtml.indexOf('/v581-stable-shell-owner.js?v=20260925-v583-1');
 const appAt=indexHtml.indexOf('/app.js?v=20260921-v564-1');
 assert.ok(stableAt>0&&appAt>stableAt,'static V581 owner must load before app.js so navigation does not wait for app bootstrap');
 
