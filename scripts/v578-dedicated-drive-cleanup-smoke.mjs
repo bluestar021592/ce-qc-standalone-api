@@ -8,7 +8,7 @@ const cleanup=fs.readFileSync(new URL('../tools/CE_QC_Dedicated_Drive_Cleanup.ps
 const launcher=fs.readFileSync(new URL('../tools/CE_QC_Managed_Launcher.ps1',import.meta.url),'utf8');
 const start=fs.readFileSync(new URL('../Start_CE_QC.ps1',import.meta.url),'utf8');
 
-assert.match(cleanup,/2026-09-22-v579-dedicated-drive-cleanup-parsefix-v1/);
+assert.match(cleanup,/2026-09-25-v583-aggressive-safe-ce-cleanup-v1/);
 assert.doesNotMatch(cleanup,/\$Letter:/,'PowerShell must delimit drive-letter variable before colon');
 assert.match(cleanup,/DeviceID='\$\{Letter\}:'/,'drive query must use ${Letter}: interpolation safely');
 for(const required of [
@@ -17,6 +17,8 @@ for(const required of [
   'npm-cache',
   'Microsoft\\Edge\\User Data\\Default\\Cache',
   'Microsoft\\Edge\\User Data\\Default\\Code Cache',
+  'Microsoft\\Edge\\User Data\\Default\\Service Worker\\CacheStorage',
+  'CE_QC_UPDATE_VERIFY_*',
   'D3DSCache',
   'CrashDumps',
   'D:\\CE_QC_TEST_TEMP',
@@ -39,7 +41,7 @@ assert.match(launcher,/D:\\CE_QC_NPM_CACHE/,'npm cache must move to D');
 assert.match(launcher,/Candidate worktree\/test scratch\/npm cache use D:/);
 
 assert.match(start,/CE_QC_Dedicated_Drive_Cleanup\.ps1/,'startup must invoke dedicated cleanup');
-assert.match(start,/\[CE-QC\]\[V581\] Stable shell rebase \+ native sidebar navigation \+ V579 C\/D cleanup/);
+assert.match(start,/\[CE-QC\]\[V583\] Stable shell\/navigation repair \+ aggressive safe C\/D cleanup/);
 assert.match(start,/D:\\CE_QC_NPM_CACHE/);
 
 if(os.platform()==='win32'){
@@ -48,4 +50,4 @@ if(os.platform()==='win32'){
   const parsed=spawnSync('powershell.exe',['-NoLogo','-NoProfile','-Command',command],{encoding:'utf8'});
   assert.equal(parsed.status,0,'PowerShell parser rejected dedicated cleanup script: '+(parsed.stdout||'')+(parsed.stderr||''));
 }
-console.log('[V578/V579/V580/V581] dedicated-drive cleanup smoke passed · PowerShell syntax parsed on Windows · C clears safe CE/user/browser caches + recycle bin · D owns update/runtime/npm scratch · no Documents/Downloads/system directories are blindly deleted');
+console.log('[V583] dedicated-drive cleanup smoke passed · PowerShell syntax parsed on Windows · stale CE-QC temp/update roots + rebuildable browser caches are cleaned · active app/live D database/user Documents/Downloads stay protected');
