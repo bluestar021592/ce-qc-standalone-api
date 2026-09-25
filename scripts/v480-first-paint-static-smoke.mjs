@@ -77,7 +77,8 @@ assert.match(stableShell,/native sidebar links/i,'V581 must explicitly keep nati
 assert.doesNotMatch(stableShell,/subtree:true/,'stable-shell observer must not watch business-card/table/chart subtree mutations');
 assert.match(stableShell,/shell-structure-mutation/,'stable shell must keep bounded structural repair');
 assert.match(stableShell,/function sidebarLinkForEvent\(event\)/,'V582 must resolve sidebar intent by direct target or pointer coordinates');
-assert.match(stableShell,/doc\.addEventListener\('click',hardNavigateSidebar,true\)/,'V582 must hard-navigate only on completed sidebar click after V565 pointer repair');\nassert.doesNotMatch(stableShell,/global\.addEventListener\('pointerdown',hardNavigateSidebar,true\)/,'V582 must not navigate during pointerdown');
+assert.match(stableShell,/doc\.addEventListener\('click',hardNavigateSidebar,true\)/,'V582 must hard-navigate only on completed sidebar click after V565 pointer repair');
+assert.doesNotMatch(stableShell,/global\.addEventListener\('pointerdown',hardNavigateSidebar,true\)/,'V582 must not navigate during pointerdown');
 assert.match(stableShell,/global\.location\.assign\(href\)/,'V582 must hard-navigate sidebar routes even when a stale transparent layer owns the hit');
 assert.match(stableResponse,/2026-09-25-v582-early-stable-shell-response-v2/);
 assert.match(stableResponse,/stripInlineV575/,'final delivered HTML must remove V575 even if an older response wrapper re-injects it');
