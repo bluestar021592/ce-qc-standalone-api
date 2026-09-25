@@ -76,6 +76,9 @@ assert.match(stableShell,/renderFallbackHomeIfStillEmpty/,'V581 must recover a b
 assert.match(stableShell,/native sidebar links/i,'V581 must explicitly keep native sidebar navigation');
 assert.doesNotMatch(stableShell,/subtree:true/,'stable-shell observer must not watch business-card/table/chart subtree mutations');
 assert.match(stableShell,/shell-structure-mutation/,'stable shell must keep bounded structural repair');
+assert.match(stableShell,/function sidebarLinkForEvent\(event\)/,'V582 must resolve sidebar intent by direct target or pointer coordinates');
+assert.match(stableShell,/global\.addEventListener\('pointerdown',hardNavigateSidebar,true\)/,'V582 must capture primary sidebar activation at the single stable owner');
+assert.match(stableShell,/global\.location\.assign\(href\)/,'V582 must hard-navigate sidebar routes even when a stale transparent layer owns the hit');
 assert.match(stableResponse,/2026-09-22-v581-stable-shell-response-v1/);
 assert.match(stableResponse,/stripInlineV575/,'final delivered HTML must remove V575 even if an older response wrapper re-injects it');
 assert.match(stableResponse,/v580-visible-shell-recovery\.js/,'final delivered HTML must remove V580 layered recovery');
