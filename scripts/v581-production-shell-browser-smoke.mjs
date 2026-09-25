@@ -225,17 +225,15 @@ try{
   await cdp.eval("(()=>{document.getElementById('v582SidebarBlocker')?.remove();const b=document.createElement('div');b.id='v582SidebarBlocker';Object.assign(b.style,{position:'fixed',left:'0',top:'0',width:'228px',height:'100vh',zIndex:'2147483647',background:'rgba(255,0,0,0.001)',pointerEvents:'auto'});document.body.appendChild(b);return true;})()",2000);
   stage('clicking CE link through transparent blocker');
   await click(cdp,'.side-nav .side-link[data-page="ce"]');
-  cdp=await reattachAfterNavigation(cdp,debugPort,'/ce');
-  await evalWait(cdp,"(()=>{const p=document.getElementById('ccslPage'),t=document.getElementById('pageTitle');return location.pathname==='/ce'&&p&&!p.hidden&&getComputedStyle(p).display!=='none'&&t?.textContent==='CE看板';})()",8000,100,'CE visible route');
-  stage('CE hard navigation passed');
+  await evalWait(cdp,"(()=>{const p=document.getElementById('ccslPage'),t=document.getElementById('pageTitle');return location.pathname==='/ce'&&p&&!p.hidden&&getComputedStyle(p).display!=='none'&&t?.textContent==='CE看板';})()",8000,100,'CE direct visible route');
+  stage('CE direct route passed');
 
   stage('reinstalling transparent sidebar blocker before import click');
   await cdp.eval("(()=>{document.getElementById('v582SidebarBlocker')?.remove();const b=document.createElement('div');b.id='v582SidebarBlocker';Object.assign(b.style,{position:'fixed',left:'0',top:'0',width:'228px',height:'100vh',zIndex:'2147483647',background:'rgba(0,0,255,0.001)',pointerEvents:'auto'});document.body.appendChild(b);return true;})()",2000);
   stage('clicking import link through transparent blocker');
   await click(cdp,'.side-nav .side-link[data-page="import"]');
-  cdp=await reattachAfterNavigation(cdp,debugPort,'/import');
-  await evalWait(cdp,"(()=>{const p=document.getElementById('importPage'),t=document.getElementById('pageTitle');return location.pathname==='/import'&&p&&!p.hidden&&getComputedStyle(p).display!=='none'&&t?.textContent==='数据导入';})()",8000,100,'import visible route');
-  stage('import hard navigation passed');
+  await evalWait(cdp,"(()=>{const p=document.getElementById('importPage'),t=document.getElementById('pageTitle');return location.pathname==='/import'&&p&&!p.hidden&&getComputedStyle(p).display!=='none'&&t?.textContent==='数据导入';})()",8000,100,'import direct visible route');
+  stage('import direct route passed');
 
   stage('verifying final production HTML owner ordering');
   const delivered=await withTimeout(new Promise((resolve,reject)=>{
@@ -251,7 +249,7 @@ try{
   const appIndex=scripts.findIndex(src=>/\/app\.js/.test(src));
   assert.ok(stableIndex>=0&&appIndex>stableIndex,'V582 stable shell must be delivered before app.js');
 
-  console.log('[V582_PRODUCTION_BROWSER] full production server + auth cookie + real Edge passed · early shell owner loads before app bootstrap · HOME self-heals · stale sidebar hit layers cannot block CE/import hard navigation');
+  console.log('[V582_PRODUCTION_BROWSER] full production server + auth cookie + real Edge passed · early shell owner loads before app bootstrap · HOME self-heals · stale sidebar hit layers cannot block CE/import direct routing');
 } catch(error){
   console.error('[V581_PRODUCTION_BROWSER] backend tail\n'+backendLog.slice(-12000));
   throw error;
