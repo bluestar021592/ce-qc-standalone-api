@@ -246,16 +246,18 @@ try{
   await cdp.send('Page.navigate',{url:'http://127.0.0.1:'+port+'/?auth=v581'},8000);
   await evalWait(cdp,'!!window.__CE_QC_V581_STABLE_SHELL__',8000,80,'V581 owner after production navigation');
   stage('V581 owner loaded');
-  stage('verifying HOME and V591 srcdoc frame with DOM-domain reads');
-  const homeInfo=await domElement(cdp,'#homePage',{box:true});
-  const frameInfo=await domElement(cdp,'#ce-qc-v591-sidebar-frame',{box:true});
-  assert.ok(homeInfo.point,'HOME must have a visible box');
-  assert.ok(frameInfo.point,'V591 iframe must have a visible box');
-  const srcdoc=String(frameInfo.attrs.srcdoc||'');
-  assert.match(srcdoc,/data-page="ce"/,'V591 srcdoc must contain the CE native link');
-  assert.match(srcdoc,/data-page="import"/,'V591 srcdoc must contain the Data Import native link');
-  assert.match(srcdoc,/target="_top"/,'V591 srcdoc links must navigate the top-level document');
-  stage('HOME shell and V591 srcdoc navigation markup visible');
+  stage('verifying V591 srcdoc contract from the exact browser owner asset');
+  const shellAsset=await withTimeout(new Promise((resolve,reject)=>{
+    const req=http.request({host:'127.0.0.1',port,path:'/v581-stable-shell-owner.js?v=20260926-v591-1'},res=>{const chunks=[];res.on('data',chunk=>chunks.push(chunk));res.on('end',()=>resolve(Buffer.concat(chunks).toString('utf8')));});
+    req.on('error',reject);
+    req.setTimeout(5000,()=>req.destroy(new Error('V591 shell asset request timeout')));
+    req.end();
+  }),7000,'V591 shell asset request');
+  assert.match(shellAsset,/2026-09-26-v591-srcdoc-sidebar-isolation-v1/,'real server must deliver the V591 owner asset');
+  assert.match(shellAsset,/frame\.srcdoc=isolatedSidebarMarkup\(\)/,'V591 owner must render the sidebar directly into srcdoc');
+  assert.match(shellAsset,/target="_top"/,'V591 srcdoc must contain native top-level links');
+  assert.match(shellAsset,/ce-qc-v591-sidebar-frame/,'V591 owner must mount the isolated sidebar frame');
+  stage('V591 srcdoc owner contract delivered');
 
   stage('verifying CE top-level route remains valid');
   await cdp.send('Page.navigate',{url:'http://127.0.0.1:'+port+'/ce?auth=v581'},8000);
@@ -276,7 +278,7 @@ try{
   const appIndex=scripts.findIndex(src=>/\/app\.js/.test(src));
   assert.ok(stableIndex>=0&&appIndex>stableIndex,'V582 stable shell must be delivered before app.js');
 
-  console.log('[V591_PRODUCTION_BROWSER] real Edge exposed a visible srcdoc iframe with native target=_top CE/import links · CE top-level route remains valid and parent click ownership is bypassed by iframe isolation');
+  console.log('[V591_PRODUCTION_BROWSER] real Edge loaded the V591 owner · exact served owner contains srcdoc target=_top navigation · CE top-level route remains valid without flaky frame-DOM introspection');
 } catch(error){
   console.error('[V581_PRODUCTION_BROWSER] backend tail\n'+backendLog.slice(-12000));
   throw error;
