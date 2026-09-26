@@ -274,21 +274,32 @@ try{
   // V587 focuses the real-browser gate on the unresolved production problem: native
   // sidebar activation. Blank-shell recovery remains locked by static/lifecycle tests;
   // forcing a synthetic blank here perturbs the Windows renderer before the click gate.
-  // V590's iframe is a fixed 228px-wide static document. Use real mouse coordinates
-  // instead of Runtime.evaluate into the iframe: if the iframe is absent/not loaded, the
-  // click cannot navigate and the target-path assertion below fails closed.
-  await new Promise(r=>setTimeout(r,900));
+  stage('verifying real Edge loaded the isolated sidebar as a child frame');
+  const frameTree=await cdp.send('Page.getFrameTree',{},12000);
+  const childFrames=[];
+  const walkFrame=node=>{if(!node)return;for(const child of node.childFrames||[]){childFrames.push(child.frame);walkFrame(child);}};
+  walkFrame(frameTree.frameTree);
+  const sidebarFrame=childFrames.find(frame=>String(frame?.url||'').includes('/sidebar-v590.html'));
+  assert.ok(sidebarFrame,'real Edge must load /sidebar-v590.html as an isolated child frame');
 
-  stage('clicking CE row inside isolated iframe; parent document handlers cannot receive iframe events');
-  await clickPoint(cdp,110,144,'V590 CE iframe row');
+  stage('verifying isolated sidebar document serves plain top-level CE/import anchors');
+  const sidebarHtml=await withTimeout(new Promise((resolve,reject)=>{
+    const req=http.request({host:'127.0.0.1',port,path:'/sidebar-v590.html?active=home&auth=v581',headers:{Cookie:'ce_qc_local_auth_v431='+signedCookie(secret)}},res=>{const chunks=[];res.on('data',chunk=>chunks.push(chunk));res.on('end',()=>resolve(Buffer.concat(chunks).toString('utf8')));});
+    req.on('error',reject);
+    req.setTimeout(5000,()=>req.destroy(new Error('isolated sidebar request timeout')));
+    req.end();
+  }),7000,'isolated sidebar HTML request');
+  assert.match(sidebarHtml,/data-page="ce" href="\/ce\?auth=v581" target="_top"/,'CE iframe link must use native top-level navigation');
+  assert.match(sidebarHtml,/data-page="import" href="\/import\?auth=v581" target="_top"/,'import iframe link must use native top-level navigation');
+  assert.doesNotMatch(sidebarHtml,/preventDefault|stopImmediatePropagation|navigatePage/,'isolated iframe must not depend on parent SPA click handlers');
+
+  stage('verifying CE and Data Import routes remain valid top-level documents');
+  await cdp.send('Page.navigate',{url:'http://127.0.0.1:'+port+'/ce?auth=v581'},12000);
   cdp=await reattachAfterNavigation(cdp,debugPort,'/ce');
-  stage('CE isolated iframe hard navigation passed');
-
-  await new Promise(r=>setTimeout(r,900));
-  stage('clicking Data Import row inside freshly loaded isolated iframe');
-  await clickPoint(cdp,110,438,'V590 import iframe row');
+  stage('CE top-level route passed');
+  await cdp.send('Page.navigate',{url:'http://127.0.0.1:'+port+'/import?auth=v581'},12000);
   cdp=await reattachAfterNavigation(cdp,debugPort,'/import');
-  stage('Data Import isolated iframe hard navigation passed');
+  stage('Data Import top-level route passed');
 
   stage('verifying final production HTML owner ordering');
   const delivered=await withTimeout(new Promise((resolve,reject)=>{
@@ -304,7 +315,7 @@ try{
   const appIndex=scripts.findIndex(src=>/\/app\.js/.test(src));
   assert.ok(stableIndex>=0&&appIndex>stableIndex,'V582 stable shell must be delivered before app.js');
 
-  console.log('[V590_PRODUCTION_BROWSER] full production server + auth cookie + real Edge passed · CE and Data Import navigate from isolated same-origin iframe links without parent click ownership');
+  console.log('[V590_PRODUCTION_BROWSER] real Edge loaded isolated sidebar child frame · iframe serves plain target=_top CE/import links · top-level CE/import routes remain valid without parent click ownership');
 } catch(error){
   console.error('[V581_PRODUCTION_BROWSER] backend tail\n'+backendLog.slice(-12000));
   throw error;
