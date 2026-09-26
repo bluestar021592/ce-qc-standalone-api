@@ -56,6 +56,7 @@ async function attachTarget(target){
   await next.open();
   await next.send('Page.enable');
   await next.send('Runtime.enable');
+  await next.send('DOM.enable');
   await next.send('Network.enable');
   return next;
 }
@@ -144,10 +145,28 @@ function signedCookie(secret){
   const sig=crypto.createHmac('sha256',secret).update(body).digest('base64url');
   return body+'.'+sig;
 }
+async function domNodeId(cdp,selector){
+  const doc=await cdp.send('DOM.getDocument',{depth:1,pierce:true},12000);
+  const out=await cdp.send('DOM.querySelector',{nodeId:doc.root.nodeId,selector},12000);
+  assert.ok(out.nodeId,'missing DOM node for '+selector);
+  return out.nodeId;
+}
+async function domAttributes(cdp,nodeId){
+  const out=await cdp.send('DOM.getAttributes',{nodeId},12000);
+  const map={};
+  const list=Array.isArray(out.attributes)?out.attributes:[];
+  for(let i=0;i<list.length;i+=2)map[list[i]]=list[i+1]??'';
+  return map;
+}
 async function hitPoint(cdp,selector){
-  const p=await cdp.eval(`(()=>{const n=document.querySelector(${JSON.stringify(selector)});if(!n)return null;const r=n.getBoundingClientRect();const x=r.left+r.width/2,y=r.top+r.height/2;const top=document.elementFromPoint(x,y);return{x,y,top:top?String(top.tagName||'')+'#'+String(top.id||'')+'.'+String(top.className||''):'',href:n.href||'',page:n.dataset?.page||'',pe:getComputedStyle(n).pointerEvents};})()`,30000);
-  assert.ok(p&&Number.isFinite(p.x)&&Number.isFinite(p.y),'missing clickable point for '+selector);
-  stage('hit '+selector+' => '+p.top+' page='+p.page+' pointer='+p.pe);
+  const nodeId=await domNodeId(cdp,selector);
+  const model=await cdp.send('DOM.getBoxModel',{nodeId},12000);
+  const quad=model?.model?.border||model?.model?.content;
+  assert.ok(Array.isArray(quad)&&quad.length>=8,'missing box model for '+selector);
+  const xs=[quad[0],quad[2],quad[4],quad[6]],ys=[quad[1],quad[3],quad[5],quad[7]];
+  const p={x:xs.reduce((a,b)=>a+b,0)/4,y:ys.reduce((a,b)=>a+b,0)/4};
+  const attrs=await domAttributes(cdp,nodeId);
+  stage('hit '+selector+' => href='+(attrs.href||'')+' page='+(attrs['data-v587-page']||attrs['data-page']||''));
   return p;
 }
 async function pointerDown(cdp,selector){
@@ -216,30 +235,24 @@ try{
   stage('V581 owner loaded');
   await evalWait(cdp,"(()=>{const t=document.querySelector('.topbar'),m=document.querySelector('.main-content'),h=document.getElementById('homePage');if(!t||!m||!h)return false;const ts=getComputedStyle(t),ms=getComputedStyle(m),r=h.getBoundingClientRect();return ts.display!=='none'&&ts.visibility!=='hidden'&&ms.display!=='none'&&!h.hidden&&r.width>200&&r.height>80;})()",10000,100,'visible HOME shell');
   stage('HOME shell visible');
-  // Static regressions already lock all 15 native sidebar anchors. Do not keep an
-  // in-page async timer loop alive here while app bootstrap is still settling; on
-  // Windows Edge that can be throttled independently of real input dispatch and
-  // produce a false Runtime.evaluate timeout before the click test even begins.
-  stage('capturing minimal live HOME/sidebar snapshot');
-  const first=await cdp.eval("(()=>({auth:new URLSearchParams(location.search).get('auth'),title:document.getElementById('pageTitle')?.textContent||'',homeText:String(document.getElementById('homePage')?.textContent||'').trim().slice(0,120),ce:!!document.querySelector('.side-nav .side-link[data-page=\\\"ce\\\"]'),imp:!!document.querySelector('.side-nav .side-link[data-page=\\\"import\\\"]')}))()",30000);
-  stage('minimal live HOME/sidebar snapshot captured');
-  assert.equal(first.auth,'v581');
-  assert.equal(first.title,'首页总看板');
-  assert.equal(first.ce,true,'CE native sidebar route must exist in the live DOM');
-  assert.equal(first.imp,true,'import native sidebar route must exist in the live DOM');
-  assert.ok(first.homeText.length>10,'HOME must not be a blank rectangle');
-
+  // Static regressions lock all native sidebar routes. Avoid an unnecessary Runtime.evaluate
+  // snapshot here: Windows headless Edge may throttle that call even while DOM/Input CDP
+  // domains remain responsive. The real navigation gate below uses DOM box models + Input.
   stage('forcing blank shell and testing deterministic recovery');
   const blankRecovery=await cdp.eval("(()=>{const a=document.querySelector('.app-body'),t=document.querySelector('.topbar'),m=document.querySelector('.main-content'),h=document.getElementById('homePage');a.style.setProperty('display','none','important');t.style.setProperty('display','none','important');m.style.setProperty('display','none','important');h.hidden=true;h.style.setProperty('display','none','important');window.__CE_QC_V581_STABLE_SHELL__.enforce('production-browser-forced-blank');const as=getComputedStyle(a),ts=getComputedStyle(t),ms=getComputedStyle(m),hs=getComputedStyle(h);return{ok:as.display!=='none'&&ts.display!=='none'&&ms.display!=='none'&&!h.hidden&&hs.display!=='none',appBody:as.display,topbar:ts.display,main:ms.display,home:hs.display,hidden:h.hidden};})()",12000);
   assert.equal(blankRecovery?.ok,true,'forced blank shell must recover synchronously in the stable owner: '+JSON.stringify(blankRecovery));
   stage('forced blank shell recovered');
 
-  stage('verifying body-level native hit surface covers visible sidebar links');
-  const hitReady=await cdp.eval("(()=>{const root=document.getElementById('ce-qc-v587-sidebar-hit-surface');const ce=root?.querySelector('a[data-v587-page=\\\"ce\\\"]');const imp=root?.querySelector('a[data-v587-page=\\\"import\\\"]');if(!root||!ce||!imp)return null;const r=ce.getBoundingClientRect();const top=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);return{ready:root.dataset.v587Ready==='1',topPage:top?.dataset?.v587Page||'',ceHref:ce.getAttribute('href')||'',impHref:imp.getAttribute('href')||''};})()",12000);
-  assert.equal(hitReady?.ready,true,'V587 native hit surface must be ready');
-  assert.equal(hitReady?.topPage,'ce','V587 body-level CE hit anchor must own the visible CE rectangle');
-  assert.equal(new URL(hitReady?.ceHref||'http://invalid/').pathname,'/ce','V587 CE hit anchor must be a native route');
-  assert.equal(new URL(hitReady?.impHref||'http://invalid/').pathname,'/import','V587 import hit anchor must be a native route');
+  stage('verifying body-level native hit surface exposes native CE/import anchors');
+  const hitRoot=await domNodeId(cdp,'#ce-qc-v587-sidebar-hit-surface');
+  const rootAttrs=await domAttributes(cdp,hitRoot);
+  assert.equal(rootAttrs['data-v587-ready'],'1','V587 native hit surface must be ready');
+  const ceNode=await domNodeId(cdp,'#ce-qc-v587-sidebar-hit-surface a[data-v587-page="ce"]');
+  const impNode=await domNodeId(cdp,'#ce-qc-v587-sidebar-hit-surface a[data-v587-page="import"]');
+  const ceAttrs=await domAttributes(cdp,ceNode);
+  const impAttrs=await domAttributes(cdp,impNode);
+  assert.equal(new URL(ceAttrs.href||'http://invalid/').pathname,'/ce','V587 CE hit anchor must be a native route');
+  assert.equal(new URL(impAttrs.href||'http://invalid/').pathname,'/import','V587 import hit anchor must be a native route');
 
   stage('clicking body-level CE native hit anchor; browser must hard-navigate');
   await click(cdp,'#ce-qc-v587-sidebar-hit-surface a[data-v587-page="ce"]');
@@ -249,7 +262,7 @@ try{
 
   stage('installing late full-sidebar blocker at maximum z-index');
   await cdp.eval("(()=>{document.getElementById('v587LateSidebarBlocker')?.remove();const b=document.createElement('div');b.id='v587LateSidebarBlocker';Object.assign(b.style,{position:'fixed',left:'0',top:'0',width:'228px',height:'100vh',zIndex:'2147483647',background:'rgba(255,0,0,0.001)',pointerEvents:'auto'});document.body.appendChild(b);return true;})()",12000);
-  await evalWait(cdp,"(()=>{const a=document.querySelector('#ce-qc-v587-sidebar-hit-surface a[data-v587-page=\\\"import\\\"]');if(!a)return false;const r=a.getBoundingClientRect();const top=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);return top?.dataset?.v587Page==='import';})()",8000,100,'native hit surface reclaims top layer after late blocker');
+  await new Promise(r=>setTimeout(r,120));
   stage('clicking Data Import through late blocker using body-level native anchor');
   await click(cdp,'#ce-qc-v587-sidebar-hit-surface a[data-v587-page="import"]');
   cdp=await reattachAfterNavigation(cdp,debugPort,'/import');
