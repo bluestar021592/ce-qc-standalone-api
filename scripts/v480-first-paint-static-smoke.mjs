@@ -93,7 +93,7 @@ assert.match(stableResponse,/V581_TAG/,'final response pass must preserve exactl
 assert.match(stableResponse,/appTag/,'final response pass must locate app.js as the bootstrap boundary');
 assert.match(stableResponse,/V581_TAG\+'\\n'\+match/,'stable shell must be injected immediately before app.js');
 const earlyAt=indexHtml.indexOf('/v592-early-sidebar-capture.js?v=20260926-v593-1');
-const stableAt=indexHtml.indexOf('/v581-stable-shell-owner.js?v=20260926-v592-1');
+const stableAt=indexHtml.indexOf('/v581-stable-shell-owner.js?v=20260926-v593-1');
 const appAt=indexHtml.indexOf('/app.js?v=20260921-v564-1');
 assert.ok(earlyAt>0&&stableAt>earlyAt&&appAt>stableAt,'V593 window capture must load in head before the stable owner and app.js');
 
