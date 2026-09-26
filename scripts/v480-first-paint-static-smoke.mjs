@@ -80,6 +80,8 @@ assert.match(stableShell,/ce-qc-v587-sidebar-hit-surface/,'V587 must create one 
 assert.match(stableShell,/a\.dataset\.v587Page=page/,'V587 hit surface must mirror every visible sidebar route');
 assert.match(stableShell,/a\.href=link\.href\|\|navHref/,'V587 hit surface must use native href navigation');
 assert.match(stableShell,/z-index:2147483647/,'V587 hit surface must escape lower application stacking contexts');
+assert.match(stableShell,/bodyObserver\.observe\(body,\{childList:true\}\)/,'V587 must notice late body-level blockers');
+assert.match(stableShell,/doc\.body\.appendChild\(root\)/,'V587 must re-append its native hit surface after late blockers');
 assert.doesNotMatch(stableShell,/hardNavigateSidebar|sidebarLinkForEvent/,'V587 primary sidebar path must not depend on document-level SPA event interception');
 assert.match(stableResponse,/2026-09-26-v587-body-native-hit-response-v1/);
 assert.match(stableResponse,/stripInlineV575/,'final delivered HTML must remove V575 even if an older response wrapper re-injects it');
