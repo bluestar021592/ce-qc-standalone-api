@@ -1,7 +1,7 @@
 (function installV581StableShell(global){
   'use strict';
   if(global.__CE_QC_V581_STABLE_SHELL__)return;
-  const VERSION='2026-09-26-v590-isolated-sidebar-iframe-v1';
+  const VERSION='2026-09-26-v591-srcdoc-isolated-sidebar-v1';
   const doc=global.document;
   const NAV=[
     ['home','首页总看板','home','/'],
@@ -93,29 +93,48 @@
     nav.dataset.v581StableNav='1';
     return true;
   }
-  function isolatedSidebarSrc(){
+  function sidebarMarkup(){
+    const active=currentPage();
+    const admin=isAdmin();
     const q=new URLSearchParams(global.location?.search||'');
     q.delete('t');
+    q.delete('active');
     q.set('auth','v581');
-    q.set('active',currentPage());
-    return '/sidebar-v590.html?'+q.toString();
+    const hrefFor=path=>{
+      const copy=new URLSearchParams(q);
+      return path+(copy.toString()?'?'+copy.toString():'');
+    };
+    const rows=NAV.filter(([page])=>page!=='data-management'||admin).map(([page,label,icon,path])=>{
+      const cls=page===active?' active':'';
+      return '<a class="nav-link'+cls+'" data-page="'+page+'" href="'+hrefFor(path)+'" target="_top"><svg class="icon"><use href="/assets/ui-icons.svg#icon-'+icon+'"></use></svg><span>'+label+'</span></a>';
+    }).join('');
+    return '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>'+
+      '*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;font-family:"Microsoft YaHei","Segoe UI",Arial,sans-serif;background:#0b365d}body{color:#b8dcff}.wrap{position:relative;width:100%;height:100vh;background:linear-gradient(180deg,#0b365d 0%,#0b3b67 100%);padding:10px 10px 58px}.brand{height:60px;display:flex;align-items:center;gap:10px;padding:0 4px 10px;border-bottom:1px solid rgba(255,255,255,.08)}.logo{width:80px;height:46px;object-fit:contain;background:#fff;border-radius:5px;padding:3px}.copy{min-width:0}.title{font-size:16px;font-weight:700;color:#fff;white-space:nowrap}.sub{margin-top:3px;font-size:10px;color:#a6c4df;white-space:nowrap}.nav{padding-top:10px}.nav-link{height:40px;display:flex;align-items:center;gap:12px;padding:0 14px;margin:2px 0;border-radius:6px;color:#a9d5ff;text-decoration:none;font-size:15px;font-weight:700;line-height:1;cursor:pointer;user-select:none}.nav-link:hover{background:rgba(37,126,255,.18);color:#fff}.nav-link.active{background:#1f80ff;color:#fff;box-shadow:0 4px 14px rgba(0,82,180,.25)}.icon{width:18px;height:18px;flex:0 0 18px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}.collapse{position:absolute;left:10px;right:10px;bottom:10px;height:40px;border:1px solid rgba(255,255,255,.18);border-radius:6px;background:rgba(255,255,255,.05);color:#fff;font-size:14px;display:flex;align-items:center;justify-content:center;gap:8px;cursor:pointer}.collapse:hover{background:rgba(255,255,255,.09)}'+
+      '</style></head><body><div class="wrap"><div class="brand"><img class="logo" src="/assets/ce-express-logo-main.png" alt="CE EXPRESS"><div class="copy"><div class="title">CE EXPRESS</div><div class="sub">质量控制管理系统</div></div></div><nav class="nav">'+rows+'</nav><button class="collapse" type="button" onclick="parent.postMessage({type:\'CE_QC_V591_TOGGLE_SIDEBAR\'},location.origin)">‹ <span>收起菜单</span></button></div></body></html>';
   }
   function mountIsolatedSidebar(){
     try{
       doc.getElementById('ce-qc-v587-sidebar-hit-surface')?.remove();
-      let frame=doc.getElementById('ce-qc-v590-sidebar-frame');
+      let frame=doc.getElementById('ce-qc-v591-sidebar-frame');
       if(!frame){
         frame=doc.createElement('iframe');
-        frame.id='ce-qc-v590-sidebar-frame';
+        frame.id='ce-qc-v591-sidebar-frame';
         frame.title='CE QC Navigation';
         frame.setAttribute('frameborder','0');
-        frame.style.cssText='position:fixed;left:0;top:0;width:228px;height:100vh;border:0;margin:0;padding:0;background:#0b365d;z-index:2147483647;pointer-events:auto;display:block';
+        frame.setAttribute('sandbox','allow-scripts allow-same-origin allow-top-navigation-by-user-activation');
         (doc.body||doc.documentElement).appendChild(frame);
       }else if(doc.body&&frame.parentNode===doc.body){
         doc.body.appendChild(frame);
       }
-      const src=isolatedSidebarSrc();
-      if(frame.getAttribute('src')!==src)frame.setAttribute('src',src);
+      const sidebar=doc.querySelector('.sidebar');
+      const sr=sidebar?.getBoundingClientRect?.();
+      const width=Math.max(72,Math.round(sr?.width||228));
+      frame.style.cssText='position:fixed;left:0;top:0;width:'+width+'px;height:100vh;border:0;margin:0;padding:0;background:#0b365d;z-index:2147483647;pointer-events:auto;display:block';
+      const markup=sidebarMarkup();
+      if(frame.dataset.v591Markup!==markup){
+        frame.srcdoc=markup;
+        frame.dataset.v591Markup=markup;
+      }
       const blocking=[...doc.querySelectorAll('.modal,#v303CleanStartOverlay')].some(node=>{
         if(node.hidden)return false;
         const cs=global.getComputedStyle?.(node);
@@ -124,10 +143,14 @@
         return Boolean(r&&r.width>80&&r.height>80);
       });
       frame.style.display=blocking?'none':'block';
-      frame.dataset.v590Ready='1';
+      frame.dataset.v591Ready='1';
+      const appBody=doc.querySelector('.app-body');
+      const topbar=doc.querySelector('.topbar');
+      if(appBody)appBody.style.setProperty('margin-left',width+'px','important');
+      if(topbar)topbar.style.setProperty('left',width+'px','important');
       return frame;
     }catch(error){
-      safeDiag('V590_IFRAME_ERROR',error?.message||error);
+      safeDiag('V591_SRCDOC_ERROR',error?.message||error);
       return null;
     }
   }
@@ -272,14 +295,12 @@
   function bind(){
     enforce('bind');
     [50,250,800,1800,3500,7000].forEach(ms=>setTimeout(()=>{enforce('timer-'+ms);renderFallbackHomeIfStillEmpty();},ms));
-    // V587 mouse activation is handled by transparent native <a> elements appended
-    // directly to document.body at the exact visible sidebar rectangles. No document-
-    // level preventDefault/SPA routing remains in the primary path.
+    // V591 renders navigation inside an isolated srcdoc iframe. Its click events never enter the parent document event chain.
     global.addEventListener('resize',()=>mountIsolatedSidebar(),{passive:true});
     global.addEventListener('message',event=>{
       if(event.origin!==global.location.origin)return;
-      if(event.data?.type!=='CE_QC_V590_TOGGLE_SIDEBAR')return;
-      const frame=doc.getElementById('ce-qc-v590-sidebar-frame');
+      if(event.data?.type!=='CE_QC_V591_TOGGLE_SIDEBAR')return;
+      const frame=doc.getElementById('ce-qc-v591-sidebar-frame');
       const appBody=doc.querySelector('.app-body');
       const topbar=doc.querySelector('.topbar');
       const collapsed=frame?.dataset?.collapsed==='1';
@@ -314,7 +335,7 @@
       const body=doc.body;
       if(body){
         bodyObserver=new MutationObserver(records=>{
-          if(records.some(r=>[...r.addedNodes].some(n=>n?.nodeType===1&&n?.id!=='ce-qc-v590-sidebar-frame'))){
+          if(records.some(r=>[...r.addedNodes].some(n=>n?.nodeType===1&&n?.id!=='ce-qc-v591-sidebar-frame'))){
             setTimeout(()=>mountIsolatedSidebar(),0);
           }
         });
@@ -333,5 +354,5 @@
   if(doc.querySelector('.side-nav')&&doc.querySelector('.main-content'))bind();
   else if(doc.readyState==='loading')doc.addEventListener('DOMContentLoaded',bind,{once:true});
   else bind();
-  console.info('[CE-QC][V581_STABLE_SHELL]',VERSION,'single stable shell owner: isolated same-origin sidebar iframe with native top-level links + deterministic route visibility.');
+  console.info('[CE-QC][V581_STABLE_SHELL]',VERSION,'single stable shell owner: srcdoc-isolated sidebar iframe with native top-level links + deterministic route visibility.');
 })(window);
