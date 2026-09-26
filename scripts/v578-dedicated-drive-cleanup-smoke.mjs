@@ -42,7 +42,7 @@ assert.match(launcher,/D:\\CE_QC_NPM_CACHE/,'npm cache must move to D');
 assert.match(launcher,/Candidate worktree\/test scratch\/npm cache use D:/);
 
 assert.match(start,/CE_QC_Dedicated_Drive_Cleanup\.ps1/,'startup must invoke dedicated cleanup');
-assert.match(start,/\[CE-QC\]\[V591\] Srcdoc-isolated sidebar \+ legacy C backup purge \+ diff-aware updater gate/);
+assert.match(start,/\[CE-QC\]\[V592\] Earliest window sidebar capture \+ original visible menu \+ diff-aware updater gate/);
 assert.match(start,/D:\\CE_QC_NPM_CACHE/);
 
 if(os.platform()==='win32'){
@@ -51,4 +51,4 @@ if(os.platform()==='win32'){
   const parsed=spawnSync('powershell.exe',['-NoLogo','-NoProfile','-Command',command],{encoding:'utf8'});
   assert.equal(parsed.status,0,'PowerShell parser rejected dedicated cleanup script: '+(parsed.stdout||'')+(parsed.stderr||''));
 }
-console.log('[V591] dedicated-drive cleanup smoke passed · obsolete CE_QC_RUNTIME backups on C are purged · live D database/user Documents/Downloads stay protected');
+console.log('[V592] dedicated-drive cleanup smoke passed · obsolete CE_QC_RUNTIME backups on C are purged · live D database/user Documents/Downloads stay protected');
