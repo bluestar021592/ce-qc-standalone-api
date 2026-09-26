@@ -45,4 +45,4 @@ if(os.platform()==='win32'){
   assert.equal(parsed.status,0,'PowerShell parser rejected deep C-drive census: '+(parsed.stdout||'')+(parsed.stderr||''));
 }
 
-console.log('[V590] diff-aware local updater gate + isolated sidebar iframe + legacy C backup purge smoke passed');
+console.log('[V591] diff-aware local updater gate + srcdoc-isolated sidebar + legacy C backup purge smoke passed');
