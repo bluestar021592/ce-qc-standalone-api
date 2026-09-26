@@ -130,7 +130,7 @@ function Clear-CeQcPort([int]$Port) {
 Write-Host 'Checking port 5177...' -ForegroundColor Cyan
 Clear-CeQcPort 5177
 Write-Host 'Port 5177 is stable and free.' -ForegroundColor Green
-Write-Host '[CE-QC][V586] Anchor-owned sidebar routing + dashboard repair + bounded updater + safe C/D cleanup are installed.' -ForegroundColor Green
+Write-Host '[CE-QC][V587] Body-level native sidebar hit surface + dashboard repair + deep C-drive census are installed.' -ForegroundColor Green
 
 $DedicatedCleanup = Join-Path $ProjectRoot 'tools\CE_QC_Dedicated_Drive_Cleanup.ps1'
 if (Test-Path -LiteralPath $DedicatedCleanup) {
@@ -316,16 +316,16 @@ Write-Host 'Keep this window open while using CE QC.' -ForegroundColor Yellow
 Write-Host '===============================================' -ForegroundColor Green
 Write-Host ''
 
-# V584: explain unexpected C-drive usage without delaying startup or deleting unknown files.
-# The census is read-only and bounded; it writes a separate log while the backend is already ready.
-$CDriveCensus = Join-Path $ProjectRoot 'tools\CE_QC_C_Drive_Census.ps1'
-$CDriveCensusLog = Join-Path $LogDir 'c_drive_census_latest.log'
+# V587: attribute unexpected C-drive usage after backend readiness without deleting unknown files.
+# The deep census is read-only and runs in a separate hidden process so startup stays responsive.
+$CDriveCensus = Join-Path $ProjectRoot 'tools\CE_QC_C_Drive_Deep_Census.ps1'
+$CDriveCensusLog = Join-Path $LogDir 'c_drive_deep_census_latest.log'
 if (-not $env:CI -and (Test-Path -LiteralPath $CDriveCensus)) {
     try {
         $quotedCensus = '"' + $CDriveCensus + '"'
         $quotedOutput = '"' + $CDriveCensusLog + '"'
         Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoLogo','-NoProfile','-ExecutionPolicy','Bypass','-File',$quotedCensus,'-OutputFile',$quotedOutput) -WorkingDirectory $ProjectRoot -WindowStyle Hidden | Out-Null
-        Write-Host "[CE-QC][V584] Read-only C-drive usage census started in background: $CDriveCensusLog" -ForegroundColor DarkCyan
+        Write-Host "[CE-QC][V587] Deep read-only C-drive attribution census started in background: $CDriveCensusLog" -ForegroundColor DarkCyan
     } catch {
         Write-Host ("[WARN] C-drive census could not start; app startup is unaffected. " + $_.Exception.Message) -ForegroundColor Yellow
     }
