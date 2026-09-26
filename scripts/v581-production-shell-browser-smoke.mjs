@@ -234,26 +234,27 @@ try{
   assert.equal(blankRecovery?.ok,true,'forced blank shell must recover synchronously in the stable owner: '+JSON.stringify(blankRecovery));
   stage('forced blank shell recovered');
 
-  stage('verifying direct per-anchor pointerdown ownership');
-  const anchorOwners=await cdp.eval("(()=>['ce','import','whpp'].every(page=>{const a=document.querySelector('.side-nav .side-link[data-page=\\\"'+page+'\\\"]');return !!a&&typeof a.onpointerdown==='function'&&a.dataset.v586AnchorOwner==='1';}))()",12000);
-  assert.equal(anchorOwners,true,'V586 must bind pointerdown directly on live sidebar anchors');
+  stage('verifying body-level native hit surface covers visible sidebar links');
+  const hitReady=await cdp.eval("(()=>{const root=document.getElementById('ce-qc-v587-sidebar-hit-surface');const ce=root?.querySelector('a[data-v587-page=\\\"ce\\\"]');const imp=root?.querySelector('a[data-v587-page=\\\"import\\\"]');if(!root||!ce||!imp)return null;const r=ce.getBoundingClientRect();const top=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);return{ready:root.dataset.v587Ready==='1',topPage:top?.dataset?.v587Page||'',ceHref:ce.getAttribute('href')||'',impHref:imp.getAttribute('href')||''};})()",12000);
+  assert.equal(hitReady?.ready,true,'V587 native hit surface must be ready');
+  assert.equal(hitReady?.topPage,'ce','V587 body-level CE hit anchor must own the visible CE rectangle');
+  assert.match(hitReady?.ceHref||'',/^\/ce\?/,'V587 CE hit anchor must be a native route');
+  assert.match(hitReady?.impHref||'',/^\/import\?/,'V587 import hit anchor must be a native route');
 
-  stage('pressing direct CE anchor; route must complete before mouse release');
-  const cePress=await pointerDown(cdp,'.side-nav .side-link[data-page="ce"]');
-  await evalWait(cdp,"(()=>{const p=document.getElementById('ccslPage'),t=document.getElementById('pageTitle');return location.pathname==='/ce'&&p&&!p.hidden&&getComputedStyle(p).display!=='none'&&t?.textContent==='CE看板';})()",8000,100,'CE anchor-owned pointerdown visible route');
-  stage('CE anchor-owned pointerdown route passed before release');
-  await pointerUp(cdp,cePress);
+  stage('clicking body-level CE native hit anchor; browser must hard-navigate');
+  await click(cdp,'#ce-qc-v587-sidebar-hit-surface a[data-v587-page="ce"]');
+  cdp=await reattachAfterNavigation(cdp,debugPort,'/ce');
+  await evalWait(cdp,"(()=>{const p=document.getElementById('ccslPage'),t=document.getElementById('pageTitle');return location.pathname==='/ce'&&p&&!p.hidden&&getComputedStyle(p).display!=='none'&&t?.textContent==='CE看板';})()",8000,100,'CE hard-navigation visible route');
+  stage('CE body-level native navigation passed');
 
-  stage('returning HOME through app route owner');
-  await cdp.eval("(()=>{if(typeof window.navigatePage==='function'){window.navigatePage('home');return true;}history.pushState({},'', '/?auth=v581');window.__CE_QC_V581_STABLE_SHELL__?.enforce('browser-home-reset');return true;})()",12000);
-  await evalWait(cdp,"location.pathname==='/'&&document.getElementById('pageTitle')?.textContent==='首页总看板'",8000,100,'HOME reset before blocker test');
-
-  stage('installing transparent sidebar blocker before import click');
-  await cdp.eval("(()=>{document.getElementById('v582SidebarBlocker')?.remove();const b=document.createElement('div');b.id='v582SidebarBlocker';Object.assign(b.style,{position:'fixed',left:'0',top:'0',width:'228px',height:'100vh',zIndex:'2147483647',background:'rgba(0,0,255,0.001)',pointerEvents:'auto'});document.body.appendChild(b);return true;})()",30000);
-  stage('clicking import link through transparent blocker to prove coordinate fallback');
-  await click(cdp,'.side-nav .side-link[data-page="import"]');
-  await evalWait(cdp,"(()=>{const p=document.getElementById('importPage'),t=document.getElementById('pageTitle');return location.pathname==='/import'&&p&&!p.hidden&&getComputedStyle(p).display!=='none'&&t?.textContent==='数据导入';})()",8000,100,'import direct visible route');
-  stage('import direct route passed');
+  stage('installing late full-sidebar blocker at maximum z-index');
+  await cdp.eval("(()=>{document.getElementById('v587LateSidebarBlocker')?.remove();const b=document.createElement('div');b.id='v587LateSidebarBlocker';Object.assign(b.style,{position:'fixed',left:'0',top:'0',width:'228px',height:'100vh',zIndex:'2147483647',background:'rgba(255,0,0,0.001)',pointerEvents:'auto'});document.body.appendChild(b);return true;})()",12000);
+  await evalWait(cdp,"(()=>{const a=document.querySelector('#ce-qc-v587-sidebar-hit-surface a[data-v587-page=\\\"import\\\"]');if(!a)return false;const r=a.getBoundingClientRect();const top=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);return top?.dataset?.v587Page==='import';})()",8000,100,'native hit surface reclaims top layer after late blocker');
+  stage('clicking Data Import through late blocker using body-level native anchor');
+  await click(cdp,'#ce-qc-v587-sidebar-hit-surface a[data-v587-page="import"]');
+  cdp=await reattachAfterNavigation(cdp,debugPort,'/import');
+  await evalWait(cdp,"(()=>{const p=document.getElementById('importPage'),t=document.getElementById('pageTitle');return location.pathname==='/import'&&p&&!p.hidden&&getComputedStyle(p).display!=='none'&&t?.textContent==='数据导入';})()",8000,100,'import hard-navigation visible route');
+  stage('import body-level native navigation passed');
 
   stage('verifying final production HTML owner ordering');
   const delivered=await withTimeout(new Promise((resolve,reject)=>{
@@ -269,7 +270,7 @@ try{
   const appIndex=scripts.findIndex(src=>/\/app\.js/.test(src));
   assert.ok(stableIndex>=0&&appIndex>stableIndex,'V582 stable shell must be delivered before app.js');
 
-  console.log('[V582_PRODUCTION_BROWSER] full production server + auth cookie + real Edge passed · early shell owner loads before app bootstrap · HOME self-heals · direct anchors own pointerdown and stale sidebar hit layers cannot block import coordinate fallback');
+  console.log('[V587_PRODUCTION_BROWSER] full production server + auth cookie + real Edge passed · HOME self-heals · body-level native anchors hard-navigate CE/import · late maximum-z sidebar blocker is displaced');
 } catch(error){
   console.error('[V581_PRODUCTION_BROWSER] backend tail\n'+backendLog.slice(-12000));
   throw error;
