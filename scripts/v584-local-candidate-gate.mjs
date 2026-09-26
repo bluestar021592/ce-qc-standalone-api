@@ -20,7 +20,7 @@ const TASKS=[
   ['node',['--check','src/v581StableShellResponsePatch.js']],
   ['node',['--check','public/v581-stable-shell-owner.js']],
   ['node',['scripts/v480-first-paint-static-smoke.mjs']],
-  ['node',['scripts/v581-production-shell-browser-smoke.mjs']],
+  ['node',['scripts/v587-production-browser-retry.mjs']],
   ['node',['scripts/v573-head-interaction-storage-smoke.mjs']],
   ['node',['scripts/v572-dual-drive-storage-smoke.mjs']],
   ['node',['scripts/v578-dedicated-drive-cleanup-smoke.mjs']],
