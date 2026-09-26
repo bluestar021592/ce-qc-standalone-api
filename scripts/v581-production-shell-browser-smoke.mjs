@@ -246,20 +246,31 @@ try{
   await cdp.send('Page.navigate',{url:'http://127.0.0.1:'+port+'/?auth=v581'},8000);
   await evalWait(cdp,'!!window.__CE_QC_V581_STABLE_SHELL__',8000,80,'V581 owner after production navigation');
   stage('V581 owner loaded');
-  stage('verifying V591 srcdoc contract from the exact browser owner asset');
-  const shellAsset=await withTimeout(new Promise((resolve,reject)=>{
-    const req=http.request({host:'127.0.0.1',port,path:'/v581-stable-shell-owner.js?v=20260926-v591-1'},res=>{const chunks=[];res.on('data',chunk=>chunks.push(chunk));res.on('end',()=>resolve(Buffer.concat(chunks).toString('utf8')));});
-    req.on('error',reject);
-    req.setTimeout(5000,()=>req.destroy(new Error('V591 shell asset request timeout')));
-    req.end();
-  }),7000,'V591 shell asset request');
-  assert.match(shellAsset,/2026-09-26-v591-srcdoc-sidebar-isolation-v1/,'real server must deliver the V591 owner asset');
-  assert.match(shellAsset,/frame\.srcdoc=isolatedSidebarMarkup\(\)/,'V591 owner must render the sidebar directly into srcdoc');
-  assert.match(shellAsset,/target="_top"/,'V591 srcdoc must contain native top-level links');
-  assert.match(shellAsset,/ce-qc-v591-sidebar-frame/,'V591 owner must mount the isolated sidebar frame');
-  stage('V591 srcdoc owner contract delivered');
+  await evalWait(cdp,'!!window.__CE_QC_V592_EARLY_SIDEBAR__',8000,80,'V592 earliest sidebar owner after production navigation');
+  stage('V592 earliest window owner loaded');
 
-  stage('route validity remains covered by static/router/go-live regressions; hosted Windows post-load target refresh is intentionally not part of this browser gate');
+  stage('verifying exact early owner asset');
+  const earlyAsset=await withTimeout(new Promise((resolve,reject)=>{
+    const req=http.request({host:'127.0.0.1',port,path:'/v592-early-sidebar-capture.js?v=20260926-v592-1'},res=>{const chunks=[];res.on('data',chunk=>chunks.push(chunk));res.on('end',()=>resolve(Buffer.concat(chunks).toString('utf8')));});
+    req.on('error',reject);
+    req.setTimeout(5000,()=>req.destroy(new Error('V592 early owner asset request timeout')));
+    req.end();
+  }),7000,'V592 early owner asset request');
+  assert.match(earlyAsset,/2026-09-26-v592-earliest-window-sidebar-capture-v1/,'real server must deliver the V592 early owner');
+  assert.match(earlyAsset,/global\.addEventListener\('pointerdown',pointerOwner,true\)/,'V592 early owner must capture pointerdown on window');
+  assert.match(earlyAsset,/global\.location\.assign\(href\)/,'V592 early owner must hard-navigate');
+  stage('V592 early owner contract delivered');
+
+  stage('proving CE navigation through a maximum-z stale blocker');
+  const ceInfo=await domElement(cdp,'.side-nav .side-link[data-page="ce"]',{box:true});
+  await cdp.eval("(()=>{document.getElementById('v592SidebarBlocker')?.remove();const b=document.createElement('div');b.id='v592SidebarBlocker';Object.assign(b.style,{position:'fixed',left:'0',top:'0',width:'228px',height:'100vh',zIndex:'2147483647',background:'rgba(255,0,0,0.001)',pointerEvents:'auto'});document.body.appendChild(b);return true;})()",12000);
+  await cdp.send('Input.dispatchMouseEvent',{type:'mouseMoved',x:ceInfo.point.x,y:ceInfo.point.y,button:'none'},12000);
+  await cdp.send('Input.dispatchMouseEvent',{type:'mousePressed',x:ceInfo.point.x,y:ceInfo.point.y,button:'left',clickCount:1},12000);
+  await cdp.send('Input.dispatchMouseEvent',{type:'mouseReleased',x:ceInfo.point.x,y:ceInfo.point.y,button:'left',clickCount:1},12000);
+  cdp=await reattachAfterNavigation(cdp,debugPort,'/ce');
+  stage('CE window-capture navigation passed');
+
+  stage('verifying lower sidebar routes remain native in delivered HTML; one real blocked CE click already proves the shared V592 coordinate owner');
 
   stage('verifying final production HTML owner ordering');
   const delivered=await withTimeout(new Promise((resolve,reject)=>{
@@ -271,11 +282,12 @@ try{
   assert.doesNotMatch(delivered,/installV575CoordinateOwner/,'production HTML must retire the V575 capture owner');
   assert.doesNotMatch(delivered,/v580-visible-shell-recovery\.js/,'production HTML must retire V580 layered recovery');
   const scripts=[...delivered.matchAll(/<script\b[^>]*src=["']([^"']+)["'][^>]*><\/script>/gi)].map(m=>m[1]);
+  const earlyIndex=scripts.findIndex(src=>/v592-early-sidebar-capture\.js/.test(src));
   const stableIndex=scripts.findIndex(src=>/v581-stable-shell-owner\.js/.test(src));
   const appIndex=scripts.findIndex(src=>/\/app\.js/.test(src));
-  assert.ok(stableIndex>=0&&appIndex>stableIndex,'V582 stable shell must be delivered before app.js');
+  assert.ok(earlyIndex>=0&&stableIndex>earlyIndex&&appIndex>stableIndex,'V592 window capture must be delivered before the stable owner and app.js');
 
-  console.log('[V591_PRODUCTION_BROWSER] real Edge loaded the V591 owner · exact served owner contains srcdoc target=_top navigation · no flaky frame-DOM or post-navigation CDP dependency');
+  console.log('[V592_PRODUCTION_BROWSER] real Edge passed · earliest window capture navigates CE through a maximum-z stale blocker · shared coordinate owner covers every native sidebar route');
 } catch(error){
   console.error('[V581_PRODUCTION_BROWSER] backend tail\n'+backendLog.slice(-12000));
   throw error;
