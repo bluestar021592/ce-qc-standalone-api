@@ -1,7 +1,7 @@
 (function installV581StableShell(global){
   'use strict';
   if(global.__CE_QC_V581_STABLE_SHELL__)return;
-  const VERSION='2026-09-26-v593-unconditional-sidebar-v1';
+  const VERSION='2026-09-26-v594-main-content-click-recovery-v1';
   const doc=global.document;
   const NAV=[
     ['home','首页总看板','home','/'],
@@ -200,10 +200,11 @@
   function removeEmptyLargeBlockers(){
     try{
       const vw=Math.max(1,global.innerWidth||1),vh=Math.max(1,global.innerHeight||1);
-      const controls=[...doc.querySelectorAll('.side-link[href],.topbar button,.main-content button')];
-      for(const control of controls.slice(0,8)){
+      const controls=[...doc.querySelectorAll('.side-link[href],.topbar button,.topbar a[href],.main-content button,.main-content a[href],.main-content [onclick],.main-content input,.main-content select,.main-content textarea')];
+      for(const control of controls){
         const r=control.getBoundingClientRect?.();if(!r||r.width<1||r.height<1)continue;
-        const x=r.left+r.width/2,y=r.top+r.height/2;
+        if(r.bottom<0||r.top>vh||r.right<0||r.left>vw)continue;
+        const x=Math.min(vw-1,Math.max(0,r.left+r.width/2)),y=Math.min(vh-1,Math.max(0,r.top+r.height/2));
         const stack=doc.elementsFromPoint?.(x,y)||[];
         for(const node of stack){
           if(node===control||control.contains(node)||node.contains(control))break;
