@@ -180,6 +180,20 @@ async function hitPoint(cdp,selector){
   stage('hit '+selector+' => href='+(info.attrs.href||'')+' page='+(info.attrs['data-v587-page']||info.attrs['data-page']||''));
   return p;
 }
+async function iframeHitPoint(cdp,page){
+  const expr=`(()=>{const f=document.getElementById('ce-qc-v590-sidebar-frame');if(!f||!f.contentDocument)return null;const a=f.contentDocument.querySelector('a[data-page="${String(page).replace(/"/g,'')}"]');if(!a)return null;const fr=f.getBoundingClientRect(),r=a.getBoundingClientRect();return{x:fr.left+r.left+r.width/2,y:fr.top+r.top+r.height/2,href:a.href||'',target:a.target||''};})()`;
+  const info=await cdp.eval(expr,12000);
+  assert.ok(info&&Number.isFinite(info.x)&&Number.isFinite(info.y),'missing isolated sidebar point for '+page);
+  stage('iframe hit '+page+' => '+info.href+' target='+info.target);
+  return info;
+}
+async function iframeClick(cdp,page){
+  const p=await iframeHitPoint(cdp,page);
+  await cdp.send('Input.dispatchMouseEvent',{type:'mouseMoved',x:p.x,y:p.y,button:'none'},12000);
+  await cdp.send('Input.dispatchMouseEvent',{type:'mousePressed',x:p.x,y:p.y,button:'left',clickCount:1},12000);
+  await cdp.send('Input.dispatchMouseEvent',{type:'mouseReleased',x:p.x,y:p.y,button:'left',clickCount:1},12000);
+  return p;
+}
 async function pointerDown(cdp,selector){
   const p=await hitPoint(cdp,selector);
   await cdp.send('Input.dispatchMouseEvent',{type:'mouseMoved',x:p.x,y:p.y,button:'none'},12000);
@@ -252,27 +266,21 @@ try{
   // V587 focuses the real-browser gate on the unresolved production problem: native
   // sidebar activation. Blank-shell recovery remains locked by static/lifecycle tests;
   // forcing a synthetic blank here perturbs the Windows renderer before the click gate.
-  stage('verifying body-level native hit surface exposes native CE/import anchors');
-  const rootInfo=await domElement(cdp,'#ce-qc-v587-sidebar-hit-surface');
-  assert.equal(rootInfo.attrs['data-v587-ready'],'1','V587 native hit surface must be ready');
-  const ceInfo=await domElement(cdp,'#ce-qc-v587-sidebar-hit-surface a[data-v587-page="ce"]');
-  const impInfo=await domElement(cdp,'#ce-qc-v587-sidebar-hit-surface a[data-v587-page="import"]');
-  const ceAttrs=ceInfo.attrs;
-  const impAttrs=impInfo.attrs;
-  assert.equal(new URL(ceAttrs.href||'http://invalid/').pathname,'/ce','V587 CE hit anchor must be a native route');
-  assert.equal(new URL(impAttrs.href||'http://invalid/').pathname,'/import','V587 import hit anchor must be a native route');
+  stage('verifying isolated sidebar iframe is loaded and owns native CE/import links');
+  await evalWait(cdp,"(()=>{const f=document.getElementById('ce-qc-v590-sidebar-frame');return !!f&&f.dataset.v590Ready==='1'&&!!f.contentDocument?.querySelector('a[data-page=\\\"ce\\\"][target=\\\"_top\\\"]')&&!!f.contentDocument?.querySelector('a[data-page=\\\"import\\\"][target=\\\"_top\\\"]');})()",10000,100,'V590 isolated sidebar ready');
 
-  stage('clicking body-level CE native hit anchor; browser must hard-navigate');
-  await click(cdp,'#ce-qc-v587-sidebar-hit-surface a[data-v587-page="ce"]');
+  stage('clicking CE inside isolated iframe; parent document handlers must not participate');
+  await iframeClick(cdp,'ce');
   cdp=await reattachAfterNavigation(cdp,debugPort,'/ce');
-  await evalWait(cdp,"(()=>{const p=document.getElementById('ccslPage'),t=document.getElementById('pageTitle');return location.pathname==='/ce'&&p&&!p.hidden&&getComputedStyle(p).display!=='none'&&t?.textContent==='CE看板';})()",8000,100,'CE hard-navigation visible route');
-  stage('CE body-level native navigation passed');
+  await evalWait(cdp,"(()=>{const p=document.getElementById('ccslPage'),t=document.getElementById('pageTitle');return location.pathname==='/ce'&&p&&!p.hidden&&getComputedStyle(p).display!=='none'&&t?.textContent==='CE看板';})()",8000,100,'CE iframe hard-navigation visible route');
+  stage('CE isolated iframe navigation passed');
 
-  // One real browser-native sidebar navigation is sufficient to prove the production
-  // hit surface is receiving user input and escaping the dead SPA click path. Static
-  // regressions lock that the same native href surface mirrors every visible route,
-  // including Data Import, and that late body blockers trigger a surface re-sync.
-
+  stage('clicking Data Import inside freshly loaded isolated iframe');
+  await evalWait(cdp,"(()=>{const f=document.getElementById('ce-qc-v590-sidebar-frame');return !!f&&f.dataset.v590Ready==='1'&&!!f.contentDocument?.querySelector('a[data-page=\\\"import\\\"]');})()",10000,100,'V590 import link after CE navigation');
+  await iframeClick(cdp,'import');
+  cdp=await reattachAfterNavigation(cdp,debugPort,'/import');
+  await evalWait(cdp,"(()=>{const p=document.getElementById('importPage'),t=document.getElementById('pageTitle');return location.pathname==='/import'&&p&&!p.hidden&&getComputedStyle(p).display!=='none'&&t?.textContent==='数据导入';})()",8000,100,'import iframe hard-navigation visible route');
+  stage('Data Import isolated iframe navigation passed');
 
   stage('verifying final production HTML owner ordering');
   const delivered=await withTimeout(new Promise((resolve,reject)=>{
@@ -288,7 +296,7 @@ try{
   const appIndex=scripts.findIndex(src=>/\/app\.js/.test(src));
   assert.ok(stableIndex>=0&&appIndex>stableIndex,'V582 stable shell must be delivered before app.js');
 
-  console.log('[V587_PRODUCTION_BROWSER] full production server + auth cookie + real Edge passed · body-level native CE anchor receives real mouse input and hard-navigates; static contract covers all mirrored sidebar routes');
+  console.log('[V590_PRODUCTION_BROWSER] full production server + auth cookie + real Edge passed · CE and Data Import navigate from isolated same-origin iframe links without parent click ownership');
 } catch(error){
   console.error('[V581_PRODUCTION_BROWSER] backend tail\n'+backendLog.slice(-12000));
   throw error;
