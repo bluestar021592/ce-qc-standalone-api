@@ -1,7 +1,7 @@
 import express from 'express';
 
-export const V581_STABLE_SHELL_RESPONSE_ID='2026-09-26-v593-unconditional-sidebar-response-v1';
-const V581_TAG='  <script src="/v581-stable-shell-owner.js?v=20260926-v593-1"></script>';
+export const V581_STABLE_SHELL_RESPONSE_ID='2026-09-26-v594-main-content-click-response-v1';
+const V581_TAG='  <script src="/v581-stable-shell-owner.js?v=20260926-v594-1"></script>';
 
 const previousSend=express.response.send;
 
