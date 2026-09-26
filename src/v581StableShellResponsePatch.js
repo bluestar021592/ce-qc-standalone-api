@@ -1,7 +1,7 @@
 import express from 'express';
 
-export const V581_STABLE_SHELL_RESPONSE_ID='2026-09-26-v591-srcdoc-sidebar-response-v1';
-const V581_TAG='  <script src="/v581-stable-shell-owner.js?v=20260926-v591-1"></script>';
+export const V581_STABLE_SHELL_RESPONSE_ID='2026-09-26-v592-earliest-window-sidebar-response-v1';
+const V581_TAG='  <script src="/v581-stable-shell-owner.js?v=20260926-v592-1"></script>';
 
 const previousSend=express.response.send;
 
@@ -35,4 +35,4 @@ express.response.send=function v581StableShellSend(body){
   return previousSend.call(this,body);
 };
 
-console.info('[CE-QC][V581_STABLE_SHELL_RESPONSE]',V581_STABLE_SHELL_RESPONSE_ID,'final response pass retires V575/V580 shell owners and injects one V591 srcdoc-isolated sidebar stable shell owner immediately before app.js.');
+console.info('[CE-QC][V581_STABLE_SHELL_RESPONSE]',V581_STABLE_SHELL_RESPONSE_ID,'final response pass retires V575/V580 shell owners and injects one V592 original-sidebar stable shell owner immediately before app.js.');
