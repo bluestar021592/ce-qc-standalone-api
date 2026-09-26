@@ -262,14 +262,14 @@ try{
   stage('V593 early owner contract delivered');
 
   stage('proving main-content click through a maximum-z stale blocker');
-  const mainInfo=await domElement(cdp,'.main-content button[onclick="resetDashboardRange()"]',{box:true});
-  await cdp.eval("(()=>{document.getElementById('v594MainContentBlocker')?.remove();const btn=document.querySelector('.main-content button[onclick=\\\"resetDashboardRange()\\\"]');if(!btn)return false;btn.addEventListener('click',()=>{document.documentElement.dataset.v594MainClick='1';},{once:true});const b=document.createElement('div');b.id='v594MainContentBlocker';Object.assign(b.style,{position:'fixed',left:'200px',top:'64px',right:'0',bottom:'0',zIndex:'2147483647',background:'rgba(255,0,0,0.001)',pointerEvents:'auto'});document.body.appendChild(b);window.__CE_QC_V581_STABLE_SHELL__?.enforce?.('v594-main-content-browser-gate');return getComputedStyle(b).pointerEvents;})()",12000);
+  await cdp.eval("(()=>{document.getElementById('v594MainProbe')?.remove();document.getElementById('v594MainContentBlocker')?.remove();const main=document.querySelector('.main-content');if(!main)return false;const btn=document.createElement('button');btn.id='v594MainProbe';btn.type='button';btn.textContent='V594 probe';Object.assign(btn.style,{position:'fixed',left:'320px',top:'120px',width:'140px',height:'44px',zIndex:'10',pointerEvents:'auto'});btn.addEventListener('click',()=>{document.documentElement.dataset.v594MainClick='1';},{once:true});main.appendChild(btn);const b=document.createElement('div');b.id='v594MainContentBlocker';Object.assign(b.style,{position:'fixed',left:'228px',top:'64px',right:'0',bottom:'0',zIndex:'2147483647',background:'rgba(255,0,0,0.001)',pointerEvents:'auto'});document.body.appendChild(b);window.__CE_QC_V581_STABLE_SHELL__?.enforce?.('v594-main-content-browser-gate');return true;})()",12000);
+  const mainInfo=await domElement(cdp,'#v594MainProbe',{box:true});
   await evalWait(cdp,"getComputedStyle(document.getElementById('v594MainContentBlocker')).pointerEvents==='none'",4000,50,'V594 main-content blocker retirement');
   await cdp.send('Input.dispatchMouseEvent',{type:'mouseMoved',x:mainInfo.point.x,y:mainInfo.point.y,button:'none'},12000);
   await cdp.send('Input.dispatchMouseEvent',{type:'mousePressed',x:mainInfo.point.x,y:mainInfo.point.y,button:'left',clickCount:1},12000);
   await cdp.send('Input.dispatchMouseEvent',{type:'mouseReleased',x:mainInfo.point.x,y:mainInfo.point.y,button:'left',clickCount:1},12000);
   await evalWait(cdp,"document.documentElement.dataset.v594MainClick==='1'",4000,50,'V594 main-content click delivery');
-  await cdp.eval("document.getElementById('v594MainContentBlocker')?.remove();true",12000);
+  await cdp.eval("document.getElementById('v594MainContentBlocker')?.remove();document.getElementById('v594MainProbe')?.remove();true",12000);
   stage('V594 main-content click recovery passed');
 
   stage('proving CE navigation through a maximum-z stale blocker');
