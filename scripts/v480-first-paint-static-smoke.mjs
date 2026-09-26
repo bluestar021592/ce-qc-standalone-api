@@ -66,12 +66,12 @@ assert.match(indexHtml,/v14-geometry-fixture\.js\?v=20260925-v582-1/,'V582 V14 o
 assert.match(v14,/v304-unified-upload-owner\.js\?v=20260925-v582-1/,'V582 V304 upload owner must be cache-busted by the runtime loader');
 assert.doesNotMatch(indexHtml,/installV575CoordinateOwner/,'V581 static shell must retire the V575 capture owner');
 assert.doesNotMatch(indexHtml,/v580-visible-shell-recovery\.js/,'V581 static shell must retire layered V580 recovery');
-assert.match(indexHtml,/v581-stable-shell-owner\.js\?v=20260926-v593-1/,'V581 stable shell must ship in the normal dashboard HTML');
+assert.match(indexHtml,/v581-stable-shell-owner\.js\?v=20260926-v594-1/,'V581 stable shell must ship in the normal dashboard HTML');
 assert.match(indexHtml,/<a class="side-link active" data-page="home"[^>]*href="\/?\?auth=v581"/,'HOME must be a native anchor');
 assert.match(indexHtml,/<a class="side-link" data-page="ce"[^>]*href="\/ce\?auth=v581"/,'CE must be a native hard-navigation anchor');
 assert.match(indexHtml,/<a class="side-link" data-page="whpp"[^>]*href="\/whpp\?auth=v581"/,'WHPP must remain a native first-class route');
 assert.match(indexHtml,/<a class="side-link" data-page="import"[^>]*href="\/import\?auth=v581"/,'data import must remain reachable without SPA click ownership');
-assert.match(stableShell,/2026-09-26-v593-unconditional-sidebar-v1/);
+assert.match(stableShell,/2026-09-26-v594-main-content-click-recovery-v1/);
 assert.match(stableShell,/data-v581-active/,'V581 must own route visibility deterministically');
 assert.match(stableShell,/renderFallbackHomeIfStillEmpty/,'V581 must recover a blank HOME container');
 assert.match(earlySidebar,/2026-09-26-v593-unconditional-sidebar-coordinate-route-v1/,'V593 unconditional sidebar owner must ship');
@@ -86,14 +86,14 @@ assert.match(stableShell,/shell-structure-mutation/,'stable shell must keep boun
 assert.match(stableShell,/retireIsolatedSidebar/,'V593 stable owner must retire V590/V591 iframe remnants');
 assert.doesNotMatch(stableShell,/frame\.srcdoc|isolatedSidebarMarkup|mountIsolatedSidebar/,'V593 primary sidebar must not create another iframe');
 assert.match(server,/X-Frame-Options', 'DENY'/,'normal authenticated HTML keeps frame denial');
-assert.match(stableResponse,/2026-09-26-v593-unconditional-sidebar-response-v1/);
+assert.match(stableResponse,/2026-09-26-v594-main-content-click-response-v1/);
 assert.match(stableResponse,/stripInlineV575/,'final delivered HTML must remove V575 even if an older response wrapper re-injects it');
 assert.match(stableResponse,/v580-visible-shell-recovery\.js/,'final delivered HTML must remove V580 layered recovery');
 assert.match(stableResponse,/V581_TAG/,'final response pass must preserve exactly one V581 owner');
 assert.match(stableResponse,/appTag/,'final response pass must locate app.js as the bootstrap boundary');
 assert.match(stableResponse,/V581_TAG\+'\\n'\+match/,'stable shell must be injected immediately before app.js');
 const earlyAt=indexHtml.indexOf('/v592-early-sidebar-capture.js?v=20260926-v593-1');
-const stableAt=indexHtml.indexOf('/v581-stable-shell-owner.js?v=20260926-v593-1');
+const stableAt=indexHtml.indexOf('/v581-stable-shell-owner.js?v=20260926-v594-1');
 const appAt=indexHtml.indexOf('/app.js?v=20260921-v564-1');
 assert.ok(earlyAt>0&&stableAt>earlyAt&&appAt>stableAt,'V593 window capture must load in head before the stable owner and app.js');
 
