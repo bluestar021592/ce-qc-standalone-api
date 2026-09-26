@@ -1,7 +1,7 @@
 (function installV581StableShell(global){
   'use strict';
   if(global.__CE_QC_V581_STABLE_SHELL__)return;
-  const VERSION='2026-09-26-v592-earliest-window-sidebar-v1';
+  const VERSION='2026-09-26-v593-unconditional-sidebar-v1';
   const doc=global.document;
   const NAV=[
     ['home','首页总看板','home','/'],
@@ -97,7 +97,7 @@
     try{doc.getElementById('ce-qc-v590-sidebar-frame')?.remove();}catch{}
     try{doc.getElementById('ce-qc-v591-sidebar-frame')?.remove();}catch{}
     try{doc.getElementById('ce-qc-v587-sidebar-hit-surface')?.remove();}catch{}
-    try{global.__CE_QC_V592_EARLY_SIDEBAR__?.retireBrokenFrames?.();}catch{}
+    try{global.__CE_QC_V593_EARLY_SIDEBAR__?.retireBrokenFrames?.();}catch{}
   }
   function installStyle(){
     let style=doc.getElementById('ce-qc-v581-stable-shell-style');
@@ -271,5 +271,5 @@
   if(doc.querySelector('.side-nav')&&doc.querySelector('.main-content'))bind();
   else if(doc.readyState==='loading')doc.addEventListener('DOMContentLoaded',bind,{once:true});
   else bind();
-  console.info('[CE-QC][V581_STABLE_SHELL]',VERSION,'single stable shell owner: original visible sidebar + earliest window-capture native navigation + deterministic route visibility.');
+  console.info('[CE-QC][V581_STABLE_SHELL]',VERSION,'single stable shell owner: original visible sidebar + unconditional early coordinate navigation + deterministic route visibility.');
 })(window);
