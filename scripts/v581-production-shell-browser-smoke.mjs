@@ -234,17 +234,23 @@ try{
   assert.equal(blankRecovery?.ok,true,'forced blank shell must recover synchronously in the stable owner: '+JSON.stringify(blankRecovery));
   stage('forced blank shell recovered');
 
-  stage('installing transparent sidebar blocker to prove pointerdown-first coordinate routing');
-  await cdp.eval("(()=>{document.getElementById('v582SidebarBlocker')?.remove();const b=document.createElement('div');b.id='v582SidebarBlocker';Object.assign(b.style,{position:'fixed',left:'0',top:'0',width:'228px',height:'100vh',zIndex:'2147483647',background:'rgba(255,0,0,0.001)',pointerEvents:'auto'});document.body.appendChild(b);return true;})()",30000);
-  stage('pressing CE link through transparent blocker; route must complete before mouse release');
+  stage('verifying direct per-anchor pointerdown ownership');
+  const anchorOwners=await cdp.eval("(()=>['ce','import','whpp'].every(page=>{const a=document.querySelector('.side-nav .side-link[data-page=\\\"'+page+'\\\"]');return !!a&&typeof a.onpointerdown==='function'&&a.dataset.v586AnchorOwner==='1';}))()",12000);
+  assert.equal(anchorOwners,true,'V586 must bind pointerdown directly on live sidebar anchors');
+
+  stage('pressing direct CE anchor; route must complete before mouse release');
   const cePress=await pointerDown(cdp,'.side-nav .side-link[data-page="ce"]');
-  await evalWait(cdp,"(()=>{const p=document.getElementById('ccslPage'),t=document.getElementById('pageTitle');return location.pathname==='/ce'&&p&&!p.hidden&&getComputedStyle(p).display!=='none'&&t?.textContent==='CE看板';})()",8000,100,'CE pointerdown visible route');
-  stage('CE pointerdown route passed before release');
+  await evalWait(cdp,"(()=>{const p=document.getElementById('ccslPage'),t=document.getElementById('pageTitle');return location.pathname==='/ce'&&p&&!p.hidden&&getComputedStyle(p).display!=='none'&&t?.textContent==='CE看板';})()",8000,100,'CE anchor-owned pointerdown visible route');
+  stage('CE anchor-owned pointerdown route passed before release');
   await pointerUp(cdp,cePress);
 
-  stage('reinstalling transparent sidebar blocker before import click');
+  stage('returning HOME through app route owner');
+  await cdp.eval("(()=>{if(typeof window.navigatePage==='function'){window.navigatePage('home');return true;}history.pushState({},'', '/?auth=v581');window.__CE_QC_V581_STABLE_SHELL__?.enforce('browser-home-reset');return true;})()",12000);
+  await evalWait(cdp,"location.pathname==='/'&&document.getElementById('pageTitle')?.textContent==='首页总看板'",8000,100,'HOME reset before blocker test');
+
+  stage('installing transparent sidebar blocker before import click');
   await cdp.eval("(()=>{document.getElementById('v582SidebarBlocker')?.remove();const b=document.createElement('div');b.id='v582SidebarBlocker';Object.assign(b.style,{position:'fixed',left:'0',top:'0',width:'228px',height:'100vh',zIndex:'2147483647',background:'rgba(0,0,255,0.001)',pointerEvents:'auto'});document.body.appendChild(b);return true;})()",30000);
-  stage('clicking import link through transparent blocker');
+  stage('clicking import link through transparent blocker to prove coordinate fallback');
   await click(cdp,'.side-nav .side-link[data-page="import"]');
   await evalWait(cdp,"(()=>{const p=document.getElementById('importPage'),t=document.getElementById('pageTitle');return location.pathname==='/import'&&p&&!p.hidden&&getComputedStyle(p).display!=='none'&&t?.textContent==='数据导入';})()",8000,100,'import direct visible route');
   stage('import direct route passed');
@@ -263,7 +269,7 @@ try{
   const appIndex=scripts.findIndex(src=>/\/app\.js/.test(src));
   assert.ok(stableIndex>=0&&appIndex>stableIndex,'V582 stable shell must be delivered before app.js');
 
-  console.log('[V582_PRODUCTION_BROWSER] full production server + auth cookie + real Edge passed · early shell owner loads before app bootstrap · HOME self-heals · stale sidebar hit layers cannot block CE pointerdown/import direct routing');
+  console.log('[V582_PRODUCTION_BROWSER] full production server + auth cookie + real Edge passed · early shell owner loads before app bootstrap · HOME self-heals · direct anchors own pointerdown and stale sidebar hit layers cannot block import coordinate fallback');
 } catch(error){
   console.error('[V581_PRODUCTION_BROWSER] backend tail\n'+backendLog.slice(-12000));
   throw error;
