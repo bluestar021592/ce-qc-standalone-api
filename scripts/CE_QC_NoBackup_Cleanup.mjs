@@ -5,7 +5,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { getRuntimeConfig, nowIso } from '../src/db.js';
 import { compactSqliteStorage, STORAGE_COMPACTION_PATCH } from '../src/storageCompaction.js';
 
-const PATCH_ID='2026-09-22-v577-fast-storage-startup-v1';
+const PATCH_ID='2026-09-26-v588-no-backup-storage-cleanup-v1';
 const DAY_MS=24*60*60*1000;
 const EVIDENCE_RETENTION_MS=60*DAY_MS;
 const LOG_RETENTION_MS=45*DAY_MS;
@@ -113,6 +113,9 @@ const launcherRoot=process.env.LOCALAPPDATA
   ? path.join(process.env.LOCALAPPDATA,'CE_QC_LAUNCHER')
   : path.join(cfg.projectRoot||process.cwd(),'.ce-qc-launcher');
 const launcherBackupRoot=path.join(launcherRoot,'backups');
+const legacyRuntimeBackupRoot=process.env.LOCALAPPDATA
+  ? path.join(process.env.LOCALAPPDATA,'CE_QC_RUNTIME','backups')
+  : path.join(cfg.projectRoot||process.cwd(),'.ce-qc-runtime','backups');
 const launcherTempRoot=path.join(launcherRoot,'temp');
 const launcherLogsRoot=path.join(launcherRoot,'app','logs');
 const fallbackDataRoot=path.join(cfg.projectRoot||process.cwd(),'data');
@@ -126,6 +129,7 @@ const drivesBefore={C:driveSnapshot(cRoot),D:driveSnapshot(dRoot)};
 
 const removed=[
   {kind:'DATA_BACKUPS',...removeChildren(cfg.backupsDir)},
+  {kind:'LEGACY_C_RUNTIME_BACKUPS',...removeChildren(legacyRuntimeBackupRoot)},
   {kind:'LAUNCHER_BACKUPS',...removeChildren(launcherBackupRoot)},
   {kind:'IMPORTS',...removeChildren(cfg.importsDir)},
   {kind:'EXPORTS',...removeChildren(cfg.exportsDir)},
@@ -199,7 +203,7 @@ console.log(JSON.stringify({
   noBackupPolicy:true,
   retentionDays:{evidence:60,logs:45},
   rolePolicy:{
-    C:'launcher/code/node_modules/current logs only; CE-QC temp/old fallback data are disposable',
+    C:'launcher/code/node_modules/current logs only; legacy CE_QC_RUNTIME backups and other CE-QC temp/old fallback data are disposable',
     D:'live SQLite/business data + runtime scratch; generated files are cleaned/aged'
   },
   removed,
