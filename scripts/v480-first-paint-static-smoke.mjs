@@ -79,6 +79,8 @@ assert.doesNotMatch(stableShell,/subtree:true/,'stable-shell observer must not w
 assert.match(stableShell,/shell-structure-mutation/,'stable shell must keep bounded structural repair');
 assert.match(stableShell,/ce-qc-v590-sidebar-frame/,'V590 must mount one dedicated sidebar iframe');
 assert.match(stableShell,/sidebar-v590\.html/,'V590 iframe must use the isolated static sidebar document');
+assert.match(server,/app\.get\('\/sidebar-v590\.html'/,'V590 server must serve the isolated sidebar through its authenticated route');
+assert.match(server,/X-Frame-Options', 'SAMEORIGIN'/,'V590 isolated sidebar must explicitly opt into same-origin framing');
 assert.match(stableShell,/z-index:2147483647/,'V590 iframe must sit above legacy application blockers');
 assert.match(isolatedSidebar,/target="_top"/,'isolated sidebar links must navigate the top-level application');
 assert.match(isolatedSidebar,/href="\/ce\?auth=v581"/,'isolated CE link must be a plain native top-level route');
