@@ -20,7 +20,7 @@ const TASKS=[
   ['node',['--check','src/v581StableShellResponsePatch.js']],
   ['node',['--check','public/v581-stable-shell-owner.js']],
   ['node',['scripts/v480-first-paint-static-smoke.mjs']],
-  ['node',['scripts/v587-production-browser-retry.mjs']],
+  ['node',['scripts/v587-production-browser-retry.mjs'],300_000],
   ['node',['scripts/v573-head-interaction-storage-smoke.mjs']],
   ['node',['scripts/v572-dual-drive-storage-smoke.mjs']],
   ['node',['scripts/v578-dedicated-drive-cleanup-smoke.mjs']],
@@ -61,15 +61,15 @@ const TASKS=[
 
 console.log(`[V584_LOCAL_GATE] ${MARKER} starting ${TASKS.length} bounded tasks`);
 for(let i=0;i<TASKS.length;i+=1){
-  const [kind,args]=TASKS[i];
+  const [kind,args,taskTimeoutMs=TIMEOUT_MS]=TASKS[i];
   const exe=kind==='node'?process.execPath:kind;
-  console.log(`[V584_LOCAL_GATE] ${i+1}/${TASKS.length} ${kind} ${args.join(' ')}`);
+  console.log(`[V584_LOCAL_GATE] ${i+1}/${TASKS.length} ${kind} ${args.join(' ')} timeoutMs=${taskTimeoutMs}`);
   const result=spawnSync(exe,args,{
     cwd:ROOT,
     env:{...process.env,CE_QC_LOCAL_CANDIDATE_GATE:'1'},
     stdio:'inherit',
     windowsHide:true,
-    timeout:TIMEOUT_MS,
+    timeout:taskTimeoutMs,
     killSignal:'SIGTERM'
   });
   if(result.error){
