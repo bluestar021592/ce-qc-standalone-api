@@ -3,7 +3,7 @@ param(
 )
 
 $ErrorActionPreference = 'SilentlyContinue'
-$Patch = '2026-09-25-v583-aggressive-safe-ce-cleanup-v1'
+$Patch = '2026-09-26-v588-remove-legacy-c-runtime-backups-v1'
 $Now = Get-Date
 $DeletedBytes = [int64]0
 $DeletedEntries = 0
@@ -73,6 +73,9 @@ $BeforeD = if (Test-Path -LiteralPath 'D:\') { Get-DriveFree 'D' } else { [int64
 
 # CE-owned disposable roots on C.
 $ceC = @(
+  # V588: this legacy pre-D-drive runtime backup root is obsolete under the
+  # current no-backup policy. Deep census found it could retain hundreds of GiB.
+  (Join-Path $env:LOCALAPPDATA 'CE_QC_RUNTIME\backups'),
   (Join-Path $env:LOCALAPPDATA 'CE_QC_LAUNCHER\backups'),
   (Join-Path $env:LOCALAPPDATA 'CE_QC_LAUNCHER\temp'),
   (Join-Path $env:LOCALAPPDATA 'CE_QC_LAUNCHER\app\logs\crashes')
@@ -167,10 +170,10 @@ $AfterC = Get-DriveFree 'C'
 $AfterD = if (Test-Path -LiteralPath 'D:\') { Get-DriveFree 'D' } else { [int64]0 }
 function GiB([int64]$Bytes) { return [math]::Round($Bytes / 1GB, 2) }
 
-Write-CeLog "[CE-QC][V583][DEDICATED] safe cleanup complete: deleted=$DeletedEntries entries, measured=$([math]::Round($DeletedBytes / 1GB, 2)) GiB, failures=$Failures."
-Write-CeLog "[CE-QC][V583][DEDICATED] C free: $(GiB $BeforeC) GiB -> $(GiB $AfterC) GiB; reclaimed=$(GiB ($AfterC-$BeforeC)) GiB."
+Write-CeLog "[CE-QC][V588][DEDICATED] safe cleanup complete: deleted=$DeletedEntries entries, measured=$([math]::Round($DeletedBytes / 1GB, 2)) GiB, failures=$Failures."
+Write-CeLog "[CE-QC][V588][DEDICATED] C free: $(GiB $BeforeC) GiB -> $(GiB $AfterC) GiB; reclaimed=$(GiB ($AfterC-$BeforeC)) GiB."
 if ($BeforeD -gt 0) {
-  Write-CeLog "[CE-QC][V583][DEDICATED] D free: $(GiB $BeforeD) GiB -> $(GiB $AfterD) GiB; reclaimed=$(GiB ($AfterD-$BeforeD)) GiB."
+  Write-CeLog "[CE-QC][V588][DEDICATED] D free: $(GiB $BeforeD) GiB -> $(GiB $AfterD) GiB; reclaimed=$(GiB ($AfterD-$BeforeD)) GiB."
 }
 
 # Surface protected system-file sizes so large C usage is explainable without deleting Windows.
@@ -179,7 +182,7 @@ foreach ($name in @('hiberfil.sys','pagefile.sys','swapfile.sys')) {
   if (Test-Path -LiteralPath $p) {
     try {
       $bytes = [int64](Get-Item -LiteralPath $p -Force).Length
-      Write-CeLog "[CE-QC][V583][DEDICATED] protected system file retained: $name = $(GiB $bytes) GiB."
+      Write-CeLog "[CE-QC][V588][DEDICATED] protected system file retained: $name = $(GiB $bytes) GiB."
     } catch {}
   }
 }
