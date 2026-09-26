@@ -30,7 +30,7 @@ function Root-Key([string]$Root,[string]$Path){
 function Scan-ByFirstLevel([string]$Root,[int]$BudgetSeconds=90,[string[]]$SkipTop=@()){
   $result=[ordered]@{Root=$Root;Bytes=[Int64]0;Files=[Int64]0;Dirs=[Int64]0;Partial=$false;ElapsedMs=0;Rows=@()}
   if([string]::IsNullOrWhiteSpace($Root)-or -not (Test-Path -LiteralPath $Root)){ return [pscustomobject]$result }
-  $skip=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+  $skip=New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
   foreach($s in $SkipTop){ if($s){ [void]$skip.Add($s) } }
   $map=@{}
   $sw=[Diagnostics.Stopwatch]::StartNew()
@@ -92,11 +92,11 @@ function Write-SystemFile([string]$Path){
     }
   }catch{}
 }
-function Capture-Command([string]$Label,[string]$Exe,[string]$Args,[int]$TimeoutSeconds=30){
+function Capture-Command([string]$Label,[string]$Exe,[string]$ArgumentLine,[int]$TimeoutSeconds=30){
   $tmpOut=[IO.Path]::GetTempFileName()
   $tmpErr=[IO.Path]::GetTempFileName()
   try{
-    $p=Start-Process -FilePath $Exe -ArgumentList $Args -PassThru -WindowStyle Hidden -RedirectStandardOutput $tmpOut -RedirectStandardError $tmpErr
+    $p=Start-Process -FilePath $Exe -ArgumentList $ArgumentLine -PassThru -WindowStyle Hidden -RedirectStandardOutput $tmpOut -RedirectStandardError $tmpErr
     if(-not $p.WaitForExit($TimeoutSeconds*1000)){
       try{$p.Kill()}catch{}
       Write-Line ("COMMAND={0} TIMEOUT={1}s" -f $Label,$TimeoutSeconds)
