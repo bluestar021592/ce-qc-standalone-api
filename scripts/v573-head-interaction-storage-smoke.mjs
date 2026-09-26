@@ -46,11 +46,11 @@ assert.match(app,/\['whpp', 'WHPP本土'/,'production homepage must include WHPP
 assert.match(app,/state\.dashboard\?\.metrics\?\.total/,'WHPP home/range count must read unified WHPP metrics total');
 
 assert.match(login,/\?auth=v581&t=/,'post-login URL must visibly identify V581');
-assert.match(cleanup,/2026-09-22-v577-fast-storage-startup-v1/);
+assert.match(cleanup,/2026-09-26-v588-no-backup-storage-cleanup-v1/);
 assert.match(cleanup,/\[CE-QC\]\[V573\]\[STORAGE\] cleanup complete:/);
 assert.match(cleanup,/driveLine\('C',drivesBefore\.C,drivesAfter\.C\)/);
 assert.match(cleanup,/driveLine\('D',drivesBefore\.D,drivesAfter\.D\)/);
 assert.match(cleanup,/compactSqliteStorage/);
-assert.match(start,/\[CE-QC\]\[V587\] Body-level native sidebar hit surface \+ dashboard repair \+ deep C-drive census are installed\./);
+assert.match(start,/\[CE-QC\]\[V588\] Native sidebar hit surface \+ legacy C backup purge \+ deep C-drive census are installed\./);
 
-console.log('[V587] body-level native sidebar hit surface + WHPP + deep C-drive census smoke passed');
+console.log('[V588] native sidebar hit surface + WHPP + legacy C backup purge + deep C-drive census smoke passed');
