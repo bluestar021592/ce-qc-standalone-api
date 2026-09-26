@@ -9,7 +9,7 @@ const index=fs.readFileSync(new URL('../public/index.html',import.meta.url),'utf
 
 assert.match(cleanup,/2026-09-26-v588-no-backup-storage-cleanup-v1/);
 assert.match(cleanup,/LEGACY_C_RUNTIME_BACKUPS/,'legacy pre-D-drive C runtime backups must be removed under no-backup policy');
-assert.match(cleanup,/CE_QC_RUNTIME','legacy C runtime backup root must be named explicitly');
+assert.match(cleanup,/CE_QC_RUNTIME/,'legacy C runtime backup root must be named explicitly');
 assert.match(cleanup,/UNUSED_C_FALLBACK_DATA/,'unused C fallback data must be removable when D is the active data root');
 assert.match(cleanup,/EVIDENCE_ARCHIVE_60D/,'evidence retention must be bounded instead of growing forever');
 assert.match(cleanup,/C_CRASH_LOGS_45D/,'launcher crash logs on C must age out');
