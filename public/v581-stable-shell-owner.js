@@ -24,6 +24,7 @@
   const PATH_TO_PAGE=Object.fromEntries(NAV.map(([p,, ,path])=>[path,p]));
   let enforcing=false;
   let observer=null;
+  let bodyObserver=null;
   let structuralRepairTimer=0;
   let navigatingHref='';
   let diagCount=0;
@@ -105,6 +106,7 @@
   function syncSidebarHitSurface(){
     try{
       const root=hitSurfaceRoot();
+      if(doc.body&&root.parentNode===doc.body)doc.body.appendChild(root);
       const blocking=doc.querySelector('.modal:not([hidden]),#v303CleanStartOverlay:not([hidden])');
       root.hidden=Boolean(blocking);
       if(root.hidden)return;
@@ -303,6 +305,15 @@
         doc.querySelector('.side-nav')
       ].filter(Boolean);
       for(const root of roots)observer.observe(root,{childList:true});
+      const body=doc.body;
+      if(body){
+        bodyObserver=new MutationObserver(records=>{
+          if(records.some(r=>[...r.addedNodes].some(n=>n?.nodeType===1&&n?.id!=='ce-qc-v587-sidebar-hit-surface'))){
+            setTimeout(()=>syncSidebarHitSurface(),0);
+          }
+        });
+        bodyObserver.observe(body,{childList:true});
+      }
       if(global.ResizeObserver){
         try{const ro=new ResizeObserver(()=>syncSidebarHitSurface());const sidebar=doc.querySelector('.sidebar');if(sidebar)ro.observe(sidebar);}catch{}
       }
