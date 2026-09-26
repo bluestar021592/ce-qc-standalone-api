@@ -15,7 +15,11 @@ assert.equal(pkg.scripts['test:golive'],'node scripts/v584-local-candidate-gate.
 assert.equal(pkg.scripts['test:ci'],'npm run test:golive-full','CI must retain the full soak suite');
 assert.match(pkg.scripts['test:golive-full'],/v505-purge-postcommit-precleanup-gate\.test\.js/,'full CI must retain the slow post-COMMIT safety regression');
 assert.doesNotMatch(gate,/v505-purge-postcommit-precleanup-gate\.test\.js/,'desktop update gate must not depend on the slow detached PREPARE soak');
-assert.match(gate,/v587-production-browser-retry\.mjs'\]\,300_000/,'desktop update gate must give the transient-only real Edge retry wrapper a bounded five-minute task window');
+assert.match(gate,/browserRequired/,'desktop update gate must decide whether real Edge is relevant to the candidate diff');
+assert.match(gate,/isBrowserSensitive/,'desktop update gate must keep an explicit browser-sensitive file policy');
+assert.match(gate,/v587-production-browser-retry\.mjs'\]\,300_000/,'browser-relevant candidates must keep the transient-only real Edge retry wrapper');
+assert.match(gate,/changed-file detection unavailable; real browser gate stays enabled \(fail-safe\)/,'diff detection failure must never silently skip browser validation');
+assert.match(launcher,/CE_QC_INSTALLED_COMMIT/,'managed launcher must tell the candidate gate which exact installed commit it is replacing');
 const browserRetry=fs.readFileSync(new URL('./v587-production-browser-retry.mjs',import.meta.url),'utf8');
 assert.match(browserRetry,/v581-production-shell-browser-smoke\.mjs/,'retry wrapper must execute the real production Edge smoke');
 assert.match(browserRetry,/non-transient browser assertion failed/,'real assertion failures must never be retried into a false pass');
@@ -24,7 +28,7 @@ assert.match(gate,/timeout:taskTimeoutMs/,'per-task timeout override must be exp
 assert.match(gate,/unified-import-v7\.test\.js/,'desktop update gate must retain seven-business import protection');
 assert.match(gate,/v512-whpp-source-membership-guard\.test\.js/,'desktop update gate must retain WHPP exact membership protection');
 assert.match(launcher,/@\('run','test:golive'\)/,'existing managed launcher contract must continue to call test:golive so old installs can consume the new bounded gate');
-assert.match(start,/\[CE-QC\]\[V588\] Native sidebar hit surface \+ legacy C backup purge \+ deep C-drive census are installed\./);
+assert.match(start,/\[CE-QC\]\[V589\] Native sidebar hit surface \+ legacy C backup purge \+ diff-aware updater gate are installed\./);
 assert.match(start,/CE_QC_C_Drive_Deep_Census\.ps1/,'startup must launch the deep C-drive census only after the app is ready');
 assert.match(start,/c_drive_deep_census_latest\.log/,'startup must publish a stable deep-census log path');
 assert.match(census,/deep read-only census/i);
@@ -41,4 +45,4 @@ if(os.platform()==='win32'){
   assert.equal(parsed.status,0,'PowerShell parser rejected deep C-drive census: '+(parsed.stdout||'')+(parsed.stderr||''));
 }
 
-console.log('[V588] local updater gate + legacy C backup purge + deep read-only C-drive attribution smoke passed');
+console.log('[V589] diff-aware local updater gate + legacy C backup purge + deep read-only C-drive attribution smoke passed');

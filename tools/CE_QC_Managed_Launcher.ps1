@@ -211,11 +211,13 @@ function Test-RemoteCandidate([string]$RemoteCommit, [string]$CurrentCommit) {
   $linkedModules = $false
   $junctionCleanupOk = $true
   $oldBackupRoot = $env:CE_QC_BACKUP_PROJECT_ROOT
+  $oldInstalledCommit = $env:CE_QC_INSTALLED_COMMIT
   $oldTemp = $env:TEMP
   $oldTmp = $env:TMP
   $candidateScratch = $null
   try {
     Write-ManagedLog "[UPDATE] Verifying candidate $($RemoteCommit.Substring(0,[Math]::Min(8,$RemoteCommit.Length))) before installing..." Cyan
+    $env:CE_QC_INSTALLED_COMMIT = $CurrentCommit
     Invoke-Exe $script:GitExe @('worktree','add','--detach','--quiet',$tempRoot,$RemoteCommit) | Out-Null
 
     $candidateScratchBase = if (Test-Path -LiteralPath 'D:\') { 'D:\CE_QC_TEST_TEMP\candidate_tests' } else { Join-Path $env:LOCALAPPDATA 'CE_QC_LAUNCHER\temp\candidate_tests' }
@@ -265,6 +267,8 @@ function Test-RemoteCandidate([string]$RemoteCommit, [string]$CurrentCommit) {
     }
     if ($null -eq $oldBackupRoot) { Remove-Item Env:CE_QC_BACKUP_PROJECT_ROOT -ErrorAction SilentlyContinue }
     else { $env:CE_QC_BACKUP_PROJECT_ROOT = $oldBackupRoot }
+    if ($null -eq $oldInstalledCommit) { Remove-Item Env:CE_QC_INSTALLED_COMMIT -ErrorAction SilentlyContinue }
+    else { $env:CE_QC_INSTALLED_COMMIT = $oldInstalledCommit }
     if ($linkedModules) { $junctionCleanupOk = Remove-JunctionOnly (Join-Path $tempRoot 'node_modules') }
     if (-not $linkedModules -or $junctionCleanupOk) { Remove-ValidationWorktree $tempRoot $true }
     else { Write-ManagedLog "[UPDATE] Candidate temp worktree intentionally retained to protect installed node_modules: $tempRoot" Yellow }

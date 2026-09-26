@@ -51,6 +51,6 @@ assert.match(cleanup,/\[CE-QC\]\[V573\]\[STORAGE\] cleanup complete:/);
 assert.match(cleanup,/driveLine\('C',drivesBefore\.C,drivesAfter\.C\)/);
 assert.match(cleanup,/driveLine\('D',drivesBefore\.D,drivesAfter\.D\)/);
 assert.match(cleanup,/compactSqliteStorage/);
-assert.match(start,/\[CE-QC\]\[V588\] Native sidebar hit surface \+ legacy C backup purge \+ deep C-drive census are installed\./);
+assert.match(start,/\[CE-QC\]\[V589\] Native sidebar hit surface \+ legacy C backup purge \+ diff-aware updater gate/);
 
-console.log('[V588] native sidebar hit surface + WHPP + legacy C backup purge + deep C-drive census smoke passed');
+console.log('[V589] native sidebar hit surface + WHPP + legacy C backup purge + diff-aware updater smoke passed');

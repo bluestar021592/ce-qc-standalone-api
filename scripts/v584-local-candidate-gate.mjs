@@ -3,8 +3,28 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
-const MARKER='2026-09-25-v584-local-candidate-fast-gate-v1';
+const MARKER='2026-09-26-v589-diff-aware-local-candidate-gate-v1';
 const TIMEOUT_MS=120_000;
+
+function readChangedFiles(){
+  const installed=String(process.env.CE_QC_INSTALLED_COMMIT||'').trim();
+  const args=installed
+    ? ['diff','--name-only',installed,'HEAD','--']
+    : ['diff','--name-only','HEAD^1','HEAD','--'];
+  const run=spawnSync('git',args,{cwd:ROOT,encoding:'utf8',windowsHide:true,timeout:15_000});
+  if(run.error||run.status!==0){
+    console.warn('[V589_LOCAL_GATE] changed-file detection unavailable; real browser gate stays enabled (fail-safe)');
+    return {unknown:true,files:[]};
+  }
+  return {unknown:false,files:String(run.stdout||'').split(/\r?\n/).map(v=>v.trim()).filter(Boolean)};
+}
+function isBrowserSensitive(file){
+  const p=String(file||'').replace(/\\/g,'/');
+  return p.startsWith('public/') || p==='bootstrap.js' || p==='server.js' || p==='src/v581StableShellResponsePatch.js' || p==='scripts/v581-production-shell-browser-smoke.mjs' || p==='scripts/v587-production-browser-retry.mjs';
+}
+const changed=readChangedFiles();
+const browserRequired=changed.unknown || changed.files.some(isBrowserSensitive);
+
 
 // This is the gate used by the installed Windows launcher before it accepts a remote
 // candidate. It intentionally validates production shell/navigation, storage policy,
@@ -20,7 +40,6 @@ const TASKS=[
   ['node',['--check','src/v581StableShellResponsePatch.js']],
   ['node',['--check','public/v581-stable-shell-owner.js']],
   ['node',['scripts/v480-first-paint-static-smoke.mjs']],
-  ['node',['scripts/v587-production-browser-retry.mjs'],300_000],
   ['node',['scripts/v573-head-interaction-storage-smoke.mjs']],
   ['node',['scripts/v572-dual-drive-storage-smoke.mjs']],
   ['node',['scripts/v578-dedicated-drive-cleanup-smoke.mjs']],
@@ -58,6 +77,13 @@ const TASKS=[
     'test/v560-direct-purge.test.js'
   ]]
 ];
+
+if(browserRequired){
+  TASKS.splice(6,0,['node',['scripts/v587-production-browser-retry.mjs'],300_000]);
+  console.log('[V589_LOCAL_GATE] real Edge gate required because browser/runtime delivery files changed or diff is unknown');
+}else{
+  console.log('[V589_LOCAL_GATE] SKIP real Edge gate: candidate changes are non-browser only: '+(changed.files.join(', ')||'(none)'));
+}
 
 console.log(`[V584_LOCAL_GATE] ${MARKER} starting ${TASKS.length} bounded tasks`);
 for(let i=0;i<TASKS.length;i+=1){
