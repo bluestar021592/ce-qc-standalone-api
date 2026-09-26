@@ -79,7 +79,7 @@ assert.match(stableShell,/shell-structure-mutation/,'stable shell must keep boun
 assert.match(stableShell,/function sidebarLinkForEvent\(event\)/,'V582 must resolve sidebar intent by direct target or pointer coordinates');
 assert.match(stableShell,/a\.onpointerdown=hardNavigateSidebar/,'V586 must give each sidebar anchor its own pointerdown owner');
 assert.match(stableShell,/a\.onclick=hardNavigateSidebar/,'V586 must give each sidebar anchor its own click fallback');
-assert.match(stableShell,/data\.v586AnchorOwner/,'V586 must mark anchor-owned navigation');
+assert.match(stableShell,/a\.dataset\.v586AnchorOwner/,'V586 must mark anchor-owned navigation');
 assert.match(stableShell,/doc\.addEventListener\('click',hardNavigateSidebar,true\)/,'V586 must retain completed-click coordinate fallback');
 assert.match(stableShell,/typeof global\.navigatePage==='function'/,'V586 must route through the app owner when available');
 assert.match(stableShell,/global\.history\?\.pushState\?\./,'V586 must provide an early same-document route fallback before app bootstrap');
