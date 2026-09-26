@@ -261,6 +261,17 @@ try{
   assert.match(earlyAsset,/global\.location\.href=href/,'V593 early owner must hard-navigate');
   stage('V593 early owner contract delivered');
 
+  stage('proving main-content click through a maximum-z stale blocker');
+  const mainInfo=await domElement(cdp,'.main-content button[onclick="resetDashboardRange()"]',{box:true});
+  await cdp.eval("(()=>{document.getElementById('v594MainContentBlocker')?.remove();const btn=document.querySelector('.main-content button[onclick=\\\"resetDashboardRange()\\\"]');if(!btn)return false;btn.addEventListener('click',()=>{document.documentElement.dataset.v594MainClick='1';},{once:true});const b=document.createElement('div');b.id='v594MainContentBlocker';Object.assign(b.style,{position:'fixed',left:'200px',top:'64px',right:'0',bottom:'0',zIndex:'2147483647',background:'rgba(255,0,0,0.001)',pointerEvents:'auto'});document.body.appendChild(b);window.__CE_QC_V581_STABLE_SHELL__?.enforce?.('v594-main-content-browser-gate');return getComputedStyle(b).pointerEvents;})()",12000);
+  await evalWait(cdp,"getComputedStyle(document.getElementById('v594MainContentBlocker')).pointerEvents==='none'",4000,50,'V594 main-content blocker retirement');
+  await cdp.send('Input.dispatchMouseEvent',{type:'mouseMoved',x:mainInfo.point.x,y:mainInfo.point.y,button:'none'},12000);
+  await cdp.send('Input.dispatchMouseEvent',{type:'mousePressed',x:mainInfo.point.x,y:mainInfo.point.y,button:'left',clickCount:1},12000);
+  await cdp.send('Input.dispatchMouseEvent',{type:'mouseReleased',x:mainInfo.point.x,y:mainInfo.point.y,button:'left',clickCount:1},12000);
+  await evalWait(cdp,"document.documentElement.dataset.v594MainClick==='1'",4000,50,'V594 main-content click delivery');
+  await cdp.eval("document.getElementById('v594MainContentBlocker')?.remove();true",12000);
+  stage('V594 main-content click recovery passed');
+
   stage('proving CE navigation through a maximum-z stale blocker');
   const ceInfo=await domElement(cdp,'.side-nav .side-link[data-page="ce"]',{box:true});
   await cdp.eval("(()=>{document.getElementById('v593SidebarBlocker')?.remove();const b=document.createElement('div');b.id='v593SidebarBlocker';Object.assign(b.style,{position:'fixed',left:'0',top:'0',width:'228px',height:'100vh',zIndex:'2147483647',background:'rgba(255,0,0,0.001)',pointerEvents:'auto'});document.body.appendChild(b);return true;})()",12000);
@@ -287,7 +298,7 @@ try{
   const appIndex=scripts.findIndex(src=>/\/app\.js/.test(src));
   assert.ok(earlyIndex>=0&&stableIndex>earlyIndex&&appIndex>stableIndex,'V593 window capture must be delivered before the stable owner and app.js');
 
-  console.log('[V593_PRODUCTION_BROWSER] real Edge passed · earliest window capture navigates CE through a maximum-z stale blocker · shared coordinate owner covers every native sidebar route');
+  console.log('[V594_PRODUCTION_BROWSER] real Edge passed · main-content click survives a maximum-z stale blocker · sidebar navigation remains protected by V593 coordinate owner');
 } catch(error){
   console.error('[V581_PRODUCTION_BROWSER] backend tail\n'+backendLog.slice(-12000));
   throw error;
