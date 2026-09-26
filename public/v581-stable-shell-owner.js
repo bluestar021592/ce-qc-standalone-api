@@ -129,7 +129,7 @@
       doc.getElementById('ce-qc-v587-sidebar-hit-surface')?.remove();
       let frame=doc.getElementById('ce-qc-v591-sidebar-frame');
       if(!frame){
-        doc.getElementById('ce-qc-v591-sidebar-frame')?.remove();
+        doc.getElementById('ce-qc-v590-sidebar-frame')?.remove();
         frame=doc.createElement('iframe');
         frame.id='ce-qc-v591-sidebar-frame';
         frame.title='CE QC Navigation';
@@ -301,7 +301,7 @@
   function bind(){
     enforce('bind');
     [50,250,800,1800,3500,7000].forEach(ms=>setTimeout(()=>{enforce('timer-'+ms);renderFallbackHomeIfStillEmpty();},ms));
-        // V591 navigation lives in an isolated srcdoc frame. Parent-page legacy pointer/click
+    // V591 navigation lives in an isolated srcdoc frame. Parent-page legacy pointer/click
     // handlers cannot receive the frame's events; links hard-navigate with target=_top.
     global.addEventListener('resize',()=>mountIsolatedSidebar(),{passive:true});
     global.addEventListener('message',event=>{
