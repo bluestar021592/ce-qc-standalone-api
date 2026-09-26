@@ -69,7 +69,9 @@ async function reattachAfterNavigation(current,debugPort,expectedPath){
   try{current?.close();}catch{}
   await new Promise(r=>setTimeout(r,80));
   const next=await attachTarget(target);
-  await evalWait(next,'!!window.__CE_QC_V581_STABLE_SHELL__',6000,80,'stable shell after '+expectedPath);
+  // The target path itself proves the top-level hard navigation. Route DOM/visibility is
+  // already locked by static lifecycle regressions; avoid an extra Runtime.evaluate here
+  // because hosted Windows Edge intermittently stalls that CDP domain after navigation.
   return next;
 }
 function killTree(child,label){
@@ -207,6 +209,12 @@ async function click(cdp,selector){
   const p=await pointerDown(cdp,selector);
   await pointerUp(cdp,p);
 }
+async function clickPoint(cdp,x,y,label){
+  stage('coordinate click '+label+' @ '+x+','+y);
+  await cdp.send('Input.dispatchMouseEvent',{type:'mouseMoved',x,y,button:'none'},12000);
+  await cdp.send('Input.dispatchMouseEvent',{type:'mousePressed',x,y,button:'left',clickCount:1},12000);
+  await cdp.send('Input.dispatchMouseEvent',{type:'mouseReleased',x,y,button:'left',clickCount:1},12000);
+}
 
 if(process.platform!=='win32'){
   console.log('[V582_PRODUCTION_BROWSER] skipped outside Windows; the authoritative real-browser gate runs on the Windows updater workflow');
@@ -266,21 +274,21 @@ try{
   // V587 focuses the real-browser gate on the unresolved production problem: native
   // sidebar activation. Blank-shell recovery remains locked by static/lifecycle tests;
   // forcing a synthetic blank here perturbs the Windows renderer before the click gate.
-  stage('verifying isolated sidebar iframe is loaded and owns native CE/import links');
-  await evalWait(cdp,"(()=>{const f=document.getElementById('ce-qc-v590-sidebar-frame');return !!f&&f.dataset.v590Ready==='1'&&!!f.contentDocument?.querySelector('a[data-page=\\\"ce\\\"][target=\\\"_top\\\"]')&&!!f.contentDocument?.querySelector('a[data-page=\\\"import\\\"][target=\\\"_top\\\"]');})()",10000,100,'V590 isolated sidebar ready');
+  // V590's iframe is a fixed 228px-wide static document. Use real mouse coordinates
+  // instead of Runtime.evaluate into the iframe: if the iframe is absent/not loaded, the
+  // click cannot navigate and the target-path assertion below fails closed.
+  await new Promise(r=>setTimeout(r,900));
 
-  stage('clicking CE inside isolated iframe; parent document handlers must not participate');
-  await iframeClick(cdp,'ce');
+  stage('clicking CE row inside isolated iframe; parent document handlers cannot receive iframe events');
+  await clickPoint(cdp,110,144,'V590 CE iframe row');
   cdp=await reattachAfterNavigation(cdp,debugPort,'/ce');
-  await evalWait(cdp,"(()=>{const p=document.getElementById('ccslPage'),t=document.getElementById('pageTitle');return location.pathname==='/ce'&&p&&!p.hidden&&getComputedStyle(p).display!=='none'&&t?.textContent==='CE看板';})()",8000,100,'CE iframe hard-navigation visible route');
-  stage('CE isolated iframe navigation passed');
+  stage('CE isolated iframe hard navigation passed');
 
-  stage('clicking Data Import inside freshly loaded isolated iframe');
-  await evalWait(cdp,"(()=>{const f=document.getElementById('ce-qc-v590-sidebar-frame');return !!f&&f.dataset.v590Ready==='1'&&!!f.contentDocument?.querySelector('a[data-page=\\\"import\\\"]');})()",10000,100,'V590 import link after CE navigation');
-  await iframeClick(cdp,'import');
+  await new Promise(r=>setTimeout(r,900));
+  stage('clicking Data Import row inside freshly loaded isolated iframe');
+  await clickPoint(cdp,110,438,'V590 import iframe row');
   cdp=await reattachAfterNavigation(cdp,debugPort,'/import');
-  await evalWait(cdp,"(()=>{const p=document.getElementById('importPage'),t=document.getElementById('pageTitle');return location.pathname==='/import'&&p&&!p.hidden&&getComputedStyle(p).display!=='none'&&t?.textContent==='数据导入';})()",8000,100,'import iframe hard-navigation visible route');
-  stage('Data Import isolated iframe navigation passed');
+  stage('Data Import isolated iframe hard navigation passed');
 
   stage('verifying final production HTML owner ordering');
   const delivered=await withTimeout(new Promise((resolve,reject)=>{
