@@ -1,7 +1,7 @@
 (function installV581StableShell(global){
   'use strict';
   if(global.__CE_QC_V581_STABLE_SHELL__)return;
-  const VERSION='2026-09-25-v585-pointerdown-route-owner-v1';
+  const VERSION='2026-09-26-v586-anchor-owned-pointerdown-v1';
   const doc=global.document;
   const NAV=[
     ['home','首页总看板','home','/'],
@@ -64,6 +64,17 @@
     q.delete('t');
     return path+(q.toString()?'?'+q.toString():'');
   }
+  function wireAnchor(a){
+    if(!a)return a;
+    // V586: own activation on the anchor itself, not only on document capture.
+    // This survives later document-level click guards that cancel the final click.
+    a.onpointerdown=hardNavigateSidebar;
+    a.onmousedown=hardNavigateSidebar;
+    a.onclick=hardNavigateSidebar;
+    a.onkeydown=hardNavigateSidebar;
+    a.dataset.v586AnchorOwner='1';
+    return a;
+  }
   function normalizeNav(){
     const nav=doc.querySelector('.side-nav');
     if(!nav)return false;
@@ -80,6 +91,7 @@
         a.href=navHref(path);
         if(page==='data-management'&&!admin)a.hidden=true;
         a.innerHTML='<svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-'+icon+'"></use></svg><span class="side-label">'+label+'</span>';
+        wireAnchor(a);
         return a;
       }));
     }else{
@@ -88,6 +100,7 @@
         a.classList.toggle('active',page===active);
         a.href=navHref(String(a.dataset.path||'/'));
         a.removeAttribute('onclick');
+        wireAnchor(a);
         if(page==='data-management')a.hidden=!admin;
       });
     }
@@ -256,7 +269,7 @@
     lastSidebarRouteAt=now;
     event.preventDefault?.();
     event.stopImmediatePropagation?.();
-    safeDiag('V585_SIDEBAR_EARLY_ROUTE',page+'|'+String(event?.type||''));
+    safeDiag('V586_SIDEBAR_ANCHOR_ROUTE',page+'|'+String(event?.type||''));
     try{
       if(typeof global.navigatePage==='function'){
         global.navigatePage(page);
@@ -264,14 +277,14 @@
         navigatingHref='';
         return;
       }
-    }catch(error){safeDiag('V585_NAVIGATE_PAGE_ERROR',error?.message||error);}
+    }catch(error){safeDiag('V586_NAVIGATE_PAGE_ERROR',error?.message||error);}
     try{
       const u=new URL(href,global.location?.href||'http://127.0.0.1/');
       global.history?.pushState?.({},'',u.pathname+u.search+u.hash);
       enforce('sidebar-early-history-route');
       navigatingHref='';
       return;
-    }catch(error){safeDiag('V585_HISTORY_ROUTE_ERROR',error?.message||error);}
+    }catch(error){safeDiag('V586_HISTORY_ROUTE_ERROR',error?.message||error);}
     try{global.location.href=href;}catch{}
     setTimeout(()=>{navigatingHref='';},1500);
   }
@@ -293,10 +306,8 @@
   function bind(){
     enforce('bind');
     [50,250,800,1800,3500,7000].forEach(ms=>setTimeout(()=>{enforce('timer-'+ms);renderFallbackHomeIfStillEmpty();},ms));
-    // V585 routes on the earliest left-button pointer event, before legacy handlers can
-    // swallow the completed click. Click/keyboard remain fallbacks. Same-document routing
-    // makes pointerdown safe: there is no unload race, and a short de-dupe prevents double
-    // hydration when the later click is also delivered.
+    // V586 anchors own pointerdown/click themselves; document capture remains only as a
+    // coordinate fallback for a stale layer that becomes event.target.
     doc.addEventListener('pointerdown',hardNavigateSidebar,true);
     doc.addEventListener('mousedown',hardNavigateSidebar,true);
     doc.addEventListener('click',hardNavigateSidebar,true);
@@ -332,5 +343,5 @@
   if(doc.querySelector('.side-nav')&&doc.querySelector('.main-content'))bind();
   else if(doc.readyState==='loading')doc.addEventListener('DOMContentLoaded',bind,{once:true});
   else bind();
-  console.info('[CE-QC][V581_STABLE_SHELL]',VERSION,'single stable shell owner: topmost native sidebar links + pointerdown-first direct routing + deterministic route visibility before app bootstrap.');
+  console.info('[CE-QC][V581_STABLE_SHELL]',VERSION,'single stable shell owner: native sidebar links with anchor-owned pointerdown navigation + document coordinate fallback + deterministic route visibility.');
 })(window);

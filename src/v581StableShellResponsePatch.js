@@ -1,7 +1,7 @@
 import express from 'express';
 
-export const V581_STABLE_SHELL_RESPONSE_ID='2026-09-25-v585-pointerdown-route-response-v1';
-const V581_TAG='  <script src="/v581-stable-shell-owner.js?v=20260925-v585-1"></script>';
+export const V581_STABLE_SHELL_RESPONSE_ID='2026-09-26-v586-anchor-owned-response-v1';
+const V581_TAG='  <script src="/v581-stable-shell-owner.js?v=20260926-v586-1"></script>';
 
 const previousSend=express.response.send;
 
@@ -35,4 +35,4 @@ express.response.send=function v581StableShellSend(body){
   return previousSend.call(this,body);
 };
 
-console.info('[CE-QC][V581_STABLE_SHELL_RESPONSE]',V581_STABLE_SHELL_RESPONSE_ID,'final response pass retires V575/V580 shell owners and injects one V585 pointerdown-first stable shell owner immediately before app.js.');
+console.info('[CE-QC][V581_STABLE_SHELL_RESPONSE]',V581_STABLE_SHELL_RESPONSE_ID,'final response pass retires V575/V580 shell owners and injects one V586 anchor-owned stable shell owner immediately before app.js.');

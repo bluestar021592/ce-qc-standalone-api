@@ -15,7 +15,7 @@ assert.match(gate,/v581-production-shell-browser-smoke\.mjs/,'desktop update gat
 assert.match(gate,/unified-import-v7\.test\.js/,'desktop update gate must retain seven-business import protection');
 assert.match(gate,/v512-whpp-source-membership-guard\.test\.js/,'desktop update gate must retain WHPP exact membership protection');
 assert.match(launcher,/@\('run','test:golive'\)/,'existing managed launcher contract must continue to call test:golive so old installs can consume the new bounded gate');
-assert.match(start,/\[CE-QC\]\[V585\] Pointerdown-first sidebar owner \+ dashboard repair \+ bounded updater \+ safe C\/D cleanup are installed\./);
+assert.match(start,/\[CE-QC\]\[V586\] Anchor-owned sidebar routing \+ dashboard repair \+ bounded updater \+ safe C\/D cleanup are installed\./);
 assert.match(start,/CE_QC_C_Drive_Census\.ps1/,'startup must launch C-drive census only after the app is ready');
 assert.match(census,/bounded read-only census/i);
 assert.doesNotMatch(census,/Remove-CeTarget|Clear-RecycleBin|Format-|Remove-Item\s+-LiteralPath\s+\$root/i,'census must remain read-only with respect to scanned roots');
@@ -23,4 +23,4 @@ assert.match(census,/Downloads/,'census may report Downloads size');
 assert.match(census,/Documents/,'census may report Documents size');
 assert.match(census,/Desktop/,'census may report Desktop size');
 
-console.log('[V585] local updater gate + full CI split + read-only C-drive census smoke passed');
+console.log('[V586] local updater gate + full CI split + read-only C-drive census smoke passed');
