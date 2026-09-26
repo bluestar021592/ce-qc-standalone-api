@@ -1,7 +1,7 @@
 (function installV581StableShell(global){
   'use strict';
   if(global.__CE_QC_V581_STABLE_SHELL__)return;
-  const VERSION='2026-09-26-v586-anchor-owned-pointerdown-v1';
+  const VERSION='2026-09-26-v587-body-native-hit-surface-v1';
   const doc=global.document;
   const NAV=[
     ['home','首页总看板','home','/'],
@@ -26,8 +26,6 @@
   let observer=null;
   let structuralRepairTimer=0;
   let navigatingHref='';
-  let lastSidebarRouteHref='';
-  let lastSidebarRouteAt=0;
   let diagCount=0;
 
   function currentPage(){
@@ -64,17 +62,6 @@
     q.delete('t');
     return path+(q.toString()?'?'+q.toString():'');
   }
-  function wireAnchor(a){
-    if(!a)return a;
-    // V586: own activation on the anchor itself, not only on document capture.
-    // This survives later document-level click guards that cancel the final click.
-    a.onpointerdown=hardNavigateSidebar;
-    a.onmousedown=hardNavigateSidebar;
-    a.onclick=hardNavigateSidebar;
-    a.onkeydown=hardNavigateSidebar;
-    a.dataset.v586AnchorOwner='1';
-    return a;
-  }
   function normalizeNav(){
     const nav=doc.querySelector('.side-nav');
     if(!nav)return false;
@@ -91,7 +78,6 @@
         a.href=navHref(path);
         if(page==='data-management'&&!admin)a.hidden=true;
         a.innerHTML='<svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-'+icon+'"></use></svg><span class="side-label">'+label+'</span>';
-        wireAnchor(a);
         return a;
       }));
     }else{
@@ -100,12 +86,56 @@
         a.classList.toggle('active',page===active);
         a.href=navHref(String(a.dataset.path||'/'));
         a.removeAttribute('onclick');
-        wireAnchor(a);
         if(page==='data-management')a.hidden=!admin;
       });
     }
     nav.dataset.v581StableNav='1';
     return true;
+  }
+  function hitSurfaceRoot(){
+    let root=doc.getElementById('ce-qc-v587-sidebar-hit-surface');
+    if(root)return root;
+    root=doc.createElement('div');
+    root.id='ce-qc-v587-sidebar-hit-surface';
+    root.setAttribute('aria-hidden','true');
+    root.style.cssText='position:fixed;left:0;top:0;width:0;height:0;z-index:2147483647;pointer-events:none';
+    (doc.body||doc.documentElement).appendChild(root);
+    return root;
+  }
+  function syncSidebarHitSurface(){
+    try{
+      const root=hitSurfaceRoot();
+      const blocking=doc.querySelector('.modal:not([hidden]),#v303CleanStartOverlay:not([hidden])');
+      root.hidden=Boolean(blocking);
+      if(root.hidden)return;
+      const wanted=new Set();
+      for(const link of doc.querySelectorAll('.side-nav .side-link[data-page][href]')){
+        if(link.hidden)continue;
+        const cs=global.getComputedStyle?.(link);
+        if(cs&&(cs.display==='none'||cs.visibility==='hidden'))continue;
+        const r=link.getBoundingClientRect?.();
+        if(!r||r.width<8||r.height<8)continue;
+        const page=String(link.dataset.page||'home');
+        wanted.add(page);
+        let a=root.querySelector('a[data-v587-page="'+page+'"]');
+        if(!a){
+          a=doc.createElement('a');
+          a.dataset.v587Page=page;
+          a.tabIndex=-1;
+          a.setAttribute('aria-hidden','true');
+          a.style.cssText='position:fixed;display:block;pointer-events:auto;cursor:pointer;background:rgba(0,0,0,0.001);color:transparent;text-decoration:none;outline:none';
+          a.addEventListener('pointerdown',()=>safeDiag('V587_NATIVE_HIT',page),{passive:true});
+          root.appendChild(a);
+        }
+        a.href=link.href||navHref(String(link.dataset.path||'/'));
+        a.style.left=Math.round(r.left)+'px';
+        a.style.top=Math.round(r.top)+'px';
+        a.style.width=Math.max(8,Math.round(r.width))+'px';
+        a.style.height=Math.max(8,Math.round(r.height))+'px';
+      }
+      root.querySelectorAll('a[data-v587-page]').forEach(a=>{if(!wanted.has(String(a.dataset.v587Page||'')))a.remove();});
+      root.dataset.v587Ready='1';
+    }catch(error){safeDiag('V587_HIT_SURFACE_ERROR',error?.message||error);}
   }
   function installStyle(){
     let style=doc.getElementById('ce-qc-v581-stable-shell-style');
@@ -228,66 +258,7 @@
       }
     }catch{}
   }
-  function sidebarLinkForEvent(event){
-    try{
-      const direct=event?.target?.closest?.('.side-nav .side-link[data-page]');
-      if(direct&&!direct.hidden)return direct;
-      const x=Number(event?.clientX),y=Number(event?.clientY);
-      if(!Number.isFinite(x)||!Number.isFinite(y))return null;
-      for(const link of doc.querySelectorAll('.side-nav .side-link[data-page]')){
-        if(link.hidden)continue;
-        const cs=global.getComputedStyle?.(link);
-        if(cs&&(cs.display==='none'||cs.visibility==='hidden'||Number(cs.opacity||1)===0))continue;
-        const r=link.getBoundingClientRect?.();
-        if(r&&r.width>0&&r.height>0&&x>=r.left&&x<=r.right&&y>=r.top&&y<=r.bottom)return link;
-      }
-    }catch{}
-    return null;
-  }
-  function hardNavigateSidebar(event){
-    if(event?.metaKey||event?.ctrlKey||event?.shiftKey||event?.altKey)return;
-    if((event?.type==='pointerdown'||event?.type==='mousedown')&&Number(event?.button||0)!==0)return;
-    if(event?.type==='keydown'&&!['Enter',' '].includes(String(event.key||'')))return;
-    const link=sidebarLinkForEvent(event);
-    if(!link)return;
-    const page=String(link.dataset?.page||'home');
-    const path=String(link.dataset?.path||'/');
-    const href=navHref(path);
-    const now=Date.now();
-    if(lastSidebarRouteHref===href&&now-lastSidebarRouteAt<900){
-      event.preventDefault?.();
-      event.stopImmediatePropagation?.();
-      return;
-    }
-    if(navigatingHref===href){
-      event.preventDefault?.();
-      event.stopImmediatePropagation?.();
-      return;
-    }
-    navigatingHref=href;
-    lastSidebarRouteHref=href;
-    lastSidebarRouteAt=now;
-    event.preventDefault?.();
-    event.stopImmediatePropagation?.();
-    safeDiag('V586_SIDEBAR_ANCHOR_ROUTE',page+'|'+String(event?.type||''));
-    try{
-      if(typeof global.navigatePage==='function'){
-        global.navigatePage(page);
-        enforce('sidebar-early-direct-route');
-        navigatingHref='';
-        return;
-      }
-    }catch(error){safeDiag('V586_NAVIGATE_PAGE_ERROR',error?.message||error);}
-    try{
-      const u=new URL(href,global.location?.href||'http://127.0.0.1/');
-      global.history?.pushState?.({},'',u.pathname+u.search+u.hash);
-      enforce('sidebar-early-history-route');
-      navigatingHref='';
-      return;
-    }catch(error){safeDiag('V586_HISTORY_ROUTE_ERROR',error?.message||error);}
-    try{global.location.href=href;}catch{}
-    setTimeout(()=>{navigatingHref='';},1500);
-  }
+
 
   function enforce(reason='manual'){
     if(enforcing)return;
@@ -295,6 +266,7 @@
     try{
       ensureLayout();
       normalizeNav();
+      syncSidebarHitSurface();
       const target=showRoute();
       removeEmptyLargeBlockers();
       doc.documentElement.dataset.ceQcStableShell=VERSION;
@@ -306,12 +278,10 @@
   function bind(){
     enforce('bind');
     [50,250,800,1800,3500,7000].forEach(ms=>setTimeout(()=>{enforce('timer-'+ms);renderFallbackHomeIfStillEmpty();},ms));
-    // V586 anchors own pointerdown/click themselves; document capture remains only as a
-    // coordinate fallback for a stale layer that becomes event.target.
-    doc.addEventListener('pointerdown',hardNavigateSidebar,true);
-    doc.addEventListener('mousedown',hardNavigateSidebar,true);
-    doc.addEventListener('click',hardNavigateSidebar,true);
-    doc.addEventListener('keydown',hardNavigateSidebar,true);
+    // V587 mouse activation is handled by transparent native <a> elements appended
+    // directly to document.body at the exact visible sidebar rectangles. No document-
+    // level preventDefault/SPA routing remains in the primary path.
+    global.addEventListener('resize',()=>syncSidebarHitSurface(),{passive:true});
     global.addEventListener('pageshow',()=>enforce('pageshow'),true);
     global.addEventListener('popstate',()=>enforce('popstate'),true);
     if(typeof MutationObserver==='function'){
@@ -333,6 +303,9 @@
         doc.querySelector('.side-nav')
       ].filter(Boolean);
       for(const root of roots)observer.observe(root,{childList:true});
+      if(global.ResizeObserver){
+        try{const ro=new ResizeObserver(()=>syncSidebarHitSurface());const sidebar=doc.querySelector('.sidebar');if(sidebar)ro.observe(sidebar);}catch{}
+      }
     }
   }
 
@@ -343,5 +316,5 @@
   if(doc.querySelector('.side-nav')&&doc.querySelector('.main-content'))bind();
   else if(doc.readyState==='loading')doc.addEventListener('DOMContentLoaded',bind,{once:true});
   else bind();
-  console.info('[CE-QC][V581_STABLE_SHELL]',VERSION,'single stable shell owner: native sidebar links with anchor-owned pointerdown navigation + document coordinate fallback + deterministic route visibility.');
+  console.info('[CE-QC][V581_STABLE_SHELL]',VERSION,'single stable shell owner: body-level native sidebar hit surface + native hard navigation + deterministic route visibility.');
 })(window);
