@@ -145,28 +145,39 @@ function signedCookie(secret){
   const sig=crypto.createHmac('sha256',secret).update(body).digest('base64url');
   return body+'.'+sig;
 }
-async function domNodeId(cdp,selector){
-  const doc=await cdp.send('DOM.getDocument',{depth:1,pierce:true},12000);
-  const out=await cdp.send('DOM.querySelector',{nodeId:doc.root.nodeId,selector},12000);
-  assert.ok(out.nodeId,'missing DOM node for '+selector);
-  return out.nodeId;
-}
-async function domAttributes(cdp,nodeId){
-  const out=await cdp.send('DOM.getAttributes',{nodeId},12000);
-  const map={};
-  const list=Array.isArray(out.attributes)?out.attributes:[];
-  for(let i=0;i<list.length;i+=2)map[list[i]]=list[i+1]??'';
-  return map;
+async function domElement(cdp,selector,{box=false}={}){
+  let lastError=null;
+  for(let attempt=1;attempt<=6;attempt+=1){
+    try{
+      const doc=await cdp.send('DOM.getDocument',{depth:1,pierce:true},12000);
+      const out=await cdp.send('DOM.querySelector',{nodeId:doc.root.nodeId,selector},12000);
+      assert.ok(out.nodeId,'missing DOM node for '+selector);
+      const attrsOut=await cdp.send('DOM.getAttributes',{nodeId:out.nodeId},12000);
+      const attrs={};
+      const list=Array.isArray(attrsOut.attributes)?attrsOut.attributes:[];
+      for(let i=0;i<list.length;i+=2)attrs[list[i]]=list[i+1]??'';
+      let point=null;
+      if(box){
+        const model=await cdp.send('DOM.getBoxModel',{nodeId:out.nodeId},12000);
+        const quad=model?.model?.border||model?.model?.content;
+        assert.ok(Array.isArray(quad)&&quad.length>=8,'missing box model for '+selector);
+        const xs=[quad[0],quad[2],quad[4],quad[6]],ys=[quad[1],quad[3],quad[5],quad[7]];
+        point={x:xs.reduce((a,b)=>a+b,0)/4,y:ys.reduce((a,b)=>a+b,0)/4};
+      }
+      return{nodeId:out.nodeId,attrs,point};
+    }catch(error){
+      lastError=error;
+      const msg=String(error?.message||error);
+      if(!/Could not find node|No node with given id|timed out/i.test(msg))throw error;
+      await new Promise(r=>setTimeout(r,80*attempt));
+    }
+  }
+  throw lastError||new Error('DOM lookup failed for '+selector);
 }
 async function hitPoint(cdp,selector){
-  const nodeId=await domNodeId(cdp,selector);
-  const model=await cdp.send('DOM.getBoxModel',{nodeId},12000);
-  const quad=model?.model?.border||model?.model?.content;
-  assert.ok(Array.isArray(quad)&&quad.length>=8,'missing box model for '+selector);
-  const xs=[quad[0],quad[2],quad[4],quad[6]],ys=[quad[1],quad[3],quad[5],quad[7]];
-  const p={x:xs.reduce((a,b)=>a+b,0)/4,y:ys.reduce((a,b)=>a+b,0)/4};
-  const attrs=await domAttributes(cdp,nodeId);
-  stage('hit '+selector+' => href='+(attrs.href||'')+' page='+(attrs['data-v587-page']||attrs['data-page']||''));
+  const info=await domElement(cdp,selector,{box:true});
+  const p=info.point;
+  stage('hit '+selector+' => href='+(info.attrs.href||'')+' page='+(info.attrs['data-v587-page']||info.attrs['data-page']||''));
   return p;
 }
 async function pointerDown(cdp,selector){
@@ -244,13 +255,12 @@ try{
   stage('forced blank shell recovered');
 
   stage('verifying body-level native hit surface exposes native CE/import anchors');
-  const hitRoot=await domNodeId(cdp,'#ce-qc-v587-sidebar-hit-surface');
-  const rootAttrs=await domAttributes(cdp,hitRoot);
-  assert.equal(rootAttrs['data-v587-ready'],'1','V587 native hit surface must be ready');
-  const ceNode=await domNodeId(cdp,'#ce-qc-v587-sidebar-hit-surface a[data-v587-page="ce"]');
-  const impNode=await domNodeId(cdp,'#ce-qc-v587-sidebar-hit-surface a[data-v587-page="import"]');
-  const ceAttrs=await domAttributes(cdp,ceNode);
-  const impAttrs=await domAttributes(cdp,impNode);
+  const rootInfo=await domElement(cdp,'#ce-qc-v587-sidebar-hit-surface');
+  assert.equal(rootInfo.attrs['data-v587-ready'],'1','V587 native hit surface must be ready');
+  const ceInfo=await domElement(cdp,'#ce-qc-v587-sidebar-hit-surface a[data-v587-page="ce"]');
+  const impInfo=await domElement(cdp,'#ce-qc-v587-sidebar-hit-surface a[data-v587-page="import"]');
+  const ceAttrs=ceInfo.attrs;
+  const impAttrs=impInfo.attrs;
   assert.equal(new URL(ceAttrs.href||'http://invalid/').pathname,'/ce','V587 CE hit anchor must be a native route');
   assert.equal(new URL(impAttrs.href||'http://invalid/').pathname,'/import','V587 import hit anchor must be a native route');
 
