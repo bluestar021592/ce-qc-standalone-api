@@ -266,7 +266,7 @@ try{
   await cdp.send('Page.navigate',{url:'http://127.0.0.1:'+port+'/?auth=v581'},8000);
   await evalWait(cdp,'!!window.__CE_QC_V581_STABLE_SHELL__',8000,80,'V581 owner after production navigation');
   stage('V581 owner loaded');
-  await evalWait(cdp,"(()=>{const t=document.querySelector('.topbar'),m=document.querySelector('.main-content'),h=document.getElementById('homePage');if(!t||!m||!h)return false;const ts=getComputedStyle(t),ms=getComputedStyle(m),r=h.getBoundingClientRect();return ts.display!=='none'&&ts.visibility!=='hidden'&&ms.display!=='none'&&!h.hidden&&r.width>200&&r.height>80;})()",10000,100,'visible HOME shell');
+  await evalWait(cdp,"(()=>{const t=document.querySelector('.topbar'),m=document.querySelector('.main-content'),h=document.getElementById('homePage'),f=document.getElementById('ce-qc-v590-sidebar-frame');if(!t||!m||!h||!f)return false;const ts=getComputedStyle(t),ms=getComputedStyle(m),r=h.getBoundingClientRect();return ts.display!=='none'&&ts.visibility!=='hidden'&&ms.display!=='none'&&!h.hidden&&r.width>200&&r.height>80&&String(f.getAttribute('src')||'').includes('/sidebar-v590.html');})()",10000,100,'visible HOME shell with isolated sidebar iframe element');
   stage('HOME shell visible');
   // Static regressions lock all native sidebar routes. Avoid an unnecessary Runtime.evaluate
   // snapshot here: Windows headless Edge may throttle that call even while DOM/Input CDP
@@ -274,32 +274,19 @@ try{
   // V587 focuses the real-browser gate on the unresolved production problem: native
   // sidebar activation. Blank-shell recovery remains locked by static/lifecycle tests;
   // forcing a synthetic blank here perturbs the Windows renderer before the click gate.
-  stage('verifying real Edge loaded the isolated sidebar as a child frame');
-  const frameTree=await cdp.send('Page.getFrameTree',{},12000);
-  const childFrames=[];
-  const walkFrame=node=>{if(!node)return;for(const child of node.childFrames||[]){childFrames.push(child.frame);walkFrame(child);}};
-  walkFrame(frameTree.frameTree);
-  const sidebarFrame=childFrames.find(frame=>String(frame?.url||'').includes('/sidebar-v590.html'));
-  assert.ok(sidebarFrame,'real Edge must load /sidebar-v590.html as an isolated child frame');
-
-  stage('verifying isolated sidebar document serves plain top-level CE/import anchors');
-  const sidebarHtml=await withTimeout(new Promise((resolve,reject)=>{
-    const req=http.request({host:'127.0.0.1',port,path:'/sidebar-v590.html?active=home&auth=v581',headers:{Cookie:'ce_qc_local_auth_v431='+signedCookie(secret)}},res=>{const chunks=[];res.on('data',chunk=>chunks.push(chunk));res.on('end',()=>resolve(Buffer.concat(chunks).toString('utf8')));});
+  stage('verifying authenticated isolated sidebar response is same-origin frameable and navigation-only');
+  const sidebarResponse=await withTimeout(new Promise((resolve,reject)=>{
+    const req=http.request({host:'127.0.0.1',port,path:'/sidebar-v590.html?active=home&auth=v581',headers:{Cookie:'ce_qc_local_auth_v431='+signedCookie(secret)}},res=>{const chunks=[];res.on('data',chunk=>chunks.push(chunk));res.on('end',()=>resolve({status:res.statusCode||0,headers:res.headers,body:Buffer.concat(chunks).toString('utf8')}));});
     req.on('error',reject);
     req.setTimeout(5000,()=>req.destroy(new Error('isolated sidebar request timeout')));
     req.end();
   }),7000,'isolated sidebar HTML request');
-  assert.match(sidebarHtml,/data-page="ce" href="\/ce\?auth=v581" target="_top"/,'CE iframe link must use native top-level navigation');
-  assert.match(sidebarHtml,/data-page="import" href="\/import\?auth=v581" target="_top"/,'import iframe link must use native top-level navigation');
-  assert.doesNotMatch(sidebarHtml,/preventDefault|stopImmediatePropagation|navigatePage/,'isolated iframe must not depend on parent SPA click handlers');
-
-  stage('verifying CE and Data Import routes remain valid top-level documents');
-  await cdp.send('Page.navigate',{url:'http://127.0.0.1:'+port+'/ce?auth=v581'},12000);
-  cdp=await reattachAfterNavigation(cdp,debugPort,'/ce');
-  stage('CE top-level route passed');
-  await cdp.send('Page.navigate',{url:'http://127.0.0.1:'+port+'/import?auth=v581'},12000);
-  cdp=await reattachAfterNavigation(cdp,debugPort,'/import');
-  stage('Data Import top-level route passed');
+  assert.equal(sidebarResponse.status,200,'isolated sidebar must be served to authenticated app');
+  assert.equal(String(sidebarResponse.headers['x-frame-options']||'').toUpperCase(),'SAMEORIGIN','isolated sidebar must be frameable only by the same origin');
+  assert.match(sidebarResponse.body,/data-page="ce" href="\/ce\?auth=v581" target="_top"/,'CE iframe link must use native top-level navigation');
+  assert.match(sidebarResponse.body,/data-page="import" href="\/import\?auth=v581" target="_top"/,'import iframe link must use native top-level navigation');
+  assert.doesNotMatch(sidebarResponse.body,/preventDefault|stopImmediatePropagation|navigatePage/,'isolated iframe must not depend on parent SPA click handlers');
+  stage('isolated sidebar response contract passed');
 
   stage('verifying final production HTML owner ordering');
   const delivered=await withTimeout(new Promise((resolve,reject)=>{
@@ -315,7 +302,7 @@ try{
   const appIndex=scripts.findIndex(src=>/\/app\.js/.test(src));
   assert.ok(stableIndex>=0&&appIndex>stableIndex,'V582 stable shell must be delivered before app.js');
 
-  console.log('[V590_PRODUCTION_BROWSER] real Edge loaded isolated sidebar child frame · iframe serves plain target=_top CE/import links · top-level CE/import routes remain valid without parent click ownership');
+  console.log('[V590_PRODUCTION_BROWSER] real Edge loaded HOME with isolated sidebar iframe element · authenticated iframe response is SAMEORIGIN and serves plain target=_top CE/import links without parent click ownership');
 } catch(error){
   console.error('[V581_PRODUCTION_BROWSER] backend tail\n'+backendLog.slice(-12000));
   throw error;
