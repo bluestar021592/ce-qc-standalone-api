@@ -8,10 +8,11 @@ const cleanup=fs.readFileSync(new URL('../tools/CE_QC_Dedicated_Drive_Cleanup.ps
 const launcher=fs.readFileSync(new URL('../tools/CE_QC_Managed_Launcher.ps1',import.meta.url),'utf8');
 const start=fs.readFileSync(new URL('../Start_CE_QC.ps1',import.meta.url),'utf8');
 
-assert.match(cleanup,/2026-09-25-v583-aggressive-safe-ce-cleanup-v1/);
+assert.match(cleanup,/2026-09-26-v588-remove-legacy-c-runtime-backups-v1/);
 assert.doesNotMatch(cleanup,/\$Letter:/,'PowerShell must delimit drive-letter variable before colon');
 assert.match(cleanup,/DeviceID='\$\{Letter\}:'/,'drive query must use ${Letter}: interpolation safely');
 for(const required of [
+  'CE_QC_RUNTIME\\backups',
   'CE_QC_LAUNCHER\\backups',
   'CE_QC_LAUNCHER\\temp',
   'npm-cache',
@@ -41,7 +42,7 @@ assert.match(launcher,/D:\\CE_QC_NPM_CACHE/,'npm cache must move to D');
 assert.match(launcher,/Candidate worktree\/test scratch\/npm cache use D:/);
 
 assert.match(start,/CE_QC_Dedicated_Drive_Cleanup\.ps1/,'startup must invoke dedicated cleanup');
-assert.match(start,/\[CE-QC\]\[V587\] Body-level native sidebar hit surface \+ dashboard repair \+ deep C-drive census/);
+assert.match(start,/\[CE-QC\]\[V588\] Native sidebar hit surface \+ legacy C backup purge \+ deep C-drive census/);
 assert.match(start,/D:\\CE_QC_NPM_CACHE/);
 
 if(os.platform()==='win32'){
@@ -50,4 +51,4 @@ if(os.platform()==='win32'){
   const parsed=spawnSync('powershell.exe',['-NoLogo','-NoProfile','-Command',command],{encoding:'utf8'});
   assert.equal(parsed.status,0,'PowerShell parser rejected dedicated cleanup script: '+(parsed.stdout||'')+(parsed.stderr||''));
 }
-console.log('[V587] dedicated-drive cleanup smoke passed · PowerShell syntax parsed on Windows · stale CE-QC temp/update roots + rebuildable browser caches are cleaned · active app/live D database/user Documents/Downloads stay protected');
+console.log('[V588] dedicated-drive cleanup smoke passed · obsolete CE_QC_RUNTIME backups on C are purged · live D database/user Documents/Downloads stay protected');
