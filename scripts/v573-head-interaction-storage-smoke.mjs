@@ -38,6 +38,9 @@ const assetAt=server.indexOf('const v575PublicAssetStatic');
 const authAt=server.indexOf('app.use(accessIdentity)');
 assert.ok(assetAt>0&&assetAt<authAt,'browser JS/CSS/image fast lane must remain before accessIdentity');
 assert.match(server,/\['\/ce', '\/ceaf', '\/tbkh', '\/ali1688', '\/whpp'/,'server routes must include /whpp');
+assert.match(server,/app\.get\('\/sidebar-v590\.html'/,'server must expose the authenticated isolated sidebar route');
+assert.match(server,/X-Frame-Options', 'SAMEORIGIN'/,'isolated sidebar alone must be embeddable by the same origin');
+assert.match(server,/X-Frame-Options', 'DENY'/,'all other authenticated HTML must retain frame denial');
 assert.match(server,/app\.get\('\/api\/client-diag'/,'server must keep bounded client diagnostics');
 
 assert.match(app,/'\/whpp':'whpp'/,'base route parser must understand WHPP');
