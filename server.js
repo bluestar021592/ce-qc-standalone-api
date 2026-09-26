@@ -107,6 +107,17 @@ app.use((req, res, next) => {
 
 app.use(accessIdentity);
 app.use(sameOriginWriteGuard);
+
+// V590 isolated navigation is authenticated like the rest of the app but must be
+// embeddable by this same origin. All other authenticated HTML keeps DENY below.
+app.get('/sidebar-v590.html', (req, res) => {
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.type('html');
+  return res.sendFile(path.join(__dirname, 'public', 'sidebar-v590.html'));
+});
+
 app.use('/api/shopee', requireBusinessScope('SHOPEE'));
 app.use('/api', (req, res, next) => {
   if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) return next();

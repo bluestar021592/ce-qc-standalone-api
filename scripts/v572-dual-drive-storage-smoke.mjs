@@ -29,7 +29,7 @@ assert.match(start,/D:\\CE_QC_RUNTIME_TEMP\\runtime/,'normal runtime scratch mus
 assert.match(start,/\$env:TEMP = \$RuntimeScratch/);
 assert.match(start,/\$env:TMP = \$RuntimeScratch/);
 
-assert.match(index,/v581-stable-shell-owner\.js\?v=20260926-v587-1/,'V581 stable shell must remain shipped while storage housekeeping changes');
+assert.match(index,/v581-stable-shell-owner\.js\?v=20260926-v590-1/,'V581 stable shell must remain shipped while storage housekeeping changes');
 assert.doesNotMatch(index,/installV575CoordinateOwner|v580-visible-shell-recovery\.js|v569-final-interaction-owner\.js/,'retired layered shell owners must not be reintroduced by storage housekeeping');
 
 console.log('[V588] dual-drive storage smoke passed · legacy C runtime backups are disposable · C keeps launcher/code only · D owns live DB/runtime scratch · live SQLite rows remain protected');

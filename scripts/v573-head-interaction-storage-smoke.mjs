@@ -8,11 +8,12 @@ const cleanup=fs.readFileSync(new URL('./CE_QC_NoBackup_Cleanup.mjs',import.meta
 const start=fs.readFileSync(new URL('../Start_CE_QC.ps1',import.meta.url),'utf8');
 const server=fs.readFileSync(new URL('../server.js',import.meta.url),'utf8');
 const stable=fs.readFileSync(new URL('../public/v581-stable-shell-owner.js',import.meta.url),'utf8');
+const isolatedSidebar=fs.readFileSync(new URL('../public/sidebar-v590.html',import.meta.url),'utf8');
 const response=fs.readFileSync(new URL('../src/v581StableShellResponsePatch.js',import.meta.url),'utf8');
 
 assert.doesNotMatch(index,/installV575CoordinateOwner/,'V581 must retire the layered V575 capture owner from static HTML');
 assert.doesNotMatch(index,/v580-visible-shell-recovery\.js/,'V581 must retire the layered V580 recovery script from static HTML');
-assert.match(index,/v581-stable-shell-owner\.js\?v=20260926-v587-1/,'static shell must carry V581 as fallback');
+assert.match(index,/v581-stable-shell-owner\.js\?v=20260926-v590-1/,'static shell must carry V581 as fallback');
 assert.match(index,/<a class="side-link active" data-page="home"[^>]*href="\/?\?auth=v581"/,'HOME must be a native hard link');
 assert.match(index,/<a class="side-link" data-page="ce"[^>]*href="\/ce\?auth=v581"/,'CE must be a native hard link');
 assert.match(index,/<a class="side-link" data-page="import"[^>]*href="\/import\?auth=v581"/,'import must be a native hard link');
@@ -22,10 +23,11 @@ assert.match(stable,/shell-structure-mutation/,'bounded structural repair must r
 assert.match(stable,/data-v581-active/,'V581 must deterministically own visible route page');
 assert.match(stable,/renderFallbackHomeIfStillEmpty/,'V581 must retry HOME render if the page container is still blank');
 assert.match(stable,/removeEmptyLargeBlockers/,'V581 must retire large stale pointer blockers without reviving V575');
-assert.match(stable,/ce-qc-v587-sidebar-hit-surface/,'V587 must create a body-level native sidebar hit surface');
-assert.match(stable,/a\.dataset\.v587Page=page/,'V587 must mirror visible sidebar routes into native hit anchors');
-assert.match(stable,/a\.href=link\.href\|\|navHref/,'V587 hit anchors must navigate with native href');
-assert.doesNotMatch(stable,/hardNavigateSidebar|sidebarLinkForEvent/,'V587 must retire document-level sidebar SPA interception');
+assert.match(stable,/ce-qc-v590-sidebar-frame/,'V590 must create an isolated sidebar iframe');
+assert.match(stable,/sidebar-v590\.html/,'V590 iframe must point to the isolated navigation document');
+assert.match(isolatedSidebar,/target="_top"/,'V590 isolated links must navigate the top document natively');
+assert.match(isolatedSidebar,/data-page="whpp" href="\/whpp\?auth=v581"/,'V590 isolated sidebar must keep WHPP first-class');
+assert.doesNotMatch(isolatedSidebar,/preventDefault|stopImmediatePropagation|navigatePage/,'V590 iframe must not depend on the parent SPA event chain');
 assert.match(response,/stripInlineV575/,'final response pass must remove V575 if any older wrapper re-injects it');
 assert.match(response,/v580-visible-shell-recovery\.js/,'final response pass must remove V580 if any older wrapper re-injects it');
 assert.match(response,/const appTag=/,'V582 response pass must locate app.js as the bootstrap boundary');
@@ -36,6 +38,9 @@ const assetAt=server.indexOf('const v575PublicAssetStatic');
 const authAt=server.indexOf('app.use(accessIdentity)');
 assert.ok(assetAt>0&&assetAt<authAt,'browser JS/CSS/image fast lane must remain before accessIdentity');
 assert.match(server,/\['\/ce', '\/ceaf', '\/tbkh', '\/ali1688', '\/whpp'/,'server routes must include /whpp');
+assert.match(server,/app\.get\('\/sidebar-v590\.html'/,'server must expose the authenticated isolated sidebar route');
+assert.match(server,/X-Frame-Options', 'SAMEORIGIN'/,'isolated sidebar alone must be embeddable by the same origin');
+assert.match(server,/X-Frame-Options', 'DENY'/,'all other authenticated HTML must retain frame denial');
 assert.match(server,/app\.get\('\/api\/client-diag'/,'server must keep bounded client diagnostics');
 
 assert.match(app,/'\/whpp':'whpp'/,'base route parser must understand WHPP');
@@ -51,6 +56,6 @@ assert.match(cleanup,/\[CE-QC\]\[V573\]\[STORAGE\] cleanup complete:/);
 assert.match(cleanup,/driveLine\('C',drivesBefore\.C,drivesAfter\.C\)/);
 assert.match(cleanup,/driveLine\('D',drivesBefore\.D,drivesAfter\.D\)/);
 assert.match(cleanup,/compactSqliteStorage/);
-assert.match(start,/\[CE-QC\]\[V589\] Native sidebar hit surface \+ legacy C backup purge \+ diff-aware updater gate/);
+assert.match(start,/\[CE-QC\]\[V590\] Isolated sidebar iframe \+ legacy C backup purge \+ diff-aware updater gate are installed\./);
 
-console.log('[V589] native sidebar hit surface + WHPP + legacy C backup purge + diff-aware updater smoke passed');
+console.log('[V590] isolated sidebar iframe + WHPP + legacy C backup purge + diff-aware updater smoke passed');

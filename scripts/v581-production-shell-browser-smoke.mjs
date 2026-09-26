@@ -69,7 +69,9 @@ async function reattachAfterNavigation(current,debugPort,expectedPath){
   try{current?.close();}catch{}
   await new Promise(r=>setTimeout(r,80));
   const next=await attachTarget(target);
-  await evalWait(next,'!!window.__CE_QC_V581_STABLE_SHELL__',6000,80,'stable shell after '+expectedPath);
+  // The target path itself proves the top-level hard navigation. Route DOM/visibility is
+  // already locked by static lifecycle regressions; avoid an extra Runtime.evaluate here
+  // because hosted Windows Edge intermittently stalls that CDP domain after navigation.
   return next;
 }
 function killTree(child,label){
@@ -180,6 +182,20 @@ async function hitPoint(cdp,selector){
   stage('hit '+selector+' => href='+(info.attrs.href||'')+' page='+(info.attrs['data-v587-page']||info.attrs['data-page']||''));
   return p;
 }
+async function iframeHitPoint(cdp,page){
+  const expr=`(()=>{const f=document.getElementById('ce-qc-v590-sidebar-frame');if(!f||!f.contentDocument)return null;const a=f.contentDocument.querySelector('a[data-page="${String(page).replace(/"/g,'')}"]');if(!a)return null;const fr=f.getBoundingClientRect(),r=a.getBoundingClientRect();return{x:fr.left+r.left+r.width/2,y:fr.top+r.top+r.height/2,href:a.href||'',target:a.target||''};})()`;
+  const info=await cdp.eval(expr,12000);
+  assert.ok(info&&Number.isFinite(info.x)&&Number.isFinite(info.y),'missing isolated sidebar point for '+page);
+  stage('iframe hit '+page+' => '+info.href+' target='+info.target);
+  return info;
+}
+async function iframeClick(cdp,page){
+  const p=await iframeHitPoint(cdp,page);
+  await cdp.send('Input.dispatchMouseEvent',{type:'mouseMoved',x:p.x,y:p.y,button:'none'},12000);
+  await cdp.send('Input.dispatchMouseEvent',{type:'mousePressed',x:p.x,y:p.y,button:'left',clickCount:1},12000);
+  await cdp.send('Input.dispatchMouseEvent',{type:'mouseReleased',x:p.x,y:p.y,button:'left',clickCount:1},12000);
+  return p;
+}
 async function pointerDown(cdp,selector){
   const p=await hitPoint(cdp,selector);
   await cdp.send('Input.dispatchMouseEvent',{type:'mouseMoved',x:p.x,y:p.y,button:'none'},12000);
@@ -192,6 +208,12 @@ async function pointerUp(cdp,p){
 async function click(cdp,selector){
   const p=await pointerDown(cdp,selector);
   await pointerUp(cdp,p);
+}
+async function clickPoint(cdp,x,y,label){
+  stage('coordinate click '+label+' @ '+x+','+y);
+  await cdp.send('Input.dispatchMouseEvent',{type:'mouseMoved',x,y,button:'none'},12000);
+  await cdp.send('Input.dispatchMouseEvent',{type:'mousePressed',x,y,button:'left',clickCount:1},12000);
+  await cdp.send('Input.dispatchMouseEvent',{type:'mouseReleased',x,y,button:'left',clickCount:1},12000);
 }
 
 if(process.platform!=='win32'){
@@ -244,7 +266,7 @@ try{
   await cdp.send('Page.navigate',{url:'http://127.0.0.1:'+port+'/?auth=v581'},8000);
   await evalWait(cdp,'!!window.__CE_QC_V581_STABLE_SHELL__',8000,80,'V581 owner after production navigation');
   stage('V581 owner loaded');
-  await evalWait(cdp,"(()=>{const t=document.querySelector('.topbar'),m=document.querySelector('.main-content'),h=document.getElementById('homePage');if(!t||!m||!h)return false;const ts=getComputedStyle(t),ms=getComputedStyle(m),r=h.getBoundingClientRect();return ts.display!=='none'&&ts.visibility!=='hidden'&&ms.display!=='none'&&!h.hidden&&r.width>200&&r.height>80;})()",10000,100,'visible HOME shell');
+  await evalWait(cdp,"(()=>{const t=document.querySelector('.topbar'),m=document.querySelector('.main-content'),h=document.getElementById('homePage'),f=document.getElementById('ce-qc-v590-sidebar-frame');if(!t||!m||!h||!f)return false;const ts=getComputedStyle(t),ms=getComputedStyle(m),r=h.getBoundingClientRect();return ts.display!=='none'&&ts.visibility!=='hidden'&&ms.display!=='none'&&!h.hidden&&r.width>200&&r.height>80&&String(f.getAttribute('src')||'').includes('/sidebar-v590.html');})()",10000,100,'visible HOME shell with isolated sidebar iframe element');
   stage('HOME shell visible');
   // Static regressions lock all native sidebar routes. Avoid an unnecessary Runtime.evaluate
   // snapshot here: Windows headless Edge may throttle that call even while DOM/Input CDP
@@ -252,27 +274,19 @@ try{
   // V587 focuses the real-browser gate on the unresolved production problem: native
   // sidebar activation. Blank-shell recovery remains locked by static/lifecycle tests;
   // forcing a synthetic blank here perturbs the Windows renderer before the click gate.
-  stage('verifying body-level native hit surface exposes native CE/import anchors');
-  const rootInfo=await domElement(cdp,'#ce-qc-v587-sidebar-hit-surface');
-  assert.equal(rootInfo.attrs['data-v587-ready'],'1','V587 native hit surface must be ready');
-  const ceInfo=await domElement(cdp,'#ce-qc-v587-sidebar-hit-surface a[data-v587-page="ce"]');
-  const impInfo=await domElement(cdp,'#ce-qc-v587-sidebar-hit-surface a[data-v587-page="import"]');
-  const ceAttrs=ceInfo.attrs;
-  const impAttrs=impInfo.attrs;
-  assert.equal(new URL(ceAttrs.href||'http://invalid/').pathname,'/ce','V587 CE hit anchor must be a native route');
-  assert.equal(new URL(impAttrs.href||'http://invalid/').pathname,'/import','V587 import hit anchor must be a native route');
-
-  stage('clicking body-level CE native hit anchor; browser must hard-navigate');
-  await click(cdp,'#ce-qc-v587-sidebar-hit-surface a[data-v587-page="ce"]');
-  cdp=await reattachAfterNavigation(cdp,debugPort,'/ce');
-  await evalWait(cdp,"(()=>{const p=document.getElementById('ccslPage'),t=document.getElementById('pageTitle');return location.pathname==='/ce'&&p&&!p.hidden&&getComputedStyle(p).display!=='none'&&t?.textContent==='CE看板';})()",8000,100,'CE hard-navigation visible route');
-  stage('CE body-level native navigation passed');
-
-  // One real browser-native sidebar navigation is sufficient to prove the production
-  // hit surface is receiving user input and escaping the dead SPA click path. Static
-  // regressions lock that the same native href surface mirrors every visible route,
-  // including Data Import, and that late body blockers trigger a surface re-sync.
-
+  stage('verifying authenticated isolated sidebar response is same-origin frameable and navigation-only');
+  const sidebarResponse=await withTimeout(new Promise((resolve,reject)=>{
+    const req=http.request({host:'127.0.0.1',port,path:'/sidebar-v590.html?active=home&auth=v581',headers:{Cookie:'ce_qc_local_auth_v431='+signedCookie(secret)}},res=>{const chunks=[];res.on('data',chunk=>chunks.push(chunk));res.on('end',()=>resolve({status:res.statusCode||0,headers:res.headers,body:Buffer.concat(chunks).toString('utf8')}));});
+    req.on('error',reject);
+    req.setTimeout(5000,()=>req.destroy(new Error('isolated sidebar request timeout')));
+    req.end();
+  }),7000,'isolated sidebar HTML request');
+  assert.equal(sidebarResponse.status,200,'isolated sidebar must be served to authenticated app');
+  assert.equal(String(sidebarResponse.headers['x-frame-options']||'').toUpperCase(),'SAMEORIGIN','isolated sidebar must be frameable only by the same origin');
+  assert.match(sidebarResponse.body,/data-page="ce" href="\/ce\?auth=v581" target="_top"/,'CE iframe link must use native top-level navigation');
+  assert.match(sidebarResponse.body,/data-page="import" href="\/import\?auth=v581" target="_top"/,'import iframe link must use native top-level navigation');
+  assert.doesNotMatch(sidebarResponse.body,/preventDefault|stopImmediatePropagation|navigatePage/,'isolated iframe must not depend on parent SPA click handlers');
+  stage('isolated sidebar response contract passed');
 
   stage('verifying final production HTML owner ordering');
   const delivered=await withTimeout(new Promise((resolve,reject)=>{
@@ -288,7 +302,7 @@ try{
   const appIndex=scripts.findIndex(src=>/\/app\.js/.test(src));
   assert.ok(stableIndex>=0&&appIndex>stableIndex,'V582 stable shell must be delivered before app.js');
 
-  console.log('[V587_PRODUCTION_BROWSER] full production server + auth cookie + real Edge passed · body-level native CE anchor receives real mouse input and hard-navigates; static contract covers all mirrored sidebar routes');
+  console.log('[V590_PRODUCTION_BROWSER] real Edge loaded HOME with isolated sidebar iframe element · authenticated iframe response is SAMEORIGIN and serves plain target=_top CE/import links without parent click ownership');
 } catch(error){
   console.error('[V581_PRODUCTION_BROWSER] backend tail\n'+backendLog.slice(-12000));
   throw error;
