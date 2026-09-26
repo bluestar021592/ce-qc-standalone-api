@@ -130,7 +130,7 @@ function Clear-CeQcPort([int]$Port) {
 Write-Host 'Checking port 5177...' -ForegroundColor Cyan
 Clear-CeQcPort 5177
 Write-Host 'Port 5177 is stable and free.' -ForegroundColor Green
-Write-Host '[CE-QC][V590] Isolated sidebar iframe + legacy C backup purge + diff-aware updater gate are installed.' -ForegroundColor Green
+Write-Host '[CE-QC][V591] Srcdoc-isolated sidebar + legacy C backup purge + diff-aware updater gate are installed.' -ForegroundColor Green
 
 $DedicatedCleanup = Join-Path $ProjectRoot 'tools\CE_QC_Dedicated_Drive_Cleanup.ps1'
 if (Test-Path -LiteralPath $DedicatedCleanup) {
