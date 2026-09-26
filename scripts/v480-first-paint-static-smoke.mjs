@@ -13,7 +13,6 @@ const startup=fs.readFileSync('public/dashboard-fixture-v18.js','utf8');
 const v14=fs.readFileSync('public/v14-geometry-fixture.js','utf8');
 const v304=fs.readFileSync('public/v304-unified-upload-owner.js','utf8');
 const stableShell=fs.readFileSync('public/v581-stable-shell-owner.js','utf8');
-const isolatedSidebar=fs.readFileSync('public/sidebar-v590.html','utf8');
 const stableResponse=fs.readFileSync('src/v581StableShellResponsePatch.js','utf8');
 const indexHtml=fs.readFileSync('public/index.html','utf8');
 const purgeConsole=fs.readFileSync('public/purge-console.html','utf8');
@@ -66,12 +65,12 @@ assert.match(indexHtml,/v14-geometry-fixture\.js\?v=20260925-v582-1/,'V582 V14 o
 assert.match(v14,/v304-unified-upload-owner\.js\?v=20260925-v582-1/,'V582 V304 upload owner must be cache-busted by the runtime loader');
 assert.doesNotMatch(indexHtml,/installV575CoordinateOwner/,'V581 static shell must retire the V575 capture owner');
 assert.doesNotMatch(indexHtml,/v580-visible-shell-recovery\.js/,'V581 static shell must retire layered V580 recovery');
-assert.match(indexHtml,/v581-stable-shell-owner\.js\?v=20260926-v590-1/,'V581 stable shell must ship in the normal dashboard HTML');
+assert.match(indexHtml,/v581-stable-shell-owner\.js\?v=20260926-v591-1/,'V581 stable shell must ship in the normal dashboard HTML');
 assert.match(indexHtml,/<a class="side-link active" data-page="home"[^>]*href="\/?\?auth=v581"/,'HOME must be a native anchor');
 assert.match(indexHtml,/<a class="side-link" data-page="ce"[^>]*href="\/ce\?auth=v581"/,'CE must be a native hard-navigation anchor');
 assert.match(indexHtml,/<a class="side-link" data-page="whpp"[^>]*href="\/whpp\?auth=v581"/,'WHPP must remain a native first-class route');
 assert.match(indexHtml,/<a class="side-link" data-page="import"[^>]*href="\/import\?auth=v581"/,'data import must remain reachable without SPA click ownership');
-assert.match(stableShell,/2026-09-26-v590-isolated-sidebar-iframe-v1/);
+assert.match(stableShell,/2026-09-26-v591-srcdoc-sidebar-isolation-v1/);
 assert.match(stableShell,/data-v581-active/,'V581 must own route visibility deterministically');
 assert.match(stableShell,/renderFallbackHomeIfStillEmpty/,'V581 must recover a blank HOME container');
 assert.match(stableShell,/isolated same-origin sidebar iframe/i,'V590 must explicitly isolate sidebar navigation from parent document click handlers');
@@ -86,13 +85,13 @@ assert.match(isolatedSidebar,/target="_top"/,'isolated sidebar links must naviga
 assert.match(isolatedSidebar,/href="\/ce\?auth=v581"/,'isolated CE link must be a plain native top-level route');
 assert.match(isolatedSidebar,/href="\/import\?auth=v581"/,'isolated import link must be a plain native top-level route');
 assert.doesNotMatch(isolatedSidebar,/preventDefault|stopImmediatePropagation|navigatePage/,'isolated sidebar must not depend on parent SPA click ownership');
-assert.match(stableResponse,/2026-09-26-v590-isolated-sidebar-response-v1/);
+assert.match(stableResponse,/2026-09-26-v591-srcdoc-sidebar-response-v1/);
 assert.match(stableResponse,/stripInlineV575/,'final delivered HTML must remove V575 even if an older response wrapper re-injects it');
 assert.match(stableResponse,/v580-visible-shell-recovery\.js/,'final delivered HTML must remove V580 layered recovery');
 assert.match(stableResponse,/V581_TAG/,'final response pass must preserve exactly one V581 owner');
 assert.match(stableResponse,/appTag/,'final response pass must locate app.js as the bootstrap boundary');
 assert.match(stableResponse,/V581_TAG\+'\\n'\+match/,'stable shell must be injected immediately before app.js');
-const stableAt=indexHtml.indexOf('/v581-stable-shell-owner.js?v=20260926-v590-1');
+const stableAt=indexHtml.indexOf('/v581-stable-shell-owner.js?v=20260926-v591-1');
 const appAt=indexHtml.indexOf('/app.js?v=20260921-v564-1');
 assert.ok(stableAt>0&&appAt>stableAt,'static V581 owner must load before app.js so navigation does not wait for app bootstrap');
 
