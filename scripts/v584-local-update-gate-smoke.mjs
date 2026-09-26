@@ -15,10 +15,12 @@ assert.equal(pkg.scripts['test:golive'],'node scripts/v584-local-candidate-gate.
 assert.equal(pkg.scripts['test:ci'],'npm run test:golive-full','CI must retain the full soak suite');
 assert.match(pkg.scripts['test:golive-full'],/v505-purge-postcommit-precleanup-gate\.test\.js/,'full CI must retain the slow post-COMMIT safety regression');
 assert.doesNotMatch(gate,/v505-purge-postcommit-precleanup-gate\.test\.js/,'desktop update gate must not depend on the slow detached PREPARE soak');
-assert.match(gate,/v587-production-browser-retry\.mjs/,'desktop update gate must run the real Edge sidebar/home recovery through the transient-only retry wrapper');
+assert.match(gate,/v587-production-browser-retry\.mjs'\]\,300_000/,'desktop update gate must give the transient-only real Edge retry wrapper a bounded five-minute task window');
 const browserRetry=fs.readFileSync(new URL('./v587-production-browser-retry.mjs',import.meta.url),'utf8');
 assert.match(browserRetry,/v581-production-shell-browser-smoke\.mjs/,'retry wrapper must execute the real production Edge smoke');
 assert.match(browserRetry,/non-transient browser assertion failed/,'real assertion failures must never be retried into a false pass');
+assert.match(gate,/const \[kind,args,taskTimeoutMs=TIMEOUT_MS\]=TASKS\[i\]/,'all other desktop candidate tasks must keep the default bounded timeout');
+assert.match(gate,/timeout:taskTimeoutMs/,'per-task timeout override must be explicit and local to the browser retry task');
 assert.match(gate,/unified-import-v7\.test\.js/,'desktop update gate must retain seven-business import protection');
 assert.match(gate,/v512-whpp-source-membership-guard\.test\.js/,'desktop update gate must retain WHPP exact membership protection');
 assert.match(launcher,/@\('run','test:golive'\)/,'existing managed launcher contract must continue to call test:golive so old installs can consume the new bounded gate');
