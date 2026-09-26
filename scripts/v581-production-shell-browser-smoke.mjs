@@ -238,8 +238,8 @@ try{
   const hitReady=await cdp.eval("(()=>{const root=document.getElementById('ce-qc-v587-sidebar-hit-surface');const ce=root?.querySelector('a[data-v587-page=\\\"ce\\\"]');const imp=root?.querySelector('a[data-v587-page=\\\"import\\\"]');if(!root||!ce||!imp)return null;const r=ce.getBoundingClientRect();const top=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);return{ready:root.dataset.v587Ready==='1',topPage:top?.dataset?.v587Page||'',ceHref:ce.getAttribute('href')||'',impHref:imp.getAttribute('href')||''};})()",12000);
   assert.equal(hitReady?.ready,true,'V587 native hit surface must be ready');
   assert.equal(hitReady?.topPage,'ce','V587 body-level CE hit anchor must own the visible CE rectangle');
-  assert.match(hitReady?.ceHref||'',/^\/ce\?/,'V587 CE hit anchor must be a native route');
-  assert.match(hitReady?.impHref||'',/^\/import\?/,'V587 import hit anchor must be a native route');
+  assert.equal(new URL(hitReady?.ceHref||'http://invalid/').pathname,'/ce','V587 CE hit anchor must be a native route');
+  assert.equal(new URL(hitReady?.impHref||'http://invalid/').pathname,'/import','V587 import hit anchor must be a native route');
 
   stage('clicking body-level CE native hit anchor; browser must hard-navigate');
   await click(cdp,'#ce-qc-v587-sidebar-hit-surface a[data-v587-page="ce"]');
