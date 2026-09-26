@@ -1,7 +1,7 @@
 (function installV581StableShell(global){
   'use strict';
   if(global.__CE_QC_V581_STABLE_SHELL__)return;
-  const VERSION='2026-09-26-v587-body-native-hit-surface-v1';
+  const VERSION='2026-09-26-v590-isolated-sidebar-iframe-v1';
   const doc=global.document;
   const NAV=[
     ['home','首页总看板','home','/'],
@@ -93,51 +93,43 @@
     nav.dataset.v581StableNav='1';
     return true;
   }
-  function hitSurfaceRoot(){
-    let root=doc.getElementById('ce-qc-v587-sidebar-hit-surface');
-    if(root)return root;
-    root=doc.createElement('div');
-    root.id='ce-qc-v587-sidebar-hit-surface';
-    root.setAttribute('aria-hidden','true');
-    root.style.cssText='position:fixed;left:0;top:0;width:0;height:0;z-index:2147483647;pointer-events:none';
-    (doc.body||doc.documentElement).appendChild(root);
-    return root;
+  function isolatedSidebarSrc(){
+    const q=new URLSearchParams(global.location?.search||'');
+    q.delete('t');
+    q.set('auth','v581');
+    q.set('active',currentPage());
+    return '/sidebar-v590.html?'+q.toString();
   }
-  function syncSidebarHitSurface(){
+  function mountIsolatedSidebar(){
     try{
-      const root=hitSurfaceRoot();
-      if(doc.body&&root.parentNode===doc.body)doc.body.appendChild(root);
-      const blocking=doc.querySelector('.modal:not([hidden]),#v303CleanStartOverlay:not([hidden])');
-      root.hidden=Boolean(blocking);
-      if(root.hidden)return;
-      const wanted=new Set();
-      for(const link of doc.querySelectorAll('.side-nav .side-link[data-page][href]')){
-        if(link.hidden)continue;
-        const cs=global.getComputedStyle?.(link);
-        if(cs&&(cs.display==='none'||cs.visibility==='hidden'))continue;
-        const r=link.getBoundingClientRect?.();
-        if(!r||r.width<8||r.height<8)continue;
-        const page=String(link.dataset.page||'home');
-        wanted.add(page);
-        let a=root.querySelector('a[data-v587-page="'+page+'"]');
-        if(!a){
-          a=doc.createElement('a');
-          a.dataset.v587Page=page;
-          a.tabIndex=-1;
-          a.setAttribute('aria-hidden','true');
-          a.style.cssText='position:fixed;display:block;pointer-events:auto;cursor:pointer;background:rgba(0,0,0,0.001);color:transparent;text-decoration:none;outline:none';
-          a.addEventListener('pointerdown',()=>safeDiag('V587_NATIVE_HIT',page),{passive:true});
-          root.appendChild(a);
-        }
-        a.href=link.href||navHref(String(link.dataset.path||'/'));
-        a.style.left=Math.round(r.left)+'px';
-        a.style.top=Math.round(r.top)+'px';
-        a.style.width=Math.max(8,Math.round(r.width))+'px';
-        a.style.height=Math.max(8,Math.round(r.height))+'px';
+      doc.getElementById('ce-qc-v587-sidebar-hit-surface')?.remove();
+      let frame=doc.getElementById('ce-qc-v590-sidebar-frame');
+      if(!frame){
+        frame=doc.createElement('iframe');
+        frame.id='ce-qc-v590-sidebar-frame';
+        frame.title='CE QC Navigation';
+        frame.setAttribute('frameborder','0');
+        frame.style.cssText='position:fixed;left:0;top:0;width:228px;height:100vh;border:0;margin:0;padding:0;background:#0b365d;z-index:2147483647;pointer-events:auto;display:block';
+        (doc.body||doc.documentElement).appendChild(frame);
+      }else if(doc.body&&frame.parentNode===doc.body){
+        doc.body.appendChild(frame);
       }
-      root.querySelectorAll('a[data-v587-page]').forEach(a=>{if(!wanted.has(String(a.dataset.v587Page||'')))a.remove();});
-      root.dataset.v587Ready='1';
-    }catch(error){safeDiag('V587_HIT_SURFACE_ERROR',error?.message||error);}
+      const src=isolatedSidebarSrc();
+      if(frame.getAttribute('src')!==src)frame.setAttribute('src',src);
+      const blocking=[...doc.querySelectorAll('.modal,#v303CleanStartOverlay')].some(node=>{
+        if(node.hidden)return false;
+        const cs=global.getComputedStyle?.(node);
+        if(cs&&(cs.display==='none'||cs.visibility==='hidden'||Number(cs.opacity||1)===0))return false;
+        const r=node.getBoundingClientRect?.();
+        return Boolean(r&&r.width>80&&r.height>80);
+      });
+      frame.style.display=blocking?'none':'block';
+      frame.dataset.v590Ready='1';
+      return frame;
+    }catch(error){
+      safeDiag('V590_IFRAME_ERROR',error?.message||error);
+      return null;
+    }
   }
   function installStyle(){
     let style=doc.getElementById('ce-qc-v581-stable-shell-style');
@@ -268,7 +260,7 @@
     try{
       ensureLayout();
       normalizeNav();
-      syncSidebarHitSurface();
+      mountIsolatedSidebar();
       const target=showRoute();
       removeEmptyLargeBlockers();
       doc.documentElement.dataset.ceQcStableShell=VERSION;
@@ -283,7 +275,21 @@
     // V587 mouse activation is handled by transparent native <a> elements appended
     // directly to document.body at the exact visible sidebar rectangles. No document-
     // level preventDefault/SPA routing remains in the primary path.
-    global.addEventListener('resize',()=>syncSidebarHitSurface(),{passive:true});
+    global.addEventListener('resize',()=>mountIsolatedSidebar(),{passive:true});
+    global.addEventListener('message',event=>{
+      if(event.origin!==global.location.origin)return;
+      if(event.data?.type!=='CE_QC_V590_TOGGLE_SIDEBAR')return;
+      const frame=doc.getElementById('ce-qc-v590-sidebar-frame');
+      const appBody=doc.querySelector('.app-body');
+      const topbar=doc.querySelector('.topbar');
+      const collapsed=frame?.dataset?.collapsed==='1';
+      if(frame){
+        frame.dataset.collapsed=collapsed?'0':'1';
+        frame.style.width=collapsed?'228px':'64px';
+      }
+      if(appBody)appBody.style.setProperty('margin-left',collapsed?'228px':'64px','important');
+      if(topbar)topbar.style.setProperty('left',collapsed?'228px':'64px','important');
+    });
     global.addEventListener('pageshow',()=>enforce('pageshow'),true);
     global.addEventListener('popstate',()=>enforce('popstate'),true);
     if(typeof MutationObserver==='function'){
@@ -308,14 +314,14 @@
       const body=doc.body;
       if(body){
         bodyObserver=new MutationObserver(records=>{
-          if(records.some(r=>[...r.addedNodes].some(n=>n?.nodeType===1&&n?.id!=='ce-qc-v587-sidebar-hit-surface'))){
-            setTimeout(()=>syncSidebarHitSurface(),0);
+          if(records.some(r=>[...r.addedNodes].some(n=>n?.nodeType===1&&n?.id!=='ce-qc-v590-sidebar-frame'))){
+            setTimeout(()=>mountIsolatedSidebar(),0);
           }
         });
         bodyObserver.observe(body,{childList:true});
       }
       if(global.ResizeObserver){
-        try{const ro=new ResizeObserver(()=>syncSidebarHitSurface());const sidebar=doc.querySelector('.sidebar');if(sidebar)ro.observe(sidebar);}catch{}
+        try{const ro=new ResizeObserver(()=>mountIsolatedSidebar());const sidebar=doc.querySelector('.sidebar');if(sidebar)ro.observe(sidebar);}catch{}
       }
     }
   }
@@ -327,5 +333,5 @@
   if(doc.querySelector('.side-nav')&&doc.querySelector('.main-content'))bind();
   else if(doc.readyState==='loading')doc.addEventListener('DOMContentLoaded',bind,{once:true});
   else bind();
-  console.info('[CE-QC][V581_STABLE_SHELL]',VERSION,'single stable shell owner: body-level native sidebar hit surface + native hard navigation + deterministic route visibility.');
+  console.info('[CE-QC][V581_STABLE_SHELL]',VERSION,'single stable shell owner: isolated same-origin sidebar iframe with native top-level links + deterministic route visibility.');
 })(window);
