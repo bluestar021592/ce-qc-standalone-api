@@ -183,7 +183,7 @@ async function hitPoint(cdp,selector){
   return p;
 }
 async function iframeHitPoint(cdp,page){
-  const expr=`(()=>{const f=document.getElementById('ce-qc-v590-sidebar-frame');if(!f||!f.contentDocument)return null;const a=f.contentDocument.querySelector('a[data-page="${String(page).replace(/"/g,'')}"]');if(!a)return null;const fr=f.getBoundingClientRect(),r=a.getBoundingClientRect();return{x:fr.left+r.left+r.width/2,y:fr.top+r.top+r.height/2,href:a.href||'',target:a.target||''};})()`;
+  const expr=`(()=>{const f=document.getElementById('ce-qc-v591-sidebar-frame');if(!f||!f.contentDocument)return null;const a=f.contentDocument.querySelector('a[data-page="${String(page).replace(/"/g,'')}"]');if(!a)return null;const fr=f.getBoundingClientRect(),r=a.getBoundingClientRect();return{x:fr.left+r.left+r.width/2,y:fr.top+r.top+r.height/2,href:a.href||'',target:a.target||''};})()`;
   const info=await cdp.eval(expr,12000);
   assert.ok(info&&Number.isFinite(info.x)&&Number.isFinite(info.y),'missing isolated sidebar point for '+page);
   stage('iframe hit '+page+' => '+info.href+' target='+info.target);
@@ -266,7 +266,7 @@ try{
   await cdp.send('Page.navigate',{url:'http://127.0.0.1:'+port+'/?auth=v581'},8000);
   await evalWait(cdp,'!!window.__CE_QC_V581_STABLE_SHELL__',8000,80,'V581 owner after production navigation');
   stage('V581 owner loaded');
-  await evalWait(cdp,"(()=>{const t=document.querySelector('.topbar'),m=document.querySelector('.main-content'),h=document.getElementById('homePage'),f=document.getElementById('ce-qc-v590-sidebar-frame');if(!t||!m||!h||!f)return false;const ts=getComputedStyle(t),ms=getComputedStyle(m),r=h.getBoundingClientRect();return ts.display!=='none'&&ts.visibility!=='hidden'&&ms.display!=='none'&&!h.hidden&&r.width>200&&r.height>80&&String(f.getAttribute('src')||'').includes('/sidebar-v590.html');})()",10000,100,'visible HOME shell with isolated sidebar iframe element');
+  await evalWait(cdp,"(()=>{const t=document.querySelector('.topbar'),m=document.querySelector('.main-content'),h=document.getElementById('homePage'),f=document.getElementById('ce-qc-v591-sidebar-frame');if(!t||!m||!h||!f)return false;const ts=getComputedStyle(t),ms=getComputedStyle(m),r=h.getBoundingClientRect(),s=String(f.srcdoc||'');return ts.display!=='none'&&ts.visibility!=='hidden'&&ms.display!=='none'&&!h.hidden&&r.width>200&&r.height>80&&s.includes('target=\\\"_top\\\"')&&s.includes('CE看板')&&s.includes('数据导入');})()",10000,100,'visible HOME shell with populated srcdoc sidebar iframe');
   stage('HOME shell visible');
   // Static regressions lock all native sidebar routes. Avoid an unnecessary Runtime.evaluate
   // snapshot here: Windows headless Edge may throttle that call even while DOM/Input CDP
@@ -274,19 +274,15 @@ try{
   // V587 focuses the real-browser gate on the unresolved production problem: native
   // sidebar activation. Blank-shell recovery remains locked by static/lifecycle tests;
   // forcing a synthetic blank here perturbs the Windows renderer before the click gate.
-  stage('verifying authenticated isolated sidebar response is same-origin frameable and navigation-only');
-  const sidebarResponse=await withTimeout(new Promise((resolve,reject)=>{
-    const req=http.request({host:'127.0.0.1',port,path:'/sidebar-v590.html?active=home&auth=v581',headers:{Cookie:'ce_qc_local_auth_v431='+signedCookie(secret)}},res=>{const chunks=[];res.on('data',chunk=>chunks.push(chunk));res.on('end',()=>resolve({status:res.statusCode||0,headers:res.headers,body:Buffer.concat(chunks).toString('utf8')}));});
+  stage('verifying V591 sidebar no longer needs a child HTML network response');
+  const directSidebar=await withTimeout(new Promise((resolve,reject)=>{
+    const req=http.request({host:'127.0.0.1',port,path:'/sidebar-v590.html?active=home&auth=v581',headers:{Cookie:'ce_qc_local_auth_v431='+signedCookie(secret)}},res=>{res.resume();res.on('end',()=>resolve({status:res.statusCode||0,frame:String(res.headers['x-frame-options']||'')}));});
     req.on('error',reject);
-    req.setTimeout(5000,()=>req.destroy(new Error('isolated sidebar request timeout')));
+    req.setTimeout(5000,()=>req.destroy(new Error('retired sidebar route probe timeout')));
     req.end();
-  }),7000,'isolated sidebar HTML request');
-  assert.equal(sidebarResponse.status,200,'isolated sidebar must be served to authenticated app');
-  assert.equal(String(sidebarResponse.headers['x-frame-options']||'').toUpperCase(),'SAMEORIGIN','isolated sidebar must be frameable only by the same origin');
-  assert.match(sidebarResponse.body,/data-page="ce" href="\/ce\?auth=v581" target="_top"/,'CE iframe link must use native top-level navigation');
-  assert.match(sidebarResponse.body,/data-page="import" href="\/import\?auth=v581" target="_top"/,'import iframe link must use native top-level navigation');
-  assert.doesNotMatch(sidebarResponse.body,/preventDefault|stopImmediatePropagation|navigatePage/,'isolated iframe must not depend on parent SPA click handlers');
-  stage('isolated sidebar response contract passed');
+  }),7000,'retired sidebar route probe');
+  assert.notEqual(directSidebar.frame.toUpperCase(),'SAMEORIGIN','V591 must not rely on the V590 frame exception');
+  stage('srcdoc isolation contract passed');
 
   stage('verifying final production HTML owner ordering');
   const delivered=await withTimeout(new Promise((resolve,reject)=>{
@@ -302,7 +298,7 @@ try{
   const appIndex=scripts.findIndex(src=>/\/app\.js/.test(src));
   assert.ok(stableIndex>=0&&appIndex>stableIndex,'V582 stable shell must be delivered before app.js');
 
-  console.log('[V590_PRODUCTION_BROWSER] real Edge loaded HOME with isolated sidebar iframe element · authenticated iframe response is SAMEORIGIN and serves plain target=_top CE/import links without parent click ownership');
+  console.log('[V591_PRODUCTION_BROWSER] real Edge loaded HOME with populated srcdoc sidebar iframe · CE/import target=_top links are present without any child HTML auth/frame dependency');
 } catch(error){
   console.error('[V581_PRODUCTION_BROWSER] backend tail\n'+backendLog.slice(-12000));
   throw error;
