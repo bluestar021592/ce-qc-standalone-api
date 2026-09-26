@@ -8,12 +8,11 @@ const cleanup=fs.readFileSync(new URL('./CE_QC_NoBackup_Cleanup.mjs',import.meta
 const start=fs.readFileSync(new URL('../Start_CE_QC.ps1',import.meta.url),'utf8');
 const server=fs.readFileSync(new URL('../server.js',import.meta.url),'utf8');
 const stable=fs.readFileSync(new URL('../public/v581-stable-shell-owner.js',import.meta.url),'utf8');
-const isolatedSidebar=fs.readFileSync(new URL('../public/sidebar-v590.html',import.meta.url),'utf8');
 const response=fs.readFileSync(new URL('../src/v581StableShellResponsePatch.js',import.meta.url),'utf8');
 
 assert.doesNotMatch(index,/installV575CoordinateOwner/,'V581 must retire the layered V575 capture owner from static HTML');
 assert.doesNotMatch(index,/v580-visible-shell-recovery\.js/,'V581 must retire the layered V580 recovery script from static HTML');
-assert.match(index,/v581-stable-shell-owner\.js\?v=20260926-v590-1/,'static shell must carry V581 as fallback');
+assert.match(index,/v581-stable-shell-owner\.js\?v=20260926-v591-1/,'static shell must carry V581 as fallback');
 assert.match(index,/<a class="side-link active" data-page="home"[^>]*href="\/?\?auth=v581"/,'HOME must be a native hard link');
 assert.match(index,/<a class="side-link" data-page="ce"[^>]*href="\/ce\?auth=v581"/,'CE must be a native hard link');
 assert.match(index,/<a class="side-link" data-page="import"[^>]*href="\/import\?auth=v581"/,'import must be a native hard link');
@@ -58,4 +57,4 @@ assert.match(cleanup,/driveLine\('D',drivesBefore\.D,drivesAfter\.D\)/);
 assert.match(cleanup,/compactSqliteStorage/);
 assert.match(start,/\[CE-QC\]\[V590\] Isolated sidebar iframe \+ legacy C backup purge \+ diff-aware updater gate are installed\./);
 
-console.log('[V590] isolated sidebar iframe + WHPP + legacy C backup purge + diff-aware updater smoke passed');
+console.log('[V591] srcdoc-isolated sidebar + WHPP + legacy C backup purge + diff-aware updater smoke passed');
