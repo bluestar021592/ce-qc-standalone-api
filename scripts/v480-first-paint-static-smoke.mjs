@@ -73,7 +73,7 @@ assert.match(indexHtml,/<a class="side-link" data-page="import"[^>]*href="\/impo
 assert.match(stableShell,/2026-09-26-v587-body-native-hit-surface-v1/);
 assert.match(stableShell,/data-v581-active/,'V581 must own route visibility deterministically');
 assert.match(stableShell,/renderFallbackHomeIfStillEmpty/,'V581 must recover a blank HOME container');
-assert.match(stableShell,/native sidebar links/i,'V581 must explicitly keep native sidebar navigation');
+assert.match(stableShell,/native hard navigation/i,'V587 must explicitly keep browser-native sidebar navigation');
 assert.doesNotMatch(stableShell,/subtree:true/,'stable-shell observer must not watch business-card/table/chart subtree mutations');
 assert.match(stableShell,/shell-structure-mutation/,'stable shell must keep bounded structural repair');
 assert.match(stableShell,/ce-qc-v587-sidebar-hit-surface/,'V587 must create one body-level sidebar hit surface');
