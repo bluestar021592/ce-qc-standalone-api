@@ -22,11 +22,11 @@ assert.match(stable,/shell-structure-mutation/,'bounded structural repair must r
 assert.match(stable,/data-v581-active/,'V581 must deterministically own visible route page');
 assert.match(stable,/renderFallbackHomeIfStillEmpty/,'V581 must retry HOME render if the page container is still blank');
 assert.match(stable,/removeEmptyLargeBlockers/,'V581 must retire large stale pointer blockers without reviving V575');
-assert.match(stable,/ce-qc-v590-sidebar-frame/,'V590 must create an isolated sidebar iframe');
-assert.match(stable,/sidebar-v590\.html/,'V590 iframe must point to the isolated navigation document');
-assert.match(isolatedSidebar,/target="_top"/,'V590 isolated links must navigate the top document natively');
-assert.match(isolatedSidebar,/data-page="whpp" href="\/whpp\?auth=v581"/,'V590 isolated sidebar must keep WHPP first-class');
-assert.doesNotMatch(isolatedSidebar,/preventDefault|stopImmediatePropagation|navigatePage/,'V590 iframe must not depend on the parent SPA event chain');
+assert.match(stable,/ce-qc-v591-sidebar-frame/,'V591 must create an isolated srcdoc sidebar iframe');
+assert.match(stable,/frame\.srcdoc=isolatedSidebarMarkup\(\)/,'V591 must render navigation directly into srcdoc');
+assert.match(stable,/target="_top"/,'V591 isolated links must navigate the top document natively');
+assert.match(stable,/\['whpp','WHPP本土看板','package','\/whpp'\]/,'V591 isolated sidebar must keep WHPP first-class');
+assert.doesNotMatch(stable,/preventDefault|stopImmediatePropagation/,'V591 iframe navigation must not depend on the parent SPA event chain');
 assert.match(response,/stripInlineV575/,'final response pass must remove V575 if any older wrapper re-injects it');
 assert.match(response,/v580-visible-shell-recovery\.js/,'final response pass must remove V580 if any older wrapper re-injects it');
 assert.match(response,/const appTag=/,'V582 response pass must locate app.js as the bootstrap boundary');
@@ -37,9 +37,8 @@ const assetAt=server.indexOf('const v575PublicAssetStatic');
 const authAt=server.indexOf('app.use(accessIdentity)');
 assert.ok(assetAt>0&&assetAt<authAt,'browser JS/CSS/image fast lane must remain before accessIdentity');
 assert.match(server,/\['\/ce', '\/ceaf', '\/tbkh', '\/ali1688', '\/whpp'/,'server routes must include /whpp');
-assert.match(server,/app\.get\('\/sidebar-v590\.html'/,'server must expose the authenticated isolated sidebar route');
-assert.match(server,/X-Frame-Options', 'SAMEORIGIN'/,'isolated sidebar alone must be embeddable by the same origin');
-assert.match(server,/X-Frame-Options', 'DENY'/,'all other authenticated HTML must retain frame denial');
+assert.doesNotMatch(server,/sidebar-v590\.html/,'V591 must remove the obsolete remote sidebar route');
+assert.match(server,/X-Frame-Options', 'DENY'/,'authenticated HTML must retain frame denial');
 assert.match(server,/app\.get\('\/api\/client-diag'/,'server must keep bounded client diagnostics');
 
 assert.match(app,/'\/whpp':'whpp'/,'base route parser must understand WHPP');
@@ -55,6 +54,6 @@ assert.match(cleanup,/\[CE-QC\]\[V573\]\[STORAGE\] cleanup complete:/);
 assert.match(cleanup,/driveLine\('C',drivesBefore\.C,drivesAfter\.C\)/);
 assert.match(cleanup,/driveLine\('D',drivesBefore\.D,drivesAfter\.D\)/);
 assert.match(cleanup,/compactSqliteStorage/);
-assert.match(start,/\[CE-QC\]\[V590\] Isolated sidebar iframe \+ legacy C backup purge \+ diff-aware updater gate are installed\./);
+assert.match(start,/\[CE-QC\]\[V591\] Srcdoc-isolated sidebar \+ legacy C backup purge \+ diff-aware updater gate are installed\./);
 
 console.log('[V591] srcdoc-isolated sidebar + WHPP + legacy C backup purge + diff-aware updater smoke passed');
