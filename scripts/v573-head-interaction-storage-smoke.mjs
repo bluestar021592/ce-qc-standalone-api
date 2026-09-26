@@ -12,7 +12,7 @@ const response=fs.readFileSync(new URL('../src/v581StableShellResponsePatch.js',
 
 assert.doesNotMatch(index,/installV575CoordinateOwner/,'V581 must retire the layered V575 capture owner from static HTML');
 assert.doesNotMatch(index,/v580-visible-shell-recovery\.js/,'V581 must retire the layered V580 recovery script from static HTML');
-assert.match(index,/v581-stable-shell-owner\.js\?v=20260925-v585-1/,'static shell must carry V581 as fallback');
+assert.match(index,/v581-stable-shell-owner\.js\?v=20260926-v586-1/,'static shell must carry V581 as fallback');
 assert.match(index,/<a class="side-link active" data-page="home"[^>]*href="\/?\?auth=v581"/,'HOME must be a native hard link');
 assert.match(index,/<a class="side-link" data-page="ce"[^>]*href="\/ce\?auth=v581"/,'CE must be a native hard link');
 assert.match(index,/<a class="side-link" data-page="import"[^>]*href="\/import\?auth=v581"/,'import must be a native hard link');
@@ -23,10 +23,11 @@ assert.match(stable,/data-v581-active/,'V581 must deterministically own visible 
 assert.match(stable,/renderFallbackHomeIfStillEmpty/,'V581 must retry HOME render if the page container is still blank');
 assert.match(stable,/removeEmptyLargeBlockers/,'V581 must retire large stale pointer blockers without reviving V575');
 assert.match(stable,/function sidebarLinkForEvent\(event\)/,'V582 must resolve the intended sidebar route even when a stale layer owns event.target');
-assert.match(stable,/doc\.addEventListener\('pointerdown',hardNavigateSidebar,true\)/,'V585 must own pointerdown before legacy sidebar blockers');
-assert.match(stable,/doc\.addEventListener\('click',hardNavigateSidebar,true\)/,'V585 must retain click fallback');
-assert.match(stable,/typeof global\.navigatePage==='function'/,'V585 sidebar activation must call the app route owner directly when available');
-assert.match(stable,/global\.history\?\.pushState\?\./,'V585 must retain an early-route fallback before app bootstrap');
+assert.match(stable,/a\.onpointerdown=hardNavigateSidebar/,'V586 must bind pointerdown directly on every sidebar anchor');
+assert.match(stable,/a\.onclick=hardNavigateSidebar/,'V586 must bind click fallback directly on every sidebar anchor');
+assert.match(stable,/doc\.addEventListener\('click',hardNavigateSidebar,true\)/,'V586 must retain click fallback');
+assert.match(stable,/typeof global\.navigatePage==='function'/,'V586 sidebar activation must call the app route owner directly when available');
+assert.match(stable,/global\.history\?\.pushState\?\./,'V586 must retain an early-route fallback before app bootstrap');
 assert.match(response,/stripInlineV575/,'final response pass must remove V575 if any older wrapper re-injects it');
 assert.match(response,/v580-visible-shell-recovery\.js/,'final response pass must remove V580 if any older wrapper re-injects it');
 assert.match(response,/const appTag=/,'V582 response pass must locate app.js as the bootstrap boundary');
@@ -52,6 +53,6 @@ assert.match(cleanup,/\[CE-QC\]\[V573\]\[STORAGE\] cleanup complete:/);
 assert.match(cleanup,/driveLine\('C',drivesBefore\.C,drivesAfter\.C\)/);
 assert.match(cleanup,/driveLine\('D',drivesBefore\.D,drivesAfter\.D\)/);
 assert.match(cleanup,/compactSqliteStorage/);
-assert.match(start,/\[CE-QC\]\[V585\] Pointerdown-first sidebar owner \+ dashboard repair \+ bounded updater \+ safe C\/D cleanup are installed\./);
+assert.match(start,/\[CE-QC\]\[V586\] Anchor-owned sidebar routing \+ dashboard repair \+ bounded updater \+ safe C\/D cleanup are installed\./);
 
-console.log('[V585] pointerdown-first stable shell + native sidebar + WHPP + bounded updater + safe C/D cleanup smoke passed');
+console.log('[V586] anchor-owned stable shell + native sidebar + WHPP + bounded updater + safe C/D cleanup smoke passed');
