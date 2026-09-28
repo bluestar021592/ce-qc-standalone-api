@@ -274,6 +274,11 @@ try{
   assert.ok(Math.abs(parseFloat(layout.cssVar||'0')-layout.sRight)<=1.5,'V596 shell variable must equal the measured sidebar edge');
   stage('V596 dynamic sidebar geometry passed edge='+layout.sRight);
 
+  // Let the stable shell's bounded startup repair timers finish. The blockers below
+  // must then be handled by the single early coordinate owner, not by a scheduled scan.
+  await new Promise(r=>setTimeout(r,7200));
+  stage('V596 bounded startup repair timers settled');
+
   stage('proving blocked real topbar query is recovered by the single V596 early owner');
   await cdp.eval("(()=>{delete document.documentElement.dataset.ceQcV596Fallback;delete document.documentElement.dataset.v596TopAction;document.getElementById('v596TopbarBlocker')?.remove();window.__v596TopOriginal=window.applyTopDateRange;window.applyTopDateRange=function(){document.documentElement.dataset.v596TopAction='1';return true;};const edge=parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ce-qc-shell-left'))||0;const b=document.createElement('div');b.id='v596TopbarBlocker';Object.assign(b.style,{position:'fixed',left:edge+'px',top:'0',right:'0',height:'64px',zIndex:'2147483647',background:'rgba(255,0,0,0.001)',pointerEvents:'auto'});document.body.appendChild(b);return true;})()",12000);
   const topInfo=await domElement(cdp,'#topRangeQuery',{box:true});
