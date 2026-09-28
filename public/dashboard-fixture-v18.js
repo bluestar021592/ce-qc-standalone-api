@@ -176,6 +176,6 @@
     [100, 500, 1500, 3000, 5000].forEach(ms => setTimeout(clearNoticeWhenRendered, ms));
   }
 
-  document.documentElement.dataset.ceQcV597LegacyInteractionRetired='1';
+  try{if(document.documentElement?.dataset)document.documentElement.dataset.ceQcV597LegacyInteractionRetired='1';}catch{}
   console.info('[CE-QC][V597_STARTUP_GUARD] first-paint/read-timeout guard active; legacy V565 pointer/click owner retired.');
 })(window);
