@@ -261,16 +261,30 @@ try{
   assert.match(earlyAsset,/global\.location\.href=href/,'V593 early owner must hard-navigate');
   stage('V593 early owner contract delivered');
 
-  stage('proving main-content click through a maximum-z stale blocker');
-  await cdp.eval("(()=>{document.getElementById('v594MainProbe')?.remove();document.getElementById('v594MainContentBlocker')?.remove();const main=document.querySelector('.main-content');if(!main)return false;const btn=document.createElement('button');btn.id='v594MainProbe';btn.type='button';btn.textContent='V594 probe';Object.assign(btn.style,{position:'fixed',left:'320px',top:'120px',width:'140px',height:'44px',zIndex:'10',pointerEvents:'auto'});btn.addEventListener('click',()=>{document.documentElement.dataset.v594MainClick='1';},{once:true});main.appendChild(btn);const b=document.createElement('div');b.id='v594MainContentBlocker';Object.assign(b.style,{position:'fixed',left:'228px',top:'64px',right:'0',bottom:'0',zIndex:'2147483647',background:'rgba(255,0,0,0.001)',pointerEvents:'auto'});document.body.appendChild(b);window.__CE_QC_V581_STABLE_SHELL__?.enforce?.('v594-main-content-browser-gate');return true;})()",12000);
-  const mainInfo=await domElement(cdp,'#v594MainProbe',{box:true});
-  await evalWait(cdp,"getComputedStyle(document.getElementById('v594MainContentBlocker')).pointerEvents==='none'",4000,50,'V594 main-content blocker retirement');
+  stage('waiting for real delivered right-side controls');
+  await evalWait(cdp,"!!document.querySelector('#topRangeQuery')&&!!document.querySelector('.main-content .v18-business-card')",10000,80,'real topbar and dashboard controls');
+
+  stage('proving real topbar query click through a maximum-z stale blocker without manual enforce');
+  await cdp.eval("(()=>{delete document.documentElement.dataset.v595TopQueryClick;document.getElementById('v595TopbarBlocker')?.remove();const btn=document.querySelector('#topRangeQuery');if(!btn)return false;btn.addEventListener('click',()=>{document.documentElement.dataset.v595TopQueryClick='1';},{once:true});const b=document.createElement('div');b.id='v595TopbarBlocker';Object.assign(b.style,{position:'fixed',left:'228px',top:'0',right:'0',height:'64px',zIndex:'2147483647',background:'rgba(255,0,0,0.001)',pointerEvents:'auto'});document.body.appendChild(b);return getComputedStyle(b).pointerEvents;})()",12000);
+  const topInfo=await domElement(cdp,'#topRangeQuery',{box:true});
+  await cdp.send('Input.dispatchMouseEvent',{type:'mouseMoved',x:topInfo.point.x,y:topInfo.point.y,button:'none'},12000);
+  await evalWait(cdp,"getComputedStyle(document.getElementById('v595TopbarBlocker')).pointerEvents==='none'",4000,50,'V595 topbar pointer-time blocker retirement');
+  await cdp.send('Input.dispatchMouseEvent',{type:'mousePressed',x:topInfo.point.x,y:topInfo.point.y,button:'left',clickCount:1},12000);
+  await cdp.send('Input.dispatchMouseEvent',{type:'mouseReleased',x:topInfo.point.x,y:topInfo.point.y,button:'left',clickCount:1},12000);
+  await evalWait(cdp,"document.documentElement.dataset.v595TopQueryClick==='1'",4000,50,'V595 real topbar query click delivery');
+  await cdp.eval("document.getElementById('v595TopbarBlocker')?.remove();true",12000);
+  stage('V595 real topbar query click recovery passed');
+
+  stage('proving real main dashboard card click through a maximum-z stale blocker without manual enforce');
+  await cdp.eval("(()=>{delete document.documentElement.dataset.v595MainCardClick;document.getElementById('v595MainContentBlocker')?.remove();const btn=document.querySelector('.main-content .v18-business-card');if(!btn)return false;btn.addEventListener('click',()=>{document.documentElement.dataset.v595MainCardClick='1';},{once:true});const b=document.createElement('div');b.id='v595MainContentBlocker';Object.assign(b.style,{position:'fixed',left:'228px',top:'64px',right:'0',bottom:'0',zIndex:'2147483647',background:'rgba(255,0,0,0.001)',pointerEvents:'auto'});document.body.appendChild(b);return getComputedStyle(b).pointerEvents;})()",12000);
+  const mainInfo=await domElement(cdp,'.main-content .v18-business-card',{box:true});
   await cdp.send('Input.dispatchMouseEvent',{type:'mouseMoved',x:mainInfo.point.x,y:mainInfo.point.y,button:'none'},12000);
+  await evalWait(cdp,"getComputedStyle(document.getElementById('v595MainContentBlocker')).pointerEvents==='none'",4000,50,'V595 main-content pointer-time blocker retirement');
   await cdp.send('Input.dispatchMouseEvent',{type:'mousePressed',x:mainInfo.point.x,y:mainInfo.point.y,button:'left',clickCount:1},12000);
   await cdp.send('Input.dispatchMouseEvent',{type:'mouseReleased',x:mainInfo.point.x,y:mainInfo.point.y,button:'left',clickCount:1},12000);
-  await evalWait(cdp,"document.documentElement.dataset.v594MainClick==='1'",4000,50,'V594 main-content click delivery');
-  await cdp.eval("document.getElementById('v594MainContentBlocker')?.remove();document.getElementById('v594MainProbe')?.remove();true",12000);
-  stage('V594 main-content click recovery passed');
+  await evalWait(cdp,"document.documentElement.dataset.v595MainCardClick==='1'",4000,50,'V595 real dashboard card click delivery');
+  await cdp.eval("document.getElementById('v595MainContentBlocker')?.remove();true",12000);
+  stage('V595 real main dashboard card click recovery passed');
 
   stage('proving CE navigation through a maximum-z stale blocker');
   const ceInfo=await domElement(cdp,'.side-nav .side-link[data-page="ce"]',{box:true});
@@ -298,7 +312,7 @@ try{
   const appIndex=scripts.findIndex(src=>/\/app\.js/.test(src));
   assert.ok(earlyIndex>=0&&stableIndex>earlyIndex&&appIndex>stableIndex,'V593 window capture must be delivered before the stable owner and app.js');
 
-  console.log('[V594_PRODUCTION_BROWSER] real Edge passed · main-content click survives a maximum-z stale blocker · sidebar navigation remains protected by V593 coordinate owner');
+  console.log('[V595_PRODUCTION_BROWSER] real Edge passed · real topbar query + real dashboard card survive maximum-z stale blockers without manual enforce · sidebar navigation remains protected by V593 coordinate owner');
 } catch(error){
   console.error('[V581_PRODUCTION_BROWSER] backend tail\n'+backendLog.slice(-12000));
   throw error;
