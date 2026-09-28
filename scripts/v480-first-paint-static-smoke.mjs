@@ -177,9 +177,8 @@ assert.equal(stage.style.pointerEvents,'auto','V535 must keep the stage interact
 assert.equal(shell.style.pointerEvents,'auto','V535 must keep the shell interactive');
 
 const interactiveTimer=timers.find(item=>item.ms===0);
-assert.ok(interactiveTimer,'V565 must schedule an immediate post-script interaction repair pass');
-interactiveTimer.fn();
-assert.equal(document.documentElement.style.pointerEvents,'auto','V565 must keep the root interactive');
+assert.equal(interactiveTimer,undefined,'V597 startup guard must not schedule a legacy interaction repair pass');
+assert.equal(document.documentElement.style.pointerEvents,'auto','V597 startup guard must keep the root interactive');
 assert.equal(notices.size,0,'V564 must not leave a startup notice overlay');
 
 const headerTimerStart=timers.length;
