@@ -268,10 +268,8 @@ try{
   await cdp.send('Input.dispatchMouseEvent',{type:'mouseMoved',x:ceInfoEarly.point.x,y:ceInfoEarly.point.y,button:'none'},12000);
   await cdp.send('Input.dispatchMouseEvent',{type:'mousePressed',x:ceInfoEarly.point.x,y:ceInfoEarly.point.y,button:'left',clickCount:1},12000);
   await cdp.send('Input.dispatchMouseEvent',{type:'mouseReleased',x:ceInfoEarly.point.x,y:ceInfoEarly.point.y,button:'left',clickCount:1},12000);
-  await waitFor(async()=>{
-    try{return await cdp.eval("location.pathname==='/ce'&&document.getElementById('pageTitle')?.textContent.includes('CE')",6000);}
-    catch{return false;}
-  },10000,120,'V597 early real VIEWER /ce navigation');
+  cdp=await reattachAfterNavigation(cdp,debugPort,'/ce');
+  await evalWait(cdp,"location.pathname==='/ce'&&document.getElementById('pageTitle')?.textContent.includes('CE')",6000,80,'V597 reattached real VIEWER /ce page');
   stage('V597 early real VIEWER sidebar hard navigation passed');
 
   stage('returning to HOME for topbar/main-content proofs');
