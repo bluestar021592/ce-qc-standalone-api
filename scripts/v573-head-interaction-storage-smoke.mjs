@@ -13,7 +13,7 @@ const response=fs.readFileSync(new URL('../src/v581StableShellResponsePatch.js',
 
 assert.doesNotMatch(index,/installV575CoordinateOwner/,'V581 must retire the layered V575 capture owner from static HTML');
 assert.doesNotMatch(index,/v580-visible-shell-recovery\.js/,'V581 must retire the layered V580 recovery script from static HTML');
-assert.match(index,/v581-stable-shell-owner\.js\?v=20260926-v594-1/,'static shell must carry V581 as fallback');
+assert.match(index,/v581-stable-shell-owner\.js\?v=20260928-v595-1/,'static shell must carry V581 as fallback');
 assert.match(index,/<a class="side-link active" data-page="home"[^>]*href="\/?\?auth=v581"/,'HOME must be a native hard link');
 assert.match(index,/<a class="side-link" data-page="ce"[^>]*href="\/ce\?auth=v581"/,'CE must be a native hard link');
 assert.match(index,/<a class="side-link" data-page="import"[^>]*href="\/import\?auth=v581"/,'import must be a native hard link');
@@ -23,8 +23,11 @@ assert.match(stable,/shell-structure-mutation/,'bounded structural repair must r
 assert.match(stable,/data-v581-active/,'V581 must deterministically own visible route page');
 assert.match(stable,/renderFallbackHomeIfStillEmpty/,'V581 must retry HOME render if the page container is still blank');
 assert.match(stable,/removeEmptyLargeBlockers/,'V581 must retire large stale pointer blockers without reviving V575');
-assert.match(stable,/\.main-content \[onclick\]/,'V594 blocker recovery must inspect interactive main-content nodes, not only sidebar controls');
-assert.doesNotMatch(stable,/controls\.slice\(0,8\)/,'V594 must not truncate blocker checks before main-content controls are reached');
+assert.match(stable,/\.main-content \[onclick\]/,'V595 blocker recovery must inspect interactive main-content nodes, not only sidebar controls');
+assert.doesNotMatch(stable,/controls\.slice\(0,8\)/,'V595 must not truncate blocker checks before main-content controls are reached');
+assert.match(stable,/retirePointerBlockersAt/,'V595 must repair stale right-side blockers at the real pointer coordinate');
+assert.match(stable,/global\.addEventListener\('pointermove',pointerRecoveryOwner,true\)/,'V595 must repair before a real mouse click selects its target');
+assert.match(stable,/global\.addEventListener\('mousedown',pointerRecoveryOwner,true\)/,'V595 must keep a stationary-pointer fallback before click');
 assert.match(early,/global\.addEventListener\('pointerdown',pointerOwner,true\)/,'V593 must capture sidebar intent at window before document blockers');
 assert.match(early,/sidebarLinkAt/,'V593 must route by sidebar geometry');
 assert.match(early,/location\.href=href/,'V593 must use browser hard navigation');
@@ -58,6 +61,6 @@ assert.match(cleanup,/\[CE-QC\]\[V573\]\[STORAGE\] cleanup complete:/);
 assert.match(cleanup,/driveLine\('C',drivesBefore\.C,drivesAfter\.C\)/);
 assert.match(cleanup,/driveLine\('D',drivesBefore\.D,drivesAfter\.D\)/);
 assert.match(cleanup,/compactSqliteStorage/);
-assert.match(start,/\[CE-QC\]\[V593\] Unconditional sidebar coordinate routing \+ original visible menu \+ diff-aware updater gate are installed\./);
+assert.match(start,/\[CE-QC\]\[V595\] Pointer-time right-content recovery \+ original visible menu \+ diff-aware updater gate are installed\./);
 
-console.log('[V593] unconditional sidebar coordinate routing + original menu + WHPP + diff-aware updater smoke passed');
+console.log('[V595] pointer-time right-content recovery + original menu + WHPP + diff-aware updater smoke passed');
