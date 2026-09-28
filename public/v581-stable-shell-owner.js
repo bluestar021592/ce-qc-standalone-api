@@ -1,7 +1,7 @@
 (function installV581StableShell(global){
   'use strict';
   if(global.__CE_QC_V581_STABLE_SHELL__)return;
-  const VERSION='2026-09-26-v594-main-content-click-recovery-v1';
+  const VERSION='2026-09-28-v595-pointer-time-main-recovery-v1';
   const doc=global.document;
   const NAV=[
     ['home','首页总看板','home','/'],
@@ -197,10 +197,61 @@
     }catch(error){safeDiag('V581_RENDER_CALL_ERROR',error?.message||error);}
     showRoute();
   }
+  const MAIN_INTERACTIVE='.topbar button,.topbar a[href],.topbar input,.topbar select,.topbar textarea,.topbar [onclick],.topbar [role="button"],.main-content button,.main-content a[href],.main-content input,.main-content select,.main-content textarea,.main-content [onclick],.main-content [role="button"]';
+  const LEGITIMATE_OVERLAY='.modal:not([hidden]),.tracking-drawer:not([hidden]),#accountDropdown:not([hidden]),#v303CleanStartOverlay';
+
+  function retireBlocker(node,vw,vh,reason='scan'){
+    try{
+      if(!node?.style||node.closest?.(LEGITIMATE_OVERLAY))return false;
+      const nr=node.getBoundingClientRect?.(),cs=global.getComputedStyle?.(node);
+      if(!nr||!cs||cs.pointerEvents==='none')return false;
+      const pos=String(cs.position||'');
+      if(!['fixed','absolute','sticky'].includes(pos))return false;
+      const area=Math.max(0,nr.width)*Math.max(0,nr.height)/(vw*vh);
+      const zRaw=String(cs.zIndex||'').trim();
+      const z=/^-?\d+$/.test(zRaw)?Number(zRaw):0;
+      if(area<0.30&&z<10000)return false;
+      node.style.setProperty('pointer-events','none','important');
+      node.dataset.ceQcV581RetiredBlocker='1';
+      node.dataset.ceQcV595RetiredReason=reason;
+      return true;
+    }catch{return false;}
+  }
+
+  function retirePointerBlockersAt(x,y,reason='pointer'){
+    try{
+      const vw=Math.max(1,global.innerWidth||1),vh=Math.max(1,global.innerHeight||1);
+      if(!Number.isFinite(x)||!Number.isFinite(y)||x<0||y<0||x>=vw||y>=vh)return false;
+      const stack=[...(doc.elementsFromPoint?.(x,y)||[])];
+      let control=null,controlIndex=-1;
+      for(let i=0;i<stack.length;i+=1){
+        const node=stack[i];
+        const candidate=node?.closest?.('button,a[href],input,select,textarea,[onclick],[role="button"]');
+        if(!candidate||candidate.hidden||candidate.disabled)continue;
+        if(!candidate.closest?.('.topbar,.main-content'))continue;
+        const cr=candidate.getBoundingClientRect?.();
+        if(!cr||cr.width<1||cr.height<1)continue;
+        control=candidate;controlIndex=i;break;
+      }
+      if(!control||controlIndex<1)return false;
+      let retired=0;
+      for(let i=0;i<controlIndex;i+=1){
+        const node=stack[i];
+        if(!node||node===control||control.contains(node)||node.contains(control))continue;
+        if(retireBlocker(node,vw,vh,reason))retired+=1;
+      }
+      if(retired){
+        doc.documentElement.dataset.ceQcV595PointerRecovery=String(Date.now());
+        safeDiag('V595_POINTER_RECOVERY',reason+'|retired='+retired+'|control='+(control.id||control.className||control.tagName||'unknown'));
+      }
+      return retired>0;
+    }catch{return false;}
+  }
+
   function removeEmptyLargeBlockers(){
     try{
       const vw=Math.max(1,global.innerWidth||1),vh=Math.max(1,global.innerHeight||1);
-      const controls=[...doc.querySelectorAll('.side-link[href],.topbar button,.topbar a[href],.main-content button,.main-content a[href],.main-content [onclick],.main-content input,.main-content select,.main-content textarea')];
+      const controls=[...doc.querySelectorAll('.side-link[href],'+MAIN_INTERACTIVE)];
       for(const control of controls){
         const r=control.getBoundingClientRect?.();if(!r||r.width<1||r.height<1)continue;
         if(r.bottom<0||r.top>vh||r.right<0||r.left>vw)continue;
@@ -208,17 +259,18 @@
         const stack=doc.elementsFromPoint?.(x,y)||[];
         for(const node of stack){
           if(node===control||control.contains(node)||node.contains(control))break;
-          if(node.closest?.('.modal:not([hidden]),.tracking-drawer:not([hidden]),#accountDropdown:not([hidden]),#v303CleanStartOverlay'))continue;
-          const nr=node.getBoundingClientRect?.(),cs=global.getComputedStyle?.(node);
-          if(!nr||!cs)continue;
-          const area=(nr.width*nr.height)/(vw*vh);
-          const pos=String(cs.position||'');
-          if(area>=0.30&&['fixed','absolute','sticky'].includes(pos)){
-            node.style?.setProperty('pointer-events','none','important');
-            node.dataset.ceQcV581RetiredBlocker='1';
-          }
+          retireBlocker(node,vw,vh,'scheduled-scan');
         }
       }
+    }catch{}
+  }
+
+  function pointerRecoveryOwner(event){
+    try{
+      const x=Number(event?.clientX),y=Number(event?.clientY);
+      const sidebar=doc.querySelector('.sidebar')?.getBoundingClientRect?.();
+      if(sidebar&&x>=sidebar.left&&x<=sidebar.right&&y>=sidebar.top&&y<=sidebar.bottom)return;
+      retirePointerBlockersAt(x,y,String(event?.type||'pointer'));
     }catch{}
   }
 
@@ -243,6 +295,13 @@
     [50,250,800,1800,3500,7000].forEach(ms=>setTimeout(()=>{enforce('timer-'+ms);renderFallbackHomeIfStillEmpty();},ms));
     global.addEventListener('pageshow',()=>enforce('pageshow'),true);
     global.addEventListener('popstate',()=>enforce('popstate'),true);
+    // V595: repair a stale right-side hit blocker on the user's real pointer path.
+    // pointermove/mousemove normally retires it before the click target is chosen;
+    // pointerdown/mousedown are retained as a no-delay fallback for stationary pointers.
+    global.addEventListener('pointermove',pointerRecoveryOwner,true);
+    global.addEventListener('mousemove',pointerRecoveryOwner,true);
+    global.addEventListener('pointerdown',pointerRecoveryOwner,true);
+    global.addEventListener('mousedown',pointerRecoveryOwner,true);
     if(typeof MutationObserver==='function'){
       observer=new MutationObserver(records=>{
         if(enforcing)return;
@@ -265,12 +324,12 @@
     }
   }
 
-  global.__CE_QC_V581_STABLE_SHELL__={version:VERSION,enforce,normalizeNav,showRoute};
+  global.__CE_QC_V581_STABLE_SHELL__={version:VERSION,enforce,normalizeNav,showRoute,retirePointerBlockersAt};
   // The owner is intentionally injected immediately before app.js, after the full
   // dashboard markup has been parsed. Bind now instead of waiting for DOMContentLoaded,
   // because a slow legacy bootstrap must never delay sidebar click ownership.
   if(doc.querySelector('.side-nav')&&doc.querySelector('.main-content'))bind();
   else if(doc.readyState==='loading')doc.addEventListener('DOMContentLoaded',bind,{once:true});
   else bind();
-  console.info('[CE-QC][V581_STABLE_SHELL]',VERSION,'single stable shell owner: original visible sidebar + unconditional early coordinate navigation + deterministic route visibility.');
+  console.info('[CE-QC][V581_STABLE_SHELL]',VERSION,'single stable shell owner: original visible sidebar + pointer-time right-content recovery + deterministic route visibility.');
 })(window);
