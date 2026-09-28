@@ -292,6 +292,8 @@ try{
   await cdp.eval("document.getElementById('v595MainContentBlocker')?.remove();true",12000);
   stage('V595 real main dashboard card recovery and click passed');
 
+  await cdp.eval("window.scrollTo(0,0);true",12000);
+  await new Promise(r=>setTimeout(r,80));
   stage('proving CE navigation through a maximum-z stale blocker');
   const ceInfo=await domElement(cdp,'.side-nav .side-link[data-page="ce"]',{box:true});
   await cdp.eval("(()=>{document.getElementById('v593SidebarBlocker')?.remove();const b=document.createElement('div');b.id='v593SidebarBlocker';Object.assign(b.style,{position:'fixed',left:'0',top:'0',width:'228px',height:'100vh',zIndex:'2147483647',background:'rgba(255,0,0,0.001)',pointerEvents:'auto'});document.body.appendChild(b);return true;})()",12000);
@@ -331,4 +333,4 @@ try{
   try{fs.rmSync(root,{recursive:true,force:true,maxRetries:10,retryDelay:50})}catch{}
 }
 
-// V595 Windows final gate trigger
+// V595 Windows final gate trigger 2
