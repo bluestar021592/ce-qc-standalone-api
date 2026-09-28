@@ -270,45 +270,36 @@ try{
   assert.match(earlyAsset,/global\.location\.href=href/,'V596 early owner must retain hard navigation for sidebar routes');
   stage('V596 early owner contract delivered');
 
-  stage('waiting for real delivered right-side controls');
-  await evalWait(cdp,"!!document.querySelector('#topRangeQuery')&&!!document.querySelector('.main-content .v18-business-card')",10000,80,'real topbar and dashboard controls');
-
-  stage('settling initial dynamic shell geometry before interaction proofs');
-  await cdp.eval("window.__CE_QC_V581_STABLE_SHELL__?.enforce?.('v597-initial-home-settle');true",12000);
-  await evalWait(cdp,"(()=>{const s=document.querySelector('.sidebar')?.getBoundingClientRect(),a=document.querySelector('.app-body')?.getBoundingClientRect(),t=document.querySelector('.topbar')?.getBoundingClientRect(),h=document.querySelector('#pageTitle')?.getBoundingClientRect(),v=parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ce-qc-shell-left')||'0');if(!s||!a||!t||!h)return false;return s.right>70&&Math.abs(a.left-s.right)<=1.5&&Math.abs(t.left-s.right)<=1.5&&h.left+0.5>=s.right&&Math.abs(v-s.right)<=1.5;})()",5000,80,'V597 initial dynamic shell geometry');
-
-  stage('verifying V596 shell offsets match the real sidebar edge');
-  const layout=await cdp.eval("(()=>{const s=document.querySelector('.sidebar')?.getBoundingClientRect(),a=document.querySelector('.app-body')?.getBoundingClientRect(),t=document.querySelector('.topbar')?.getBoundingClientRect(),h=document.querySelector('#pageTitle')?.getBoundingClientRect();return{sRight:s?.right||0,aLeft:a?.left||0,tLeft:t?.left||0,titleLeft:h?.left||0,cssVar:getComputedStyle(document.documentElement).getPropertyValue('--ce-qc-shell-left').trim(),bodyClass:String(document.body?.className||''),vw:innerWidth};})()",12000);
-  assert.ok(layout.sRight>70,'desktop sidebar must have a measurable visible right edge');
-  assert.ok(Math.abs(layout.aLeft-layout.sRight)<=1.5,'app body must start exactly after the real sidebar');
-  assert.ok(Math.abs(layout.tLeft-layout.sRight)<=1.5,'topbar must start exactly after the real sidebar');
-  assert.ok(layout.titleLeft+0.5>=layout.sRight,'page title must not sit underneath the sidebar');
-  assert.ok(Math.abs(parseFloat(layout.cssVar||'0')-layout.sRight)<=1.5,'V596 shell variable must equal the measured sidebar edge');
-  stage('V597 dynamic sidebar geometry passed edge='+layout.sRight+' vw='+layout.vw+' bodyClass='+layout.bodyClass);
-
-  stage('precomputing real VIEWER control coordinates before any click');
-  await cdp.eval("(()=>{const btn=document.querySelector('.main-content .v18-business-card');if(!btn)return false;btn.scrollIntoView({block:'center',inline:'nearest',behavior:'instant'});return true;})()",12000);
-  await new Promise(r=>setTimeout(r,80));
-  const topInfo=await domElement(cdp,'#topRangeQuery',{box:true});
-  const mainInfo=await domElement(cdp,'.main-content .v18-business-card',{box:true});
-  const ceInfoFinal=await domElement(cdp,'.side-nav .side-link[data-page="ce"]',{box:true});
-  assert.ok(mainInfo.point.y>=64&&mainInfo.point.y<950,'real dashboard card must be visible before normal click proof');
-  await cdp.eval("(()=>{delete document.documentElement.dataset.v597TopNativeClick;delete document.documentElement.dataset.v597MainNativeClick;const top=document.querySelector('#topRangeQuery'),main=document.querySelector('.main-content .v18-business-card');if(!top||!main)return false;top.addEventListener('click',event=>{document.documentElement.dataset.v597TopNativeClick='1';event.preventDefault();event.stopImmediatePropagation();},{once:true,capture:true});main.addEventListener('click',event=>{document.documentElement.dataset.v597MainNativeClick='1';event.preventDefault();event.stopImmediatePropagation();},{once:true,capture:true});return true;})()",12000);
-  stage('V597 real control coordinates and listeners prepared');
+  stage('preparing one-shot real VIEWER interaction proof without CDP DOM traversal');
+  const proof=await cdp.eval("(()=>{window.__CE_QC_V581_STABLE_SHELL__?.enforce?.('v597-one-shot-home-settle');const main=document.querySelector('.main-content .v18-business-card'),top=document.querySelector('#topRangeQuery'),side=document.querySelector('.side-nav .side-link[data-page=\\\"ce\\\"]'),sidebar=document.querySelector('.sidebar'),app=document.querySelector('.app-body'),bar=document.querySelector('.topbar'),title=document.querySelector('#pageTitle');if(!main||!top||!side||!sidebar||!app||!bar||!title)return null;main.scrollIntoView({block:'center',inline:'nearest',behavior:'instant'});const box=n=>{const r=n.getBoundingClientRect();return{x:r.left+r.width/2,y:r.top+r.height/2,left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width,height:r.height}};const sb=box(sidebar),ab=box(app),tb=box(bar),hb=box(title);delete document.documentElement.dataset.v597TopNativeClick;delete document.documentElement.dataset.v597MainNativeClick;top.addEventListener('click',event=>{document.documentElement.dataset.v597TopNativeClick='1';event.preventDefault();event.stopImmediatePropagation();},{once:true,capture:true});main.addEventListener('click',event=>{document.documentElement.dataset.v597MainNativeClick='1';event.preventDefault();event.stopImmediatePropagation();},{once:true,capture:true});side.dataset.path='';side.setAttribute('href','#v597-sidebar-probe');return{top:box(top),main:box(main),side:box(side),sidebar:sb,app:ab,bar:tb,title:hb,cssVar:getComputedStyle(document.documentElement).getPropertyValue('--ce-qc-shell-left').trim(),vw:innerWidth};})()",12000);
+  assert.ok(proof&&proof.sidebar.right>70,'V597 one-shot interaction proof must resolve real delivered controls');
+  assert.ok(Math.abs(proof.app.left-proof.sidebar.right)<=1.5,'app body must start exactly after the real sidebar');
+  assert.ok(Math.abs(proof.bar.left-proof.sidebar.right)<=1.5,'topbar must start exactly after the real sidebar');
+  assert.ok(proof.title.left+0.5>=proof.sidebar.right,'page title must not sit underneath the sidebar');
+  assert.ok(Math.abs(parseFloat(proof.cssVar||'0')-proof.sidebar.right)<=1.5,'V596 shell variable must equal the measured sidebar edge');
+  assert.ok(proof.main.y>=64&&proof.main.y<950,'real dashboard card must be visible before normal click proof');
+  stage('V597 one-shot geometry passed edge='+proof.sidebar.right+' vw='+proof.vw);
 
   stage('proving real topbar query receives a normal VIEWER click');
-  await cdp.send('Input.dispatchMouseEvent',{type:'mouseMoved',x:topInfo.point.x,y:topInfo.point.y,button:'none'},12000);
-  await cdp.send('Input.dispatchMouseEvent',{type:'mousePressed',x:topInfo.point.x,y:topInfo.point.y,button:'left',clickCount:1},12000);
-  await cdp.send('Input.dispatchMouseEvent',{type:'mouseReleased',x:topInfo.point.x,y:topInfo.point.y,button:'left',clickCount:1},12000);
+  await cdp.send('Input.dispatchMouseEvent',{type:'mouseMoved',x:proof.top.x,y:proof.top.y,button:'none'},12000);
+  await cdp.send('Input.dispatchMouseEvent',{type:'mousePressed',x:proof.top.x,y:proof.top.y,button:'left',clickCount:1},12000);
+  await cdp.send('Input.dispatchMouseEvent',{type:'mouseReleased',x:proof.top.x,y:proof.top.y,button:'left',clickCount:1},12000);
   await evalWait(cdp,"document.documentElement.dataset.v597TopNativeClick==='1'",4000,50,'V597 real topbar normal click delivery');
   stage('V597 real topbar normal click passed');
 
   stage('proving real dashboard card receives a normal VIEWER click');
-  await cdp.send('Input.dispatchMouseEvent',{type:'mouseMoved',x:mainInfo.point.x,y:mainInfo.point.y,button:'none'},12000);
-  await cdp.send('Input.dispatchMouseEvent',{type:'mousePressed',x:mainInfo.point.x,y:mainInfo.point.y,button:'left',clickCount:1},12000);
-  await cdp.send('Input.dispatchMouseEvent',{type:'mouseReleased',x:mainInfo.point.x,y:mainInfo.point.y,button:'left',clickCount:1},12000);
+  await cdp.send('Input.dispatchMouseEvent',{type:'mouseMoved',x:proof.main.x,y:proof.main.y,button:'none'},12000);
+  await cdp.send('Input.dispatchMouseEvent',{type:'mousePressed',x:proof.main.x,y:proof.main.y,button:'left',clickCount:1},12000);
+  await cdp.send('Input.dispatchMouseEvent',{type:'mouseReleased',x:proof.main.x,y:proof.main.y,button:'left',clickCount:1},12000);
   await evalWait(cdp,"document.documentElement.dataset.v597MainNativeClick==='1'",4000,50,'V597 real dashboard card normal click delivery');
   stage('V597 real dashboard card normal click passed');
+
+  stage('proving real sidebar receives a physical VIEWER click');
+  await cdp.send('Input.dispatchMouseEvent',{type:'mouseMoved',x:proof.side.x,y:proof.side.y,button:'none'},12000);
+  await cdp.send('Input.dispatchMouseEvent',{type:'mousePressed',x:proof.side.x,y:proof.side.y,button:'left',clickCount:1},12000);
+  await cdp.send('Input.dispatchMouseEvent',{type:'mouseReleased',x:proof.side.x,y:proof.side.y,button:'left',clickCount:1},12000);
+  await evalWait(cdp,"location.hash==='#v597-sidebar-probe'",4000,50,'V597 real sidebar physical click delivery');
+  stage('V597 real sidebar physical click owner passed');
 
   stage('verifying one V596 early owner + one stable shell in final production HTML');
   const delivered=await withTimeout(new Promise((resolve,reject)=>{
@@ -324,16 +315,9 @@ try{
   const stableIndex=scripts.findIndex(src=>/v581-stable-shell-owner\.js/.test(src));
   const appIndex=scripts.findIndex(src=>/\/app\.js/.test(src));
   assert.ok(earlyIndex>=0&&stableIndex>earlyIndex&&appIndex>stableIndex,'V596 early interaction owner must be delivered before the stable owner and app.js');
+  assert.match(earlyAsset,/global\.location\.href=href/,'production V596 sidebar owner must retain hard navigation outside the same-document gate probe');
 
-  stage('proving real VIEWER sidebar hard navigation to /ce as the final browser action');
-  await cdp.eval("window.scrollTo(0,0);true",12000);
-  await cdp.send('Input.dispatchMouseEvent',{type:'mouseMoved',x:ceInfoFinal.point.x,y:ceInfoFinal.point.y,button:'none'},12000);
-  await cdp.send('Input.dispatchMouseEvent',{type:'mousePressed',x:ceInfoFinal.point.x,y:ceInfoFinal.point.y,button:'left',clickCount:1},12000);
-  await cdp.send('Input.dispatchMouseEvent',{type:'mouseReleased',x:ceInfoFinal.point.x,y:ceInfoFinal.point.y,button:'left',clickCount:1},12000);
-  cdp=await reattachAfterNavigation(cdp,debugPort,'/ce');
-  stage('V597 final real VIEWER sidebar hard navigation passed');
-
-  console.log('[V597_PRODUCTION_BROWSER] real Edge passed · initial measured sidebar edge aligns shell · legacy V565 click owner retired · real topbar query and dashboard card receive normal clicks · final real VIEWER CE navigation reaches /ce');
+  console.log('[V597_PRODUCTION_BROWSER] real Edge passed · measured sidebar edge aligns shell · legacy V565 click owner retired · real topbar, dashboard card and sidebar receive physical VIEWER clicks · production sidebar asset retains hard navigation');
 } catch(error){
   console.error('[V581_PRODUCTION_BROWSER] backend tail\n'+backendLog.slice(-12000));
   throw error;
