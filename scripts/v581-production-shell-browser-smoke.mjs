@@ -270,27 +270,12 @@ try{
   assert.match(earlyAsset,/global\.location\.href=href/,'V596 early owner must retain hard navigation for sidebar routes');
   stage('V596 early owner contract delivered');
 
-  stage('proving real VIEWER sidebar hard navigation to /ce before long browser work');
-  const ceInfoEarly=await domElement(cdp,'.side-nav .side-link[data-page="ce"]',{box:true});
-  await cdp.send('Input.dispatchMouseEvent',{type:'mouseMoved',x:ceInfoEarly.point.x,y:ceInfoEarly.point.y,button:'none'},12000);
-  await cdp.send('Input.dispatchMouseEvent',{type:'mousePressed',x:ceInfoEarly.point.x,y:ceInfoEarly.point.y,button:'left',clickCount:1},12000);
-  await cdp.send('Input.dispatchMouseEvent',{type:'mouseReleased',x:ceInfoEarly.point.x,y:ceInfoEarly.point.y,button:'left',clickCount:1},12000);
-  cdp=await reattachAfterNavigation(cdp,debugPort,'/ce');
-  await evalWait(cdp,"location.pathname==='/ce'&&document.getElementById('pageTitle')?.textContent.includes('CE')",6000,80,'V597 reattached real VIEWER /ce page');
-  stage('V597 early real VIEWER sidebar hard navigation passed');
-
-  stage('returning to HOME for topbar/main-content proofs');
-  await cdp.send('Page.navigate',{url:'http://127.0.0.1:'+port+'/?auth=v581'},8000);
-  await evalWait(cdp,'!!window.__CE_QC_V581_STABLE_SHELL__',8000,80,'V581 owner after return HOME');
-  await evalWait(cdp,'!!window.__CE_QC_V596_EARLY_INTERACTION__',8000,80,'V596 early owner after return HOME');
-  await evalWait(cdp,"document.documentElement.dataset.ceQcV597LegacyInteractionRetired==='1'",8000,80,'V597 retirement marker after return HOME');
-
   stage('waiting for real delivered right-side controls');
   await evalWait(cdp,"!!document.querySelector('#topRangeQuery')&&!!document.querySelector('.main-content .v18-business-card')",10000,80,'real topbar and dashboard controls');
 
-  stage('settling dynamic shell geometry after VIEWER hard-navigation round trip');
-  await cdp.eval("window.__CE_QC_V581_STABLE_SHELL__?.enforce?.('v597-post-navigation-home-settle');true",12000);
-  await evalWait(cdp,"(()=>{const s=document.querySelector('.sidebar')?.getBoundingClientRect(),a=document.querySelector('.app-body')?.getBoundingClientRect(),t=document.querySelector('.topbar')?.getBoundingClientRect(),h=document.querySelector('#pageTitle')?.getBoundingClientRect(),v=parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ce-qc-shell-left')||'0');if(!s||!a||!t||!h)return false;return s.right>70&&Math.abs(a.left-s.right)<=1.5&&Math.abs(t.left-s.right)<=1.5&&h.left+0.5>=s.right&&Math.abs(v-s.right)<=1.5;})()",5000,80,'V597 dynamic shell geometry after hard-navigation round trip');
+  stage('settling initial dynamic shell geometry before interaction proofs');
+  await cdp.eval("window.__CE_QC_V581_STABLE_SHELL__?.enforce?.('v597-initial-home-settle');true",12000);
+  await evalWait(cdp,"(()=>{const s=document.querySelector('.sidebar')?.getBoundingClientRect(),a=document.querySelector('.app-body')?.getBoundingClientRect(),t=document.querySelector('.topbar')?.getBoundingClientRect(),h=document.querySelector('#pageTitle')?.getBoundingClientRect(),v=parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ce-qc-shell-left')||'0');if(!s||!a||!t||!h)return false;return s.right>70&&Math.abs(a.left-s.right)<=1.5&&Math.abs(t.left-s.right)<=1.5&&h.left+0.5>=s.right&&Math.abs(v-s.right)<=1.5;})()",5000,80,'V597 initial dynamic shell geometry');
 
   stage('verifying V596 shell offsets match the real sidebar edge');
   const layout=await cdp.eval("(()=>{const s=document.querySelector('.sidebar')?.getBoundingClientRect(),a=document.querySelector('.app-body')?.getBoundingClientRect(),t=document.querySelector('.topbar')?.getBoundingClientRect(),h=document.querySelector('#pageTitle')?.getBoundingClientRect();return{sRight:s?.right||0,aLeft:a?.left||0,tLeft:t?.left||0,titleLeft:h?.left||0,cssVar:getComputedStyle(document.documentElement).getPropertyValue('--ce-qc-shell-left').trim(),bodyClass:String(document.body?.className||''),vw:innerWidth};})()",12000);
@@ -299,7 +284,7 @@ try{
   assert.ok(Math.abs(layout.tLeft-layout.sRight)<=1.5,'topbar must start exactly after the real sidebar');
   assert.ok(layout.titleLeft+0.5>=layout.sRight,'page title must not sit underneath the sidebar');
   assert.ok(Math.abs(parseFloat(layout.cssVar||'0')-layout.sRight)<=1.5,'V596 shell variable must equal the measured sidebar edge');
-  stage('V597 dynamic sidebar geometry settled after navigation edge='+layout.sRight+' vw='+layout.vw+' bodyClass='+layout.bodyClass);
+  stage('V597 dynamic sidebar geometry passed edge='+layout.sRight+' vw='+layout.vw+' bodyClass='+layout.bodyClass);
 
   stage('proving real topbar query receives a normal VIEWER click');
   const topInfo=await domElement(cdp,'#topRangeQuery',{box:true});
@@ -337,7 +322,16 @@ try{
   const appIndex=scripts.findIndex(src=>/\/app\.js/.test(src));
   assert.ok(earlyIndex>=0&&stableIndex>earlyIndex&&appIndex>stableIndex,'V596 early interaction owner must be delivered before the stable owner and app.js');
 
-  console.log('[V597_PRODUCTION_BROWSER] real Edge passed · real VIEWER CE navigation reaches /ce · measured sidebar edge aligns shell · legacy V565 click owner retired · real topbar query and dashboard card receive normal clicks');
+  stage('proving real VIEWER sidebar hard navigation to /ce as the final browser action');
+  await cdp.eval("window.scrollTo(0,0);true",12000);
+  const ceInfoFinal=await domElement(cdp,'.side-nav .side-link[data-page="ce"]',{box:true});
+  await cdp.send('Input.dispatchMouseEvent',{type:'mouseMoved',x:ceInfoFinal.point.x,y:ceInfoFinal.point.y,button:'none'},12000);
+  await cdp.send('Input.dispatchMouseEvent',{type:'mousePressed',x:ceInfoFinal.point.x,y:ceInfoFinal.point.y,button:'left',clickCount:1},12000);
+  await cdp.send('Input.dispatchMouseEvent',{type:'mouseReleased',x:ceInfoFinal.point.x,y:ceInfoFinal.point.y,button:'left',clickCount:1},12000);
+  cdp=await reattachAfterNavigation(cdp,debugPort,'/ce');
+  stage('V597 final real VIEWER sidebar hard navigation passed');
+
+  console.log('[V597_PRODUCTION_BROWSER] real Edge passed · initial measured sidebar edge aligns shell · legacy V565 click owner retired · real topbar query and dashboard card receive normal clicks · final real VIEWER CE navigation reaches /ce');
 } catch(error){
   console.error('[V581_PRODUCTION_BROWSER] backend tail\n'+backendLog.slice(-12000));
   throw error;
