@@ -42,7 +42,7 @@ assert.match(launcher,/D:\\CE_QC_NPM_CACHE/,'npm cache must move to D');
 assert.match(launcher,/Candidate worktree\/test scratch\/npm cache use D:/);
 
 assert.match(start,/CE_QC_Dedicated_Drive_Cleanup\.ps1/,'startup must invoke dedicated cleanup');
-assert.match(start,/\[CE-QC\]\[V596\] Dynamic sidebar geometry \+ unified coordinate click fallback \+ diff-aware updater gate/);
+assert.match(start,/\[CE-QC\]\[V597\] Single interaction owner \+ dynamic sidebar geometry \+ real VIEWER navigation gate/);
 assert.match(start,/D:\\CE_QC_NPM_CACHE/);
 
 if(os.platform()==='win32'){
