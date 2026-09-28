@@ -136,6 +136,7 @@
 
   function invokeControl(control,event,source='geometry'){
     if(!control||control.disabled)return false;
+    try{doc.documentElement.dataset.ceQcV596Fallback=(control.id||control.className||control.tagName||'control')+'|'+source;}catch{}
     if(control.matches?.('input,select,textarea')){
       try{control.focus?.({preventScroll:true});}catch{try{control.focus?.();}catch{}}
       try{
