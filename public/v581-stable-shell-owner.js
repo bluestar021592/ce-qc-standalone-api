@@ -360,7 +360,7 @@
       });
       if(doc.body)bodyObserver.observe(doc.body,{attributes:true,attributeFilter:['class']});
       const sidebar=doc.querySelector('.sidebar');
-      if(sidebar)bodyObserver.observe(sidebar,{attributes:true,attributeFilter:['class','style']});
+      if(sidebar)bodyObserver.observe(sidebar,{attributes:true,attributeFilter:['class']});
     }
   }
 
