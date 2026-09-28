@@ -51,4 +51,4 @@ if(os.platform()==='win32'){
   const parsed=spawnSync('powershell.exe',['-NoLogo','-NoProfile','-Command',command],{encoding:'utf8'});
   assert.equal(parsed.status,0,'PowerShell parser rejected dedicated cleanup script: '+(parsed.stdout||'')+(parsed.stderr||''));
 }
-console.log('[V596] dedicated-drive cleanup smoke passed · obsolete CE_QC_RUNTIME backups on C are purged · live D database/user Documents/Downloads stay protected');
+console.log('[V597] dedicated-drive cleanup smoke passed · obsolete CE_QC_RUNTIME backups on C are purged · live D database/user Documents/Downloads stay protected');
