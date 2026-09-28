@@ -218,41 +218,48 @@
     }catch{return false;}
   }
 
-  function hitContextAt(x,y){
+  function interactiveFromNode(node,x,y){
     try{
-      const stack=[...(doc.elementsFromPoint?.(x,y)||[])];
-      for(const node of stack){
-        if(!node?.matches&&!node?.closest)continue;
-        const control=node.matches?.(MAIN_INTERACTIVE)?node:node.closest?.(MAIN_INTERACTIVE);
-        if(!control||control.hidden||control.disabled||control.closest?.('[hidden],[inert]'))continue;
-        const r=control.getBoundingClientRect?.();
-        if(!r||r.width<1||r.height<1||x<r.left||x>r.right||y<r.top||y>r.bottom)continue;
-        const cs=global.getComputedStyle?.(control);
-        if(!cs||cs.display==='none'||cs.visibility==='hidden'||Number(cs.opacity||1)===0)continue;
-        return{control,stack};
-      }
-      return{control:null,stack};
-    }catch{return{control:null,stack:[]};}
+      const control=node?.matches?.(MAIN_INTERACTIVE)?node:node?.closest?.(MAIN_INTERACTIVE);
+      if(!control||control.hidden||control.disabled||control.closest?.('[hidden],[inert]'))return null;
+      const r=control.getBoundingClientRect?.();
+      if(!r||r.width<1||r.height<1||x<r.left||x>r.right||y<r.top||y>r.bottom)return null;
+      const cs=global.getComputedStyle?.(control);
+      if(!cs||cs.display==='none'||cs.visibility==='hidden'||Number(cs.opacity||1)===0)return null;
+      return control;
+    }catch{return null;}
   }
 
   function retirePointerBlockersAt(x,y,reason='pointer'){
     try{
       const vw=Math.max(1,global.innerWidth||1),vh=Math.max(1,global.innerHeight||1);
       if(!Number.isFinite(x)||!Number.isFinite(y)||x<0||y<0||x>=vw||y>=vh)return false;
-      const hit=hitContextAt(x,y),control=hit.control;
-      if(!control)return false;
-      try{
-        if(global.getComputedStyle?.(control)?.pointerEvents==='none')control.style?.setProperty('pointer-events','auto','important');
-      }catch{}
-      let retired=0;
-      for(const node of hit.stack){
-        if(!node||node===control||control.contains(node))continue;
-        if(node.contains?.(control))break;
-        if(retireBlocker(node,vw,vh,reason))retired+=1;
+      let retired=0,control=null;
+      for(let depth=0;depth<8;depth+=1){
+        const top=doc.elementFromPoint?.(x,y);
+        if(!top)break;
+        control=interactiveFromNode(top,x,y);
+        if(control)break;
+        if(top.closest?.(LEGITIMATE_OVERLAY))break;
+        let probe=top,retiredThisRound=false;
+        while(probe&&probe!==doc.body&&probe!==doc.documentElement){
+          if(retireBlocker(probe,vw,vh,reason)){
+            retired+=1;
+            retiredThisRound=true;
+            break;
+          }
+          probe=probe.parentElement;
+        }
+        if(!retiredThisRound)break;
+      }
+      if(control){
+        try{
+          if(global.getComputedStyle?.(control)?.pointerEvents==='none')control.style?.setProperty('pointer-events','auto','important');
+        }catch{}
       }
       if(retired){
         doc.documentElement.dataset.ceQcV595PointerRecovery=String(Date.now());
-        safeDiag('V595_POINTER_RECOVERY',reason+'|retired='+retired+'|control='+(control.id||control.className||control.tagName||'unknown'));
+        safeDiag('V595_POINTER_RECOVERY',reason+'|retired='+retired+'|control='+(control?.id||control?.className||control?.tagName||'revealed'));
       }
       return retired>0;
     }catch{return false;}
