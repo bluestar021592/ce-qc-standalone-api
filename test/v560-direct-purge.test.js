@@ -151,7 +151,7 @@ test('post-purge empty bootstrap clears stale browser business state instead of 
   assert.match(app,/\^ce_qc_/,'full purge must retire CE QC browser caches when server has no business data');
   assert.match(app,/sessionStorage\.removeItem\('trackingReturnContext'\)/);
   assert.match(html,/app\.js\?v=20260921-v564-1/,'browser must receive the corrected empty-state and interaction owner immediately after update');
-  assert.match(html,/dashboard-fixture-v18\.js\?v=20260925-v582-1/,'browser must receive the self-healing first-paint interaction owner immediately after update');
+  assert.match(html,/dashboard-fixture-v18\.js\?v=20260928-v597-1/,'browser must receive the V597 single-owner startup guard immediately after update');
 });
 
 
@@ -166,16 +166,16 @@ test('V246 hidden tracking panel never auto-reads the heavy ledger on normal pag
 });
 
 
-test('V564/V565 post-purge startup stays no-reload and self-heals stale click blockers',()=>{
+test('V564/V597 post-purge startup stays no-reload while legacy click repair stays retired',()=>{
   const app=fs.readFileSync('public/app.js','utf8');
   const startup=fs.readFileSync('public/dashboard-fixture-v18.js','utf8');
   const sourceTruth=fs.readFileSync('public/v81-startup-source-truth.js','utf8');
   assert.doesNotMatch(startup,/系统界面已可操作，本地数据继续后台读取/);
   assert.doesNotMatch(startup,/typeof global\.refresh === 'function'/);
   assert.doesNotMatch(startup,/typeof global\.renderAll === 'function'/);
-  assert.match(startup,/2026-09-21-v565-interaction-surface-self-heal-v1/);
-  assert.match(startup,/document\.elementsFromPoint/);
-  assert.match(startup,/ceQcRetiredClickBlocker/);
+  assert.match(startup,/2026-09-21-v565-interaction-surface-self-heal-v1/,'historical V565 marker may remain for compatibility');
+  assert.match(startup,/ceQcV597LegacyInteractionRetired/,'V597 must publish that legacy interaction ownership is retired');
+  assert.doesNotMatch(startup,/repairInteractionSurface|repairBlockedPointer|ceQcRetiredClickBlocker|document\.elementsFromPoint/,'startup fixture must no longer own hit-testing or pointer\/click repair');
   assert.match(sourceTruth,/location\.replace\('\/\?returnTo='/);
   assert.doesNotMatch(sourceTruth,/location\.reload\(\)/);
   const resetListener=app.match(/events\.addEventListener\('DATA_RESET',[\s\S]*?\n  \}\);/);
