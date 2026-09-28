@@ -221,7 +221,7 @@ child.stdout.on('data',d=>{backendLog+=String(d);if(backendLog.length>180000)bac
 child.stderr.on('data',d=>{backendLog+=String(d);if(backendLog.length>180000)backendLog=backendLog.slice(-180000);});
 
 const userData=fs.mkdtempSync(path.join(os.tmpdir(),'ce-qc-v581-edge-'));
-const edge=spawn(browser,['--headless=new','--disable-gpu','--no-first-run','--no-default-browser-check','--disable-extensions','--disable-background-networking','--disable-background-timer-throttling','--disable-renderer-backgrounding','--disable-backgrounding-occluded-windows','--disable-features=CalculateNativeWinOcclusion','--remote-debugging-port='+debugPort,'--user-data-dir='+userData,'about:blank'],{stdio:'ignore',windowsHide:true});
+const edge=spawn(browser,['--headless=new','--disable-gpu','--no-first-run','--no-default-browser-check','--disable-extensions','--disable-background-networking','--disable-background-timer-throttling','--disable-renderer-backgrounding','--disable-backgrounding-occluded-windows','--disable-features=CalculateNativeWinOcclusion','--window-size=1600,1000','--force-device-scale-factor=1','--remote-debugging-port='+debugPort,'--user-data-dir='+userData,'about:blank'],{stdio:'ignore',windowsHide:true});
 let cdp;
 try{
   stage('waiting for production backend health');
@@ -245,57 +245,63 @@ try{
   stage('navigating production shell');
   await cdp.send('Page.navigate',{url:'http://127.0.0.1:'+port+'/?auth=v581'},8000);
   await evalWait(cdp,'!!window.__CE_QC_V581_STABLE_SHELL__',8000,80,'V581 owner after production navigation');
-  stage('V581 owner loaded');
-  await evalWait(cdp,'!!window.__CE_QC_V593_EARLY_SIDEBAR__',8000,80,'V593 unconditional sidebar owner after production navigation');
-  stage('V593 unconditional window owner loaded');
+  stage('V581/V596 stable owner loaded');
+  await evalWait(cdp,'!!window.__CE_QC_V596_EARLY_INTERACTION__',8000,80,'V596 unified early interaction owner after production navigation');
+  stage('V596 unified early window owner loaded');
 
-  stage('verifying exact early owner asset');
+  stage('verifying exact V596 early owner asset');
   const earlyAsset=await withTimeout(new Promise((resolve,reject)=>{
-    const req=http.request({host:'127.0.0.1',port,path:'/v592-early-sidebar-capture.js?v=20260926-v593-1'},res=>{const chunks=[];res.on('data',chunk=>chunks.push(chunk));res.on('end',()=>resolve(Buffer.concat(chunks).toString('utf8')));});
+    const req=http.request({host:'127.0.0.1',port,path:'/v592-early-sidebar-capture.js?v=20260928-v596-1'},res=>{const chunks=[];res.on('data',chunk=>chunks.push(chunk));res.on('end',()=>resolve(Buffer.concat(chunks).toString('utf8')));});
     req.on('error',reject);
-    req.setTimeout(5000,()=>req.destroy(new Error('V593 early owner asset request timeout')));
+    req.setTimeout(5000,()=>req.destroy(new Error('V596 early owner asset request timeout')));
     req.end();
-  }),7000,'V593 early owner asset request');
-  assert.match(earlyAsset,/2026-09-26-v593-unconditional-sidebar-coordinate-route-v1/,'real server must deliver the V593 early owner');
-  assert.match(earlyAsset,/global\.addEventListener\('pointerdown',pointerOwner,true\)/,'V593 early owner must capture pointerdown on window');
-  assert.match(earlyAsset,/global\.location\.href=href/,'V593 early owner must hard-navigate');
-  stage('V593 early owner contract delivered');
+  }),7000,'V596 early owner asset request');
+  assert.match(earlyAsset,/2026-09-28-v596-unified-coordinate-interaction-v1/,'real server must deliver the V596 unified early owner');
+  assert.match(earlyAsset,/global\.addEventListener\('pointerdown',pointerOwner,true\)/,'V596 early owner must capture pointerdown on window');
+  assert.match(earlyAsset,/controlAt\(x,y\)/,'V596 early owner must resolve blocked controls by real geometry');
+  assert.match(earlyAsset,/global\.location\.href=href/,'V596 early owner must retain hard navigation for sidebar routes');
+  stage('V596 early owner contract delivered');
 
   stage('waiting for real delivered right-side controls');
   await evalWait(cdp,"!!document.querySelector('#topRangeQuery')&&!!document.querySelector('.main-content .v18-business-card')",10000,80,'real topbar and dashboard controls');
 
-  stage('proving real topbar query click through a maximum-z stale blocker without manual enforce');
-  await cdp.eval("(()=>{delete document.documentElement.dataset.v595TopQueryClick;document.getElementById('v595TopbarBlocker')?.remove();const btn=document.querySelector('#topRangeQuery');if(!btn)return false;btn.addEventListener('click',event=>{document.documentElement.dataset.v595TopQueryClick='1';event.preventDefault();event.stopImmediatePropagation();},{once:true,capture:true});const b=document.createElement('div');b.id='v595TopbarBlocker';Object.assign(b.style,{position:'fixed',left:'228px',top:'0',right:'0',height:'64px',zIndex:'2147483647',background:'rgba(255,0,0,0.001)',pointerEvents:'auto'});document.body.appendChild(b);return getComputedStyle(b).pointerEvents;})()",12000);
+  stage('verifying V596 shell offsets match the real sidebar edge');
+  const layout=await cdp.eval("(()=>{const s=document.querySelector('.sidebar')?.getBoundingClientRect(),a=document.querySelector('.app-body')?.getBoundingClientRect(),t=document.querySelector('.topbar')?.getBoundingClientRect(),h=document.querySelector('#pageTitle')?.getBoundingClientRect();return{sRight:s?.right||0,aLeft:a?.left||0,tLeft:t?.left||0,titleLeft:h?.left||0,cssVar:getComputedStyle(document.documentElement).getPropertyValue('--ce-qc-shell-left').trim()};})()",12000);
+  assert.ok(layout.sRight>70,'desktop sidebar must have a measurable visible right edge');
+  assert.ok(Math.abs(layout.aLeft-layout.sRight)<=1.5,'app body must start exactly after the real sidebar');
+  assert.ok(Math.abs(layout.tLeft-layout.sRight)<=1.5,'topbar must start exactly after the real sidebar');
+  assert.ok(layout.titleLeft+0.5>=layout.sRight,'page title must not sit underneath the sidebar');
+  assert.ok(Math.abs(parseFloat(layout.cssVar||'0')-layout.sRight)<=1.5,'V596 shell variable must equal the measured sidebar edge');
+  stage('V596 dynamic sidebar geometry passed edge='+layout.sRight);
+
+  stage('proving blocked real topbar query is recovered by the single V596 early owner');
+  await cdp.eval("(()=>{delete document.documentElement.dataset.ceQcV596Fallback;delete document.documentElement.dataset.v596TopAction;document.getElementById('v596TopbarBlocker')?.remove();window.__v596TopOriginal=window.applyTopDateRange;window.applyTopDateRange=function(){document.documentElement.dataset.v596TopAction='1';return true;};const edge=parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ce-qc-shell-left'))||0;const b=document.createElement('div');b.id='v596TopbarBlocker';Object.assign(b.style,{position:'fixed',left:edge+'px',top:'0',right:'0',height:'64px',zIndex:'2147483647',background:'rgba(255,0,0,0.001)',pointerEvents:'auto'});document.body.appendChild(b);return true;})()",12000);
   const topInfo=await domElement(cdp,'#topRangeQuery',{box:true});
   await cdp.send('Input.dispatchMouseEvent',{type:'mouseMoved',x:topInfo.point.x,y:topInfo.point.y,button:'none'},12000);
-  await evalWait(cdp,"getComputedStyle(document.getElementById('v595TopbarBlocker')).pointerEvents==='none'",4000,50,'V595 topbar pointer-time blocker retirement');
   await cdp.send('Input.dispatchMouseEvent',{type:'mousePressed',x:topInfo.point.x,y:topInfo.point.y,button:'left',clickCount:1},12000);
   await cdp.send('Input.dispatchMouseEvent',{type:'mouseReleased',x:topInfo.point.x,y:topInfo.point.y,button:'left',clickCount:1},12000);
-  await evalWait(cdp,"document.documentElement.dataset.v595TopQueryClick==='1'",4000,50,'V595 real topbar query click delivery');
-  await cdp.eval("document.getElementById('v595TopbarBlocker')?.remove();true",12000);
-  stage('V595 real topbar query click recovery passed');
+  await evalWait(cdp,"document.documentElement.dataset.v596TopAction==='1'",4000,50,'V596 real topbar query fallback delivery');
+  const topFallback=await cdp.eval("document.documentElement.dataset.ceQcV596Fallback||''",12000);
+  assert.match(String(topFallback),/topRangeQuery/,'V596 must record coordinate fallback for the blocked real topbar query');
+  await cdp.eval("(()=>{document.getElementById('v596TopbarBlocker')?.remove();if(window.__v596TopOriginal)window.applyTopDateRange=window.__v596TopOriginal;delete window.__v596TopOriginal;return true;})()",12000);
+  stage('V596 real topbar coordinate fallback passed');
 
-  stage('proving real main dashboard card recovery through a maximum-z stale blocker');
+  stage('proving blocked real dashboard card is recovered by the same V596 early owner');
   await cdp.eval("(()=>{const btn=document.querySelector('.main-content .v18-business-card');if(!btn)return false;btn.scrollIntoView({block:'center',inline:'nearest',behavior:'instant'});return true;})()",12000);
   await new Promise(r=>setTimeout(r,80));
-  await cdp.eval("(()=>{delete document.documentElement.dataset.v595MainCardClick;document.getElementById('v595MainContentBlocker')?.remove();const btn=document.querySelector('.main-content .v18-business-card');if(!btn)return false;btn.addEventListener('click',event=>{document.documentElement.dataset.v595MainCardClick='1';event.preventDefault();event.stopImmediatePropagation();},{once:true,capture:true});const b=document.createElement('div');b.id='v595MainContentBlocker';Object.assign(b.style,{position:'fixed',left:'228px',top:'64px',right:'0',bottom:'0',zIndex:'2147483647',background:'rgba(255,0,0,0.001)',pointerEvents:'auto'});document.body.appendChild(b);return true;})()",12000);
+  await cdp.eval("(()=>{delete document.documentElement.dataset.ceQcV596Fallback;delete document.documentElement.dataset.v596MainAction;document.getElementById('v596MainContentBlocker')?.remove();window.__v596NavOriginal=window.navigatePage;window.navigatePage=function(page){document.documentElement.dataset.v596MainAction=String(page||'called');return true;};const edge=parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ce-qc-shell-left'))||0;const b=document.createElement('div');b.id='v596MainContentBlocker';Object.assign(b.style,{position:'fixed',left:edge+'px',top:'64px',right:'0',bottom:'0',zIndex:'2147483647',background:'rgba(255,0,0,0.001)',pointerEvents:'auto'});document.body.appendChild(b);return true;})()",12000);
   const mainInfo=await domElement(cdp,'.main-content .v18-business-card',{box:true});
-  assert.ok(mainInfo.point.y>=64&&mainInfo.point.y<480,'real dashboard card must be scrolled into the visible content viewport before click proof');
-  const repaired=await cdp.eval("window.__CE_QC_V581_STABLE_SHELL__?.retirePointerBlockersAt?.("+mainInfo.point.x+","+mainInfo.point.y+",'v595-real-card-gate')===true",12000);
-  assert.equal(repaired,true,'V595 must retire a maximum-z blocker above a real delivered dashboard card');
-  const mainPointer=await cdp.eval("getComputedStyle(document.getElementById('v595MainContentBlocker')).pointerEvents",12000);
-  assert.equal(mainPointer,'none','V595 must disable pointer capture on the real-card blocker');
+  assert.ok(mainInfo.point.y>=64&&mainInfo.point.y<950,'real dashboard card must be visible before click proof');
   await cdp.send('Input.dispatchMouseEvent',{type:'mouseMoved',x:mainInfo.point.x,y:mainInfo.point.y,button:'none'},12000);
   await cdp.send('Input.dispatchMouseEvent',{type:'mousePressed',x:mainInfo.point.x,y:mainInfo.point.y,button:'left',clickCount:1},12000);
   await cdp.send('Input.dispatchMouseEvent',{type:'mouseReleased',x:mainInfo.point.x,y:mainInfo.point.y,button:'left',clickCount:1},12000);
-  await evalWait(cdp,"document.documentElement.dataset.v595MainCardClick==='1'",4000,50,'V595 real dashboard card click delivery');
-  await cdp.eval("document.getElementById('v595MainContentBlocker')?.remove();true",12000);
-  stage('V595 real main dashboard card recovery and click passed');
+  await evalWait(cdp,"!!document.documentElement.dataset.v596MainAction",4000,50,'V596 real dashboard card fallback delivery');
+  const mainFallback=await cdp.eval("document.documentElement.dataset.ceQcV596Fallback||''",12000);
+  assert.match(String(mainFallback),/v18-business-card/,'V596 must record coordinate fallback for the blocked real dashboard card');
+  await cdp.eval("(()=>{document.getElementById('v596MainContentBlocker')?.remove();if(window.__v596NavOriginal)window.navigatePage=window.__v596NavOriginal;delete window.__v596NavOriginal;return true;})()",12000);
+  stage('V596 real dashboard card coordinate fallback passed');
 
-  stage('verifying unchanged V593 sidebar contract and final production HTML owner ordering');
-  // V595 changes only right-side pointer recovery. The V593 early sidebar owner is
-  // byte-for-byte contract-checked above; avoid repeating a hosted-Windows hard
-  // navigation here because CDP target publication is unrelated and intermittently stalls.
+  stage('verifying one V596 early owner + one stable shell in final production HTML');
   const delivered=await withTimeout(new Promise((resolve,reject)=>{
     const req=http.request({host:'127.0.0.1',port,path:'/?auth=v581',headers:{Cookie:'ce_qc_local_auth_v431='+signedCookie(secret)}},res=>{const chunks=[];res.on('data',c=>chunks.push(c));res.on('end',()=>resolve(Buffer.concat(chunks).toString('utf8')));});
     req.on('error',reject);
@@ -308,9 +314,9 @@ try{
   const earlyIndex=scripts.findIndex(src=>/v592-early-sidebar-capture\.js/.test(src));
   const stableIndex=scripts.findIndex(src=>/v581-stable-shell-owner\.js/.test(src));
   const appIndex=scripts.findIndex(src=>/\/app\.js/.test(src));
-  assert.ok(earlyIndex>=0&&stableIndex>earlyIndex&&appIndex>stableIndex,'V593 window capture must be delivered before the stable owner and app.js');
+  assert.ok(earlyIndex>=0&&stableIndex>earlyIndex&&appIndex>stableIndex,'V596 early interaction owner must be delivered before the stable owner and app.js');
 
-  console.log('[V595_PRODUCTION_BROWSER] real Edge passed · real topbar query + real dashboard card survive maximum-z stale blockers · unchanged V593 sidebar owner contract verified from delivered asset/HTML');
+  console.log('[V596_PRODUCTION_BROWSER] real Edge passed · measured sidebar edge aligns shell · blocked real topbar/main controls recover through one early geometry owner · final owner ordering verified');
 } catch(error){
   console.error('[V581_PRODUCTION_BROWSER] backend tail\n'+backendLog.slice(-12000));
   throw error;
