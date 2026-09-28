@@ -218,35 +218,36 @@
     }catch{return false;}
   }
 
-  function interactiveAt(x,y){
+  function hitContextAt(x,y){
     try{
-      let winner=null,winnerArea=Infinity;
-      for(const control of doc.querySelectorAll(MAIN_INTERACTIVE)){
-        if(control.hidden||control.disabled||control.closest?.('[hidden],[inert]'))continue;
+      const stack=[...(doc.elementsFromPoint?.(x,y)||[])];
+      for(const node of stack){
+        if(!node?.matches&&!node?.closest)continue;
+        const control=node.matches?.(MAIN_INTERACTIVE)?node:node.closest?.(MAIN_INTERACTIVE);
+        if(!control||control.hidden||control.disabled||control.closest?.('[hidden],[inert]'))continue;
         const r=control.getBoundingClientRect?.();
         if(!r||r.width<1||r.height<1||x<r.left||x>r.right||y<r.top||y>r.bottom)continue;
         const cs=global.getComputedStyle?.(control);
         if(!cs||cs.display==='none'||cs.visibility==='hidden'||Number(cs.opacity||1)===0)continue;
-        const area=r.width*r.height;
-        if(area<winnerArea){winner=control;winnerArea=area;}
+        return{control,stack};
       }
-      return winner;
-    }catch{return null;}
+      return{control:null,stack};
+    }catch{return{control:null,stack:[]};}
   }
 
   function retirePointerBlockersAt(x,y,reason='pointer'){
     try{
       const vw=Math.max(1,global.innerWidth||1),vh=Math.max(1,global.innerHeight||1);
       if(!Number.isFinite(x)||!Number.isFinite(y)||x<0||y<0||x>=vw||y>=vh)return false;
-      const control=interactiveAt(x,y);
+      const hit=hitContextAt(x,y),control=hit.control;
       if(!control)return false;
       try{
         if(global.getComputedStyle?.(control)?.pointerEvents==='none')control.style?.setProperty('pointer-events','auto','important');
       }catch{}
-      const stack=[...(doc.elementsFromPoint?.(x,y)||[])];
       let retired=0;
-      for(const node of stack){
-        if(!node||node===control||control.contains(node)||node.contains(control))continue;
+      for(const node of hit.stack){
+        if(!node||node===control||control.contains(node))continue;
+        if(node.contains?.(control))break;
         if(retireBlocker(node,vw,vh,reason))retired+=1;
       }
       if(retired){
