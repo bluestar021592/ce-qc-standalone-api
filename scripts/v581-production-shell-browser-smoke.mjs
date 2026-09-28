@@ -276,8 +276,11 @@ try{
   stage('V595 real topbar query click recovery passed');
 
   stage('proving real main dashboard card recovery through a maximum-z stale blocker');
+  await cdp.eval("(()=>{const btn=document.querySelector('.main-content .v18-business-card');if(!btn)return false;btn.scrollIntoView({block:'center',inline:'nearest',behavior:'instant'});return true;})()",12000);
+  await new Promise(r=>setTimeout(r,80));
   await cdp.eval("(()=>{delete document.documentElement.dataset.v595MainCardClick;document.getElementById('v595MainContentBlocker')?.remove();const btn=document.querySelector('.main-content .v18-business-card');if(!btn)return false;btn.addEventListener('click',event=>{document.documentElement.dataset.v595MainCardClick='1';event.preventDefault();event.stopImmediatePropagation();},{once:true,capture:true});const b=document.createElement('div');b.id='v595MainContentBlocker';Object.assign(b.style,{position:'fixed',left:'228px',top:'64px',right:'0',bottom:'0',zIndex:'2147483647',background:'rgba(255,0,0,0.001)',pointerEvents:'auto'});document.body.appendChild(b);return true;})()",12000);
   const mainInfo=await domElement(cdp,'.main-content .v18-business-card',{box:true});
+  assert.ok(mainInfo.point.y>=64&&mainInfo.point.y<480,'real dashboard card must be scrolled into the visible content viewport before click proof');
   const repaired=await cdp.eval("window.__CE_QC_V581_STABLE_SHELL__?.retirePointerBlockersAt?.("+mainInfo.point.x+","+mainInfo.point.y+",'v595-real-card-gate')===true",12000);
   assert.equal(repaired,true,'V595 must retire a maximum-z blocker above a real delivered dashboard card');
   const mainPointer=await cdp.eval("getComputedStyle(document.getElementById('v595MainContentBlocker')).pointerEvents",12000);
