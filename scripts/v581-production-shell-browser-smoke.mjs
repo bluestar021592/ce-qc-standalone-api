@@ -247,7 +247,8 @@ try{
   await evalWait(cdp,'!!window.__CE_QC_V581_STABLE_SHELL__',8000,80,'V581 owner after production navigation');
   stage('V581/V596 stable owner loaded');
   await evalWait(cdp,'!!window.__CE_QC_V596_EARLY_INTERACTION__',8000,80,'V596 unified early interaction owner after production navigation');
-  stage('V596 unified early window owner loaded');
+  await evalWait(cdp,"document.documentElement.dataset.ceQcV597LegacyInteractionRetired==='1'",8000,80,'V597 legacy interaction retirement marker');
+  stage('V597 single interaction ownership active; legacy V565 click capture retired');
 
   stage('verifying exact V596 early owner asset');
   const earlyAsset=await withTimeout(new Promise((resolve,reject)=>{
@@ -305,15 +306,17 @@ try{
   await cdp.eval("(()=>{document.getElementById('v596MainContentBlocker')?.remove();if(window.__v596NavOriginal)window.navigatePage=window.__v596NavOriginal;delete window.__v596NavOriginal;return true;})()",12000);
   stage('V596 real dashboard card coordinate fallback passed');
 
-  stage('proving real sidebar route ownership without cross-page CDP reattach');
+  stage('proving real VIEWER sidebar hard navigation to /ce');
   await cdp.eval("window.scrollTo(0,0);true",12000);
   const sideInfo=await domElement(cdp,'.side-nav .side-link[data-page="ce"]',{box:true});
-  await cdp.eval("(()=>{const link=document.querySelector('.side-nav .side-link[data-page=\\\"ce\\\"]');if(!link)return false;link.dataset.path='';link.setAttribute('href','#v596-sidebar-probe');return true;})()",12000);
   await cdp.send('Input.dispatchMouseEvent',{type:'mouseMoved',x:sideInfo.point.x,y:sideInfo.point.y,button:'none'},12000);
   await cdp.send('Input.dispatchMouseEvent',{type:'mousePressed',x:sideInfo.point.x,y:sideInfo.point.y,button:'left',clickCount:1},12000);
   await cdp.send('Input.dispatchMouseEvent',{type:'mouseReleased',x:sideInfo.point.x,y:sideInfo.point.y,button:'left',clickCount:1},12000);
-  await evalWait(cdp,"location.hash==='#v596-sidebar-probe'",4000,50,'V596 real sidebar route delivery');
-  stage('V596 real sidebar click owner passed');
+  await waitFor(async()=>{
+    try{return await cdp.eval("location.pathname==='/ce'&&document.getElementById('pageTitle')?.textContent.includes('CE')",12000);}
+    catch{return false;}
+  },12000,120,'V597 real VIEWER /ce navigation');
+  stage('V597 real VIEWER sidebar hard navigation passed');
 
   stage('verifying one V596 early owner + one stable shell in final production HTML');
   const delivered=await withTimeout(new Promise((resolve,reject)=>{
@@ -330,7 +333,7 @@ try{
   const appIndex=scripts.findIndex(src=>/\/app\.js/.test(src));
   assert.ok(earlyIndex>=0&&stableIndex>earlyIndex&&appIndex>stableIndex,'V596 early interaction owner must be delivered before the stable owner and app.js');
 
-  console.log('[V596_PRODUCTION_BROWSER] real Edge passed · measured sidebar edge aligns shell · blocked real topbar/main controls recover through one early geometry owner · final owner ordering verified');
+  console.log('[V597_PRODUCTION_BROWSER] real Edge passed · measured sidebar edge aligns shell · legacy V565 click owner retired · blocked topbar/main fallback works · real VIEWER CE navigation reaches /ce');
 } catch(error){
   console.error('[V581_PRODUCTION_BROWSER] backend tail\n'+backendLog.slice(-12000));
   throw error;
