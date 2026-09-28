@@ -80,7 +80,8 @@ assert.match(earlySidebar,/global\.addEventListener\('click',pointerOwner,true\)
 assert.match(earlySidebar,/sidebarLinkAt\(Number\(event\.clientX\),Number\(event\.clientY\)\)/,'V593 must resolve route by coordinates, not event target');
 assert.match(earlySidebar,/global\.location\.href=href/,'V593 must hard-navigate through the browser');
 assert.match(earlySidebar,/ce-qc-v591-sidebar-frame/,'V593 must remove the broken V591 iframe');
-assert.match(stableShell,/original visible sidebar \+ unconditional early coordinate navigation/i,'V593 stable owner must keep the original menu visible');
+assert.match(stableShell,/original visible sidebar \+ pointer-time right-content recovery/i,'V595 stable owner must keep the original menu visible while recovering real right-side clicks');
+assert.match(stableShell,/retirePointerBlockersAt/,'V595 stable owner must expose coordinate blocker recovery');
 assert.doesNotMatch(stableShell,/subtree:true/,'stable-shell observer must not watch business-card/table/chart subtree mutations');
 assert.match(stableShell,/shell-structure-mutation/,'stable shell must keep bounded structural repair');
 assert.match(stableShell,/retireIsolatedSidebar/,'V593 stable owner must retire V590/V591 iframe remnants');
