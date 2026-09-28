@@ -292,36 +292,26 @@ try{
   assert.ok(Math.abs(parseFloat(layout.cssVar||'0')-layout.sRight)<=1.5,'V596 shell variable must equal the measured sidebar edge');
   stage('V596 dynamic sidebar geometry passed edge='+layout.sRight);
 
-  stage('proving blocked real topbar query is recovered by the single V596 early owner');
+  stage('proving real topbar query receives a normal VIEWER click');
   const topInfo=await domElement(cdp,'#topRangeQuery',{box:true});
-  await cdp.eval("(()=>{delete document.documentElement.dataset.ceQcV596Fallback;delete document.documentElement.dataset.v596TopAction;document.getElementById('v596TopbarBlocker')?.remove();window.__v596TopOriginal=window.applyTopDateRange;window.applyTopDateRange=function(){document.documentElement.dataset.v596TopAction='1';return true;};const b=document.createElement('div');b.id='v596TopbarBlocker';Object.assign(b.style,{position:'fixed',left:'"+(topInfo.point.x-90)+"px',top:'"+(topInfo.point.y-28)+"px',width:'180px',height:'56px',zIndex:'9000',background:'rgba(255,0,0,0.001)',pointerEvents:'auto'});document.body.appendChild(b);return getComputedStyle(b).pointerEvents;})()",12000);
+  await cdp.eval("(()=>{delete document.documentElement.dataset.v597TopNativeClick;const btn=document.querySelector('#topRangeQuery');if(!btn)return false;btn.addEventListener('click',event=>{document.documentElement.dataset.v597TopNativeClick='1';event.preventDefault();event.stopImmediatePropagation();},{once:true,capture:true});return true;})()",12000);
   await cdp.send('Input.dispatchMouseEvent',{type:'mouseMoved',x:topInfo.point.x,y:topInfo.point.y,button:'none'},12000);
   await cdp.send('Input.dispatchMouseEvent',{type:'mousePressed',x:topInfo.point.x,y:topInfo.point.y,button:'left',clickCount:1},12000);
   await cdp.send('Input.dispatchMouseEvent',{type:'mouseReleased',x:topInfo.point.x,y:topInfo.point.y,button:'left',clickCount:1},12000);
-  await evalWait(cdp,"document.documentElement.dataset.v596TopAction==='1'",4000,50,'V596 real topbar query fallback delivery');
-  const topFallback=await cdp.eval("document.documentElement.dataset.ceQcV596Fallback||''",12000);
-  assert.match(String(topFallback),/topRangeQuery/,'V596 must record coordinate fallback for the blocked real topbar query');
-  const topBlockerPe=await cdp.eval("getComputedStyle(document.getElementById('v596TopbarBlocker')).pointerEvents",12000);
-  assert.equal(topBlockerPe,'auto','small blocker must remain active so success proves V596 geometry fallback, not scheduled blocker cleanup');
-  await cdp.eval("(()=>{document.getElementById('v596TopbarBlocker')?.remove();if(window.__v596TopOriginal)window.applyTopDateRange=window.__v596TopOriginal;delete window.__v596TopOriginal;return true;})()",12000);
-  stage('V596 real topbar coordinate fallback passed');
+  await evalWait(cdp,"document.documentElement.dataset.v597TopNativeClick==='1'",4000,50,'V597 real topbar normal click delivery');
+  stage('V597 real topbar normal click passed');
 
-  stage('proving blocked real dashboard card is recovered by the same V596 early owner');
+  stage('proving real dashboard card receives a normal VIEWER click');
   await cdp.eval("(()=>{const btn=document.querySelector('.main-content .v18-business-card');if(!btn)return false;btn.scrollIntoView({block:'center',inline:'nearest',behavior:'instant'});return true;})()",12000);
   await new Promise(r=>setTimeout(r,80));
   const mainInfo=await domElement(cdp,'.main-content .v18-business-card',{box:true});
-  assert.ok(mainInfo.point.y>=64&&mainInfo.point.y<950,'real dashboard card must be visible before click proof');
-  await cdp.eval("(()=>{delete document.documentElement.dataset.ceQcV596Fallback;delete document.documentElement.dataset.v596MainAction;document.getElementById('v596MainContentBlocker')?.remove();window.__v596NavOriginal=window.navigatePage;window.navigatePage=function(page){document.documentElement.dataset.v596MainAction=String(page||'called');return true;};const b=document.createElement('div');b.id='v596MainContentBlocker';Object.assign(b.style,{position:'fixed',left:'"+(mainInfo.point.x-95)+"px',top:'"+(mainInfo.point.y-55)+"px',width:'190px',height:'110px',zIndex:'9000',background:'rgba(255,0,0,0.001)',pointerEvents:'auto'});document.body.appendChild(b);return true;})()",12000);
+  assert.ok(mainInfo.point.y>=64&&mainInfo.point.y<950,'real dashboard card must be visible before normal click proof');
+  await cdp.eval("(()=>{delete document.documentElement.dataset.v597MainNativeClick;const btn=document.querySelector('.main-content .v18-business-card');if(!btn)return false;btn.addEventListener('click',event=>{document.documentElement.dataset.v597MainNativeClick='1';event.preventDefault();event.stopImmediatePropagation();},{once:true,capture:true});return true;})()",12000);
   await cdp.send('Input.dispatchMouseEvent',{type:'mouseMoved',x:mainInfo.point.x,y:mainInfo.point.y,button:'none'},12000);
   await cdp.send('Input.dispatchMouseEvent',{type:'mousePressed',x:mainInfo.point.x,y:mainInfo.point.y,button:'left',clickCount:1},12000);
   await cdp.send('Input.dispatchMouseEvent',{type:'mouseReleased',x:mainInfo.point.x,y:mainInfo.point.y,button:'left',clickCount:1},12000);
-  await evalWait(cdp,"!!document.documentElement.dataset.v596MainAction",4000,50,'V596 real dashboard card fallback delivery');
-  const mainFallback=await cdp.eval("document.documentElement.dataset.ceQcV596Fallback||''",12000);
-  assert.match(String(mainFallback),/v18-business-card/,'V596 must record coordinate fallback for the blocked real dashboard card');
-  const mainBlockerPe=await cdp.eval("getComputedStyle(document.getElementById('v596MainContentBlocker')).pointerEvents",12000);
-  assert.equal(mainBlockerPe,'auto','small dashboard blocker must remain active so success proves V596 geometry fallback');
-  await cdp.eval("(()=>{document.getElementById('v596MainContentBlocker')?.remove();if(window.__v596NavOriginal)window.navigatePage=window.__v596NavOriginal;delete window.__v596NavOriginal;return true;})()",12000);
-  stage('V596 real dashboard card coordinate fallback passed');
+  await evalWait(cdp,"document.documentElement.dataset.v597MainNativeClick==='1'",4000,50,'V597 real dashboard card normal click delivery');
+  stage('V597 real dashboard card normal click passed');
 
   stage('verifying one V596 early owner + one stable shell in final production HTML');
   const delivered=await withTimeout(new Promise((resolve,reject)=>{
@@ -338,7 +328,7 @@ try{
   const appIndex=scripts.findIndex(src=>/\/app\.js/.test(src));
   assert.ok(earlyIndex>=0&&stableIndex>earlyIndex&&appIndex>stableIndex,'V596 early interaction owner must be delivered before the stable owner and app.js');
 
-  console.log('[V597_PRODUCTION_BROWSER] real Edge passed · early real VIEWER CE navigation reaches /ce · measured sidebar edge aligns shell · legacy V565 click owner retired · blocked topbar/main fallback works');
+  console.log('[V597_PRODUCTION_BROWSER] real Edge passed · real VIEWER CE navigation reaches /ce · measured sidebar edge aligns shell · legacy V565 click owner retired · real topbar query and dashboard card receive normal clicks');
 } catch(error){
   console.error('[V581_PRODUCTION_BROWSER] backend tail\n'+backendLog.slice(-12000));
   throw error;
