@@ -1,7 +1,7 @@
 import express from 'express';
 
-export const V581_STABLE_SHELL_RESPONSE_ID='2026-09-28-v595-pointer-time-main-response-v1';
-const V581_TAG='  <script src="/v581-stable-shell-owner.js?v=20260928-v595-1"></script>';
+export const V581_STABLE_SHELL_RESPONSE_ID='2026-09-28-v596-dynamic-shell-click-response-v1';
+const V581_TAG='  <script src="/v581-stable-shell-owner.js?v=20260928-v596-1"></script>';
 
 const previousSend=express.response.send;
 
@@ -15,7 +15,7 @@ function stripInlineV575(body){
 export function rewriteV581StableShellHtml(body){
   if(typeof body!=='string'||!body.includes('CE Express')||!body.includes('</body>'))return body;
   body=stripInlineV575(body);
-  for(const file of ['v580-visible-shell-recovery.js','v569-final-interaction-owner.js','v581-stable-shell-owner.js']){
+  for(const file of ['v580-visible-shell-recovery.js','v569-final-interaction-owner.js','v573-head-interaction-bridge.js','v581-stable-shell-owner.js']){
     body=stripScriptSrc(body,file);
   }
   body=body.replace(/auth=v(?:575|578|579|580)/g,'auth=v581');
@@ -35,4 +35,4 @@ express.response.send=function v581StableShellSend(body){
   return previousSend.call(this,body);
 };
 
-console.info('[CE-QC][V581_STABLE_SHELL_RESPONSE]',V581_STABLE_SHELL_RESPONSE_ID,'final response pass retires V575/V580 shell owners and injects one V592 original-sidebar stable shell owner immediately before app.js.');
+console.info('[CE-QC][V581_STABLE_SHELL_RESPONSE]',V581_STABLE_SHELL_RESPONSE_ID,'final response pass retires legacy layered interaction owners and injects one V596 dynamic stable shell immediately before app.js.');
