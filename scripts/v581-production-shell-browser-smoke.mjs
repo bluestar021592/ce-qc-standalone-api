@@ -263,6 +263,23 @@ try{
   assert.match(earlyAsset,/global\.location\.href=href/,'V596 early owner must retain hard navigation for sidebar routes');
   stage('V596 early owner contract delivered');
 
+  stage('proving real VIEWER sidebar hard navigation to /ce before long browser work');
+  const ceInfoEarly=await domElement(cdp,'.side-nav .side-link[data-page="ce"]',{box:true});
+  await cdp.send('Input.dispatchMouseEvent',{type:'mouseMoved',x:ceInfoEarly.point.x,y:ceInfoEarly.point.y,button:'none'},12000);
+  await cdp.send('Input.dispatchMouseEvent',{type:'mousePressed',x:ceInfoEarly.point.x,y:ceInfoEarly.point.y,button:'left',clickCount:1},12000);
+  await cdp.send('Input.dispatchMouseEvent',{type:'mouseReleased',x:ceInfoEarly.point.x,y:ceInfoEarly.point.y,button:'left',clickCount:1},12000);
+  await waitFor(async()=>{
+    try{return await cdp.eval("location.pathname==='/ce'&&document.getElementById('pageTitle')?.textContent.includes('CE')",6000);}
+    catch{return false;}
+  },10000,120,'V597 early real VIEWER /ce navigation');
+  stage('V597 early real VIEWER sidebar hard navigation passed');
+
+  stage('returning to HOME for topbar/main-content proofs');
+  await cdp.send('Page.navigate',{url:'http://127.0.0.1:'+port+'/?auth=v581'},8000);
+  await evalWait(cdp,'!!window.__CE_QC_V581_STABLE_SHELL__',8000,80,'V581 owner after return HOME');
+  await evalWait(cdp,'!!window.__CE_QC_V596_EARLY_INTERACTION__',8000,80,'V596 early owner after return HOME');
+  await evalWait(cdp,"document.documentElement.dataset.ceQcV597LegacyInteractionRetired==='1'",8000,80,'V597 retirement marker after return HOME');
+
   stage('waiting for real delivered right-side controls');
   await evalWait(cdp,"!!document.querySelector('#topRangeQuery')&&!!document.querySelector('.main-content .v18-business-card')",10000,80,'real topbar and dashboard controls');
 
@@ -306,18 +323,6 @@ try{
   await cdp.eval("(()=>{document.getElementById('v596MainContentBlocker')?.remove();if(window.__v596NavOriginal)window.navigatePage=window.__v596NavOriginal;delete window.__v596NavOriginal;return true;})()",12000);
   stage('V596 real dashboard card coordinate fallback passed');
 
-  stage('proving real VIEWER sidebar hard navigation to /ce');
-  await cdp.eval("window.scrollTo(0,0);true",12000);
-  const sideInfo=await domElement(cdp,'.side-nav .side-link[data-page="ce"]',{box:true});
-  await cdp.send('Input.dispatchMouseEvent',{type:'mouseMoved',x:sideInfo.point.x,y:sideInfo.point.y,button:'none'},12000);
-  await cdp.send('Input.dispatchMouseEvent',{type:'mousePressed',x:sideInfo.point.x,y:sideInfo.point.y,button:'left',clickCount:1},12000);
-  await cdp.send('Input.dispatchMouseEvent',{type:'mouseReleased',x:sideInfo.point.x,y:sideInfo.point.y,button:'left',clickCount:1},12000);
-  await waitFor(async()=>{
-    try{return await cdp.eval("location.pathname==='/ce'&&document.getElementById('pageTitle')?.textContent.includes('CE')",12000);}
-    catch{return false;}
-  },12000,120,'V597 real VIEWER /ce navigation');
-  stage('V597 real VIEWER sidebar hard navigation passed');
-
   stage('verifying one V596 early owner + one stable shell in final production HTML');
   const delivered=await withTimeout(new Promise((resolve,reject)=>{
     const req=http.request({host:'127.0.0.1',port,path:'/?auth=v581',headers:{Cookie:'ce_qc_local_auth_v431='+signedCookie(secret)}},res=>{const chunks=[];res.on('data',c=>chunks.push(c));res.on('end',()=>resolve(Buffer.concat(chunks).toString('utf8')));});
@@ -333,7 +338,7 @@ try{
   const appIndex=scripts.findIndex(src=>/\/app\.js/.test(src));
   assert.ok(earlyIndex>=0&&stableIndex>earlyIndex&&appIndex>stableIndex,'V596 early interaction owner must be delivered before the stable owner and app.js');
 
-  console.log('[V597_PRODUCTION_BROWSER] real Edge passed · measured sidebar edge aligns shell · legacy V565 click owner retired · blocked topbar/main fallback works · real VIEWER CE navigation reaches /ce');
+  console.log('[V597_PRODUCTION_BROWSER] real Edge passed · early real VIEWER CE navigation reaches /ce · measured sidebar edge aligns shell · legacy V565 click owner retired · blocked topbar/main fallback works');
 } catch(error){
   console.error('[V581_PRODUCTION_BROWSER] backend tail\n'+backendLog.slice(-12000));
   throw error;
