@@ -1,7 +1,7 @@
 (function installV581StableShell(global){
   'use strict';
   if(global.__CE_QC_V581_STABLE_SHELL__)return;
-  const VERSION='2026-09-28-v595-pointer-time-main-recovery-v1';
+  const VERSION='2026-09-28-v596-dynamic-shell-click-owner-v1';
   const doc=global.document;
   const NAV=[
     ['home','首页总看板','home','/'],
@@ -110,8 +110,8 @@
       '.sidebar{pointer-events:auto!important;z-index:2147483000!important}',
       '.side-nav,.side-link{pointer-events:auto!important;position:relative!important;z-index:2147483001!important;touch-action:manipulation!important}',
       '.side-nav a.side-link{display:flex!important;text-decoration:none!important;box-sizing:border-box!important;cursor:pointer!important}',
-      '.app-body{display:flex!important;flex-direction:column!important;visibility:visible!important;opacity:1!important;min-height:100vh!important;margin-left:228px!important;padding-top:64px!important;pointer-events:auto!important}',
-      '.topbar{display:flex!important;visibility:visible!important;opacity:1!important;position:fixed!important;left:228px!important;right:0!important;top:0!important;height:64px!important;z-index:1000!important;pointer-events:auto!important}',
+      '.app-body{display:flex!important;flex-direction:column!important;visibility:visible!important;opacity:1!important;min-height:100vh!important;margin-left:var(--ce-qc-shell-left,250px)!important;width:calc(100% - var(--ce-qc-shell-left,250px))!important;padding-top:64px!important;pointer-events:auto!important}',
+      '.topbar{display:flex!important;visibility:visible!important;opacity:1!important;position:fixed!important;left:var(--ce-qc-shell-left,250px)!important;right:0!important;top:0!important;height:64px!important;z-index:1000!important;pointer-events:auto!important}',
       '.main-content{display:block!important;visibility:visible!important;opacity:1!important;position:relative!important;z-index:1!important;min-height:calc(100vh - 64px)!important;pointer-events:auto!important}',
       '.app-page[data-v581-active="1"]{display:block!important;visibility:visible!important;opacity:1!important}',
       '.app-page[data-v581-active="0"]{display:none!important}',
@@ -119,6 +119,20 @@
     ].join('');
     (doc.head||doc.documentElement).appendChild(style);
     return style;
+  }
+  function syncSidebarGeometry(reason='layout'){
+    try{
+      const sidebar=doc.querySelector('.sidebar');
+      if(!sidebar)return 0;
+      const r=sidebar.getBoundingClientRect?.(),cs=global.getComputedStyle?.(sidebar);
+      let edge=Math.max(0,Math.min(global.innerWidth||99999,Number(r?.right||0)));
+      if((global.innerWidth||0)<=900&&String(cs?.position||'')==='static')edge=0;
+      edge=Math.round(edge*100)/100;
+      doc.documentElement.style.setProperty('--ce-qc-shell-left',edge+'px');
+      doc.documentElement.dataset.ceQcV596SidebarEdge=String(edge);
+      sidebar.dataset.ceQcV596SidebarEdge=String(edge);
+      return edge;
+    }catch{return 0;}
   }
   function clearLegacyShellSideEffects(){
     try{doc.getElementById('ce-qc-v575-coordinate-style')?.remove();}catch{}
@@ -183,6 +197,7 @@
     if(main?.style)main.style.setProperty('display','block','important');
     const appBody=doc.querySelector('.app-body');
     if(appBody?.style)appBody.style.setProperty('display','flex','important');
+    syncSidebarGeometry('ensure-layout');
   }
   function renderFallbackHomeIfStillEmpty(){
     if(currentPage()!=='home')return;
@@ -198,7 +213,7 @@
     showRoute();
   }
   const MAIN_INTERACTIVE='.topbar button,.topbar a[href],.topbar input,.topbar select,.topbar textarea,.topbar [onclick],.topbar [role="button"],.main-content button,.main-content a[href],.main-content input,.main-content select,.main-content textarea,.main-content [onclick],.main-content [role="button"]';
-  const LEGITIMATE_OVERLAY='.modal:not([hidden]),.tracking-drawer:not([hidden]),#accountDropdown:not([hidden]),#v303CleanStartOverlay';
+  const LEGITIMATE_OVERLAY='.modal:not([hidden]),.tracking-drawer:not([hidden]),#accountDropdown:not([hidden]),#v303CleanStartOverlay:not([hidden])';
 
   function retireBlocker(node,vw,vh,reason='scan'){
     try{
@@ -213,7 +228,7 @@
       if(area<0.30&&z<10000)return false;
       node.style.setProperty('pointer-events','none','important');
       node.dataset.ceQcV581RetiredBlocker='1';
-      node.dataset.ceQcV595RetiredReason=reason;
+      node.dataset.ceQcV596RetiredReason=reason;
       return true;
     }catch{return false;}
   }
@@ -258,8 +273,8 @@
         }catch{}
       }
       if(retired){
-        doc.documentElement.dataset.ceQcV595PointerRecovery=String(Date.now());
-        safeDiag('V595_POINTER_RECOVERY',reason+'|retired='+retired+'|control='+(control?.id||control?.className||control?.tagName||'revealed'));
+        doc.documentElement.dataset.ceQcV596PointerRecovery=String(Date.now());
+        safeDiag('V596_POINTER_RECOVERY',reason+'|retired='+retired+'|control='+(control?.id||control?.className||control?.tagName||'revealed'));
       }
       return retired>0;
     }catch{return false;}
@@ -312,13 +327,14 @@
     [50,250,800,1800,3500,7000].forEach(ms=>setTimeout(()=>{enforce('timer-'+ms);renderFallbackHomeIfStillEmpty();},ms));
     global.addEventListener('pageshow',()=>enforce('pageshow'),true);
     global.addEventListener('popstate',()=>enforce('popstate'),true);
-    // V595: repair a stale right-side hit blocker on the user's real pointer path.
-    // pointermove/mousemove normally retires it before the click target is chosen;
-    // pointerdown/mousedown are retained as a no-delay fallback for stationary pointers.
-    global.addEventListener('pointermove',pointerRecoveryOwner,true);
-    global.addEventListener('mousemove',pointerRecoveryOwner,true);
-    global.addEventListener('pointerdown',pointerRecoveryOwner,true);
-    global.addEventListener('mousedown',pointerRecoveryOwner,true);
+    // V596: user click ownership lives only in the early head owner. This stable
+    // owner keeps layout/route visibility deterministic and exposes blocker repair
+    // for diagnostics/tests without adding a second pointer-capture chain.
+    global.addEventListener('resize',()=>enforce('resize'),{passive:true});
+    doc.querySelector('.sidebar-collapse')?.addEventListener('click',()=>{
+      setTimeout(()=>enforce('sidebar-collapse-0'),0);
+      setTimeout(()=>enforce('sidebar-collapse-120'),120);
+    },true);
     if(typeof MutationObserver==='function'){
       observer=new MutationObserver(records=>{
         if(enforcing)return;
@@ -338,15 +354,22 @@
         doc.querySelector('.side-nav')
       ].filter(Boolean);
       for(const root of roots)observer.observe(root,{childList:true});
+      bodyObserver=new MutationObserver(()=>{
+        if(enforcing)return;
+        setTimeout(()=>enforce('sidebar-geometry-mutation'),0);
+      });
+      if(doc.body)bodyObserver.observe(doc.body,{attributes:true,attributeFilter:['class']});
+      const sidebar=doc.querySelector('.sidebar');
+      if(sidebar)bodyObserver.observe(sidebar,{attributes:true,attributeFilter:['class','style']});
     }
   }
 
-  global.__CE_QC_V581_STABLE_SHELL__={version:VERSION,enforce,normalizeNav,showRoute,retirePointerBlockersAt};
+  global.__CE_QC_V581_STABLE_SHELL__={version:VERSION,enforce,normalizeNav,showRoute,retirePointerBlockersAt,syncSidebarGeometry};
   // The owner is intentionally injected immediately before app.js, after the full
   // dashboard markup has been parsed. Bind now instead of waiting for DOMContentLoaded,
   // because a slow legacy bootstrap must never delay sidebar click ownership.
   if(doc.querySelector('.side-nav')&&doc.querySelector('.main-content'))bind();
   else if(doc.readyState==='loading')doc.addEventListener('DOMContentLoaded',bind,{once:true});
   else bind();
-  console.info('[CE-QC][V581_STABLE_SHELL]',VERSION,'single stable shell owner: original visible sidebar + pointer-time right-content recovery + deterministic route visibility.');
+  console.info('[CE-QC][V581_STABLE_SHELL]',VERSION,'single stable shell owner: measured sidebar geometry + deterministic route visibility; click fallback belongs to V596 early owner.');
 })(window);
