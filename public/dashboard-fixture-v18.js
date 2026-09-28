@@ -163,141 +163,19 @@
     } catch {}
   }
 
-  function isLegitimateBlockingLayer(node) {
-    try {
-      if (!node || node === document.documentElement || node === document.body) return true;
-      if (node.closest?.('.modal:not([hidden])')) return true;
-      if (node.closest?.('#v303CleanStartOverlay')) return true;
-      if (node.closest?.('#accountDropdown:not([hidden])')) return true;
-      return false;
-    } catch { return false; }
-  }
-
-  function largeClickBlocker(node, control) {
-    try {
-      if (!node || !control || node === control || control.contains?.(node) || node.contains?.(control)) return false;
-      if (isLegitimateBlockingLayer(node)) return false;
-      const rect = node.getBoundingClientRect?.();
-      if (!rect || rect.width <= 0 || rect.height <= 0) return false;
-      const viewportW = Math.max(1, Number(global.innerWidth || document.documentElement?.clientWidth || 1));
-      const viewportH = Math.max(1, Number(global.innerHeight || document.documentElement?.clientHeight || 1));
-      const areaRatio = (rect.width * rect.height) / (viewportW * viewportH);
-      const style = typeof global.getComputedStyle === 'function' ? global.getComputedStyle(node) : null;
-      const position = String(style?.position || node.style?.position || '').toLowerCase();
-      const z = Number.parseInt(style?.zIndex || node.style?.zIndex || '0', 10) || 0;
-      return areaRatio >= 0.35 && (position === 'fixed' || position === 'absolute' || z >= 50);
-    } catch { return false; }
-  }
-
-  function retireBlocker(node) {
-    try {
-      if (!node?.style) return false;
-      if (node.style.setProperty) node.style.setProperty('pointer-events', 'none', 'important');
-      else node.style.pointerEvents = 'none';
-      node.dataset.ceQcRetiredClickBlocker = V565_PATCH_ID;
-      return true;
-    } catch { return false; }
-  }
-
-  function repairControlHitTarget(control) {
-    try {
-      if (!control || typeof document.elementsFromPoint !== 'function') return false;
-      const rect = control.getBoundingClientRect?.();
-      if (!rect || rect.width <= 0 || rect.height <= 0) return false;
-      const x = Math.max(rect.left + 1, Math.min(rect.right - 1, rect.left + rect.width / 2));
-      const y = Math.max(rect.top + 1, Math.min(rect.bottom - 1, rect.top + rect.height / 2));
-      const stack = document.elementsFromPoint(x, y) || [];
-      const controlIndex = stack.findIndex(node => node === control || control.contains?.(node));
-      if (controlIndex <= 0) return false;
-      let changed = false;
-      for (const node of stack.slice(0, controlIndex)) {
-        if (largeClickBlocker(node, control)) changed = retireBlocker(node) || changed;
-      }
-      return changed;
-    } catch { return false; }
-  }
-
-  function repairInteractionSurface() {
-    forceInteractivePaint();
-    try {
-      const representatives = [
-        document.querySelector('.sidebar .side-link[data-page]'),
-        document.getElementById('topRangeQuery'),
-        document.querySelector('#homeBusinessCards .v18-business-card'),
-        document.querySelector('.main-content button:not(:disabled)')
-      ].filter(Boolean);
-      for (const control of representatives) repairControlHitTarget(control);
-    } catch {}
-  }
-
-  let redispatching = false;
-  function findUnderlyingInteractive(event) {
-    try {
-      if (typeof document.elementsFromPoint !== 'function') return null;
-      const stack = document.elementsFromPoint(Number(event.clientX || 0), Number(event.clientY || 0)) || [];
-      for (const node of stack) {
-        const candidate = node?.closest?.('.side-link[data-page],button:not(:disabled),a[href],[onclick],input:not(:disabled),select:not(:disabled),.v18-business-card,.v18-metric-card,.region-block button');
-        if (candidate) return candidate;
-      }
-    } catch {}
-    return null;
-  }
-
-  function repairBlockedPointer(event) {
-    if (redispatching) return;
-    repairInteractionSurface();
-    try {
-      const target = event.target;
-      const direct = target?.closest?.('.side-link[data-page],button:not(:disabled),a[href],[onclick],input:not(:disabled),select:not(:disabled),.v18-business-card,.v18-metric-card,.region-block button');
-      if (direct) return;
-      const candidate = findUnderlyingInteractive(event);
-      if (!candidate) return;
-      const stack = typeof document.elementsFromPoint === 'function'
-        ? document.elementsFromPoint(Number(event.clientX || 0), Number(event.clientY || 0)) || []
-        : [];
-      const candidateIndex = stack.findIndex(node => node === candidate || candidate.contains?.(node));
-      if (candidateIndex <= 0) return;
-      let repaired = false;
-      for (const node of stack.slice(0, candidateIndex)) {
-        if (largeClickBlocker(node, candidate)) repaired = retireBlocker(node) || repaired;
-      }
-      if (!repaired || event.type !== 'click') return;
-      event.preventDefault?.();
-      event.stopImmediatePropagation?.();
-      redispatching = true;
-      setTimeout(() => {
-        try { candidate.click?.(); }
-        finally { redispatching = false; }
-      }, 0);
-    } catch {}
-  }
-
-  function installInteractionCapture() {
-    if (typeof global.addEventListener !== 'function') return;
-    global.addEventListener('pointerdown', repairBlockedPointer, true);
-    global.addEventListener('click', repairBlockedPointer, true);
-  }
+  // V597: interaction ownership was moved to the single early window owner.
+  // Keep this startup guard focused on first paint and bounded startup reads only.
+  // Do not install a second pointer/click capture chain and do not rescan/rewrite
+  // dashboard hit targets after the page has rendered.
 
   forceFirstPaint();
-  installInteractionCapture();
-  repairInteractionSurface();
-  // V564/V565 never paint a startup toast and never call renderAll from the guard.
-  // It only guarantees clickability after parser-blocking scripts finish.
-  setTimeout(repairInteractionSurface, 0);
-  setTimeout(repairInteractionSurface, 250);
-  setTimeout(repairInteractionSurface, 750);
-  setTimeout(repairInteractionSurface, 1500);
-  setTimeout(repairInteractionSurface, 3000);
+  forceInteractivePaint();
 
   if (!clearNoticeWhenRendered()) {
-    // Do not watch the whole dashboard subtree. Rendering cards/tables can generate a
-    // large burst of childList mutations; a body-wide MutationObserver here adds no
-    // business value and can starve the renderer during first paint.
+    // Read-only notice cleanup only. No interaction mutation or click ownership lives here.
     [100, 500, 1500, 3000, 5000].forEach(ms => setTimeout(clearNoticeWhenRendered, ms));
   }
 
-  // V564: no automatic rescue refresh. Startup recovery stays read-only/lightweight
-  // so a slow local SQLite read can never restart a render or interaction loop.
-  setTimeout(repairInteractionSurface, 5000);
-
+  document.documentElement.dataset.ceQcV597LegacyInteractionRetired='1';
+  console.info('[CE-QC][V597_STARTUP_GUARD] first-paint/read-timeout guard active; legacy V565 pointer/click owner retired.');
 })(window);
