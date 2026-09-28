@@ -68,4 +68,4 @@ assert.match(cleanup,/driveLine\('D',drivesBefore\.D,drivesAfter\.D\)/);
 assert.match(cleanup,/compactSqliteStorage/);
 assert.match(start,/\[CE-QC\]\[V596\] Dynamic sidebar geometry \+ unified coordinate click fallback \+ diff-aware updater gate are installed\./);
 
-console.log('[V596] dynamic sidebar geometry + unified coordinate click fallback + WHPP + diff-aware updater smoke passed');
+console.log('[V597] single interaction owner + dynamic sidebar geometry + WHPP + diff-aware updater smoke passed');
