@@ -286,9 +286,17 @@ try{
   assert.ok(Math.abs(parseFloat(layout.cssVar||'0')-layout.sRight)<=1.5,'V596 shell variable must equal the measured sidebar edge');
   stage('V597 dynamic sidebar geometry passed edge='+layout.sRight+' vw='+layout.vw+' bodyClass='+layout.bodyClass);
 
-  stage('proving real topbar query receives a normal VIEWER click');
+  stage('precomputing real VIEWER control coordinates before any click');
+  await cdp.eval("(()=>{const btn=document.querySelector('.main-content .v18-business-card');if(!btn)return false;btn.scrollIntoView({block:'center',inline:'nearest',behavior:'instant'});return true;})()",12000);
+  await new Promise(r=>setTimeout(r,80));
   const topInfo=await domElement(cdp,'#topRangeQuery',{box:true});
-  await cdp.eval("(()=>{delete document.documentElement.dataset.v597TopNativeClick;const btn=document.querySelector('#topRangeQuery');if(!btn)return false;btn.addEventListener('click',event=>{document.documentElement.dataset.v597TopNativeClick='1';event.preventDefault();event.stopImmediatePropagation();},{once:true,capture:true});return true;})()",12000);
+  const mainInfo=await domElement(cdp,'.main-content .v18-business-card',{box:true});
+  const ceInfoFinal=await domElement(cdp,'.side-nav .side-link[data-page="ce"]',{box:true});
+  assert.ok(mainInfo.point.y>=64&&mainInfo.point.y<950,'real dashboard card must be visible before normal click proof');
+  await cdp.eval("(()=>{delete document.documentElement.dataset.v597TopNativeClick;delete document.documentElement.dataset.v597MainNativeClick;const top=document.querySelector('#topRangeQuery'),main=document.querySelector('.main-content .v18-business-card');if(!top||!main)return false;top.addEventListener('click',event=>{document.documentElement.dataset.v597TopNativeClick='1';event.preventDefault();event.stopImmediatePropagation();},{once:true,capture:true});main.addEventListener('click',event=>{document.documentElement.dataset.v597MainNativeClick='1';event.preventDefault();event.stopImmediatePropagation();},{once:true,capture:true});return true;})()",12000);
+  stage('V597 real control coordinates and listeners prepared');
+
+  stage('proving real topbar query receives a normal VIEWER click');
   await cdp.send('Input.dispatchMouseEvent',{type:'mouseMoved',x:topInfo.point.x,y:topInfo.point.y,button:'none'},12000);
   await cdp.send('Input.dispatchMouseEvent',{type:'mousePressed',x:topInfo.point.x,y:topInfo.point.y,button:'left',clickCount:1},12000);
   await cdp.send('Input.dispatchMouseEvent',{type:'mouseReleased',x:topInfo.point.x,y:topInfo.point.y,button:'left',clickCount:1},12000);
@@ -296,11 +304,6 @@ try{
   stage('V597 real topbar normal click passed');
 
   stage('proving real dashboard card receives a normal VIEWER click');
-  await cdp.eval("(()=>{const btn=document.querySelector('.main-content .v18-business-card');if(!btn)return false;btn.scrollIntoView({block:'center',inline:'nearest',behavior:'instant'});return true;})()",12000);
-  await new Promise(r=>setTimeout(r,80));
-  const mainInfo=await domElement(cdp,'.main-content .v18-business-card',{box:true});
-  assert.ok(mainInfo.point.y>=64&&mainInfo.point.y<950,'real dashboard card must be visible before normal click proof');
-  await cdp.eval("(()=>{delete document.documentElement.dataset.v597MainNativeClick;const btn=document.querySelector('.main-content .v18-business-card');if(!btn)return false;btn.addEventListener('click',event=>{document.documentElement.dataset.v597MainNativeClick='1';event.preventDefault();event.stopImmediatePropagation();},{once:true,capture:true});return true;})()",12000);
   await cdp.send('Input.dispatchMouseEvent',{type:'mouseMoved',x:mainInfo.point.x,y:mainInfo.point.y,button:'none'},12000);
   await cdp.send('Input.dispatchMouseEvent',{type:'mousePressed',x:mainInfo.point.x,y:mainInfo.point.y,button:'left',clickCount:1},12000);
   await cdp.send('Input.dispatchMouseEvent',{type:'mouseReleased',x:mainInfo.point.x,y:mainInfo.point.y,button:'left',clickCount:1},12000);
@@ -324,7 +327,6 @@ try{
 
   stage('proving real VIEWER sidebar hard navigation to /ce as the final browser action');
   await cdp.eval("window.scrollTo(0,0);true",12000);
-  const ceInfoFinal=await domElement(cdp,'.side-nav .side-link[data-page="ce"]',{box:true});
   await cdp.send('Input.dispatchMouseEvent',{type:'mouseMoved',x:ceInfoFinal.point.x,y:ceInfoFinal.point.y,button:'none'},12000);
   await cdp.send('Input.dispatchMouseEvent',{type:'mousePressed',x:ceInfoFinal.point.x,y:ceInfoFinal.point.y,button:'left',clickCount:1},12000);
   await cdp.send('Input.dispatchMouseEvent',{type:'mouseReleased',x:ceInfoFinal.point.x,y:ceInfoFinal.point.y,button:'left',clickCount:1},12000);
