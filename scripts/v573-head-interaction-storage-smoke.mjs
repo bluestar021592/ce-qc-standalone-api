@@ -66,6 +66,6 @@ assert.match(cleanup,/\[CE-QC\]\[V573\]\[STORAGE\] cleanup complete:/);
 assert.match(cleanup,/driveLine\('C',drivesBefore\.C,drivesAfter\.C\)/);
 assert.match(cleanup,/driveLine\('D',drivesBefore\.D,drivesAfter\.D\)/);
 assert.match(cleanup,/compactSqliteStorage/);
-assert.match(start,/\[CE-QC\]\[V596\] Dynamic sidebar geometry \+ unified coordinate click fallback \+ diff-aware updater gate are installed\./);
+assert.match(start,/\[CE-QC\]\[V597\] Single interaction owner \+ dynamic sidebar geometry \+ real VIEWER navigation gate are installed\./);
 
 console.log('[V597] single interaction owner + dynamic sidebar geometry + WHPP + diff-aware updater smoke passed');
