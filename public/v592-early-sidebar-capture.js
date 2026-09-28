@@ -230,7 +230,7 @@
   }
 
   global.addEventListener('pointerdown',pointerOwner,true);
-  global.addEventListener('mousedown',pointerOwner,true);
+  if(!('PointerEvent' in global))global.addEventListener('mousedown',pointerOwner,true);
   global.addEventListener('click',clickOwner,true);
   global.addEventListener('keydown',keyboardOwner,true);
   if(doc.readyState==='loading')doc.addEventListener('DOMContentLoaded',retireBrokenFrames,{once:true});
