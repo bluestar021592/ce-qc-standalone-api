@@ -281,14 +281,18 @@ try{
   stage('waiting for real delivered right-side controls');
   await evalWait(cdp,"!!document.querySelector('#topRangeQuery')&&!!document.querySelector('.main-content .v18-business-card')",10000,80,'real topbar and dashboard controls');
 
+  stage('settling dynamic shell geometry after VIEWER hard-navigation round trip');
+  await cdp.eval("window.__CE_QC_V581_STABLE_SHELL__?.enforce?.('v597-post-navigation-home-settle');true",12000);
+  await evalWait(cdp,"(()=>{const s=document.querySelector('.sidebar')?.getBoundingClientRect(),a=document.querySelector('.app-body')?.getBoundingClientRect(),t=document.querySelector('.topbar')?.getBoundingClientRect(),h=document.querySelector('#pageTitle')?.getBoundingClientRect(),v=parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ce-qc-shell-left')||'0');if(!s||!a||!t||!h)return false;return s.right>70&&Math.abs(a.left-s.right)<=1.5&&Math.abs(t.left-s.right)<=1.5&&h.left+0.5>=s.right&&Math.abs(v-s.right)<=1.5;})()",5000,80,'V597 dynamic shell geometry after hard-navigation round trip');
+
   stage('verifying V596 shell offsets match the real sidebar edge');
-  const layout=await cdp.eval("(()=>{const s=document.querySelector('.sidebar')?.getBoundingClientRect(),a=document.querySelector('.app-body')?.getBoundingClientRect(),t=document.querySelector('.topbar')?.getBoundingClientRect(),h=document.querySelector('#pageTitle')?.getBoundingClientRect();return{sRight:s?.right||0,aLeft:a?.left||0,tLeft:t?.left||0,titleLeft:h?.left||0,cssVar:getComputedStyle(document.documentElement).getPropertyValue('--ce-qc-shell-left').trim()};})()",12000);
+  const layout=await cdp.eval("(()=>{const s=document.querySelector('.sidebar')?.getBoundingClientRect(),a=document.querySelector('.app-body')?.getBoundingClientRect(),t=document.querySelector('.topbar')?.getBoundingClientRect(),h=document.querySelector('#pageTitle')?.getBoundingClientRect();return{sRight:s?.right||0,aLeft:a?.left||0,tLeft:t?.left||0,titleLeft:h?.left||0,cssVar:getComputedStyle(document.documentElement).getPropertyValue('--ce-qc-shell-left').trim(),bodyClass:String(document.body?.className||''),vw:innerWidth};})()",12000);
   assert.ok(layout.sRight>70,'desktop sidebar must have a measurable visible right edge');
   assert.ok(Math.abs(layout.aLeft-layout.sRight)<=1.5,'app body must start exactly after the real sidebar');
   assert.ok(Math.abs(layout.tLeft-layout.sRight)<=1.5,'topbar must start exactly after the real sidebar');
   assert.ok(layout.titleLeft+0.5>=layout.sRight,'page title must not sit underneath the sidebar');
   assert.ok(Math.abs(parseFloat(layout.cssVar||'0')-layout.sRight)<=1.5,'V596 shell variable must equal the measured sidebar edge');
-  stage('V596 dynamic sidebar geometry passed edge='+layout.sRight);
+  stage('V597 dynamic sidebar geometry settled after navigation edge='+layout.sRight+' vw='+layout.vw+' bodyClass='+layout.bodyClass);
 
   stage('proving real topbar query receives a normal VIEWER click');
   const topInfo=await domElement(cdp,'#topRangeQuery',{box:true});
