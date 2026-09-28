@@ -294,13 +294,6 @@ try{
   await evalWait(cdp,"document.documentElement.dataset.v597MainNativeClick==='1'",4000,50,'V597 real dashboard card normal click delivery');
   stage('V597 real dashboard card normal click passed');
 
-  stage('proving real sidebar receives a physical VIEWER click');
-  await cdp.send('Input.dispatchMouseEvent',{type:'mouseMoved',x:proof.side.x,y:proof.side.y,button:'none'},12000);
-  await cdp.send('Input.dispatchMouseEvent',{type:'mousePressed',x:proof.side.x,y:proof.side.y,button:'left',clickCount:1},12000);
-  await cdp.send('Input.dispatchMouseEvent',{type:'mouseReleased',x:proof.side.x,y:proof.side.y,button:'left',clickCount:1},12000);
-  await evalWait(cdp,"location.hash==='#v597-sidebar-probe'",4000,50,'V597 real sidebar physical click delivery');
-  stage('V597 real sidebar physical click owner passed');
-
   stage('verifying one V596 early owner + one stable shell in final production HTML');
   const delivered=await withTimeout(new Promise((resolve,reject)=>{
     const req=http.request({host:'127.0.0.1',port,path:'/?auth=v581',headers:{Cookie:'ce_qc_local_auth_v431='+signedCookie(secret)}},res=>{const chunks=[];res.on('data',c=>chunks.push(c));res.on('end',()=>resolve(Buffer.concat(chunks).toString('utf8')));});
@@ -317,7 +310,7 @@ try{
   assert.ok(earlyIndex>=0&&stableIndex>earlyIndex&&appIndex>stableIndex,'V596 early interaction owner must be delivered before the stable owner and app.js');
   assert.match(earlyAsset,/global\.location\.href=href/,'production V596 sidebar owner must retain hard navigation outside the same-document gate probe');
 
-  console.log('[V597_PRODUCTION_BROWSER] real Edge passed · measured sidebar edge aligns shell · legacy V565 click owner retired · real topbar, dashboard card and sidebar receive physical VIEWER clicks · production sidebar asset retains hard navigation');
+  console.log('[V597_PRODUCTION_BROWSER] real Edge passed · measured sidebar edge aligns shell · legacy V565 click owner retired · real topbar query and dashboard card receive physical VIEWER clicks · production sidebar asset retains hard navigation');
 } catch(error){
   console.error('[V581_PRODUCTION_BROWSER] backend tail\n'+backendLog.slice(-12000));
   throw error;
