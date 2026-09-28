@@ -61,17 +61,24 @@ async function attachTarget(target){
   return next;
 }
 async function reattachAfterNavigation(current,debugPort,expectedPath){
-  // Windows Edge can take longer to publish the same-page target URL under CI or
-  // antivirus load even after the click handler has fired. Keep the real click
-  // requirement, but do not turn a slow /json target refresh into a false failure.
+  // A normal same-tab hard navigation keeps the existing page target. Prefer proving
+  // the new pathname on the already attached session; hosted Windows can lag or omit
+  // the /json target URL refresh even though the real navigation has completed.
+  try{
+    await waitFor(async()=>{
+      try{return await current.eval("location.pathname",1800)===expectedPath;}catch{return false;}
+    },9000,120,'existing browser target path '+expectedPath);
+    stage('existing browser target observed '+expectedPath);
+    return current;
+  }catch{}
+  // Only reattach when the existing CDP session genuinely stopped following the tab.
   const target=await waitForPageTarget(debugPort,expectedPath,25000);
-  stage('browser target observed '+expectedPath);
+  stage('published browser target observed '+expectedPath);
+  let next=null;
+  try{next=await attachTarget(target);}
+  catch(error){throw error;}
   try{current?.close();}catch{}
   await new Promise(r=>setTimeout(r,80));
-  const next=await attachTarget(target);
-  // The target path itself proves the top-level hard navigation. Route DOM/visibility is
-  // already locked by static lifecycle regressions; avoid an extra Runtime.evaluate here
-  // because hosted Windows Edge intermittently stalls that CDP domain after navigation.
   return next;
 }
 function killTree(child,label){
