@@ -1,8 +1,8 @@
 import { spawnSync } from 'node:child_process';
 
 const script='scripts/v581-production-shell-browser-smoke.mjs';
-const maxAttempts=3;
-const transient=/CDP\s+(?:Runtime\.evaluate|DOM\.[A-Za-z]+|Input\.[A-Za-z]+)\s+timed out|Could not find node with given id|No node with given id|timeout waiting for (?:Chromium|browser target)|ECONNRESET|WebSocket.*(?:closed|open error)/i;
+const maxAttempts=4;
+const transient=/CDP\s+(?:Runtime\.evaluate|DOM\.[A-Za-z]+|Input\.[A-Za-z]+|Network\.[A-Za-z]+|Page\.[A-Za-z]+)\s+timed out|Could not find node with given id|No node with given id|timeout waiting for (?:Chromium|browser target)|ECONNRESET|WebSocket.*(?:closed|open error)/i;
 
 for(let attempt=1;attempt<=maxAttempts;attempt+=1){
   console.log(`[V587_BROWSER_RETRY] attempt ${attempt}/${maxAttempts}`);
