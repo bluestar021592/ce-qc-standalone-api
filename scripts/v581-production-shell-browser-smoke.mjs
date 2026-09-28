@@ -278,6 +278,8 @@ try{
   stage('proving real main dashboard card recovery through a maximum-z stale blocker');
   await cdp.eval("(()=>{delete document.documentElement.dataset.v595MainCardClick;document.getElementById('v595MainContentBlocker')?.remove();const btn=document.querySelector('.main-content .v18-business-card');if(!btn)return false;btn.addEventListener('click',event=>{document.documentElement.dataset.v595MainCardClick='1';event.preventDefault();event.stopImmediatePropagation();},{once:true,capture:true});const b=document.createElement('div');b.id='v595MainContentBlocker';Object.assign(b.style,{position:'fixed',left:'228px',top:'64px',right:'0',bottom:'0',zIndex:'2147483647',background:'rgba(255,0,0,0.001)',pointerEvents:'auto'});document.body.appendChild(b);return true;})()",12000);
   const mainInfo=await domElement(cdp,'.main-content .v18-business-card',{box:true});
+  const mainHitDebug=await cdp.eval("(()=>{const x="+mainInfo.point.x+",y="+mainInfo.point.y+",btn=document.querySelector('.main-content .v18-business-card'),blk=document.getElementById('v595MainContentBlocker'),top=document.elementFromPoint(x,y);const pack=n=>n?{tag:n.tagName,id:n.id,cls:String(n.className||''),pos:getComputedStyle(n).position,z:getComputedStyle(n).zIndex,pe:getComputedStyle(n).pointerEvents,rect:(()=>{const r=n.getBoundingClientRect();return{x:r.x,y:r.y,w:r.width,h:r.height}})()}:null;return{x,y,btn:pack(btn),blk:pack(blk),top:pack(top),topParent:pack(top?.parentElement)};})()",12000);
+  stage('V595 main hit debug '+JSON.stringify(mainHitDebug));
   const repaired=await cdp.eval("window.__CE_QC_V581_STABLE_SHELL__?.retirePointerBlockersAt?.("+mainInfo.point.x+","+mainInfo.point.y+",'v595-real-card-gate')===true",12000);
   assert.equal(repaired,true,'V595 must retire a maximum-z blocker above a real delivered dashboard card');
   const mainPointer=await cdp.eval("getComputedStyle(document.getElementById('v595MainContentBlocker')).pointerEvents",12000);
@@ -327,3 +329,5 @@ try{
   try{fs.rmSync(userData,{recursive:true,force:true,maxRetries:10,retryDelay:50})}catch{}
   try{fs.rmSync(root,{recursive:true,force:true,maxRetries:10,retryDelay:50})}catch{}
 }
+
+// V595 Windows debug2 trigger
