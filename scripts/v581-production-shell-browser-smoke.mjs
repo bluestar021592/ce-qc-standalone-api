@@ -328,3 +328,5 @@ try{
   try{fs.rmSync(userData,{recursive:true,force:true,maxRetries:10,retryDelay:50})}catch{}
   try{fs.rmSync(root,{recursive:true,force:true,maxRetries:10,retryDelay:50})}catch{}
 }
+
+// V596 Windows gate trigger
