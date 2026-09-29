@@ -187,6 +187,10 @@
   const VERSION='2026-09-29-v598-passive-interaction-forensics-v1';
   const doc=global.document;
   global.__CE_QC_V598_PASSIVE_FORENSICS__={version:VERSION};
+  if(typeof global.addEventListener!=='function'||typeof global.setTimeout!=='function'||typeof global.setInterval!=='function'){
+    global.__CE_QC_V598_PASSIVE_FORENSICS__.skipped='NON_BROWSER_RUNTIME';
+    return;
+  }
   let sequence=0;
   let lastMoveAt=0;
   let expectedTick=(global.performance?.now?.()||Date.now())+1000;
