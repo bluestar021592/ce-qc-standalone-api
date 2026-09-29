@@ -1,7 +1,7 @@
 (function installV596EarlyInteractionOwner(global){
   'use strict';
   if(global.__CE_QC_V596_EARLY_INTERACTION__)return;
-  const VERSION='2026-09-28-v596-unified-coordinate-interaction-v1';
+  const VERSION='2026-09-29-v600-native-browser-interaction-v1';
   const doc=global.document;
   const ACTION_SELECTOR=[
     '.topbar button:not(:disabled)',
@@ -229,15 +229,15 @@
     if(link)route(link,event,'keyboard');
   }
 
-  global.addEventListener('pointerdown',pointerOwner,true);
-  if(!('PointerEvent' in global))global.addEventListener('mousedown',pointerOwner,true);
-  global.addEventListener('click',clickOwner,true);
-  global.addEventListener('keydown',keyboardOwner,true);
+  // V600: native browser interaction is authoritative. Do not capture pointerdown/click
+  // at window level. The delivered UI already uses native anchors, buttons, inputs and
+  // inline handlers; a second global owner can suppress real user input on Windows/Edge.
+  try{doc.documentElement.dataset.ceQcV600NativeInteraction='1';}catch{}
   if(doc.readyState==='loading')doc.addEventListener('DOMContentLoaded',retireBrokenFrames,{once:true});
   else retireBrokenFrames();
 
   const api={version:VERSION,retireBrokenFrames,sidebarLinkAt,controlAt,route,invokeControl};
   global.__CE_QC_V596_EARLY_INTERACTION__=api;
   global.__CE_QC_V593_EARLY_SIDEBAR__=api;
-  console.info('[CE-QC][V596_EARLY_INTERACTION]',VERSION,'one early window-capture owner: native clicks stay native; blocked sidebar/topbar/main controls fall back by real geometry.');
+  console.info('[CE-QC][V600_NATIVE_INTERACTION]',VERSION,'native anchors/buttons/inputs are the only click owner; legacy global pointer/click capture is retired.');
 })(window);
