@@ -267,7 +267,7 @@ try{
     req.setTimeout(5000,()=>req.destroy(new Error('V600 native interaction asset request timeout')));
     req.end();
   }),7000,'V600 native interaction asset request');
-  assert.match(earlyAsset,/2026-09-29-v600-native-browser-interaction-v1/,'real server must deliver the V600 native interaction bootstrap');
+  assert.match(earlyAsset,/2026-09-29-v603-real-edge-geometry-rescue-v1/,'real server must deliver the V603 real-Edge interaction rescue');
   assert.doesNotMatch(earlyAsset,/global\.addEventListener\('pointerdown',pointerOwner,true\)/,'V600 must not capture pointerdown globally');
   assert.doesNotMatch(earlyAsset,/global\.addEventListener\('click',clickOwner,true\)/,'V600 must not capture click globally');
   assert.match(earlyAsset,/ceQcV600NativeInteraction/,'V600 native interaction marker must be published');
@@ -291,6 +291,10 @@ try{
   await evalWait(cdp,"document.getElementById('accountDropdown')?.hidden===false",4000,50,'top user menu functional result');
   stage('V601 top user menu functional click passed');
 
+  stage('proving V603 survives a stale invisible hit surface present only in persistent Edge sessions');
+  await cdp.eval("(()=>{const a=document.querySelector('.main-content .v18-business-card[href^=\\\"/ce?\\\"]');if(!a)return false;const r=a.getBoundingClientRect();const blocker=document.createElement('div');blocker.id='v603-real-edge-stale-hit-fixture';Object.assign(blocker.style,{position:'fixed',left:r.left+'px',top:r.top+'px',width:r.width+'px',height:r.height+'px',zIndex:'2147483646',background:'transparent',pointerEvents:'auto'});document.body.appendChild(blocker);return true;})()",5000);
+  const blockedHit=await cdp.eval("(()=>{const a=document.querySelector('.main-content .v18-business-card[href^=\\\"/ce?\\\"]');const r=a.getBoundingClientRect();return document.elementFromPoint(r.left+r.width/2,r.top+r.height/2)?.id||'';})()",5000);
+  assert.equal(blockedHit,'v603-real-edge-stale-hit-fixture','V603 fixture must really cover the CE card');
   stage('proving CE home card actually navigates after a physical click');
   await cdp.eval("(()=>{window.__V602_CLICK_TRACE__={before:location.href,defaultPrevented:null,target:null};const a=document.querySelector('.main-content .v18-business-card[href^=\\\"/ce?\\\"]');a?.addEventListener('click',e=>{queueMicrotask(()=>{window.__V602_CLICK_TRACE__.defaultPrevented=e.defaultPrevented;window.__V602_CLICK_TRACE__.target=e.target?.tagName||'';});},{once:true});return true;})()",5000);
   await cdp.send('Input.dispatchMouseEvent',{type:'mouseMoved',x:proof.main.x,y:proof.main.y,button:'none'},12000);
