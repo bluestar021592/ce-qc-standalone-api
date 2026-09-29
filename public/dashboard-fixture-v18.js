@@ -179,3 +179,94 @@
   try{if(document.documentElement?.dataset)document.documentElement.dataset.ceQcV597LegacyInteractionRetired='1';}catch{}
   console.info('[CE-QC][V597_STARTUP_GUARD] first-paint/read-timeout guard active; legacy V565 pointer/click owner retired.');
 })(window);
+
+
+(function installV598PassiveInteractionForensics(global){
+  'use strict';
+  if(!global||!global.document||global.__CE_QC_V598_PASSIVE_FORENSICS__)return;
+  const VERSION='2026-09-29-v598-passive-interaction-forensics-v1';
+  const doc=global.document;
+  global.__CE_QC_V598_PASSIVE_FORENSICS__={version:VERSION};
+  let sequence=0;
+  let lastMoveAt=0;
+  let expectedTick=(global.performance?.now?.()||Date.now())+1000;
+
+  function label(node){
+    try{
+      if(!node)return '-';
+      const tag=String(node.tagName||node.nodeName||'?').toLowerCase();
+      const id=node.id?'#'+String(node.id).slice(0,34):'';
+      const cls=String(node.className||'').trim().split(/\s+/).filter(Boolean).slice(0,2).join('.');
+      return (tag+id+(cls?'.'+cls:'')).slice(0,72);
+    }catch{return '?';}
+  }
+  function send(event,extra=''){
+    try{
+      const q=new URLSearchParams({
+        event:String(event||'').slice(0,48),
+        page:String(global.location?.pathname||'/').replace(/^\//,'').slice(0,32)||'home',
+        extra:String(extra||'').slice(0,220),
+        v:'598'
+      });
+      fetch('/api/client-diag?'+q.toString(),{cache:'no-store',credentials:'same-origin',keepalive:true}).catch(()=>{});
+    }catch{}
+  }
+  function pointSnapshot(event){
+    try{
+      const x=Math.round(Number(event?.clientX||0)),y=Math.round(Number(event?.clientY||0));
+      const target=event?.target||null;
+      const top=doc.elementFromPoint?.(x,y)||null;
+      const cs=top?global.getComputedStyle?.(top):null;
+      const root=global.getComputedStyle?.(doc.documentElement);
+      const body=global.getComputedStyle?.(doc.body);
+      const overlay=doc.querySelector('.modal:not([hidden]),.tracking-drawer:not([hidden]),#v303CleanStartOverlay:not([hidden])');
+      return [
+        'n='+(++sequence),
+        'xy='+x+','+y,
+        't='+label(target),
+        'top='+label(top),
+        'pe='+(cs?.pointerEvents||'-'),
+        'z='+(cs?.zIndex||'-'),
+        'pos='+(cs?.position||'-'),
+        'inert='+(top?.closest?.('[inert]')?'1':'0'),
+        'root='+(root?.pointerEvents||'-')+'/'+(body?.pointerEvents||'-'),
+        'ov='+label(overlay)
+      ].join('|');
+    }catch(error){return 'snapshot_error='+String(error?.message||error).slice(0,90);}
+  }
+  function record(type){
+    return event=>send(type,pointSnapshot(event));
+  }
+
+  global.addEventListener('pointerdown',record('V598_POINTERDOWN'),{capture:true,passive:true});
+  global.addEventListener('pointerup',record('V598_POINTERUP'),{capture:true,passive:true});
+  global.addEventListener('click',record('V598_CLICK'),{capture:true,passive:true});
+  global.addEventListener('mousemove',event=>{
+    const now=Date.now();
+    if(now-lastMoveAt<2500)return;
+    lastMoveAt=now;
+    send('V598_MOUSEMOVE',pointSnapshot(event));
+  },{capture:true,passive:true});
+  global.addEventListener('error',event=>send('V598_WINDOW_ERROR',String(event?.message||event?.error?.message||'error').slice(0,200)),true);
+  global.addEventListener('unhandledrejection',event=>send('V598_REJECTION',String(event?.reason?.message||event?.reason||'rejection').slice(0,200)),true);
+
+  send('V598_START',[
+    'ready='+doc.readyState,
+    'vis='+doc.visibilityState,
+    'owners='+(global.__CE_QC_V596_EARLY_INTERACTION__?'early':'-')+'/'+(global.__CE_QC_V581_STABLE_SHELL__?'stable':'-'),
+    'retired='+(doc.documentElement?.dataset?.ceQcV597LegacyInteractionRetired||'-')
+  ].join('|'));
+
+  [2000,8000,20000].forEach(ms=>setTimeout(()=>{
+    send('V598_HEARTBEAT','ms='+ms+'|ready='+doc.readyState+'|vis='+doc.visibilityState+'|owners='+(global.__CE_QC_V596_EARLY_INTERACTION__?'early':'-')+'/'+(global.__CE_QC_V581_STABLE_SHELL__?'stable':'-'));
+  },ms));
+
+  setInterval(()=>{
+    const now=global.performance?.now?.()||Date.now();
+    const lag=Math.max(0,Math.round(now-expectedTick));
+    expectedTick=now+1000;
+    if(lag>=700)send('V598_MAINTHREAD_LAG','lagMs='+lag+'|ready='+doc.readyState+'|vis='+doc.visibilityState);
+  },1000);
+
+  console.info('[CE-QC][V598_PASSIVE_FORENSICS]',VERSION,'passive only; no preventDefault/stopPropagation/style mutation/business writes.');
+})(window);
