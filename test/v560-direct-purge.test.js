@@ -151,7 +151,7 @@ test('post-purge empty bootstrap clears stale browser business state instead of 
   assert.match(app,/\^ce_qc_/,'full purge must retire CE QC browser caches when server has no business data');
   assert.match(app,/sessionStorage\.removeItem\('trackingReturnContext'\)/);
   assert.match(html,/app\.js\?v=20260921-v564-1/,'browser must receive the corrected empty-state and interaction owner immediately after update');
-  assert.match(html,/dashboard-fixture-v18\.js\?v=20260928-v597-1/,'browser must receive the V597 single-owner startup guard immediately after update');
+  assert.match(html,/dashboard-fixture-v18\.js\?v=20260929-v598-1/,'browser must receive the V598 passive forensic startup guard immediately after update');
 });
 
 
