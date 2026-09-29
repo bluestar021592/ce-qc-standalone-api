@@ -588,28 +588,30 @@ app.get('/api/bootstrap', async (req, res) => {
     const shopee = loadFastSqlAggregateState('SHOPEE') || compactDashboardState(summarizeLightweightShopeeState(loadLightweightAggregateState('SHOPEE'), { dbStatus: getDbStatus() }));
     const unifiedHistory = listUnifiedImportHistory(120);
     const latestUnified = getLatestUnifiedImport();
-    const selectedSnapshotId = String(latestUnified?.snapshotId || unifiedHistory?.[0]?.snapshotId || '');
-    const businesses = {};
-    for (const type of ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN']) {
-      const fast = loadFastSqlBusinessState(type, selectedSnapshotId);
-      if (fast) businesses[type] = fast;
-    }
-    res.setHeader('Cache-Control', 'private, max-age=5');
-    res.json({
+    // V599: the HOME first paint must never hydrate six business state objects.
+    // Individual boards fetch their own compact state only after the user navigates.
+    // Home totals already come from the aggregate cache + unified classification summary.
+    const bootstrapStartedAt = Date.now();
+    const payload = {
       ok: true,
       state: ccsl,
       shopeeState: shopee,
       authStatus: summarizeToken(await loadToken()),
       session: { ok: true, user: publicUser(req.user), unreadNotifications: 0 },
       history: {
-        CCSL: listSnapshotHistory(90),
-        SHOPEE: listBusinessHistoryDates(SHOPEE, 90),
-        UNIFIED: unifiedHistory
+        CCSL: listSnapshotHistory(45),
+        SHOPEE: listBusinessHistoryDates(SHOPEE, 45),
+        UNIFIED: unifiedHistory.slice(0, 60)
       },
       unifiedImport: latestUnified,
-      businessStates: businesses,
+      businessStates: {},
+      bootstrapMode: 'V599_HOME_ZERO_DETAIL',
       generatedAt: new Date().toISOString()
-    });
+    };
+    res.setHeader('Cache-Control', 'private, max-age=5');
+    res.setHeader('X-CE-QC-Bootstrap-Mode', 'V599_HOME_ZERO_DETAIL');
+    res.setHeader('X-CE-QC-Bootstrap-Ms', String(Date.now() - bootstrapStartedAt));
+    res.json(payload);
   } catch (error) {
     res.status(500).json({ ok: false, code: 'BOOTSTRAP_FAILED', error: error.message || String(error) });
   }
