@@ -6,7 +6,7 @@ import { loadToken, summarizeToken } from './authStore.js';
 import { publicUser } from './accessControl.js';
 import { getDbStatus } from './store.js';
 
-export const V213_FAST_BOOTSTRAP_ROUTE_ID = '2026-08-22-v213-safe-fast-bootstrap-route-v1';
+export const V213_FAST_BOOTSTRAP_ROUTE_ID = '2026-09-29-v599-cache-first-fast-bootstrap-v1';
 const ROUTE = '/api/bootstrap';
 const TYPES = Object.freeze(['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN']);
 const CCSL_TYPES = new Set(['CE','CEAF','TBKH','ALI1688']);
@@ -108,11 +108,23 @@ function cachedRows(db, batch) {
   } catch { return []; }
 }
 
-function metricRows(db, batch) {
-  const imported = importedRows(db, batch);
+function metricRows(db, batch, timings = null) {
+  const cacheStarted = Date.now();
   const cached = cachedRows(db, batch);
-  if (!cached.length) return imported;
+  if (timings) timings.cacheRowsMs = Date.now() - cacheStarted;
   const cachedTypes = new Set(cached.map(row => row.businessType));
+  const cacheComplete = TYPES.every(type => cachedTypes.has(type));
+  if (cacheComplete) {
+    if (timings) { timings.importedRowsMs = 0; timings.metricSource = 'COMPLETE_DASHBOARD_CACHE'; }
+    return cached;
+  }
+  const importedStarted = Date.now();
+  const imported = importedRows(db, batch);
+  if (timings) {
+    timings.importedRowsMs = Date.now() - importedStarted;
+    timings.metricSource = cached.length ? 'CACHE_PLUS_IMPORT_FALLBACK' : 'IMPORT_FALLBACK';
+  }
+  if (!cached.length) return imported;
   return [...cached, ...imported.filter(row => !cachedTypes.has(row.businessType))];
 }
 
@@ -178,18 +190,41 @@ function networkInfo(req) {
 }
 
 function buildData(req) {
-  const started = Date.now(), db = getDb(), batch = latestBatch(db), dbStatus = getDbStatus();
-  if (!batch) return { key:'empty', cacheHit:false, state:ccslState('CCSL',[],null,dbStatus), shopeeState:shopeeState('SHOPEE',[],null,{},dbStatus), history:{CCSL:[],SHOPEE:[],UNIFIED:[]}, unifiedImport:null, businessStates:{}, serverBuildMs:Date.now()-started };
+  const started = Date.now(), timings = {}, db = getDb();
+  let stageAt = Date.now();
+  const batch = latestBatch(db);
+  timings.latestBatchMs = Date.now() - stageAt;
+  stageAt = Date.now();
+  const dbStatus = getDbStatus();
+  timings.dbStatusMs = Date.now() - stageAt;
+  if (!batch) {
+    const empty = { key:'empty', cacheHit:false, state:ccslState('CCSL',[],null,dbStatus), shopeeState:shopeeState('SHOPEE',[],null,{},dbStatus), history:{CCSL:[],SHOPEE:[],UNIFIED:[]}, unifiedImport:null, businessStates:{}, serverBuildMs:Date.now()-started, bootstrapTimings:timings };
+    console.log(`[CE-QC][V599_BOOTSTRAP_OWNER] totalMs=${empty.serverBuildMs} source=EMPTY latestBatchMs=${timings.latestBatchMs} dbStatusMs=${timings.dbStatusMs}`);
+    return empty;
+  }
   const key = `${batch.snapshotId}|${batch.reportDate}`;
-  if (dataCache?.key === key && Date.now() - dataCache.at < CACHE_MS) return { ...dataCache.data, key, cacheHit:true };
-  const rows = metricRows(db,batch), byType = Object.fromEntries(TYPES.map(type => [type, rows.filter(row => row.businessType === type)]));
+  if (dataCache?.key === key && Date.now() - dataCache.at < CACHE_MS) {
+    const hit = { ...dataCache.data, key, cacheHit:true, bootstrapTimings:{...dataCache.data.bootstrapTimings,cacheHit:true} };
+    console.log(`[CE-QC][V599_BOOTSTRAP_OWNER] totalMs=${Date.now()-started} source=MEMORY_CACHE reportDate=${batch.reportDate}`);
+    return hit;
+  }
+  stageAt = Date.now();
+  const rows = metricRows(db,batch,timings);
+  timings.metricRowsMs = Date.now() - stageAt;
+  const byType = Object.fromEntries(TYPES.map(type => [type, rows.filter(row => row.businessType === type)]));
   const businessStates = { CE:ccslState('CE',byType.CE,batch,dbStatus), CEAF:ccslState('CEAF',byType.CEAF,batch,dbStatus), TBKH:ccslState('TBKH',byType.TBKH,batch,dbStatus), ALI1688:ccslState('ALI1688',byType.ALI1688,batch,dbStatus), SHOPEECN:shopeeState('SHOPEECN',byType.SHOPEECN,batch,{},dbStatus), SHOPEEVN:shopeeState('SHOPEEVN',byType.SHOPEEVN,batch,{},dbStatus) };
   const state = ccslState('CCSL',rows.filter(row => CCSL_TYPES.has(row.businessType)),batch,dbStatus); state.network = networkInfo(req);
   const shopeeStateValue = shopeeState('SHOPEE',rows.filter(row => SHOPEE_TYPES.has(row.businessType)),batch,{CN:byType.SHOPEECN,VN:byType.SHOPEEVN},dbStatus);
-  const history = historyRows(db,60), classificationCounts = Object.fromEntries(TYPES.map(type => [type,addMetrics(byType[type]).total])), total = Object.values(classificationCounts).reduce((sum,v)=>sum+n(v),0);
+  stageAt = Date.now();
+  const history = historyRows(db,60);
+  timings.historyMs = Date.now() - stageAt;
+  const classificationCounts = Object.fromEntries(TYPES.map(type => [type,addMetrics(byType[type]).total])), total = Object.values(classificationCounts).reduce((sum,v)=>sum+n(v),0);
   const unifiedImport = { batchId:batch.batchId,snapshotId:batch.snapshotId,reportDate:batch.reportDate,sourceName:batch.sourceName || '',fileHash:batch.fileHash || '',snapshotStatus:batch.snapshotStatus || 'IMPORTED',classificationCounts,summary:{validUniqueWaybills:total,totalUnique:total},sourceReconciliation:{validUniqueWaybills:total,classifiedWaybills:total,difference:0,balanced:true},carryover:{todayOpen:0,historicalOpen:0,currentOpen:0} };
-  const data = { state,shopeeState:shopeeStateValue,history:{CCSL:history,SHOPEE:history,UNIFIED:history},unifiedImport,businessStates,serverBuildMs:Date.now()-started };
-  dataCache = { key,at:Date.now(),data }; return { ...data,key,cacheHit:false };
+  timings.totalMs = Date.now() - started;
+  const data = { state,shopeeState:shopeeStateValue,history:{CCSL:history,SHOPEE:history,UNIFIED:history},unifiedImport,businessStates,serverBuildMs:timings.totalMs,bootstrapTimings:timings };
+  dataCache = { key,at:Date.now(),data };
+  console.log(`[CE-QC][V599_BOOTSTRAP_OWNER] totalMs=${timings.totalMs} source=${timings.metricSource} reportDate=${batch.reportDate} latestBatchMs=${timings.latestBatchMs} dbStatusMs=${timings.dbStatusMs} cacheRowsMs=${timings.cacheRowsMs||0} importedRowsMs=${timings.importedRowsMs||0} metricRowsMs=${timings.metricRowsMs||0} historyMs=${timings.historyMs||0}`);
+  return { ...data,key,cacheHit:false };
 }
 
 async function handler(req,res) {
@@ -198,7 +233,7 @@ async function handler(req,res) {
     const built = buildData(req), token = await loadToken();
     res.setHeader('Cache-Control','private, max-age=5');
     res.setHeader('X-CE-QC-Bootstrap',built.cacheHit?'V213-HIT':'V213-MISS');
-    res.setHeader('Server-Timing',`bootstrap;dur=${Date.now()-started}`);
+    res.setHeader('Server-Timing',`bootstrap;dur=${Date.now()-started}, metricRows;dur=${Number(built.bootstrapTimings?.metricRowsMs||0)}, history;dur=${Number(built.bootstrapTimings?.historyMs||0)}`);
     res.json({ ok:true,patchId:V213_FAST_BOOTSTRAP_ROUTE_ID,bootstrapMode:'V213_SAFE_FAST_ROUTE',state:built.state,shopeeState:built.shopeeState,authStatus:summarizeToken(token),session:{ok:true,user:publicUser(req.user),unreadNotifications:0},history:built.history,unifiedImport:built.unifiedImport,businessStates:built.businessStates,generatedAt:new Date().toISOString(),serverBuildMs:built.serverBuildMs,cacheHit:built.cacheHit });
   } catch (error) {
     console.error('[CE-QC][V213] bootstrap failed:',error?.stack || error);
