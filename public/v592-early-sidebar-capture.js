@@ -1,7 +1,7 @@
 (function installV596EarlyInteractionOwner(global){
   'use strict';
   if(global.__CE_QC_V596_EARLY_INTERACTION__)return;
-  const VERSION='2026-09-29-v600-native-browser-interaction-v1';
+  const VERSION='2026-09-29-v603-real-edge-geometry-rescue-v1';
   const doc=global.document;
   const ACTION_SELECTOR=[
     '.topbar button:not(:disabled)',
@@ -229,10 +229,29 @@
     if(link)route(link,event,'keyboard');
   }
 
-  // V600: native browser interaction is authoritative. Do not capture pointerdown/click
-  // at window level. The delivered UI already uses native anchors, buttons, inputs and
-  // inline handlers; a second global owner can suppress real user input on Windows/Edge.
-  try{doc.documentElement.dataset.ceQcV600NativeInteraction='1';}catch{}
+  // V603: keep native browser interaction authoritative, but add a narrowly-scoped
+  // geometry rescue for HOME business cards. Real user Edge sessions can retain an
+  // invisible/stale hit surface that is absent from the clean headless gate. We never
+  // suppress a click that already lands on a real control or a legitimate overlay.
+  function homeCardRescue(event){
+    try{
+      if(redispatching||event?.defaultPrevented||event?.metaKey||event?.ctrlKey||event?.shiftKey||event?.altKey)return;
+      if(Number(event?.button||0)!==0||String(global.location?.pathname||'/')!=='/')return;
+      if(blockedByLegitimateOverlay(event.target)||directControl(event.target))return;
+      const x=Number(event?.clientX),y=Number(event?.clientY);
+      if(!Number.isFinite(x)||!Number.isFinite(y))return;
+      const intended=controlAt(x,y);
+      if(!intended||!intended.matches?.('.v18-business-card[href]'))return;
+      diag('V603_HOME_CARD_RESCUE',(intended.getAttribute('href')||'')+'|target='+(event.target?.tagName||''));
+      event.preventDefault?.();event.stopPropagation?.();event.stopImmediatePropagation?.();
+      invokeControl(intended,event,'v603-home-card-rescue');
+    }catch{}
+  }
+  try{
+    doc.documentElement.dataset.ceQcV600NativeInteraction='1';
+    doc.documentElement.dataset.ceQcV603RealEdgeRescue='1';
+  }catch{}
+  global.addEventListener('pointerup',homeCardRescue,true);
   if(doc.readyState==='loading')doc.addEventListener('DOMContentLoaded',retireBrokenFrames,{once:true});
   else retireBrokenFrames();
 
