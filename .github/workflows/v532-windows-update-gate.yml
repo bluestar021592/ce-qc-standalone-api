@@ -1,6 +1,8 @@
 name: CE QC V532 Windows updater gate
 
 on:
+  push:
+    branches: [main]
   pull_request:
     branches: [main]
   workflow_dispatch:
