@@ -270,31 +270,30 @@ try{
   assert.match(earlyAsset,/ceQcV600NativeInteraction/,'V600 native interaction marker must be published');
   stage('V600 native interaction contract delivered');
 
-  stage('waiting for the real home dashboard card before one-shot interaction proof');
-  await evalWait(cdp,"!!document.querySelector('.main-content .v18-business-card')",12000,80,'real rendered V18 home dashboard card');
-  stage('preparing one-shot real VIEWER interaction proof without CDP DOM traversal');
-  const proof=await cdp.eval("(()=>{window.__CE_QC_V581_STABLE_SHELL__?.enforce?.('v597-one-shot-home-settle');const main=document.querySelector('.main-content .v18-business-card'),top=document.querySelector('#topRangeQuery'),side=document.querySelector('.side-nav .side-link[data-page=\\\"ce\\\"]'),sidebar=document.querySelector('.sidebar'),app=document.querySelector('.app-body'),bar=document.querySelector('.topbar'),title=document.querySelector('#pageTitle');if(!main||!top||!side||!sidebar||!app||!bar||!title)return null;main.scrollIntoView({block:'center',inline:'nearest',behavior:'instant'});const box=n=>{const r=n.getBoundingClientRect();return{x:r.left+r.width/2,y:r.top+r.height/2,left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width,height:r.height}};const sb=box(sidebar),ab=box(app),tb=box(bar),hb=box(title);delete document.documentElement.dataset.v597TopNativeClick;delete document.documentElement.dataset.v597MainNativeClick;top.addEventListener('click',event=>{document.documentElement.dataset.v597TopNativeClick='1';event.preventDefault();event.stopImmediatePropagation();},{once:true,capture:true});main.addEventListener('click',event=>{document.documentElement.dataset.v597MainNativeClick='1';event.preventDefault();event.stopImmediatePropagation();},{once:true,capture:true});side.dataset.path='';side.setAttribute('href','#v597-sidebar-probe');return{top:box(top),main:box(main),side:box(side),sidebar:sb,app:ab,bar:tb,title:hb,cssVar:getComputedStyle(document.documentElement).getPropertyValue('--ce-qc-shell-left').trim(),vw:innerWidth};})()",12000);
-  assert.ok(proof&&proof.sidebar.right>70,'V597 one-shot interaction proof must resolve real delivered controls');
+  stage('waiting for real functional controls before V601 interaction proof');
+  await evalWait(cdp,"!!document.querySelector('.main-content .v18-business-card[href^=\\\"/ce?\\\"]') && !!document.querySelector('.top-user') && !!document.getElementById('accountDropdown')",12000,80,'real functional HOME controls');
+  const proof=await cdp.eval("(()=>{window.__CE_QC_V581_STABLE_SHELL__?.enforce?.('v601-functional-settle');const main=document.querySelector('.main-content .v18-business-card[href^=\\\"/ce?\\\"]'),top=document.querySelector('.top-user'),sidebar=document.querySelector('.sidebar'),app=document.querySelector('.app-body'),bar=document.querySelector('.topbar'),title=document.querySelector('#pageTitle');if(!main||!top||!sidebar||!app||!bar||!title)return null;main.scrollIntoView({block:'center',inline:'nearest',behavior:'instant'});const box=n=>{const r=n.getBoundingClientRect();return{x:r.left+r.width/2,y:r.top+r.height/2,left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width,height:r.height}};return{top:box(top),main:box(main),sidebar:box(sidebar),app:box(app),bar:box(bar),title:box(title),cssVar:getComputedStyle(document.documentElement).getPropertyValue('--ce-qc-shell-left').trim(),vw:innerWidth};})()",12000);
+  assert.ok(proof&&proof.sidebar.right>70,'V601 functional interaction proof must resolve real delivered controls');
   assert.ok(Math.abs(proof.app.left-proof.sidebar.right)<=1.5,'app body must start exactly after the real sidebar');
   assert.ok(Math.abs(proof.bar.left-proof.sidebar.right)<=1.5,'topbar must start exactly after the real sidebar');
   assert.ok(proof.title.left+0.5>=proof.sidebar.right,'page title must not sit underneath the sidebar');
-  assert.ok(Math.abs(parseFloat(proof.cssVar||'0')-proof.sidebar.right)<=1.5,'V596 shell variable must equal the measured sidebar edge');
-  assert.ok(proof.main.y>=64&&proof.main.y<950,'real dashboard card must be visible before normal click proof');
-  stage('V597 one-shot geometry passed edge='+proof.sidebar.right+' vw='+proof.vw);
+  assert.ok(Math.abs(parseFloat(proof.cssVar||'0')-proof.sidebar.right)<=1.5,'V601 shell variable must equal the measured sidebar edge');
+  assert.ok(proof.main.y>=64&&proof.main.y<950,'real CE dashboard card must be visible before functional click');
+  stage('V601 functional geometry passed edge='+proof.sidebar.right+' vw='+proof.vw);
 
-  stage('proving real topbar query receives a normal VIEWER click');
+  stage('proving top user control actually opens its menu after a physical click');
   await cdp.send('Input.dispatchMouseEvent',{type:'mouseMoved',x:proof.top.x,y:proof.top.y,button:'none'},12000);
   await cdp.send('Input.dispatchMouseEvent',{type:'mousePressed',x:proof.top.x,y:proof.top.y,button:'left',clickCount:1},12000);
   await cdp.send('Input.dispatchMouseEvent',{type:'mouseReleased',x:proof.top.x,y:proof.top.y,button:'left',clickCount:1},12000);
-  await evalWait(cdp,"document.documentElement.dataset.v597TopNativeClick==='1'",4000,50,'V597 real topbar normal click delivery');
-  stage('V597 real topbar normal click passed');
+  await evalWait(cdp,"document.getElementById('accountDropdown')?.hidden===false",4000,50,'top user menu functional result');
+  stage('V601 top user menu functional click passed');
 
-  stage('proving real dashboard card receives a normal VIEWER click');
+  stage('proving CE home card actually navigates after a physical click');
   await cdp.send('Input.dispatchMouseEvent',{type:'mouseMoved',x:proof.main.x,y:proof.main.y,button:'none'},12000);
   await cdp.send('Input.dispatchMouseEvent',{type:'mousePressed',x:proof.main.x,y:proof.main.y,button:'left',clickCount:1},12000);
   await cdp.send('Input.dispatchMouseEvent',{type:'mouseReleased',x:proof.main.x,y:proof.main.y,button:'left',clickCount:1},12000);
-  await evalWait(cdp,"document.documentElement.dataset.v597MainNativeClick==='1'",4000,50,'V597 real dashboard card normal click delivery');
-  stage('V597 real dashboard card normal click passed');
+  await evalWait(cdp,"location.pathname==='/ce' && document.getElementById('pageTitle')?.textContent?.includes('CE')",8000,80,'CE card functional navigation');
+  stage('V601 CE card functional navigation passed');
 
   stage('verifying one V596 early owner + one stable shell in final production HTML');
   const delivered=await withTimeout(new Promise((resolve,reject)=>{
@@ -311,7 +310,7 @@ try{
   const appIndex=scripts.findIndex(src=>/\/app\.js/.test(src));
   assert.ok(earlyIndex>=0&&stableIndex>earlyIndex&&appIndex>stableIndex,'V600 native interaction bootstrap must be delivered before the stable shell and app.js');
 
-  console.log('[V600_PRODUCTION_BROWSER] real Edge passed · measured sidebar edge aligns shell · legacy capture owners retired · real topbar query and dashboard card receive physical native VIEWER clicks');
+  console.log('[V601_PRODUCTION_BROWSER] real Edge passed · top user menu opens and CE home card physically navigates to /ce · native functional interaction proven end-to-end');
 } catch(error){
   console.error('[V581_PRODUCTION_BROWSER] backend tail\n'+backendLog.slice(-12000));
   throw error;
