@@ -1,7 +1,7 @@
 import express from 'express';
 
-export const V581_STABLE_SHELL_RESPONSE_ID='2026-09-28-v596-dynamic-shell-click-response-v1';
-const V581_TAG='  <script src="/v581-stable-shell-owner.js?v=20260928-v596-1"></script>';
+export const V581_STABLE_SHELL_RESPONSE_ID='2026-09-29-v600-native-interaction-response-v1';
+const V581_TAG='  <script src="/v581-stable-shell-owner.js?v=20260929-v600-1"></script>';
 
 const previousSend=express.response.send;
 
@@ -35,4 +35,4 @@ express.response.send=function v581StableShellSend(body){
   return previousSend.call(this,body);
 };
 
-console.info('[CE-QC][V581_STABLE_SHELL_RESPONSE]',V581_STABLE_SHELL_RESPONSE_ID,'final response pass retires legacy layered interaction owners and injects one V596 dynamic stable shell immediately before app.js.');
+console.info('[CE-QC][V581_STABLE_SHELL_RESPONSE]',V581_STABLE_SHELL_RESPONSE_ID,'final response pass retires legacy layered interaction owners and injects one V600 native-interaction stable shell immediately before app.js.');
