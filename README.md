@@ -125,3 +125,5 @@ place
 当长期JSON、轨迹节点、Excel导出数据很大时，OTWMS页面会无响应。
 
 独立版把所有计算放在本地 Node 服务里，页面只负责导入、登录、开始处理和导出，不再承载几十万行数据。
+
+<!-- V599 Windows gate validation branch -->
