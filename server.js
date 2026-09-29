@@ -48,6 +48,10 @@ import { queueDirectDataPurge, getDirectDataPurgeStatus, DIRECT_PURGE_ID } from 
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const clientInteractionLogFile = path.join(__dirname, 'logs', 'client_interaction_latest.log');
+const clientInteractionLogReady = fs.mkdir(path.dirname(clientInteractionLogFile), { recursive: true })
+  .then(() => fs.writeFile(clientInteractionLogFile, `[CE-QC][V598] client interaction forensic log started ${new Date().toISOString()}\n`, 'utf8'))
+  .catch(() => {});
 
 const app = express();
 validateAccessConfiguration();
@@ -192,9 +196,13 @@ app.get(['/ce', '/ceaf', '/tbkh', '/ali1688', '/whpp', '/shopeecn', '/shopeevn',
 app.get('/api/client-diag', (req, res) => {
   const event = String(req.query?.event || '').replace(/[^A-Z0-9_:-]/gi, '').slice(0, 48);
   const page = String(req.query?.page || '').replace(/[^a-z0-9_-]/gi, '').slice(0, 32);
-  const extra = String(req.query?.extra || '').replace(/[\r\n\t]/g, ' ').slice(0, 160);
+  const extra = String(req.query?.extra || '').replace(/[\r\n\t]/g, ' ').slice(0, 220);
   const version = String(req.query?.v || '').replace(/[^0-9.]/g, '').slice(0, 16);
-  console.log(`[CE-QC][V575_CLIENT] event=${event || '-'} page=${page || '-'} v=${version || '-'}${extra ? ` extra=${extra}` : ''}`);
+  const line = `[CE-QC][V575_CLIENT] event=${event || '-'} page=${page || '-'} v=${version || '-'}${extra ? ` extra=${extra}` : ''}`;
+  console.log(line);
+  void clientInteractionLogReady
+    .then(() => fs.appendFile(clientInteractionLogFile, `${new Date().toISOString()} ${line}\n`, 'utf8'))
+    .catch(() => {});
   res.setHeader('Cache-Control', 'no-store');
   res.json({ ok: true });
 });
