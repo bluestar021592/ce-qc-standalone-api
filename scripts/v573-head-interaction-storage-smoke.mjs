@@ -14,12 +14,12 @@ const v213Bootstrap=fs.readFileSync(new URL('../src/v213FastBootstrapRoutePatch.
 
 assert.doesNotMatch(index,/installV575CoordinateOwner/,'V581 must retire the layered V575 capture owner from static HTML');
 assert.doesNotMatch(index,/v580-visible-shell-recovery\.js/,'V581 must retire the layered V580 recovery script from static HTML');
-assert.match(index,/v581-stable-shell-owner\.js\?v=20260928-v596-1/,'static shell must carry V581 as fallback');
+assert.match(index,/v581-stable-shell-owner\.js\?v=20260929-v600-1/,'static shell must carry the V600 stable shell fallback');
 assert.match(index,/<a class="side-link active" data-page="home"[^>]*href="\/?\?auth=v581"/,'HOME must be a native hard link');
 assert.match(index,/<a class="side-link" data-page="ce"[^>]*href="\/ce\?auth=v581"/,'CE must be a native hard link');
 assert.match(index,/<a class="side-link" data-page="import"[^>]*href="\/import\?auth=v581"/,'import must be a native hard link');
-assert.match(stable,/single stable shell owner/i);
-assert.match(index,/v592-early-sidebar-capture\.js\?v=20260928-v596-1/,'V596 early unified interaction owner must be cache-busted in the head');
+assert.match(stable,/browser-native controls own all clicks/i,'stable shell must remain layout-only under V600');
+assert.match(index,/v592-early-sidebar-capture\.js\?v=20260929-v600-1/,'V600 native interaction bootstrap must be cache-busted in the head');
 assert.doesNotMatch(stable,/subtree:true/,'stable-shell observer must never watch the whole dashboard subtree');
 assert.match(stable,/shell-structure-mutation/,'bounded structural repair must remain available');
 assert.match(stable,/data-v581-active/,'V581 must deterministically own visible route page');
@@ -32,11 +32,10 @@ assert.match(stable,/syncSidebarGeometry/,'V596 must align shell offsets to the 
 assert.match(stable,/--ce-qc-shell-left/,'V596 must publish one measured shell-left variable');
 assert.doesNotMatch(stable,/margin-left:228px|left:228px/,'V596 must not hard-code the old 228px shell boundary');
 assert.doesNotMatch(stable,/addEventListener\('pointermove',pointerRecoveryOwner|addEventListener\('mousedown',pointerRecoveryOwner/,'V596 stable shell must not install a second pointer-capture owner');
-assert.match(early,/2026-09-28-v596-unified-coordinate-interaction-v1/,'V596 unified early interaction owner must ship');
-assert.match(early,/global\.addEventListener\('pointerdown',pointerOwner,true\)/,'V596 must capture blocked intent at window before document blockers');
-assert.match(early,/controlAt\(x,y\)/,'V596 must resolve blocked topbar/main actions by geometry');
-assert.match(early,/sidebarLinkAt/,'V596 must retain sidebar geometry routing');
-assert.match(early,/global\.location\.href=href/,'V596 must retain browser hard navigation for sidebar routes');
+assert.match(early,/2026-09-29-v600-native-browser-interaction-v1/,'V600 native interaction bootstrap must ship');
+assert.doesNotMatch(early,/global\.addEventListener\('pointerdown',pointerOwner,true\)/,'V600 must not capture pointerdown globally');
+assert.doesNotMatch(early,/global\.addEventListener\('click',clickOwner,true\)/,'V600 must not capture click globally');
+assert.match(early,/ceQcV600NativeInteraction/,'V600 must publish native interaction readiness');
 assert.match(stable,/retireIsolatedSidebar/,'V593 must remove the blank V590/V591 iframe');
 assert.doesNotMatch(stable,/srcdoc|mountIsolatedSidebar/,'V593 stable shell must not cover the real sidebar with an iframe');
 assert.match(stable,/\['whpp','WHPP本土看板','package','\/whpp'\]/,'V593 original sidebar must keep WHPP first-class');
@@ -76,6 +75,6 @@ assert.match(metricRowsBlock,/if \(cacheComplete\)[\s\S]*return cached/,'V599 co
 assert.ok(metricRowsBlock.indexOf('const cached = cachedRows') < metricRowsBlock.indexOf('const imported = importedRows'),'V599 imported-row fallback must occur only after cache inspection');
 assert.match(v213Bootstrap,/\[CE-QC\]\[V599_BOOTSTRAP_OWNER\]/,'V599 actual bootstrap owner must publish bounded stage timings');
 assert.match(v213Bootstrap,/metricSource = 'COMPLETE_DASHBOARD_CACHE'/,'V599 diagnostics must distinguish zero-scan cache hits from import fallback');
-assert.match(start,/\[CE-QC\]\[V599\] Bounded startup bootstrap \+ V598 passive interaction forensics \+ V597 single interaction owner are installed\./);
+assert.match(start,/\[CE-QC\]\[V600\] Bounded startup bootstrap \+ V598 passive interaction forensics \+ native browser interaction are installed\./);
 
-console.log('[V599] bounded startup bootstrap + passive interaction forensics + V597 single interaction owner + WHPP smoke passed');
+console.log('[V600] bounded startup bootstrap + passive interaction forensics + native browser interaction + WHPP smoke passed');
