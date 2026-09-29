@@ -48,6 +48,10 @@ assert.match(startup,/V533_STARTUP_READ_TIMEOUT/,'header timeout must fail one r
 assert.match(startup,/forceFirstPaint\(\)/,'startup guard must make the static shell visible before app bootstrap completes');
 assert.match(startup,/function forceInteractivePaint\(\)/,'V564 must make the shell interactive independently of refresh');
 assert.match(startup,/ceQcV597LegacyInteractionRetired/,'V597 startup guard must publish legacy interaction retirement');
+assert.match(startup,/V598_PASSIVE_FORENSICS/,'V598 passive forensic runtime must be shipped');
+assert.match(startup,/V598_POINTERDOWN/,'V598 must record pointerdown without taking ownership');
+assert.match(startup,/V598_MAINTHREAD_LAG/,'V598 must record long main-thread stalls');
+assert.doesNotMatch(startup,/V598_PASSIVE_FORENSICS[\s\S]*preventDefault\(|V598_PASSIVE_FORENSICS[\s\S]*stopPropagation\(/,'V598 forensic block must not prevent or stop user input');
 assert.doesNotMatch(startup,/function repairInteractionSurface\(\)|repairBlockedPointer|ceQcRetiredClickBlocker/,'V597 startup fixture must no longer own pointer\/click repair');
 assert.doesNotMatch(startup,/系统界面已可操作，本地数据继续后台读取/,'V564 must not display the misleading startup toast');
 assert.doesNotMatch(startup,/typeof global\.renderAll === 'function'/,'startup click guard must never trigger a second renderAll pass');
@@ -58,7 +62,7 @@ assert.doesNotMatch(startup,/method\s*:\s*['"`](?:POST|PUT|PATCH|DELETE)['"`]/i,
 assert.doesNotMatch(startup,/observe\(document\.body,\s*\{\s*childList:\s*true,\s*subtree:\s*true\s*\}\)/,'first-paint guard must not observe the whole dashboard subtree');
 assert.doesNotMatch(v14,/observe\(document\.body,\s*\{\s*childList:\s*true,\s*subtree:\s*true\s*\}\)/,'V14 must not install a body-wide dashboard MutationObserver');
 assert.doesNotMatch(v304,/observe\(document\.body,\s*\{\s*childList:\s*true,\s*subtree:\s*true\s*\}\)/,'V304 upload owner must not observe unrelated dashboard mutations');
-assert.match(indexHtml,/dashboard-fixture-v18\.js\?v=20260928-v597-1/,'V597 startup-guard retirement must be cache-busted');
+assert.match(indexHtml,/dashboard-fixture-v18\.js\?v=20260929-v598-1/,'V598 passive forensic runtime must be cache-busted');
 assert.match(indexHtml,/v14-geometry-fixture\.js\?v=20260925-v582-1/,'V582 V14 observer fix must be cache-busted');
 assert.match(v14,/v304-unified-upload-owner\.js\?v=20260925-v582-1/,'V582 V304 upload owner must be cache-busted by the runtime loader');
 assert.doesNotMatch(indexHtml,/installV575CoordinateOwner/,'V581 static shell must retire the V575 capture owner');
@@ -200,4 +204,4 @@ const nativePost=await context.fetch('/api/admin/data-purge/prepare',{method:'PO
 assert.equal(nativePost.native,true,'write requests must bypass startup guard unchanged');
 assert.equal(nativeCalls.at(-1)?.init?.method,'POST');
 
-console.log('[V480/V533/V535/V564/V597/V581] first-paint/lifecycle smoke passed · CSS/JS/images/fonts before auth · HTML/API stay protected · startup reads bounded · V581 single stable shell/native navigation shipped · writes stay untouched · export descendants self-release when direct parent disappears');
+console.log('[V480/V533/V535/V564/V597/V598/V581] first-paint/lifecycle smoke passed · CSS/JS/images/fonts before auth · HTML/API stay protected · startup reads bounded · V598 passive forensics shipped without interaction mutation · writes stay untouched · export descendants self-release when direct parent disappears');
