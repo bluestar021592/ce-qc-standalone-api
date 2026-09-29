@@ -130,7 +130,7 @@ function Clear-CeQcPort([int]$Port) {
 Write-Host 'Checking port 5177...' -ForegroundColor Cyan
 Clear-CeQcPort 5177
 Write-Host 'Port 5177 is stable and free.' -ForegroundColor Green
-Write-Host '[CE-QC][V598] Passive live interaction forensics + V597 single interaction owner + dynamic sidebar geometry are installed.' -ForegroundColor Green
+Write-Host '[CE-QC][V599] Bounded startup bootstrap + V598 passive interaction forensics + V597 single interaction owner are installed.' -ForegroundColor Green
 
 $DedicatedCleanup = Join-Path $ProjectRoot 'tools\CE_QC_Dedicated_Drive_Cleanup.ps1'
 if (Test-Path -LiteralPath $DedicatedCleanup) {
