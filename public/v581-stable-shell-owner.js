@@ -1,7 +1,7 @@
 (function installV581StableShell(global){
   'use strict';
   if(global.__CE_QC_V581_STABLE_SHELL__)return;
-  const VERSION='2026-09-28-v596-dynamic-shell-click-owner-v1';
+  const VERSION='2026-09-29-v600-native-interaction-shell-v1';
   const doc=global.document;
   const NAV=[
     ['home','首页总看板','home','/'],
@@ -327,9 +327,9 @@
     [50,250,800,1800,3500,7000].forEach(ms=>setTimeout(()=>{enforce('timer-'+ms);renderFallbackHomeIfStillEmpty();},ms));
     global.addEventListener('pageshow',()=>enforce('pageshow'),true);
     global.addEventListener('popstate',()=>enforce('popstate'),true);
-    // V596: user click ownership lives only in the early head owner. This stable
-    // owner keeps layout/route visibility deterministic and exposes blocker repair
-    // for diagnostics/tests without adding a second pointer-capture chain.
+    // V600: browser-native anchors/buttons/inputs are the only interaction owner.
+    // This stable shell only repairs layout, route visibility and accidental blockers;
+    // it must never install a pointer/click capture chain.
     global.addEventListener('resize',()=>enforce('resize'),{passive:true});
     doc.querySelector('.sidebar-collapse')?.addEventListener('click',()=>{
       setTimeout(()=>enforce('sidebar-collapse-0'),0);
@@ -371,5 +371,5 @@
   if(doc.querySelector('.side-nav')&&doc.querySelector('.main-content'))bind();
   else if(doc.readyState==='loading')doc.addEventListener('DOMContentLoaded',bind,{once:true});
   else bind();
-  console.info('[CE-QC][V581_STABLE_SHELL]',VERSION,'single stable shell owner: measured sidebar geometry + deterministic route visibility; click fallback belongs to V596 early owner.');
+  console.info('[CE-QC][V581_STABLE_SHELL]',VERSION,'stable shell: measured sidebar geometry + deterministic route visibility; browser-native controls own all clicks.');
 })(window);
