@@ -10,6 +10,7 @@ const server=fs.readFileSync(new URL('../server.js',import.meta.url),'utf8');
 const early=fs.readFileSync(new URL('../public/v592-early-sidebar-capture.js',import.meta.url),'utf8');
 const stable=fs.readFileSync(new URL('../public/v581-stable-shell-owner.js',import.meta.url),'utf8');
 const response=fs.readFileSync(new URL('../src/v581StableShellResponsePatch.js',import.meta.url),'utf8');
+const unifiedStore=fs.readFileSync(new URL('../src/unifiedImportStore.js',import.meta.url),'utf8');
 
 assert.doesNotMatch(index,/installV575CoordinateOwner/,'V581 must retire the layered V575 capture owner from static HTML');
 assert.doesNotMatch(index,/v580-visible-shell-recovery\.js/,'V581 must retire the layered V580 recovery script from static HTML');
@@ -68,6 +69,14 @@ assert.match(cleanup,/driveLine\('D',drivesBefore\.D,drivesAfter\.D\)/);
 assert.match(cleanup,/compactSqliteStorage/);
 assert.match(server,/client_interaction_latest\.log/,'V598 must persist passive interaction diagnostics to a dedicated log');
 assert.match(server,/fs\.appendFile\(clientInteractionLogFile/,'V598 client diagnostics must append without touching business data');
+assert.match(unifiedStore,/export function listUnifiedImportHistoryLite\(limit = 120\)/,'V599 must provide a lightweight startup history reader');
+const liteHistoryBlock=unifiedStore.match(/export function listUnifiedImportHistoryLite\(limit = 120\) \{[\s\S]*?\n\}/)?.[0]||'';
+assert.match(liteHistoryBlock,/SELECT[\s\S]*b\.batchId,b\.snapshotId,b\.reportDate,b\.createdAt/,'V599 lightweight history must use one metadata-only SQLite query');
+assert.doesNotMatch(liteHistoryBlock,/hydrateBatch\(/,'V599 lightweight history must never run per-batch classification hydration');
+const bootstrapBlock=server.match(/app\.get\('\/api\/bootstrap',[\s\S]*?\n\}\);/)?.[0]||'';
+assert.match(bootstrapBlock,/listUnifiedImportHistoryLite\(120\)/,'V599 bootstrap must use lightweight unified history');
+assert.doesNotMatch(bootstrapBlock,/listUnifiedImportHistory\(120\)/,'V599 bootstrap must not revive N+1 full history hydration');
+assert.match(bootstrapBlock,/\[CE-QC\]\[V599_BOOTSTRAP\]/,'V599 bootstrap must publish stage timings for production diagnosis');
 assert.match(start,/\[CE-QC\]\[V599\] Bounded startup bootstrap \+ V598 passive interaction forensics \+ V597 single interaction owner are installed\./);
 
 console.log('[V599] bounded startup bootstrap + passive interaction forensics + V597 single interaction owner + WHPP smoke passed');
