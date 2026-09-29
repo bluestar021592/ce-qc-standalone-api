@@ -68,6 +68,6 @@ assert.match(cleanup,/driveLine\('D',drivesBefore\.D,drivesAfter\.D\)/);
 assert.match(cleanup,/compactSqliteStorage/);
 assert.match(server,/client_interaction_latest\.log/,'V598 must persist passive interaction diagnostics to a dedicated log');
 assert.match(server,/fs\.appendFile\(clientInteractionLogFile/,'V598 client diagnostics must append without touching business data');
-assert.match(start,/\[CE-QC\]\[V598\] Passive live interaction forensics \+ V597 single interaction owner \+ dynamic sidebar geometry are installed\./);
+assert.match(start,/\[CE-QC\]\[V599\] Bounded startup bootstrap \+ V598 passive interaction forensics \+ V597 single interaction owner are installed\./);
 
-console.log('[V598] passive interaction forensics + V597 single interaction owner + dynamic sidebar geometry + WHPP + diff-aware updater smoke passed');
+console.log('[V599] bounded startup bootstrap + passive interaction forensics + V597 single interaction owner + WHPP smoke passed');
