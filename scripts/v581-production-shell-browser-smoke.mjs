@@ -256,6 +256,9 @@ try{
   await evalWait(cdp,'!!window.__CE_QC_V596_EARLY_INTERACTION__',8000,80,'V600 native interaction bootstrap after production navigation');
   await evalWait(cdp,"document.documentElement.dataset.ceQcV597LegacyInteractionRetired==='1'",8000,80,'V597 legacy interaction retirement marker');
   stage('V600 native interaction active; legacy capture owners retired');
+  const retiredOwners=await cdp.eval("({v569:!!window.__CE_QC_V569_FINAL_INTERACTION_OWNER__,v570:!!window.__CE_QC_V570_EARLY_INTERACTION_OWNER__,v573:!!window.__CE_QC_V573_HEAD_INTERACTION_BRIDGE__,v580:!!window.__CE_QC_V580_VISIBLE_SHELL_RECOVERY__})",5000);
+  assert.deepEqual(retiredOwners,{v569:false,v570:false,v573:false,v580:false},'retired interaction owners must not exist at runtime');
+  stage('V602 retired interaction globals absent at runtime');
 
   stage('verifying exact V600 native interaction asset');
   const earlyAsset=await withTimeout(new Promise((resolve,reject)=>{
@@ -289,9 +292,14 @@ try{
   stage('V601 top user menu functional click passed');
 
   stage('proving CE home card actually navigates after a physical click');
+  await cdp.eval("(()=>{window.__V602_CLICK_TRACE__={before:location.href,defaultPrevented:null,target:null};const a=document.querySelector('.main-content .v18-business-card[href^=\\\"/ce?\\\"]');a?.addEventListener('click',e=>{queueMicrotask(()=>{window.__V602_CLICK_TRACE__.defaultPrevented=e.defaultPrevented;window.__V602_CLICK_TRACE__.target=e.target?.tagName||'';});},{once:true});return true;})()",5000);
   await cdp.send('Input.dispatchMouseEvent',{type:'mouseMoved',x:proof.main.x,y:proof.main.y,button:'none'},12000);
   await cdp.send('Input.dispatchMouseEvent',{type:'mousePressed',x:proof.main.x,y:proof.main.y,button:'left',clickCount:1},12000);
   await cdp.send('Input.dispatchMouseEvent',{type:'mouseReleased',x:proof.main.x,y:proof.main.y,button:'left',clickCount:1},12000);
+  try{
+    const trace=await cdp.eval("window.__V602_CLICK_TRACE__",1800);
+    stage('V602 CE click trace before='+String(trace?.before||'')+' prevented='+String(trace?.defaultPrevented)+' target='+String(trace?.target||''));
+  }catch{}
   cdp=await reattachAfterNavigation(cdp,debugPort,'/ce');
   await evalWait(cdp,"location.pathname==='/ce' && document.getElementById('pageTitle')?.textContent?.includes('CE')",8000,80,'CE card functional navigation');
   stage('V601 CE card functional navigation passed after navigation reattach');
