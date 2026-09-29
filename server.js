@@ -94,6 +94,21 @@ app.get('/v505-data-purge-recovery.js', sendLoopbackRecoveryFile('v505-data-purg
 app.get('/v560-direct-data-purge.js', sendLoopbackRecoveryFile('v560-direct-data-purge.js', 'application/javascript'));
 app.get(['/local-login.html','/local-login'], sendLoopbackRecoveryFile('local-login.html', 'html'));
 
+// V602: retired interaction-owner assets must never execute again.
+// Older compatibility code may still request these filenames dynamically. Returning a
+// deterministic no-op here prevents stale window-capture listeners from cancelling
+// native anchor/button behavior even when an old loader survives in browser cache.
+const retiredInteractionAssets = new Set([
+  '/v569-final-interaction-owner.js',
+  '/v573-head-interaction-bridge.js',
+  '/v580-visible-shell-recovery.js'
+]);
+app.get([...retiredInteractionAssets], (req, res) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+  res.type('application/javascript');
+  res.send("'use strict';console.info('[CE-QC][V602_RETIRED_INTERACTION_ASSET]','"+String(req.path||'')+"','no-op');");
+});
+
 // V574: static browser assets contain no business/user data and must never wait on
 // auth/session/database readiness. The authenticated HTML/API surface stays protected.
 const v575PublicAssetStatic = express.static(path.join(__dirname, 'public'), {
