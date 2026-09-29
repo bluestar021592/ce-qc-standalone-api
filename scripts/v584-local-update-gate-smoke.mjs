@@ -28,7 +28,7 @@ assert.match(gate,/timeout:taskTimeoutMs/,'per-task timeout override must be exp
 assert.match(gate,/unified-import-v7\.test\.js/,'desktop update gate must retain seven-business import protection');
 assert.match(gate,/v512-whpp-source-membership-guard\.test\.js/,'desktop update gate must retain WHPP exact membership protection');
 assert.match(launcher,/@\('run','test:golive'\)/,'existing managed launcher contract must continue to call test:golive so old installs can consume the new bounded gate');
-assert.match(start,/\[CE-QC\]\[V597\] Single interaction owner \+ dynamic sidebar geometry \+ real VIEWER navigation gate are installed\./);
+assert.match(start,/\[CE-QC\]\[V598\] Passive live interaction forensics \+ V597 single interaction owner \+ dynamic sidebar geometry are installed\./);
 assert.match(start,/CE_QC_C_Drive_Deep_Census\.ps1/,'startup must launch the deep C-drive census only after the app is ready');
 assert.match(start,/c_drive_deep_census_latest\.log/,'startup must publish a stable deep-census log path');
 assert.match(census,/deep read-only census/i);
@@ -45,4 +45,4 @@ if(os.platform()==='win32'){
   assert.equal(parsed.status,0,'PowerShell parser rejected deep C-drive census: '+(parsed.stdout||'')+(parsed.stderr||''));
 }
 
-console.log('[V597] diff-aware local updater gate + single interaction owner + dynamic sidebar geometry + legacy C backup purge smoke passed');
+console.log('[V598] diff-aware local updater gate + passive interaction forensics + single interaction owner + dynamic sidebar geometry + legacy C backup purge smoke passed');
