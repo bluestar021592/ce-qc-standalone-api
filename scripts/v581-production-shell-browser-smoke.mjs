@@ -292,8 +292,9 @@ try{
   await cdp.send('Input.dispatchMouseEvent',{type:'mouseMoved',x:proof.main.x,y:proof.main.y,button:'none'},12000);
   await cdp.send('Input.dispatchMouseEvent',{type:'mousePressed',x:proof.main.x,y:proof.main.y,button:'left',clickCount:1},12000);
   await cdp.send('Input.dispatchMouseEvent',{type:'mouseReleased',x:proof.main.x,y:proof.main.y,button:'left',clickCount:1},12000);
+  cdp=await reattachAfterNavigation(cdp,debugPort,'/ce');
   await evalWait(cdp,"location.pathname==='/ce' && document.getElementById('pageTitle')?.textContent?.includes('CE')",8000,80,'CE card functional navigation');
-  stage('V601 CE card functional navigation passed');
+  stage('V601 CE card functional navigation passed after navigation reattach');
 
   stage('verifying one V596 early owner + one stable shell in final production HTML');
   const delivered=await withTimeout(new Promise((resolve,reject)=>{
