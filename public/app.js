@@ -184,6 +184,7 @@ async function refreshInternal() {
       };
       unifiedImportState = boot?.unifiedImport || null;
       businessStates = { ...(boot?.businessStates || {}) };
+      if (boot?.bootstrapMode === 'V599_HOME_ZERO_DETAIL') document.documentElement.dataset.ceQcV599Bootstrap='ZERO_DETAIL';
       const serverHasBusinessData = Boolean(
         unifiedImportState?.snapshotId
         || historyCatalog.UNIFIED.length
@@ -2598,13 +2599,16 @@ function buildProductionDashboardSnapshot() {
   const ccslTotalTrend = metricTrend(appState, '今日PNH');
   const ccslPodRateTrend = metricTrend(appState, '首投POD率');
   const shDashboard = shopeeState.dashboard || {};
-  const provinceOpenRows = normalizedFinalRows(appState).filter(row => {
+  const compactStartup = Boolean(appState?._v238FreshExact || shopeeState?._v238FreshExact);
+  const provinceOpenRows = compactStartup ? [] : normalizedFinalRows(appState).filter(row => {
     if (row.currentState === 'POD' || row.currentState === 'RETURN_COMPLETED' || row.是否POD === '是' || row.退回状态 === '已退回') return false;
     return /^(WHJT|WHPP|CCSL_PV)/i.test(String(row.lastEventTargetNode || row.最后节点目标网点 || ''));
   });
-  const provinceOpenCount = provinceOpenRows.length;
-  const ccslIssues = (appState.detailTabs?.coreAbnormal?.rows || []).map(row => issueFromRow(row, 'CCSL', '金边'));
-  const shopeeIssues = (shopeeState.detailTabs?.abnormal?.rows || []).map(row => issueFromRow(row, `SHOPEE-${normalizedRegion(row)}`, normalizedRegion(row) === 'PV' ? '外省/省外' : '金边/本省'));
+  const provinceOpenCount = compactStartup
+    ? Number(appState.dashboard?.metrics?.provinceOpen || appState.dashboard?.metrics?.外省未完结POD件 || 0)
+    : provinceOpenRows.length;
+  const ccslIssues = compactStartup ? [] : (appState.detailTabs?.coreAbnormal?.rows || []).map(row => issueFromRow(row, 'CCSL', '金边'));
+  const shopeeIssues = compactStartup ? [] : (shopeeState.detailTabs?.abnormal?.rows || []).map(row => issueFromRow(row, `SHOPEE-${normalizedRegion(row)}`, normalizedRegion(row) === 'PV' ? '外省/省外' : '金边/本省'));
   const importedCounts = unifiedImportState?.classificationCounts || {};
   // Single-day mode may use the exact import classification counters. In a date
   // range those counters belong only to the newest imported day, so every business
@@ -2735,6 +2739,20 @@ function productionRecipient(group) {
 }
 
 function productionDispatchRegion(group, region) {
+  if (shopeeState?._v238FreshExact) {
+    const metric = shopeeState.dashboard?.recipientGroups?.[group]?.regions?.[region]
+      || shopeeState.dashboard?.regions?.[region]
+      || {};
+    return {
+      firstAttemptRate: nullableNumber(metric.dispatchAttempt1Rate ?? metric.firstAttemptRate),
+      secondAttemptRate: nullableNumber(metric.dispatchAttempt2Rate ?? metric.secondAttemptRate),
+      thirdAttemptRate: nullableNumber(metric.dispatchAttempt3Rate ?? metric.thirdAttemptRate),
+      firstAttemptCount: Number(metric.dispatchAttempt1 ?? metric.firstAttemptCount ?? 0),
+      secondAttemptCount: Number(metric.dispatchAttempt2 ?? metric.secondAttemptCount ?? 0),
+      thirdAttemptCount: Number(metric.dispatchAttempt3 ?? metric.thirdAttemptCount ?? 0),
+      denominator: Number(metric.dispatchAttemptDenominator ?? metric.total ?? 0)
+    };
+  }
   const finalRows = Array.isArray(shopeeState.finalRows) ? shopeeState.finalRows : [];
   const detailRows = shopeeState.detailTabs?.byRecipientGroup?.[group]?.all?.rows
     || shopeeState.detailTabs?.[`${group}_all`]?.rows
