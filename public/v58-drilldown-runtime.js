@@ -1,5 +1,5 @@
 (function installDrilldownRuntimeV58(global){
-  const VERSION='2026-08-22-v237-canonical-drilldown-v5';
+  const VERSION='2026-09-29-v603-native-route-anchor-exemption-v1';
   const PATH_TYPES=new Map([['/ce','CE'],['/ceaf','CEAF'],['/tbkh','TBKH'],['/ali1688','ALI1688'],['/shopeecn','SHOPEECN'],['/shopeevn','SHOPEEVN']]);
   const COMMON={
     '签收件数':'podClosed','今日POD':'podClosed','签收率':'podClosed','POD率':'podClosed','首次妥投率':'podClosed',
@@ -157,6 +157,9 @@
 
   function onClick(event){
     const card=event.target?.closest?.('.v18-metric-card,.v18-business-card');if(!card)return;
+    // V603: HOME/business navigation cards are native anchors. They are routes, not
+    // drilldown metrics, and must never be cancelled by this capture-phase owner.
+    if(card.matches?.('a.v18-business-card[href]'))return;
     const type=pageBusinessType(card),label=cardLabel(card),tab=tabFor(type,label,card.dataset?.metric||'');
     if(!type||!tab)return;
     event.preventDefault();event.stopPropagation();event.stopImmediatePropagation();void openDetail(type,tab,label);
