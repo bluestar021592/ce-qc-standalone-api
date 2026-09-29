@@ -12,7 +12,7 @@ import { parseDailyExcel } from './src/excelParser.js';
 import { parseLongBackupModules } from './src/backupParser.js';
 import { parseShopeeDailyExcel } from './src/shopeeExcelParser.js';
 import { parseUnifiedDailyExcel } from './src/unifiedExcelParser.js';
-import { completeUnifiedSnapshot, getLatestUnifiedImport, getUnifiedProcessingQueue, listUnifiedImportHistory, loadUnifiedBusinessState, loadUnifiedPeriodBusinessState, saveUnifiedImport, updateCarryoverResults } from './src/unifiedImportStore.js';
+import { completeUnifiedSnapshot, getLatestUnifiedImport, getUnifiedProcessingQueue, listUnifiedImportHistory, listUnifiedImportHistoryLite, loadUnifiedBusinessState, loadUnifiedPeriodBusinessState, saveUnifiedImport, updateCarryoverResults } from './src/unifiedImportStore.js';
 import { loadLightweightAggregateState, loadLightweightPeriodBusinessState, loadLightweightUnifiedBusinessState } from './src/lightweightDashboardStore.js';
 import { getDashboardCacheStatus, loadRangeDashboard, markDashboardCacheDirty } from './src/rangeDashboardStore.js';
 import { summarizeLightweightCcslState, summarizeLightweightShopeeState } from './src/lightweightDashboardSummary.js';
@@ -575,7 +575,8 @@ app.get('/api/dashboard-cache/status', (req, res) => {
 });
 
 app.get('/api/unified-history', (req, res) => {
-  res.json({ ok: true, rows: listUnifiedImportHistory(req.query.limit) });
+  const compact = String(req.query.compact || '') === '1';
+  res.json({ ok: true, rows: compact ? listUnifiedImportHistoryLite(req.query.limit) : listUnifiedImportHistory(req.query.limit) });
 });
 
 // V26: one lightweight startup payload. The browser used to wait for nine API
@@ -583,18 +584,40 @@ app.get('/api/unified-history', (req, res) => {
 // the fast SQL/range cache when possible, so normal navigation behaves like a
 // website rather than a batch-processing console.
 app.get('/api/bootstrap', async (req, res) => {
+  const startedAt = Date.now();
+  const stageMs = {};
   try {
+    let stageAt = Date.now();
     const ccsl = loadFastSqlAggregateState('CCSL') || compactDashboardState(summarizeLightweightCcslState(loadLightweightAggregateState('CCSL'), { dbStatus: getDbStatus(), network: buildNetworkInfo(getRuntimeConfig()), shopCodes: getShopCodeSummary() }));
     const shopee = loadFastSqlAggregateState('SHOPEE') || compactDashboardState(summarizeLightweightShopeeState(loadLightweightAggregateState('SHOPEE'), { dbStatus: getDbStatus() }));
-    const unifiedHistory = listUnifiedImportHistory(120);
+    stageMs.dashboard = Date.now() - stageAt;
+
+    stageAt = Date.now();
+    const unifiedHistory = listUnifiedImportHistoryLite(120);
+    stageMs.unifiedHistory = Date.now() - stageAt;
+
+    stageAt = Date.now();
     const latestUnified = getLatestUnifiedImport();
+    stageMs.latestUnified = Date.now() - stageAt;
+
     const selectedSnapshotId = String(latestUnified?.snapshotId || unifiedHistory?.[0]?.snapshotId || '');
+    stageAt = Date.now();
     const businesses = {};
     for (const type of ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN']) {
       const fast = loadFastSqlBusinessState(type, selectedSnapshotId);
       if (fast) businesses[type] = fast;
     }
+    stageMs.businesses = Date.now() - stageAt;
+
+    stageAt = Date.now();
+    const ccslHistory = listSnapshotHistory(90);
+    const shopeeHistory = listBusinessHistoryDates(SHOPEE, 90);
+    stageMs.legacyHistory = Date.now() - stageAt;
+
+    const totalMs = Date.now() - startedAt;
+    console.log(`[CE-QC][V599_BOOTSTRAP] totalMs=${totalMs} dashboardMs=${stageMs.dashboard} unifiedHistoryMs=${stageMs.unifiedHistory} latestUnifiedMs=${stageMs.latestUnified} businessesMs=${stageMs.businesses} legacyHistoryMs=${stageMs.legacyHistory} unifiedDates=${unifiedHistory.length}`);
     res.setHeader('Cache-Control', 'private, max-age=5');
+    res.setHeader('Server-Timing', `dashboard;dur=${stageMs.dashboard}, unifiedHistory;dur=${stageMs.unifiedHistory}, latestUnified;dur=${stageMs.latestUnified}, businesses;dur=${stageMs.businesses}, legacyHistory;dur=${stageMs.legacyHistory}`);
     res.json({
       ok: true,
       state: ccsl,
@@ -602,8 +625,8 @@ app.get('/api/bootstrap', async (req, res) => {
       authStatus: summarizeToken(await loadToken()),
       session: { ok: true, user: publicUser(req.user), unreadNotifications: 0 },
       history: {
-        CCSL: listSnapshotHistory(90),
-        SHOPEE: listBusinessHistoryDates(SHOPEE, 90),
+        CCSL: ccslHistory,
+        SHOPEE: shopeeHistory,
         UNIFIED: unifiedHistory
       },
       unifiedImport: latestUnified,
@@ -611,6 +634,7 @@ app.get('/api/bootstrap', async (req, res) => {
       generatedAt: new Date().toISOString()
     });
   } catch (error) {
+    console.error(`[CE-QC][V599_BOOTSTRAP] failed totalMs=${Date.now() - startedAt} error=${error?.message || error}`);
     res.status(500).json({ ok: false, code: 'BOOTSTRAP_FAILED', error: error.message || String(error) });
   }
 });
