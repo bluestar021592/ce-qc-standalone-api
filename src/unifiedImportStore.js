@@ -75,6 +75,39 @@ export function listUnifiedImportHistory(limit = 120) {
   }).map(row => ({ ...hydrateBatch(row, false, { includeCarryover: false }), snapshotStatus: row.snapshotStatus || 'IMPORTED', createdAt: row.snapshotCreatedAt || row.createdAt }));
 }
 
+export function listUnifiedImportHistoryLite(limit = 120) {
+  const requested = Math.max(1, Math.min(365, Number(limit) || 120));
+  // Startup/history selectors need only identity/date/status. Do not call
+  // hydrateBatch here: hydrateBatch performs one GROUP BY over unified_import_rows
+  // per history row and can block the Node event loop for a long time on the
+  // multi-GB production database.
+  const rawLimit = Math.max(requested, Math.min(1000, requested * 4));
+  const rows = getDb().prepare(`SELECT
+      b.batchId,b.snapshotId,b.reportDate,b.createdAt,
+      COALESCE(s.status,'IMPORTED') AS snapshotStatus
+    FROM unified_import_batches b
+    LEFT JOIN unified_snapshots s ON s.snapshotId=b.snapshotId
+    WHERE b.status='VALID'
+    ORDER BY b.reportDate DESC,b.createdAt DESC,b.rowid DESC
+    LIMIT ?`).all(rawLimit);
+  const seen = new Set();
+  const result = [];
+  for (const row of rows) {
+    const reportDate = String(row?.reportDate || '').slice(0, 10);
+    if (!reportDate || seen.has(reportDate)) continue;
+    seen.add(reportDate);
+    result.push({
+      batchId: String(row.batchId || ''),
+      snapshotId: String(row.snapshotId || ''),
+      reportDate,
+      snapshotStatus: String(row.snapshotStatus || 'IMPORTED'),
+      createdAt: String(row.createdAt || '')
+    });
+    if (result.length >= requested) break;
+  }
+  return result;
+}
+
 function hydrateBatch(row, duplicateFile, { includeCarryover = true } = {}) {
   const counts = getDb().prepare('SELECT businessType, COUNT(*) count FROM unified_import_rows WHERE batchId=? GROUP BY businessType').all(row.batchId);
   const classificationCounts = Object.assign(Object.fromEntries(BUSINESS_TYPES.map(type => [type, 0])), Object.fromEntries(counts.map(item => [item.businessType, Number(item.count)])));
