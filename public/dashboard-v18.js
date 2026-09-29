@@ -4,7 +4,7 @@
   if(document.documentElement?.dataset?.v58Drilldown||document.getElementById(RUNTIME_ID))return;
   const script=document.createElement('script');
   script.id=RUNTIME_ID;
-  script.src='/v58-drilldown-runtime.js?v=20260811-v61-1';
+  script.src='/v58-drilldown-runtime.js?v=20260929-v603-1';
   script.async=false;
   script.dataset.ceQcExactDrilldown='1';
   (document.head||document.documentElement).appendChild(script);
