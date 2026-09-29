@@ -253,22 +253,22 @@ try{
   await cdp.send('Page.navigate',{url:'http://127.0.0.1:'+port+'/?auth=v581'},8000);
   await evalWait(cdp,'!!window.__CE_QC_V581_STABLE_SHELL__',8000,80,'V581 owner after production navigation');
   stage('V581/V596 stable owner loaded');
-  await evalWait(cdp,'!!window.__CE_QC_V596_EARLY_INTERACTION__',8000,80,'V596 unified early interaction owner after production navigation');
+  await evalWait(cdp,'!!window.__CE_QC_V596_EARLY_INTERACTION__',8000,80,'V600 native interaction bootstrap after production navigation');
   await evalWait(cdp,"document.documentElement.dataset.ceQcV597LegacyInteractionRetired==='1'",8000,80,'V597 legacy interaction retirement marker');
-  stage('V597 single interaction ownership active; legacy V565 click capture retired');
+  stage('V600 native interaction active; legacy capture owners retired');
 
-  stage('verifying exact V596 early owner asset');
+  stage('verifying exact V600 native interaction asset');
   const earlyAsset=await withTimeout(new Promise((resolve,reject)=>{
-    const req=http.request({host:'127.0.0.1',port,path:'/v592-early-sidebar-capture.js?v=20260928-v596-1'},res=>{const chunks=[];res.on('data',chunk=>chunks.push(chunk));res.on('end',()=>resolve(Buffer.concat(chunks).toString('utf8')));});
+    const req=http.request({host:'127.0.0.1',port,path:'/v592-early-sidebar-capture.js?v=20260929-v600-1'},res=>{const chunks=[];res.on('data',chunk=>chunks.push(chunk));res.on('end',()=>resolve(Buffer.concat(chunks).toString('utf8')));});
     req.on('error',reject);
-    req.setTimeout(5000,()=>req.destroy(new Error('V596 early owner asset request timeout')));
+    req.setTimeout(5000,()=>req.destroy(new Error('V600 native interaction asset request timeout')));
     req.end();
-  }),7000,'V596 early owner asset request');
-  assert.match(earlyAsset,/2026-09-28-v596-unified-coordinate-interaction-v1/,'real server must deliver the V596 unified early owner');
-  assert.match(earlyAsset,/global\.addEventListener\('pointerdown',pointerOwner,true\)/,'V596 early owner must capture pointerdown on window');
-  assert.match(earlyAsset,/controlAt\(x,y\)/,'V596 early owner must resolve blocked controls by real geometry');
-  assert.match(earlyAsset,/global\.location\.href=href/,'V596 early owner must retain hard navigation for sidebar routes');
-  stage('V596 early owner contract delivered');
+  }),7000,'V600 native interaction asset request');
+  assert.match(earlyAsset,/2026-09-29-v600-native-browser-interaction-v1/,'real server must deliver the V600 native interaction bootstrap');
+  assert.doesNotMatch(earlyAsset,/global\.addEventListener\('pointerdown',pointerOwner,true\)/,'V600 must not capture pointerdown globally');
+  assert.doesNotMatch(earlyAsset,/global\.addEventListener\('click',clickOwner,true\)/,'V600 must not capture click globally');
+  assert.match(earlyAsset,/ceQcV600NativeInteraction/,'V600 native interaction marker must be published');
+  stage('V600 native interaction contract delivered');
 
   stage('waiting for the real home dashboard card before one-shot interaction proof');
   await evalWait(cdp,"!!document.querySelector('.main-content .v18-business-card')",12000,80,'real rendered V18 home dashboard card');
@@ -309,10 +309,9 @@ try{
   const earlyIndex=scripts.findIndex(src=>/v592-early-sidebar-capture\.js/.test(src));
   const stableIndex=scripts.findIndex(src=>/v581-stable-shell-owner\.js/.test(src));
   const appIndex=scripts.findIndex(src=>/\/app\.js/.test(src));
-  assert.ok(earlyIndex>=0&&stableIndex>earlyIndex&&appIndex>stableIndex,'V596 early interaction owner must be delivered before the stable owner and app.js');
-  assert.match(earlyAsset,/global\.location\.href=href/,'production V596 sidebar owner must retain hard navigation outside the same-document gate probe');
+  assert.ok(earlyIndex>=0&&stableIndex>earlyIndex&&appIndex>stableIndex,'V600 native interaction bootstrap must be delivered before the stable shell and app.js');
 
-  console.log('[V597_PRODUCTION_BROWSER] real Edge passed · measured sidebar edge aligns shell · legacy V565 click owner retired · real topbar query and dashboard card receive physical VIEWER clicks · production sidebar asset retains hard navigation');
+  console.log('[V600_PRODUCTION_BROWSER] real Edge passed · measured sidebar edge aligns shell · legacy capture owners retired · real topbar query and dashboard card receive physical native VIEWER clicks');
 } catch(error){
   console.error('[V581_PRODUCTION_BROWSER] backend tail\n'+backendLog.slice(-12000));
   throw error;
