@@ -268,6 +268,7 @@ try{
     req.end();
   }),7000,'V600 native interaction asset request');
   assert.match(earlyAsset,/2026-09-29-v603-real-edge-geometry-rescue-v1/,'real server must deliver the V603 real-Edge interaction rescue');
+  assert.doesNotMatch(earlyAsset,/2026-09-29-v600-native-browser-interaction-v1/,'real server must not deliver the superseded V600 interaction bootstrap');
   assert.doesNotMatch(earlyAsset,/global\.addEventListener\('pointerdown',pointerOwner,true\)/,'V600 must not capture pointerdown globally');
   assert.doesNotMatch(earlyAsset,/global\.addEventListener\('click',clickOwner,true\)/,'V600 must not capture click globally');
   assert.match(earlyAsset,/ceQcV600NativeInteraction/,'V600 native interaction marker must be published');
