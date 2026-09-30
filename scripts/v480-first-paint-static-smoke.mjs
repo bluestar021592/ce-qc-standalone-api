@@ -75,7 +75,8 @@ assert.match(indexHtml,/<a class="side-link" data-page="import"[^>]*href="\/impo
 assert.match(stableShell,/2026-09-29-v600-native-interaction-shell-v1/);
 assert.match(stableShell,/data-v581-active/,'V581 must own route visibility deterministically');
 assert.match(stableShell,/renderFallbackHomeIfStillEmpty/,'V581 must recover a blank HOME container');
-assert.match(earlySidebar,/2026-09-29-v600-native-browser-interaction-v1/,'V600 native interaction bootstrap must ship');
+assert.match(earlySidebar,/2026-09-29-v603-real-edge-geometry-rescue-v1/,'current real Edge interaction rescue must ship');
+assert.doesNotMatch(earlySidebar,/2026-09-29-v600-native-browser-interaction-v1/,'superseded V600 interaction bootstrap must stay retired');
 assert.doesNotMatch(earlySidebar,/global\.addEventListener\('pointerdown',pointerOwner,true\)/,'V600 must not own pointerdown at window capture');
 assert.doesNotMatch(earlySidebar,/global\.addEventListener\('click',clickOwner,true\)/,'V600 must not own click at window capture');
 assert.match(earlySidebar,/ceQcV600NativeInteraction/,'V600 must publish the native interaction marker');
