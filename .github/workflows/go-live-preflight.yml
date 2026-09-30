@@ -1,4 +1,5 @@
 name: CE QC go-live preflight
+# V606 trigger probe: verify push-to-main Actions delivery
 
 'on':
   workflow_dispatch:
