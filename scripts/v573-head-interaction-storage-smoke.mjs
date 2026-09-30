@@ -32,7 +32,7 @@ assert.match(stable,/syncSidebarGeometry/,'V596 must align shell offsets to the 
 assert.match(stable,/--ce-qc-shell-left/,'V596 must publish one measured shell-left variable');
 assert.doesNotMatch(stable,/margin-left:228px|left:228px/,'V596 must not hard-code the old 228px shell boundary');
 assert.doesNotMatch(stable,/addEventListener\('pointermove',pointerRecoveryOwner|addEventListener\('mousedown',pointerRecoveryOwner/,'V596 stable shell must not install a second pointer-capture owner');
-assert.match(early,/2026-09-29-v600-native-browser-interaction-v1/,'V600 native interaction bootstrap must ship');
+assert.match(early,/2026-09-29-v603-real-edge-geometry-rescue-v1/,'current real Edge interaction rescue must ship');
 assert.doesNotMatch(early,/global\.addEventListener\('pointerdown',pointerOwner,true\)/,'V600 must not capture pointerdown globally');
 assert.doesNotMatch(early,/global\.addEventListener\('click',clickOwner,true\)/,'V600 must not capture click globally');
 assert.match(early,/ceQcV600NativeInteraction/,'V600 must publish native interaction readiness');
