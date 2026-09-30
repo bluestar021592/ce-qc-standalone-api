@@ -15,7 +15,22 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  windows-edge-updater-gate:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - name: Windows + Edge desktop updater gate
+        shell: pwsh
+        run: npm run test:local-update-gate
+
   go-live-preflight:
+    needs: windows-edge-updater-gate
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
