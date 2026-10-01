@@ -23,6 +23,8 @@ assert.match(index,/v592-early-sidebar-capture\.js\?v=20261001-v608-1/,'V600 nat
 assert.doesNotMatch(stable,/subtree:true/,'stable-shell observer must never watch the whole dashboard subtree');
 assert.doesNotMatch(stable,/shell-structure-mutation/,'V610 stable shell must not revive the self-triggering structural observer repair loop');
 assert.match(stable,/ceQcV610ShellObserverRetired='1'/,'V610 stable shell must publish observer retirement marker');
+assert.match(stable,/ceQcV611StartupEnforceRetired='1'/,'V611 stable shell must publish repeated-startup-enforce retirement marker');
+assert.doesNotMatch(stable,/\[50,250,800,1800,3500,7000\]/,'V611 must not restore repeated startup enforce timers');
 assert.match(stable,/data-v581-active/,'V581 must deterministically own visible route page');
 assert.match(stable,/renderFallbackHomeIfStillEmpty/,'V581 must retry HOME render if the page container is still blank');
 assert.match(stable,/removeEmptyLargeBlockers/,'V581 must retire large stale pointer blockers without reviving V575');
