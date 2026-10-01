@@ -254,6 +254,18 @@
   global.addEventListener('error',event=>send('V598_WINDOW_ERROR',String(event?.message||event?.error?.message||'error').slice(0,200)),true);
   global.addEventListener('unhandledrejection',event=>send('V598_REJECTION',String(event?.reason?.message||event?.reason||'rejection').slice(0,200)),true);
 
+  function v607SelfCheck(){
+    try{
+      const card=doc.querySelector('.v18-business-card[href]');
+      const r=card?.getBoundingClientRect?.();
+      const x=r?Math.round(r.left+r.width/2):-1;
+      const y=r?Math.round(r.top+r.height/2):-1;
+      const top=r?doc.elementFromPoint?.(x,y):null;
+      send('V607_SELF_CHECK','focus='+(doc.hasFocus?.()?1:0)+'|inner='+global.innerWidth+'x'+global.innerHeight+'|early='+(global.__CE_QC_V596_EARLY_INTERACTION__?1:0)+'|v603='+(doc.documentElement?.dataset?.ceQcV603RealEdgeRescue||'-')+'|card='+label(card)+'|top='+label(top));
+    }catch(error){send('V607_SELF_CHECK_ERROR',String(error?.message||error).slice(0,160));}
+  }
+  setTimeout(v607SelfCheck,500);
+  setTimeout(v607SelfCheck,3000);
   send('V598_START',[
     'ready='+doc.readyState,
     'vis='+doc.visibilityState,
