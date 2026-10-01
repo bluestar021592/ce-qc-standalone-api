@@ -410,10 +410,7 @@ async function fastBootstrap(req, res) {
   return res.json({ ...payload, cacheHit: false });
 }
 
-const previousGet = express.application.get;
-express.application.get = function v43FastBootstrapRegistration(pathValue, ...handlers) {
-  if (pathValue === '/api/bootstrap' && handlers.length) return previousGet.call(this, pathValue, fastBootstrap);
-  return previousGet.call(this, pathValue, ...handlers);
-};
-
+// V618: canonical /api/bootstrap ownership lives in server.js.
+// Keep V43 payload builders available for compatibility, but never intercept
+// Express route registration again.
 export const V43_BOOTSTRAP_PERF_PATCH_ID = PATCH_ID;
