@@ -365,12 +365,8 @@ export function v27CarryMonitorHandler(req,res) {
 }
 
 let installed = false;
-const originalGet = express.application.get;
-express.application.get = function v27Get(path,...handlers) {
-  if (path === '/api/bootstrap' && handlers.length) return originalGet.call(this,path,v27BootstrapHandler);
-  return originalGet.call(this,path,...handlers);
-};
-
+// V618: /api/bootstrap has one canonical owner in server.js.
+// V27 keeps its metric/carry routes but no longer intercepts bootstrap registration.
 const originalListen = express.application.listen;
 express.application.listen = function v27Listen(...args) {
   if (!installed) {
