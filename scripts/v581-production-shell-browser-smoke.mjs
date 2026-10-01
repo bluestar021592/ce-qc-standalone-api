@@ -293,13 +293,14 @@ try{
   stage('V601 top user menu functional click passed');
 
   stage('proving V603 survives a stale invisible hit surface present only in persistent Edge sessions');
-  await cdp.eval("(()=>{const a=document.querySelector('.main-content .v18-business-card[href^=\\\"/ce?\\\"]');if(!a)return false;const r=a.getBoundingClientRect();const blocker=document.createElement('div');blocker.id='v603-real-edge-stale-hit-fixture';Object.assign(blocker.style,{position:'fixed',left:r.left+'px',top:r.top+'px',width:r.width+'px',height:r.height+'px',zIndex:'2147483646',background:'transparent',pointerEvents:'auto'});document.body.appendChild(blocker);return true;})()",5000);
-  const blockedHit=await cdp.eval("(()=>{const a=document.querySelector('.main-content .v18-business-card[href^=\\\"/ce?\\\"]');const r=a.getBoundingClientRect();return document.elementFromPoint(r.left+r.width/2,r.top+r.height/2)?.id||'';})()",5000);
-  assert.equal(blockedHit,'v603-real-edge-stale-hit-fixture','V603 fixture must really cover the CE card');
+  await cdp.eval("(()=>{const menu=document.getElementById('accountDropdown');if(menu)menu.hidden=true;const old=document.getElementById('v603-real-edge-stale-hit-fixture');old?.remove();const a=document.querySelector('.main-content .v18-business-card[href^=\\\"/ce?\\\"]');if(!a)return false;a.scrollIntoView({block:'center',inline:'nearest',behavior:'instant'});const r=a.getBoundingClientRect();const blocker=document.createElement('div');blocker.id='v603-real-edge-stale-hit-fixture';Object.assign(blocker.style,{position:'fixed',left:r.left+'px',top:r.top+'px',width:r.width+'px',height:r.height+'px',zIndex:'2147483646',background:'transparent',pointerEvents:'auto'});document.body.appendChild(blocker);return true;})()",5000);
+  const blockerProof=await cdp.eval("(()=>{const b=document.getElementById('v603-real-edge-stale-hit-fixture');if(!b)return null;const r=b.getBoundingClientRect();const x=r.left+r.width/2,y=r.top+r.height/2;return{id:document.elementFromPoint(x,y)?.id||'',x,y,width:r.width,height:r.height};})()",5000);
+  assert.equal(blockerProof?.id,'v603-real-edge-stale-hit-fixture','V603 fixture must really cover the CE card');
+  assert.ok(blockerProof?.width>0&&blockerProof?.height>0,'V603 fixture must retain non-zero CE card geometry');
   stage('proving CE home card actually navigates after a physical click');
   await cdp.eval("(()=>{window.__V602_CLICK_TRACE__={before:location.href,defaultPrevented:null,target:null};const a=document.querySelector('.main-content .v18-business-card[href^=\\\"/ce?\\\"]');a?.addEventListener('click',e=>{queueMicrotask(()=>{window.__V602_CLICK_TRACE__.defaultPrevented=e.defaultPrevented;window.__V602_CLICK_TRACE__.target=e.target?.tagName||'';});},{once:true});return true;})()",5000);
-  await cdp.send('Input.dispatchMouseEvent',{type:'mouseMoved',x:proof.main.x,y:proof.main.y,button:'none'},12000);
-  await cdp.send('Input.dispatchMouseEvent',{type:'mousePressed',x:proof.main.x,y:proof.main.y,button:'left',clickCount:1},12000);
+  await cdp.send('Input.dispatchMouseEvent',{type:'mouseMoved',x:blockerProof.x,y:blockerProof.y,button:'none'},12000);
+  await cdp.send('Input.dispatchMouseEvent',{type:'mousePressed',x:blockerProof.x,y:blockerProof.y,button:'left',clickCount:1},12000);
   await cdp.send('Input.dispatchMouseEvent',{type:'mouseReleased',x:proof.main.x,y:proof.main.y,button:'left',clickCount:1},12000);
   try{
     const trace=await cdp.eval("window.__V602_CLICK_TRACE__",1800);
