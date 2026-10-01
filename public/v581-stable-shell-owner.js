@@ -340,33 +340,12 @@
       setTimeout(()=>enforce('sidebar-collapse-0'),0);
       setTimeout(()=>enforce('sidebar-collapse-120'),120);
     },true);
-    if(typeof MutationObserver==='function'){
-      observer=new MutationObserver(records=>{
-        if(enforcing)return;
-        const structural=records.some(r=>[...r.addedNodes].some(n=>n?.nodeType===1)||[...r.removedNodes].some(n=>n?.nodeType===1));
-        if(!structural||structuralRepairTimer)return;
-        // Do not observe the whole dashboard subtree. Business-card/table/chart rendering
-        // produces many childList mutations and a microtask-level shell repair loop can
-        // starve Chromium's main thread, which looks exactly like a blank/dead UI.
-        structuralRepairTimer=setTimeout(()=>{
-          structuralRepairTimer=0;
-          enforce('shell-structure-mutation');
-        },80);
-      });
-      const roots=[
-        doc.querySelector('.app-shell'),
-        doc.querySelector('.sidebar'),
-        doc.querySelector('.side-nav')
-      ].filter(Boolean);
-      for(const root of roots)observer.observe(root,{childList:true});
-      bodyObserver=new MutationObserver(()=>{
-        if(enforcing)return;
-        setTimeout(()=>enforce('sidebar-geometry-mutation'),0);
-      });
-      if(doc.body)bodyObserver.observe(doc.body,{attributes:true,attributeFilter:['class']});
-      const sidebar=doc.querySelector('.sidebar');
-      if(sidebar)bodyObserver.observe(sidebar,{attributes:true,attributeFilter:['class']});
-    }
+    // V610: stable shell must not observe and rewrite its own DOM. In persistent
+    // Edge sessions the previous childList/body observers could form a repair loop:
+    // app render -> mutation -> enforce -> DOM writes -> mutation -> enforce. That
+    // starves Runtime.evaluate/timers and produces Edge's "page not responding".
+    // Initial + bounded timers + explicit pageshow/popstate/resize are sufficient.
+    doc.documentElement.dataset.ceQcV610ShellObserverRetired='1';
   }
 
   global.__CE_QC_V581_STABLE_SHELL__={version:VERSION,enforce,normalizeNav,showRoute,retirePointerBlockersAt,syncSidebarGeometry};
