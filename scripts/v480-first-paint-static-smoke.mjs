@@ -72,7 +72,7 @@ assert.match(indexHtml,/<a class="side-link active" data-page="home"[^>]*href="\
 assert.match(indexHtml,/<a class="side-link" data-page="ce"[^>]*href="\/ce\?auth=v581"/,'CE must be a native hard-navigation anchor');
 assert.match(indexHtml,/<a class="side-link" data-page="whpp"[^>]*href="\/whpp\?auth=v581"/,'WHPP must remain a native first-class route');
 assert.match(indexHtml,/<a class="side-link" data-page="import"[^>]*href="\/import\?auth=v581"/,'data import must remain reachable without SPA click ownership');
-assert.match(stableShell,/2026-10-01-v610-observer-loop-retired-v1/,'V610 stable shell version must identify observer-loop retirement');
+assert.match(stableShell,/2026-10-01-v610-observer-loop-retired-v2/,'V610 stable shell version must identify observer-loop retirement');
 assert.match(stableShell,/data-v581-active/,'V581 must own route visibility deterministically');
 assert.match(stableShell,/renderFallbackHomeIfStillEmpty/,'V581 must recover a blank HOME container');
 assert.match(earlySidebar,/2026-09-29-v603-real-edge-geometry-rescue-v1/,'current real Edge interaction rescue must ship');
