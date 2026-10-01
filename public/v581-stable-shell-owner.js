@@ -1,7 +1,7 @@
 (function installV581StableShell(global){
   'use strict';
   if(global.__CE_QC_V581_STABLE_SHELL__)return;
-  const VERSION='2026-10-01-v610-observer-loop-retired-v2';
+  const VERSION='2026-10-01-v610-observer-loop-retired-v3';
   const doc=global.document;
   const NAV=[
     ['home','首页总看板','home','/'],
