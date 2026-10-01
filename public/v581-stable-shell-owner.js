@@ -315,7 +315,12 @@
       normalizeNav();
       retireIsolatedSidebar();
       const target=showRoute();
-      removeEmptyLargeBlockers();
+      // V609: do not synchronously scan every main-content control with
+      // elementsFromPoint/getComputedStyle during startup enforcement. Persistent
+      // Edge sessions can enter a long layout/hit-test stall here, freezing the
+      // page before timers and native clicks can run. V603 owns the narrowly
+      // scoped CE-card stale-hit rescue; the stable shell remains layout-only.
+      doc.documentElement.dataset.ceQcV609MainHitScanRetired='1';
       doc.documentElement.dataset.ceQcStableShell=VERSION;
       const tr=target?.getBoundingClientRect?.();
       const tb=doc.querySelector('.topbar')?.getBoundingClientRect?.();
