@@ -253,6 +253,10 @@ try{
   await cdp.send('Page.navigate',{url:'http://127.0.0.1:'+port+'/?auth=v581'},8000);
   await evalWait(cdp,'!!window.__CE_QC_V581_STABLE_SHELL__',8000,80,'V581 owner after production navigation');
   stage('V581/V596 stable owner loaded');
+  const v609=await cdp.eval("(()=>({retired:document.documentElement.dataset.ceQcV609MainHitScanRetired||'',alive:new Promise(resolve=>setTimeout(()=>resolve('timer-ok'),750))}))()",5000);
+  assert.equal(v609?.retired,'1','V609 must retire synchronous main-content hit-test scanning during stable-shell enforcement');
+  const timerAlive=await cdp.eval("new Promise(resolve=>setTimeout(()=>resolve('timer-ok'),750))",5000);
+  assert.equal(timerAlive,'timer-ok','V609 production page main thread must remain timer-responsive after startup');
   await evalWait(cdp,'!!window.__CE_QC_V596_EARLY_INTERACTION__',8000,80,'V600 native interaction bootstrap after production navigation');
   await evalWait(cdp,"document.documentElement.dataset.ceQcV597LegacyInteractionRetired==='1'",8000,80,'V597 legacy interaction retirement marker');
   stage('V600 native interaction active; legacy capture owners retired');
