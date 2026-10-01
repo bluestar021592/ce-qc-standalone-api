@@ -8,9 +8,13 @@ const TIMEOUT_MS=120_000;
 
 function readChangedFiles(){
   const installed=String(process.env.CE_QC_INSTALLED_COMMIT||'').trim();
+  const pushBefore=String(process.env.GITHUB_EVENT_BEFORE||'').trim();
+  const usablePushBefore=/^[0-9a-f]{40}$/i.test(pushBefore)&&!/^0{40}$/.test(pushBefore);
   const args=installed
     ? ['diff','--name-only',installed,'HEAD','--']
-    : ['diff','--name-only','HEAD^1','HEAD','--'];
+    : usablePushBefore
+      ? ['diff','--name-only',pushBefore,'HEAD','--']
+      : ['diff','--name-only','HEAD^1','HEAD','--'];
   const run=spawnSync('git',args,{cwd:ROOT,encoding:'utf8',windowsHide:true,timeout:15_000});
   if(run.error||run.status!==0){
     console.warn('[V589_LOCAL_GATE] changed-file detection unavailable; real browser gate stays enabled (fail-safe)');
