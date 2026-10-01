@@ -72,7 +72,7 @@ assert.match(indexHtml,/<a class="side-link active" data-page="home"[^>]*href="\
 assert.match(indexHtml,/<a class="side-link" data-page="ce"[^>]*href="\/ce\?auth=v581"/,'CE must be a native hard-navigation anchor');
 assert.match(indexHtml,/<a class="side-link" data-page="whpp"[^>]*href="\/whpp\?auth=v581"/,'WHPP must remain a native first-class route');
 assert.match(indexHtml,/<a class="side-link" data-page="import"[^>]*href="\/import\?auth=v581"/,'data import must remain reachable without SPA click ownership');
-assert.match(stableShell,/2026-09-29-v600-native-interaction-shell-v1/);
+assert.match(stableShell,/2026-10-01-v610-observer-loop-retired-v1/,'V610 stable shell version must identify observer-loop retirement');
 assert.match(stableShell,/data-v581-active/,'V581 must own route visibility deterministically');
 assert.match(stableShell,/renderFallbackHomeIfStillEmpty/,'V581 must recover a blank HOME container');
 assert.match(earlySidebar,/2026-09-29-v603-real-edge-geometry-rescue-v1/,'current real Edge interaction rescue must ship');
@@ -86,7 +86,8 @@ assert.match(stableShell,/retirePointerBlockersAt/,'V596 stable owner must keep 
 assert.match(stableShell,/syncSidebarGeometry/,'V596 stable owner must measure the real sidebar edge');
 assert.doesNotMatch(stableShell,/margin-left:228px|left:228px/,'V596 must remove stale 228px shell offsets');
 assert.doesNotMatch(stableShell,/subtree:true/,'stable-shell observer must not watch business-card/table/chart subtree mutations');
-assert.match(stableShell,/shell-structure-mutation/,'stable shell must keep bounded structural repair');
+assert.doesNotMatch(stableShell,/shell-structure-mutation/,'V610 stable shell must not revive the self-triggering structural observer repair loop');
+assert.match(stableShell,/ceQcV610ShellObserverRetired='1'/,'V610 stable shell must publish observer retirement marker');
 assert.match(stableShell,/retireIsolatedSidebar/,'V593 stable owner must retire V590/V591 iframe remnants');
 assert.doesNotMatch(stableShell,/frame\.srcdoc|isolatedSidebarMarkup|mountIsolatedSidebar/,'V593 primary sidebar must not create another iframe');
 assert.match(server,/X-Frame-Options', 'DENY'/,'normal authenticated HTML keeps frame denial');
