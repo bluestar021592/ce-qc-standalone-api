@@ -599,8 +599,14 @@ app.get('/api/unified-history', (req, res) => {
 // website rather than a batch-processing console.
 app.get('/api/bootstrap', async (req, res) => {
   try {
-    const ccsl = loadFastSqlAggregateState('CCSL') || compactDashboardState(summarizeLightweightCcslState(loadLightweightAggregateState('CCSL'), { dbStatus: getDbStatus(), network: buildNetworkInfo(getRuntimeConfig()), shopCodes: getShopCodeSummary() }));
-    const shopee = loadFastSqlAggregateState('SHOPEE') || compactDashboardState(summarizeLightweightShopeeState(loadLightweightAggregateState('SHOPEE'), { dbStatus: getDbStatus() }));
+    const fastCcsl = loadFastSqlAggregateState('CCSL');
+    const fastShopee = loadFastSqlAggregateState('SHOPEE');
+    const ccsl = fastCcsl
+      ? compactDashboardState(fastCcsl)
+      : compactDashboardState(summarizeLightweightCcslState(loadLightweightAggregateState('CCSL'), { dbStatus: getDbStatus(), network: buildNetworkInfo(getRuntimeConfig()), shopCodes: getShopCodeSummary() }));
+    const shopee = fastShopee
+      ? compactDashboardState(fastShopee)
+      : compactDashboardState(summarizeLightweightShopeeState(loadLightweightAggregateState('SHOPEE'), { dbStatus: getDbStatus() }));
     const unifiedHistory = listUnifiedImportHistory(120);
     const latestUnified = getLatestUnifiedImport();
     // V599: the HOME first paint must never hydrate six business state objects.
@@ -624,8 +630,9 @@ app.get('/api/bootstrap', async (req, res) => {
       generatedAt: new Date().toISOString()
     };
     res.setHeader('Cache-Control', 'private, max-age=5');
-    res.setHeader('X-CE-QC-Bootstrap-Mode', 'V599_HOME_ZERO_DETAIL');
+    res.setHeader('X-CE-QC-Bootstrap-Mode', 'V613_HOME_COMPACT_FAST_SQL');
     res.setHeader('X-CE-QC-Bootstrap-Ms', String(Date.now() - bootstrapStartedAt));
+    res.setHeader('X-CE-QC-Bootstrap-Bytes', String(Buffer.byteLength(JSON.stringify(payload), 'utf8')));
     res.json(payload);
   } catch (error) {
     res.status(500).json({ ok: false, code: 'BOOTSTRAP_FAILED', error: error.message || String(error) });
