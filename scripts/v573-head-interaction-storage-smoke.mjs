@@ -21,7 +21,8 @@ assert.match(index,/<a class="side-link" data-page="import"[^>]*href="\/import\?
 assert.match(stable,/browser-native controls own all clicks/i,'stable shell must remain layout-only under V600');
 assert.match(index,/v592-early-sidebar-capture\.js\?v=20261001-v608-1/,'V600 native interaction bootstrap must be cache-busted in the head');
 assert.doesNotMatch(stable,/subtree:true/,'stable-shell observer must never watch the whole dashboard subtree');
-assert.match(stable,/shell-structure-mutation/,'bounded structural repair must remain available');
+assert.doesNotMatch(stable,/shell-structure-mutation/,'V610 stable shell must not revive the self-triggering structural observer repair loop');
+assert.match(stable,/ceQcV610ShellObserverRetired='1'/,'V610 stable shell must publish observer retirement marker');
 assert.match(stable,/data-v581-active/,'V581 must deterministically own visible route page');
 assert.match(stable,/renderFallbackHomeIfStillEmpty/,'V581 must retry HOME render if the page container is still blank');
 assert.match(stable,/removeEmptyLargeBlockers/,'V581 must retire large stale pointer blockers without reviving V575');
