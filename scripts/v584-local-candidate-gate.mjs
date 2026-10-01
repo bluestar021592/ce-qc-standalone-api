@@ -27,7 +27,8 @@ function isBrowserSensitive(file){
   return p.startsWith('public/') || p==='bootstrap.js' || p==='server.js' || p==='src/v581StableShellResponsePatch.js' || p==='scripts/v581-production-shell-browser-smoke.mjs' || p==='scripts/v587-production-browser-retry.mjs';
 }
 const changed=readChangedFiles();
-const browserRequired=changed.unknown || changed.files.some(isBrowserSensitive);
+const inGitHubActions=String(process.env.GITHUB_ACTIONS||'').toLowerCase()==='true';
+const browserRequired=inGitHubActions || changed.unknown || changed.files.some(isBrowserSensitive);
 
 
 // This is the gate used by the installed Windows launcher before it accepts a remote
@@ -84,7 +85,7 @@ const TASKS=[
 
 if(browserRequired){
   TASKS.splice(6,0,['node',['scripts/v587-production-browser-retry.mjs'],300_000]);
-  console.log('[V589_LOCAL_GATE] real Edge gate required because browser/runtime delivery files changed or diff is unknown');
+  console.log('[V611_LOCAL_GATE] real Edge gate required because GitHub CI is authoritative or browser/runtime delivery files changed or diff is unknown');
 }else{
   console.log('[V589_LOCAL_GATE] SKIP real Edge gate: candidate changes are non-browser only: '+(changed.files.join(', ')||'(none)'));
 }
