@@ -19,6 +19,16 @@ jobs:
           cache: npm
       - name: Install dependencies
         run: npm ci
+      - name: Verify exact checked-out V610 gate source
+        shell: pwsh
+        run: |
+          Write-Host "HEAD=$(git rev-parse HEAD)"
+          Write-Host "GITHUB_SHA=$env:GITHUB_SHA"
+          if ((git rev-parse HEAD).Trim() -ne $env:GITHUB_SHA) { throw "checkout SHA mismatch" }
+          Select-String -Path scripts/v573-head-interaction-storage-smoke.mjs -Pattern "shell-structure-mutation|ceQcV610ShellObserverRetired"
+          $src = Get-Content scripts/v573-head-interaction-storage-smoke.mjs -Raw
+          if ($src -match "assert\.match\(stable,/shell-structure-mutation/") { throw "stale pre-V610 assertion present in runner worktree" }
+          if ($src -notmatch "assert\.doesNotMatch\(stable,/shell-structure-mutation/") { throw "V610 retirement assertion missing from runner worktree" }
       - name: V505 coordinator Windows regression
         run: node --test test/v505-purge-coordinator.test.js
       - name: Exact managed-updater go-live gate on Windows
