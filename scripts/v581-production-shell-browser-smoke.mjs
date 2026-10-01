@@ -256,6 +256,8 @@ try{
   await evalWait(cdp,"document.documentElement.dataset.ceQcV609MainHitScanRetired==='1'",8000,80,'V609 main-content hit scan retirement marker');
   await evalWait(cdp,"document.documentElement.dataset.ceQcV610ShellObserverRetired==='1'",8000,80,'V610 stable-shell observer retirement marker');
   await evalWait(cdp,"document.documentElement.dataset.ceQcV611StartupEnforceRetired==='1'",8000,80,'V611 repeated startup enforce retirement marker');
+  await evalWait(cdp,"document.documentElement.dataset.ceQcV615RuntimeChainDone==='1'",12000,80,'V615 runtime script chain completion marker');
+  stage('V615 runtime chain settled before liveness probe');
   const timerAlive=await cdp.eval("new Promise(resolve=>setTimeout(()=>resolve('timer-ok'),750))",5000);
   assert.equal(timerAlive,'timer-ok','V609 production page main thread must remain timer-responsive after startup');
   await evalWait(cdp,'!!window.__CE_QC_V596_EARLY_INTERACTION__',8000,80,'V600 native interaction bootstrap after production navigation');
