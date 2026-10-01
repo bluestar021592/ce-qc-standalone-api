@@ -10,57 +10,10 @@ const CORE_TYPES = Object.freeze(['CE', 'CEAF', 'TBKH', 'ALI1688', 'SHOPEECN', '
 const CACHE_MS = Math.max(5_000, Number(process.env.V90_DASHBOARD_CACHE_MS || 30_000));
 const cache = new Map();
 
-// V211: V43 is imported before this module and owns the fastBootstrap closure.
-// Extract that exact private handler through a disposable Express app, then force
-// the real /api/bootstrap route to that handler immediately before listen(). This
-// avoids any later route-registration patch accidentally restoring the old heavy
-// server bootstrap handler. Express 4 exposes a deprecated `router` getter that
-// throws when read as a setting; route inspection must use the internal _router
-// stack directly so a supervised backend restart cannot die during listen().
-function extractV43FastBootstrapHandler() {
-  try {
-    const probe = express();
-    const fallback = function v211BootstrapProbeFallback(req, res) { res.status(599).end(); };
-    probe.get(BOOTSTRAP_ROUTE, fallback);
-    const stack = probe._router?.stack || [];
-    for (const layer of stack) {
-      if (layer?.route?.path !== BOOTSTRAP_ROUTE) continue;
-      for (const routeLayer of layer.route.stack || []) {
-        const handler = routeLayer?.handle;
-        if (typeof handler === 'function' && handler !== fallback) return handler;
-      }
-    }
-  } catch (error) {
-    console.warn('[CE-QC][V211] unable to extract V43 fast bootstrap handler:', error?.message || error);
-  }
-  return null;
-}
-
-const V43_FAST_BOOTSTRAP_HANDLER = extractV43FastBootstrapHandler();
-const previousListenForBootstrapAuthority = express.application.listen;
-express.application.listen = function v211ForceFastBootstrapListen(...args) {
-  try {
-    const stack = this._router?.stack || [];
-    let matched = 0;
-    let replaced = 0;
-    for (const layer of stack) {
-      if (layer?.route?.path !== BOOTSTRAP_ROUTE) continue;
-      matched += 1;
-      for (const routeLayer of layer.route.stack || []) {
-        if (!routeLayer?.method || String(routeLayer.method).toLowerCase() === 'get') {
-          if (V43_FAST_BOOTSTRAP_HANDLER && routeLayer.handle !== V43_FAST_BOOTSTRAP_HANDLER) {
-            routeLayer.handle = V43_FAST_BOOTSTRAP_HANDLER;
-            replaced += 1;
-          }
-        }
-      }
-    }
-    console.log(`[CE-QC][V211] ${BOOTSTRAP_AUTHORITY_ID} matched=${matched} replaced=${replaced} handler=${V43_FAST_BOOTSTRAP_HANDLER?.name || 'missing'}`);
-  } catch (error) {
-    console.error('[CE-QC][V211] bootstrap route authority failed:', error?.stack || error);
-  }
-  return previousListenForBootstrapAuthority.apply(this, args);
-};
+// V618: /api/bootstrap now has one canonical owner in server.js.
+// Do not extract, replace or rebind the bootstrap handler at listen time.
+// V90 still owns the instant-dashboard route and request-timing diagnostics.
+const V618_BOOTSTRAP_SINGLE_OWNER = '2026-10-01-v618-server-bootstrap-single-owner-v1';
 
 // V209 diagnostic: record the real server-side duration of every slow API
 // request. Include the bootstrap response authority header so the startup log can
