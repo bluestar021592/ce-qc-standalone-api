@@ -206,11 +206,28 @@ if (new URLSearchParams(location.search).has('visualTest')) {
 })();
 
 if (!new URLSearchParams(location.search).has('visualTest')) {
+  function v614Diag(event, extra=''){
+    try{
+      fetch('/api/client-diag?'+new URLSearchParams({
+        event:String(event||'').slice(0,48),
+        page:String(location.pathname||'/').replace(/^\//,'').slice(0,32)||'home',
+        extra:String(extra||'').slice(0,180),
+        v:'614'
+      }),{cache:'no-store',credentials:'same-origin',keepalive:true}).catch(()=>{});
+    }catch{}
+  }
+  v614Diag('V614_RUNTIME_CHAIN_START','ready='+document.readyState);
+  document.addEventListener('DOMContentLoaded',()=>v614Diag('V614_DOM_CONTENT_LOADED','ready='+document.readyState),{once:true});
   function loadRuntimeScript(src, done) {
     const script = document.createElement('script');
     script.src = src;
     script.async = false;
-    if (done) script.onload = done;
+    v614Diag('V614_SCRIPT_LOAD_START',src);
+    script.onload = () => {
+      v614Diag('V614_SCRIPT_LOAD_DONE',src);
+      if (done) done();
+    };
+    script.onerror = () => v614Diag('V614_SCRIPT_LOAD_ERROR',src);
     document.head.appendChild(script);
   }
   // This loader runs after app.js. Claim the destructive purge UI owner here,
