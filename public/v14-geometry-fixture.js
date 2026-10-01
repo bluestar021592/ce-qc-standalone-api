@@ -240,7 +240,10 @@ if (!new URLSearchParams(location.search).has('visualTest')) {
         // Live dashboard trends are intentionally not mounted. Trend/history
         // calculations remain available only through export/report workflows.
         loadRuntimeScript('/v27-carry-business-filter.js?v=20260809-v29-carry-1', () => {
-          loadRuntimeScript('/v29-data-consistency-fix.js?v=20260809-v29-1');
+          loadRuntimeScript('/v29-data-consistency-fix.js?v=20260809-v29-1', () => {
+            document.documentElement.dataset.ceQcV615RuntimeChainDone='1';
+            v614Diag('V615_RUNTIME_CHAIN_DONE','ready='+document.readyState);
+          });
         });
       });
     });
