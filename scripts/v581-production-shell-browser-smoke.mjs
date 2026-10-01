@@ -301,7 +301,7 @@ try{
   await cdp.eval("(()=>{window.__V602_CLICK_TRACE__={before:location.href,defaultPrevented:null,target:null};const a=document.querySelector('.main-content .v18-business-card[href^=\\\"/ce?\\\"]');a?.addEventListener('click',e=>{queueMicrotask(()=>{window.__V602_CLICK_TRACE__.defaultPrevented=e.defaultPrevented;window.__V602_CLICK_TRACE__.target=e.target?.tagName||'';});},{once:true});return true;})()",5000);
   await cdp.send('Input.dispatchMouseEvent',{type:'mouseMoved',x:blockerProof.x,y:blockerProof.y,button:'none'},12000);
   await cdp.send('Input.dispatchMouseEvent',{type:'mousePressed',x:blockerProof.x,y:blockerProof.y,button:'left',clickCount:1},12000);
-  await cdp.send('Input.dispatchMouseEvent',{type:'mouseReleased',x:proof.main.x,y:proof.main.y,button:'left',clickCount:1},12000);
+  await cdp.send('Input.dispatchMouseEvent',{type:'mouseReleased',x:blockerProof.x,y:blockerProof.y,button:'left',clickCount:1},12000);
   try{
     const trace=await cdp.eval("window.__V602_CLICK_TRACE__",1800);
     stage('V602 CE click trace before='+String(trace?.before||'')+' prevented='+String(trace?.defaultPrevented)+' target='+String(trace?.target||''));
