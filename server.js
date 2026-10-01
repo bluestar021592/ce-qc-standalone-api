@@ -598,26 +598,35 @@ app.get('/api/unified-history', (req, res) => {
 // the fast SQL/range cache when possible, so normal navigation behaves like a
 // website rather than a batch-processing console.
 app.get('/api/bootstrap', async (req, res) => {
+  const bootstrapStartedAt = Date.now();
+  const bootstrapLog = stage => console.log(`[CE-QC][V616_BOOTSTRAP] stage=${stage} elapsedMs=${Date.now()-bootstrapStartedAt}`);
+  bootstrapLog('ENTER');
   try {
     const fastCcsl = loadFastSqlAggregateState('CCSL');
     const fastShopee = loadFastSqlAggregateState('SHOPEE');
+    bootstrapLog('FAST_SQL_READ_DONE');
     const ccsl = fastCcsl
       ? compactDashboardState(fastCcsl)
       : compactDashboardState(summarizeLightweightCcslState(loadLightweightAggregateState('CCSL'), { dbStatus: getDbStatus(), network: buildNetworkInfo(getRuntimeConfig()), shopCodes: getShopCodeSummary() }));
+    bootstrapLog('CCSL_READY');
     const shopee = fastShopee
       ? compactDashboardState(fastShopee)
       : compactDashboardState(summarizeLightweightShopeeState(loadLightweightAggregateState('SHOPEE'), { dbStatus: getDbStatus() }));
+    bootstrapLog('SHOPEE_READY');
     const unifiedHistory = listUnifiedImportHistory(120);
+    bootstrapLog('UNIFIED_HISTORY_READY');
     const latestUnified = getLatestUnifiedImport();
+    bootstrapLog('LATEST_UNIFIED_READY');
     // V599: the HOME first paint must never hydrate six business state objects.
     // Individual boards fetch their own compact state only after the user navigates.
     // Home totals already come from the aggregate cache + unified classification summary.
-    const bootstrapStartedAt = Date.now();
+    const tokenSummary = summarizeToken(await loadToken());
+    bootstrapLog('TOKEN_READY');
     const payload = {
       ok: true,
       state: ccsl,
       shopeeState: shopee,
-      authStatus: summarizeToken(await loadToken()),
+      authStatus: tokenSummary,
       session: { ok: true, user: publicUser(req.user), unreadNotifications: 0 },
       history: {
         CCSL: listSnapshotHistory(45),
@@ -632,9 +641,13 @@ app.get('/api/bootstrap', async (req, res) => {
     res.setHeader('Cache-Control', 'private, max-age=5');
     res.setHeader('X-CE-QC-Bootstrap-Mode', 'V613_HOME_COMPACT_FAST_SQL');
     res.setHeader('X-CE-QC-Bootstrap-Ms', String(Date.now() - bootstrapStartedAt));
-    res.setHeader('X-CE-QC-Bootstrap-Bytes', String(Buffer.byteLength(JSON.stringify(payload), 'utf8')));
+    const payloadBytes = Buffer.byteLength(JSON.stringify(payload), 'utf8');
+    res.setHeader('X-CE-QC-Bootstrap-Bytes', String(payloadBytes));
+    bootstrapLog('PAYLOAD_READY bytes='+payloadBytes);
     res.json(payload);
+    bootstrapLog('RESPONSE_SENT');
   } catch (error) {
+    bootstrapLog('ERROR '+String(error?.message||error).slice(0,120));
     res.status(500).json({ ok: false, code: 'BOOTSTRAP_FAILED', error: error.message || String(error) });
   }
 });
