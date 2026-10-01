@@ -154,6 +154,19 @@ function signedCookie(secret){
   const sig=crypto.createHmac('sha256',secret).update(body).digest('base64url');
   return body+'.'+sig;
 }
+async function probeAssetHttp(port,pathName,timeoutMs=8000){
+  const started=Date.now();
+  return await new Promise((resolve,reject)=>{
+    const req=http.request({host:'127.0.0.1',port,path:pathName,method:'GET',headers:{Accept:'application/javascript','Cache-Control':'no-store'}},res=>{
+      const chunks=[];let bytes=0;
+      res.on('data',chunk=>{bytes+=chunk.length;chunks.push(chunk);});
+      res.on('end',()=>resolve({status:Number(res.statusCode||0),ms:Date.now()-started,bytes,text:Buffer.concat(chunks).toString('utf8'),cache:String(res.headers['cache-control']||'')}));
+    });
+    req.on('error',reject);
+    req.setTimeout(timeoutMs,()=>req.destroy(new Error('asset HTTP probe timed out after '+timeoutMs+'ms')));
+    req.end();
+  });
+}
 async function probeBootstrapHttp(port,secret,timeoutMs=12000){
   const started=Date.now();
   const cookie='ce_qc_local_auth_v431='+signedCookie(secret);
@@ -166,6 +179,12 @@ async function probeBootstrapHttp(port,secret,timeoutMs=12000){
       res.on('data',chunk=>{bytes+=chunk.length;chunks.push(chunk);});
       res.on('end',()=>{
         const raw=Buffer.concat(chunks).toString('utf8');
+        let parsed={};
+        try{parsed=raw?JSON.parse(raw):{};}catch{}
+        const topBytes={};
+        for(const key of ['state','shopeeState','history','unifiedImport','businessStates','session','authStatus']){
+          try{topBytes[key]=Buffer.byteLength(JSON.stringify(parsed?.[key]??null),'utf8');}catch{topBytes[key]=-1;}
+        }
         resolve({
           status:Number(res.statusCode||0),
           ms:Date.now()-started,
@@ -173,7 +192,8 @@ async function probeBootstrapHttp(port,secret,timeoutMs=12000){
           mode:String(res.headers['x-ce-qc-bootstrap-mode']||''),
           serverMs:String(res.headers['x-ce-qc-bootstrap-ms']||''),
           serverBytes:String(res.headers['x-ce-qc-bootstrap-bytes']||''),
-          okJson:/\"ok\"\s*:\s*true/.test(raw)
+          okJson:parsed?.ok===true,
+          topBytes
         });
       });
     });
@@ -270,9 +290,14 @@ try{
   stage('production backend health ready');
   const bootstrapProbe=await probeBootstrapHttp(port,secret,12000);
   console.log('[V617_BOOTSTRAP_HTTP] status='+bootstrapProbe.status+' ms='+bootstrapProbe.ms+' bytes='+bootstrapProbe.bytes+' mode='+bootstrapProbe.mode+' serverMs='+bootstrapProbe.serverMs+' serverBytes='+bootstrapProbe.serverBytes+' okJson='+(bootstrapProbe.okJson?1:0));
+  console.log('[V619_BOOTSTRAP_TOP_BYTES] '+JSON.stringify(bootstrapProbe.topBytes||{}));
   assert.equal(bootstrapProbe.status,200,'V617 direct bootstrap HTTP probe must succeed before browser navigation');
   assert.equal(bootstrapProbe.okJson,true,'V617 direct bootstrap HTTP probe must return ok:true');
   assert.ok(bootstrapProbe.ms<8000,'V617 direct bootstrap HTTP probe must stay below 8s');
+  const appAsset=await probeAssetHttp(port,'/app.js?v=20261001-v619-1',8000);
+  console.log('[V619_APP_ASSET] status='+appAsset.status+' ms='+appAsset.ms+' bytes='+appAsset.bytes+' cache='+appAsset.cache+' hasV612='+(appAsset.text.includes('V612_REFRESH_START')?1:0)+' hasV616='+(appAsset.text.includes('V616_BOOTSTRAP_FETCH_START')?1:0));
+  assert.equal(appAsset.status,200,'V619 app.js asset probe must succeed');
+  assert.match(appAsset.text,/V616_BOOTSTRAP_FETCH_START/,'V619 delivered app.js must contain V616 bootstrap client diagnostics');
 
   stage('waiting for Chromium remote-debug target');
   const target=await waitFor(async()=>{
