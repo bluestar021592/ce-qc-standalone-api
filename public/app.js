@@ -1,3 +1,15 @@
+function v612StartupDiag(event, extra = '') {
+  try {
+    fetch('/api/client-diag?' + new URLSearchParams({
+      event: String(event || '').slice(0, 48),
+      page: String(location.pathname || '/').replace(/^\//, '').slice(0, 32) || 'home',
+      extra: String(extra || '').slice(0, 180),
+      v: '612'
+    }), { cache: 'no-store', credentials: 'same-origin', keepalive: true }).catch(() => {});
+  } catch {}
+}
+v612StartupDiag('V612_APP_SCRIPT_START','ready='+document.readyState);
+
 let appState = {};
 let shopeeState = {};
 let businessStates = {};
@@ -32,6 +44,7 @@ const previewState = {
 
 normalizeTopNavigation();
 separateLegacyPanels();
+v612StartupDiag('V612_APP_TOP_INIT_DONE','page='+currentPage);
 
 function normalizeTopNavigation() {
   const nav = document.querySelector('.side-nav');
@@ -157,6 +170,7 @@ async function refresh() {
 }
 
 async function refreshInternal() {
+  v612StartupDiag('V612_REFRESH_START','page='+currentPage+'|visual='+(visualMode?1:0));
   if (visualMode) {
     visualFixture ||= await fetch('/visual-dashboard-fixture.json', { cache: 'no-store' }).then(response => response.json());
     appState = buildVisualCcslState(visualFixture);
@@ -208,6 +222,7 @@ async function refreshInternal() {
         } catch {}
       }
       bootstrapLoaded = true;
+      v612StartupDiag('V612_BOOTSTRAP_DONE','businessStates='+Object.keys(businessStates).length+'|history='+(historyCatalog.UNIFIED?.length||0));
     } catch (error) {
       console.warn('[startup] 快速启动接口读取失败，回退兼容加载', error);
     }
@@ -277,7 +292,9 @@ async function refreshInternal() {
   } else {
     historyModeDate = '';
   }
+  v612StartupDiag('V612_RENDER_ALL_START','page='+currentPage);
   renderAll();
+  v612StartupDiag('V612_RENDER_ALL_DONE','page='+currentPage);
   if (currentPage === 'tracking') loadTrackingWorkspace();
 }
 
@@ -2858,6 +2875,7 @@ function updateClock() {
 
 window.addEventListener('popstate', () => { currentPage = pageFromPath(); renderAll(); });
 updateClock(); setInterval(updateClock, 1000);
+v612StartupDiag('V612_BEFORE_REFRESH_CALL','ready='+document.readyState);
 refresh().catch(async error => {
   console.error('Initial page refresh failed:', error);
   const backendHealthy = await rawHealthProbe();
