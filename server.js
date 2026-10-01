@@ -597,7 +597,7 @@ app.get('/api/unified-history', (req, res) => {
 // requests serially before first paint. All dashboard data below is served from
 // the fast SQL/range cache when possible, so normal navigation behaves like a
 // website rather than a batch-processing console.
-app.get('/api/bootstrap', async (req, res) => {
+app.route('/api/bootstrap').get(async (req, res) => {
   const bootstrapStartedAt = Date.now();
   const bootstrapLog = stage => console.log(`[CE-QC][V616_BOOTSTRAP] stage=${stage} elapsedMs=${Date.now()-bootstrapStartedAt}`);
   bootstrapLog('ENTER');
@@ -639,7 +639,8 @@ app.get('/api/bootstrap', async (req, res) => {
       generatedAt: new Date().toISOString()
     };
     res.setHeader('Cache-Control', 'private, max-age=5');
-    res.setHeader('X-CE-QC-Bootstrap-Mode', 'V613_HOME_COMPACT_FAST_SQL');
+    res.setHeader('X-CE-QC-Bootstrap-Mode', 'V618_SERVER_CANONICAL');
+    res.setHeader('X-CE-QC-Bootstrap-Owner', 'server.js');
     res.setHeader('X-CE-QC-Bootstrap-Ms', String(Date.now() - bootstrapStartedAt));
     const payloadBytes = Buffer.byteLength(JSON.stringify(payload), 'utf8');
     res.setHeader('X-CE-QC-Bootstrap-Bytes', String(payloadBytes));
