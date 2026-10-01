@@ -111,9 +111,12 @@ async function rawHealthProbe(timeoutMs = 3500) {
 }
 
 async function api(url, options = {}) {
+  const bootstrapDiag = String(url || '').startsWith('/api/bootstrap');
+  if (bootstrapDiag) v612StartupDiag('V616_BOOTSTRAP_FETCH_START','url='+url);
   let response;
   try {
     response = await fetch(url, options);
+    if (bootstrapDiag) v612StartupDiag('V616_BOOTSTRAP_HEADERS','status='+response.status);
   } catch (cause) {
     const backendHealthy = url === '/api/health' ? false : await rawHealthProbe();
     const error = new Error(backendHealthy
@@ -125,8 +128,10 @@ async function api(url, options = {}) {
     throw error;
   }
   const rawText = await response.text();
+  if (bootstrapDiag) v612StartupDiag('V616_BOOTSTRAP_BODY_DONE','bytes='+rawText.length);
   let result = {};
   try { result = rawText ? JSON.parse(rawText) : {}; } catch {}
+  if (bootstrapDiag) v612StartupDiag('V616_BOOTSTRAP_PARSE_DONE','ok='+(result?.ok!==false?1:0));
   if (!response.ok || result.ok === false) {
     const fallback = rawText && !/^\s*</.test(rawText)
       ? rawText.slice(0, 300)
