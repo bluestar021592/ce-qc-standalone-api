@@ -154,6 +154,34 @@ function signedCookie(secret){
   const sig=crypto.createHmac('sha256',secret).update(body).digest('base64url');
   return body+'.'+sig;
 }
+async function probeBootstrapHttp(port,secret,timeoutMs=12000){
+  const started=Date.now();
+  const cookie='ce_qc_local_auth_v431='+signedCookie(secret);
+  return await new Promise((resolve,reject)=>{
+    const req=http.request({
+      host:'127.0.0.1',port,path:'/api/bootstrap',method:'GET',
+      headers:{Cookie:cookie,Accept:'application/json','Cache-Control':'no-store'}
+    },res=>{
+      const chunks=[];let bytes=0;
+      res.on('data',chunk=>{bytes+=chunk.length;chunks.push(chunk);});
+      res.on('end',()=>{
+        const raw=Buffer.concat(chunks).toString('utf8');
+        resolve({
+          status:Number(res.statusCode||0),
+          ms:Date.now()-started,
+          bytes,
+          mode:String(res.headers['x-ce-qc-bootstrap-mode']||''),
+          serverMs:String(res.headers['x-ce-qc-bootstrap-ms']||''),
+          serverBytes:String(res.headers['x-ce-qc-bootstrap-bytes']||''),
+          okJson:/\"ok\"\s*:\s*true/.test(raw)
+        });
+      });
+    });
+    req.on('error',reject);
+    req.setTimeout(timeoutMs,()=>req.destroy(new Error('bootstrap HTTP probe timed out after '+timeoutMs+'ms')));
+    req.end();
+  });
+}
 async function domElement(cdp,selector,{box=false}={}){
   let lastError=null;
   for(let attempt=1;attempt<=6;attempt+=1){
@@ -240,6 +268,11 @@ try{
     }catch{return false;}
   },30000,150,'production backend health');
   stage('production backend health ready');
+  const bootstrapProbe=await probeBootstrapHttp(port,secret,12000);
+  console.log('[V617_BOOTSTRAP_HTTP] status='+bootstrapProbe.status+' ms='+bootstrapProbe.ms+' bytes='+bootstrapProbe.bytes+' mode='+bootstrapProbe.mode+' serverMs='+bootstrapProbe.serverMs+' serverBytes='+bootstrapProbe.serverBytes+' okJson='+(bootstrapProbe.okJson?1:0));
+  assert.equal(bootstrapProbe.status,200,'V617 direct bootstrap HTTP probe must succeed before browser navigation');
+  assert.equal(bootstrapProbe.okJson,true,'V617 direct bootstrap HTTP probe must return ok:true');
+  assert.ok(bootstrapProbe.ms<8000,'V617 direct bootstrap HTTP probe must stay below 8s');
 
   stage('waiting for Chromium remote-debug target');
   const target=await waitFor(async()=>{
@@ -341,6 +374,8 @@ try{
   }catch(diagError){
     console.error('[V609_DIAG] runtime unavailable: '+String(diagError?.message||diagError));
   }
+  const focused=backendLog.split(/\r?\n/).filter(line=>/V612_|V615_|V616_|V617_|V598_MAINTHREAD_LAG|V607_SELF_CHECK/.test(line)).slice(-160).join('\n');
+  if(focused)console.error('[V617_DIAG_FOCUSED]\n'+focused);
   console.error('[V581_PRODUCTION_BROWSER] backend tail\n'+backendLog.slice(-12000));
   throw error;
 } finally{
