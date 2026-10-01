@@ -330,6 +330,12 @@ try{
 
   console.log('[V601_PRODUCTION_BROWSER] real Edge passed · top user menu opens and CE home card physically navigates to /ce · native functional interaction proven end-to-end');
 } catch(error){
+  try{
+    const runtime=cdp?await cdp.eval("(()=>({href:location.href,ready:document.readyState,stable:!!window.__CE_QC_V581_STABLE_SHELL__,early:!!window.__CE_QC_V596_EARLY_INTERACTION__,v609:document.documentElement?.dataset?.ceQcV609MainHitScanRetired||'',shell:document.documentElement?.dataset?.ceQcStableShell||'',title:document.title,bodyClass:document.body?.className||''}))()",2500):null;
+    console.error('[V609_DIAG] runtime='+JSON.stringify(runtime));
+  }catch(diagError){
+    console.error('[V609_DIAG] runtime unavailable: '+String(diagError?.message||diagError));
+  }
   console.error('[V581_PRODUCTION_BROWSER] backend tail\n'+backendLog.slice(-12000));
   throw error;
 } finally{
