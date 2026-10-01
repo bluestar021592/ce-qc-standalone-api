@@ -328,13 +328,17 @@
     }finally{enforcing=false;}
   }
   function bind(){
+    // V611: the production shell gets exactly one synchronous startup enforce.
+    // Re-running full layout/navigation repair at 50/250/800/1800/3500/7000ms
+    // repeatedly forces style/layout work on Edge and can starve Runtime.evaluate,
+    // timers and real pointer input. Keep only a read-mostly blank-home fallback.
     enforce('bind');
-    [50,250,800,1800,3500,7000].forEach(ms=>setTimeout(()=>{enforce('timer-'+ms);renderFallbackHomeIfStillEmpty();},ms));
-    global.addEventListener('pageshow',()=>enforce('pageshow'),true);
+    doc.documentElement.dataset.ceQcV611StartupEnforceRetired='1';
+    setTimeout(()=>renderFallbackHomeIfStillEmpty(),1200);
+    global.addEventListener('pageshow',event=>{if(event?.persisted)enforce('pageshow-bfcache');},true);
     global.addEventListener('popstate',()=>enforce('popstate'),true);
-    // V600: browser-native anchors/buttons/inputs are the only interaction owner.
-    // This stable shell only repairs layout, route visibility and accidental blockers;
-    // it must never install a pointer/click capture chain.
+    // Browser-native anchors/buttons/inputs remain the only interaction owner.
+    // Resize is an explicit geometry change, so it may request one repair.
     global.addEventListener('resize',()=>enforce('resize'),{passive:true});
     doc.querySelector('.sidebar-collapse')?.addEventListener('click',()=>{
       setTimeout(()=>enforce('sidebar-collapse-0'),0);
