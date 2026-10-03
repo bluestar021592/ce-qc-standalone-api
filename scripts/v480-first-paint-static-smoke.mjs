@@ -125,6 +125,12 @@ assert.match(v625Shell,/id="v625Users"/,'V625 user-management page must ship ind
 assert.match(v625Shell,/id="v625Roles"/,'V625 role-permission page must ship independently');
 assert.match(v625Shell,/id="v625Profile"/,'V625 personal-center page must ship independently');
 assert.match(v625Shell,/id="v625404"/,'V625 404 page must ship independently');
+assert.match(v625Shell,/icon-shopee-nav/,'V625 sidebar must use dedicated Shopee navigation icon');
+assert.match(v625Shell,/icon-shopee-card/,'V625 home business cards must use dedicated Shopee S-bag icon');
+assert.match(v625Shell,/icon-plane/,'V625 CEAF surfaces must use airplane icon');
+assert.doesNotMatch(v625Shell,/data-key="shopeecn"[^\n]*icon-bag|data-key="shopeevn"[^\n]*icon-bag/,'V625 Shopee navigation must never fall back to generic bag icon');
+assert.match(fs.readFileSync('public/assets/ui-icons-v625.svg','utf8'),/id="icon-shopee-card"/,'V625 dedicated icon sprite must include Shopee card icon');
+
 assert.doesNotMatch(v625Shell,/id="v625Aux"/,'V625 must not merge users roles profile and 404 into one auxiliary surface');
 assert.match(server,/\['\/users', \{ key:'users', title:'用户管理', business:'' \}\]/,'V625 user-management route must be first-class');
 assert.match(server,/\['\/profile', \{ key:'profile', title:'个人中心', business:'' \}\]/,'V625 personal-center route must be first-class');
