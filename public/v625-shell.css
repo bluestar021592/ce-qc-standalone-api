@@ -166,3 +166,19 @@ svg{width:1em;height:1em;display:inline-block;vertical-align:middle}
   .v625-status-meta{grid-template-columns:1fr}.v625-status-meta>div{border-right:0;border-bottom:1px solid #e4edf6;padding:10px}
   .v625-donut-wrap{grid-template-columns:1fr}.v625-data-manage-grid,.v625-aux-grid{grid-template-columns:1fr}
 }
+
+.v625-role-cards{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+.role-card{text-align:center;padding:26px 22px}
+.role-card .role-icon{width:54px;height:54px;margin:0 auto 14px;border-radius:14px;display:grid;place-items:center;background:#edf5ff;color:#1677f2}
+.role-card .role-icon svg{width:27px;height:27px}
+.role-card h2{margin:0;font-size:18px}
+.role-card p{margin:7px 0 18px;color:#74889c;font-size:12px}
+.role-card ul{list-style:none;padding:0;margin:0;text-align:left;display:grid;gap:9px}
+.role-card li{padding:9px 11px;border:1px solid #e5edf5;border-radius:7px;color:#526c84;font-size:12px;background:#fbfdff}
+.role-card.operator .role-icon{background:#effaf5;color:#17ac70}
+.role-card.viewer .role-icon{background:#fff6e8;color:#e58b18}
+.v625-profile-layout{display:grid;grid-template-columns:360px minmax(0,1fr);gap:18px}
+.profile-main-card{display:flex;align-items:center;justify-content:center;min-height:330px}
+.v625-profile-role{display:inline-flex;margin-top:9px;padding:5px 12px;border-radius:20px;background:#edf5ff;color:#1677f2;font-size:11px;font-weight:700}
+.v625-404-card{max-width:760px;margin:80px auto}
+@media(max-width:1100px){.v625-role-cards{grid-template-columns:1fr}.v625-profile-layout{grid-template-columns:1fr}}
