@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="ce-qc-shell" content="V625_FULL_SYSTEM_UI">
   <title>__V625_PAGE_TITLE__ - CE EXPRESS 质量控制管理系统</title>
-  <link rel="stylesheet" href="/v625-shell.css?v=20261003-v625-2">
+  <link rel="stylesheet" href="/v625-shell.css?v=20261003-v625-3">
 </head>
 <body data-page="__V625_PAGE_KEY__" data-business="__V625_BUSINESS_TYPE__">
   <div class="v625-app">
@@ -227,25 +227,120 @@
 
         <!-- SETTINGS -->
         <section id="v625Settings" class="v625-page" hidden>
-          <div class="v625-tabs settings-tabs"><button class="active">基本设置</button><button>账号管理</button><button>接口设置</button><button>数据设置</button><button>系统维护</button></div>
-          <div class="v625-settings-grid">
+          <div class="v625-tabs settings-tabs" id="v625SettingsTabs">
+            <button class="active" data-settings-tab="basic" type="button">基本设置</button>
+            <button data-settings-tab="accounts" type="button">账号管理</button>
+            <button data-settings-tab="interface" type="button">接口设置</button>
+            <button data-settings-tab="maintenance" type="button">系统维护</button>
+          </div>
+
+          <div class="v625-settings-tab-panel" data-settings-panel="basic">
+            <div class="v625-settings-grid">
+              <section class="v625-panel">
+                <div class="v625-section-head"><h2>当前账号信息</h2><span id="v625SettingsRole">—</span></div>
+                <div class="v625-profile-row">
+                  <span class="v625-profile-avatar"><svg><use href="/assets/ui-icons-v625.svg#icon-user"/></svg></span>
+                  <div><b id="v625SettingsUser">—</b><p id="v625SettingsEmail">—</p></div>
+                  <a class="v625-btn outline" href="/profile?auth=v625">修改资料</a>
+                </div>
+              </section>
+
+              <section class="v625-panel">
+                <div class="v625-section-head"><h2>数据库状态</h2><span class="v625-status-dot ok">正常</span></div>
+                <div class="v625-info-list">
+                  <div><span>数据库</span><b id="v625DbState">—</b></div>
+                  <div><span>本机地址</span><b id="v625LocalUrl">—</b></div>
+                  <div><span>局域网地址</span><b id="v625LanUrl">—</b></div>
+                </div>
+              </section>
+
+              <section class="v625-panel settings-span-2">
+                <div class="v625-section-head"><h2>门店CP码设置</h2><span id="v625ShopMeta">—</span></div>
+                <div class="v625-inline-form">
+                  <label class="v625-file-mini"><input id="v625ShopFile" type="file" accept=".xlsx,.xls"><span id="v625ShopFileName">请选择CP码文件</span></label>
+                  <button id="v625ShopImport" class="v625-btn primary" type="button">保存</button>
+                </div>
+              </section>
+            </div>
+          </div>
+
+          <div class="v625-settings-tab-panel" data-settings-panel="accounts" hidden>
             <section class="v625-panel">
-              <div class="v625-section-head"><h2>当前账号信息</h2><span id="v625SettingsRole">—</span></div>
-              <div class="v625-profile-row"><span class="v625-profile-avatar"><svg><use href="/assets/ui-icons-v625.svg#icon-user"/></svg></span><div><b id="v625SettingsUser">—</b><p id="v625SettingsEmail">—</p></div><a class="v625-btn outline" href="/profile?auth=v625">修改资料</a></div>
+              <div class="v625-section-head">
+                <h2>账号管理</h2>
+                <button id="v625AddUser" class="v625-btn primary" type="button">新增用户</button>
+              </div>
+              <div id="v625UserEditor" class="v625-user-editor" hidden>
+                <div class="v625-section-head"><h2 id="v625UserEditorTitle">新增用户</h2><button id="v625CancelUserEdit" class="v625-btn outline" type="button">取消</button></div>
+                <input id="v625EditUserId" type="hidden">
+                <div class="v625-form-grid account-grid">
+                  <label>用户名<input id="v625AccountUsername" placeholder="英文/数字/._-" autocomplete="off"></label>
+                  <label>显示名称<input id="v625AccountDisplayName" placeholder="姓名或昵称"></label>
+                  <label>邮箱<input id="v625AccountEmail" type="email" placeholder="name@example.com"></label>
+                  <label>角色<select id="v625AccountRole"><option value="VIEWER">查看员</option><option value="OPERATOR">操作员</option><option value="ADMIN">管理员</option></select></label>
+                  <label>业务范围<select id="v625AccountScope"><option value="ALL">全部</option><option value="CCSL">CCSL</option><option value="SHOPEE">SHOPEE</option></select></label>
+                  <label id="v625TempPasswordWrap">临时密码<input id="v625AccountPassword" type="password" placeholder="至少10位"></label>
+                </div>
+                <div class="v625-button-row"><button id="v625SaveUser" class="v625-btn primary" type="button">保存用户</button></div>
+                <div id="v625AccountMessage" class="v625-inline-note">新增用户需要至少10位临时密码。</div>
+              </div>
+
+              <div class="v625-table-wrap">
+                <table class="v625-table">
+                  <thead><tr><th>用户名</th><th>显示名称</th><th>角色</th><th>业务范围</th><th>状态</th><th>最近登录</th><th>操作</th></tr></thead>
+                  <tbody id="v625SettingsUserRows"><tr><td colspan="7">正在读取…</td></tr></tbody>
+                </table>
+              </div>
             </section>
+          </div>
+
+          <div class="v625-settings-tab-panel" data-settings-panel="interface" hidden>
             <section class="v625-panel">
               <div class="v625-section-head"><h2>CE系统连接</h2><span id="v625CeStatus">读取中</span></div>
-              <div class="v625-form-grid"><label>Tenant ID<input id="v625CeTenant" value="000000"></label><label>CE账号<input id="v625CeUser"></label><label>CE密码<input id="v625CePassword" type="password"></label></div>
-              <div class="v625-button-row"><button id="v625CeLogin" class="v625-btn primary">重新登录</button><button id="v625CeLogout" class="v625-btn danger-lite">退出登录</button></div>
+              <div class="v625-form-grid">
+                <label>Tenant ID<input id="v625CeTenant" value="000000"></label>
+                <label>CE账号<input id="v625CeUser" autocomplete="username"></label>
+                <label>CE密码<input id="v625CePassword" type="password" autocomplete="current-password"></label>
+              </div>
+              <div class="v625-button-row">
+                <button id="v625CeLogin" class="v625-btn primary" type="button">重新登录</button>
+                <button id="v625CeLogout" class="v625-btn danger-lite" type="button">退出登录</button>
+              </div>
               <div id="v625CeMessage" class="v625-inline-note">正在读取CE连接状态。</div>
             </section>
+          </div>
+
+          <div class="v625-settings-tab-panel" data-settings-panel="maintenance" hidden>
+            <div class="v625-settings-grid">
+              <section class="v625-panel">
+                <div class="v625-section-head"><h2>数据库备份</h2><span id="v625SettingsBackupMeta">—</span></div>
+                <p class="v625-maintenance-copy">立即创建数据库备份，不会清理或修改现有业务数据。</p>
+                <div class="v625-button-row">
+                  <button id="v625SettingsBackupNow" class="v625-btn primary" type="button">立即备份</button>
+                  <a class="v625-btn outline" href="/data-management?auth=v625">数据管理</a>
+                  <a class="v625-btn outline" href="/logs?auth=v625">操作日志</a>
+                </div>
+                <div id="v625SettingsBackupMessage" class="v625-inline-note">正在读取备份状态。</div>
+              </section>
+
+              <section class="v625-panel">
+                <div class="v625-section-head"><h2>维护状态</h2><span class="v625-status-dot ok">正常</span></div>
+                <div class="v625-info-list">
+                  <div><span>当前版本</span><b>V625</b></div>
+                  <div><span>数据库</span><b id="v625MaintenanceDb">—</b></div>
+                  <div><span>最近备份</span><b id="v625LastBackup">—</b></div>
+                </div>
+              </section>
+            </div>
+
             <section class="v625-panel">
-              <div class="v625-section-head"><h2>门店CP码设置</h2><span id="v625ShopMeta">—</span></div>
-              <div class="v625-inline-form"><label class="v625-file-mini"><input id="v625ShopFile" type="file" accept=".xlsx,.xls"><span id="v625ShopFileName">请选择CP码文件</span></label><button id="v625ShopImport" class="v625-btn primary">保存</button></div>
-            </section>
-            <section class="v625-panel">
-              <div class="v625-section-head"><h2>数据库状态</h2><span class="v625-status-dot ok">正常</span></div>
-              <div class="v625-info-list"><div><span>数据库</span><b id="v625DbState">—</b></div><div><span>本机地址</span><b id="v625LocalUrl">—</b></div><div><span>局域网地址</span><b id="v625LanUrl">—</b></div></div>
+              <div class="v625-section-head"><h2>最近备份记录</h2><span>最近10条</span></div>
+              <div class="v625-table-wrap">
+                <table class="v625-table">
+                  <thead><tr><th>备份时间</th><th>文件名称</th><th>类型</th><th>大小</th></tr></thead>
+                  <tbody id="v625SettingsBackupRows"><tr><td colspan="4">正在读取…</td></tr></tbody>
+                </table>
+              </div>
             </section>
           </div>
         </section>
@@ -355,6 +450,6 @@
       </main>
     </div>
   </div>
-  <script src="/v625-shell.js?v=20261003-v625-2" defer></script>
+  <script src="/v625-shell.js?v=20261003-v625-3" defer></script>
 </body>
 </html>
