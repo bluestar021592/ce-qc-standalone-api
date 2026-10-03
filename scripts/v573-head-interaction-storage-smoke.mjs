@@ -66,7 +66,7 @@ assert.match(app,/__CE_QC_V90_INSTANT_WHPP_NAV__/,'base runtime must preserve th
 assert.match(app,/\['whpp', 'WHPP本土'/,'production homepage must include WHPP as a first-class business card');
 assert.match(app,/state\.dashboard\?\.metrics\?\.total/,'WHPP home/range count must read unified WHPP metrics total');
 
-assert.match(login,/\?auth=v581&t=/,'post-login URL must visibly identify V581');
+assert.match(login,/\?auth=v624&t=/,'post-login URL must enter the clean V624 dashboard shell');
 assert.match(cleanup,/2026-09-26-v588-no-backup-storage-cleanup-v1/);
 assert.match(cleanup,/\[CE-QC\]\[V573\]\[STORAGE\] cleanup complete:/);
 assert.match(cleanup,/driveLine\('C',drivesBefore\.C,drivesAfter\.C\)/);
