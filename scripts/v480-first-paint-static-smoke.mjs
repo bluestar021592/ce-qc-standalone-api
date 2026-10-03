@@ -23,6 +23,7 @@ const localLogin=fs.readFileSync('public/local-login.html','utf8');
 const dashboardV18=fs.readFileSync('public/dashboard-v18.js','utf8');
 const v625Shell=fs.readFileSync('public/v625-shell.html','utf8');
 const v625Runtime=fs.readFileSync('public/v625-shell.js','utf8');
+const homeQualitySummary=fs.readFileSync('src/homeQualitySummary.js','utf8');
 const purgeConsole=fs.readFileSync('public/purge-console.html','utf8');
 const server=fs.readFileSync('server.js','utf8');
 assert.match(source,/2026-09-08-v480-preauth-static-first-paint-v1/);
@@ -147,6 +148,22 @@ assert.match(v625Runtime,/switchSettingsTab/,'V625 settings tabs must be interac
 assert.match(v625Runtime,/\/api\/admin\/users/,'V625 account-management tab must use the real admin-users API');
 assert.match(v625Runtime,/method:'PATCH'/,'V625 account-management tab must support real user updates');
 assert.match(v625Runtime,/\/api\/admin\/backup-now/,'V625 maintenance tab must use the real backup API');
+
+assert.match(server,/\/api\/home-quality-summary/,'V625 server must expose the canonical home quality summary API');
+assert.match(v625Shell,/id="v625ClassAccuracy"/,'V625 approved home must include classification accuracy validation');
+assert.match(v625Shell,/id="v625RecognitionRows"/,'V625 approved home must include seven-business recognition table');
+assert.match(v625Shell,/id="v625TimingTBKHOverall"/,'V625 approved home must include TBKH signing time');
+assert.match(v625Shell,/id="v625TimingSHOPEECNOverall"/,'V625 approved home must include SHOPEE CN signing time');
+assert.match(v625Shell,/id="v625TimingSHOPEEVNOverall"/,'V625 approved home must include SHOPEE VN signing time');
+assert.doesNotMatch(v625Shell,/质量监控概览/,'V625 approved home must not fall back to the old simplified quality-monitor block');
+assert.match(v625Runtime,/\/api\/home-quality-summary/,'V625 home UI must read the canonical quality summary rather than inventing metrics client-side');
+assert.match(homeQualitySummary,/classificationConflicts/,'V625 classification validation must expose real conflict counts');
+assert.match(homeQualitySummary,/signedDays/,'V625 signing time must be calculated from actual POD dates');
+assert.match(homeQualitySummary,/region:\s*String\(row\.regionCode/,'V625 signing time must preserve PP and PV region truth');
+assert.match(homeQualitySummary,/attempt1/,'V625 signing summary must expose first-attempt timing');
+assert.match(homeQualitySummary,/attempt2/,'V625 signing summary must expose second-attempt timing');
+assert.match(homeQualitySummary,/attempt3/,'V625 signing summary must expose third-and-later timing');
+
 
 
 assert.doesNotMatch(v625Shell,/data-key="shopeecn"[^\n]*icon-bag|data-key="shopeevn"[^\n]*icon-bag/,'V625 Shopee navigation must never fall back to generic bag icon');
