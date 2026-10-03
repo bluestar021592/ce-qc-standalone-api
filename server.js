@@ -1423,7 +1423,7 @@ app.get('/api/tracking-workspace', async (req, res) => {
   const reportDate = String(req.query.reportDate || unified?.reportDate || '');
   const scope = ['all', 'pod'].includes(String(req.query.scope || '')) ? String(req.query.scope) : 'actionable';
   let states = [];
-  if (snapshotId) states = ['CE', 'CEAF', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN'].map(type => loadLightweightUnifiedBusinessState(type, snapshotId));
+  if (snapshotId) states = ['CE', 'CEAF', 'TBKH', 'ALI1688', 'WHPP', 'SHOPEECN', 'SHOPEEVN'].map(type => loadLightweightUnifiedBusinessState(type, snapshotId));
   if (!states.some(state => state?.finalRows?.length)) states = [await loadState(), loadBusinessState(SHOPEE)];
   const allRows = states.flatMap(state => workspaceRows(state, state.businessType || 'CCSL'));
   const priority = row => row.queryStatus === '待重试' ? 0 : row.isActionable ? 1 : 2;
