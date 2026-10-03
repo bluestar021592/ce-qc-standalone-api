@@ -46,7 +46,8 @@ test('V560 direct purge clears business data without creating a backup or purge 
     assert.equal(result.direct,true);
     assert.equal(result.backupCreated,false);
     assert.equal(result.sealed,false);
-    assert.equal(result.deleteMode,'DIRECT_NO_BACKUP_TRANSACTION');
+    assert.equal(result.deleteMode,'DIRECT_NO_BACKUP_TRANSACTION_PRESERVE_EXISTING_BACKUPS');
+    assert.equal(result.existingBackupsPreserved,true,'direct business-data purge must preserve pre-existing backups');
 
     const verifyDb=(await import('node:sqlite')).DatabaseSync;
     const check=new verifyDb(cfg.dbFile);
@@ -65,8 +66,8 @@ test('V560 direct purge clears business data without creating a backup or purge 
 
     const preClearAfter=fs.existsSync(preClearDir)?fs.readdirSync(preClearDir).length:0;
     assert.ok(preClearBefore>0,'fixture must contain one legacy backup');
-    assert.equal(preClearAfter,0,'direct purge must remove legacy CE QC backups under no-backup policy');
-    assert.equal(result.backupCleanup?.retainedCount||0,0,'no safety backup may be retained');
+    assert.equal(preClearAfter,preClearBefore,'direct purge must preserve existing CE QC backups; clearing business data is independent from backup retention');
+    assert.equal(result.backupCleanup?.preserved,true,'direct purge must report that existing backups were preserved');
     assert.equal(result.compactResult?.skipped,false,'purged database should be compacted to release SQLite free pages');
   }finally{
     try{closeDb();}catch{}
