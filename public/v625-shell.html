@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="ce-qc-shell" content="V625_FULL_SYSTEM_UI">
   <title>__V625_PAGE_TITLE__ - CE EXPRESS 质量控制管理系统</title>
-  <link rel="stylesheet" href="/v625-shell.css?v=20261003-v625-1">
+  <link rel="stylesheet" href="/v625-shell.css?v=20261003-v625-2">
 </head>
 <body data-page="__V625_PAGE_KEY__" data-business="__V625_BUSINESS_TYPE__">
   <div class="v625-app">
@@ -279,18 +279,82 @@
           </section>
         </section>
 
-        <!-- AUXILIARY -->
-        <section id="v625Aux" class="v625-page" hidden>
-          <div class="v625-aux-grid">
-            <section class="v625-panel" id="v625UsersCard"><div class="v625-section-head"><h2>用户管理</h2><span>ADMIN</span></div><div class="v625-table-wrap"><table class="v625-table compact"><thead><tr><th>用户名</th><th>角色</th><th>状态</th></tr></thead><tbody id="v625UserRows"><tr><td colspan="3">正在读取…</td></tr></tbody></table></div></section>
-            <section class="v625-panel" id="v625RolesCard"><div class="v625-section-head"><h2>角色权限</h2><span>权限模板</span></div><div class="v625-role-list"><div><b>管理员</b><span>全部权限</span></div><div><b>操作员</b><span>业务操作</span></div><div><b>查看员</b><span>只读访问</span></div></div></section>
-            <section class="v625-panel" id="v625ProfileCard"><div class="v625-profile-center"><span class="v625-profile-avatar large"><svg><use href="/assets/ui-icons.svg#icon-user"/></svg></span><h2 id="v625ProfileName">当前用户</h2><p id="v625ProfileEmail">—</p><a class="v625-btn outline" href="/settings?auth=v625">修改设置</a></div></section>
-            <section class="v625-panel" id="v625404Card"><div class="v625-404"><strong>404</strong><h2>页面不存在</h2><p>请检查地址或返回首页。</p><a class="v625-btn primary" href="/?auth=v625">返回首页</a></div></section>
+        <!-- USER MANAGEMENT -->
+        <section id="v625Users" class="v625-page" hidden>
+          <section class="v625-panel">
+            <div class="v625-section-head">
+              <h2>用户管理</h2>
+              <span>账号与权限配置</span>
+            </div>
+            <div class="v625-table-wrap">
+              <table class="v625-table">
+                <thead><tr><th>用户名</th><th>角色</th><th>业务范围</th><th>状态</th><th>操作</th></tr></thead>
+                <tbody id="v625UserRows"><tr><td colspan="5">正在读取…</td></tr></tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+
+        <!-- ROLE PERMISSIONS -->
+        <section id="v625Roles" class="v625-page" hidden>
+          <div class="v625-role-cards">
+            <article class="v625-panel role-card admin">
+              <div class="role-icon"><svg><use href="/assets/ui-icons.svg#icon-user"/></svg></div>
+              <h2>管理员</h2><p>全部权限</p>
+              <ul><li>系统设置</li><li>用户与权限</li><li>数据管理</li><li>全部业务操作</li></ul>
+            </article>
+            <article class="v625-panel role-card operator">
+              <div class="role-icon"><svg><use href="/assets/ui-icons.svg#icon-briefcase"/></svg></div>
+              <h2>操作员</h2><p>业务操作</p>
+              <ul><li>数据导入</li><li>轨迹查询</li><li>异常处理</li><li>报表导出</li></ul>
+            </article>
+            <article class="v625-panel role-card viewer">
+              <div class="role-icon"><svg><use href="/assets/ui-icons.svg#icon-search"/></svg></div>
+              <h2>查看员</h2><p>只读访问</p>
+              <ul><li>首页总看板</li><li>业务看板</li><li>异常明细</li><li>操作日志只读</li></ul>
+            </article>
           </div>
         </section>
+
+        <!-- PROFILE -->
+        <section id="v625Profile" class="v625-page" hidden>
+          <div class="v625-profile-layout">
+            <section class="v625-panel profile-main-card">
+              <div class="v625-profile-center">
+                <span class="v625-profile-avatar large"><svg><use href="/assets/ui-icons.svg#icon-user"/></svg></span>
+                <h2 id="v625ProfileName">当前用户</h2>
+                <p id="v625ProfileEmail">—</p>
+                <span class="v625-profile-role" id="v625ProfileRole">—</span>
+              </div>
+            </section>
+            <section class="v625-panel">
+              <div class="v625-section-head"><h2>账号信息</h2><span>个人中心</span></div>
+              <div class="v625-info-list">
+                <div><span>显示名称</span><b id="v625ProfileDisplayName">—</b></div>
+                <div><span>登录账号</span><b id="v625ProfileLogin">—</b></div>
+                <div><span>角色</span><b id="v625ProfileRoleInfo">—</b></div>
+                <div><span>业务权限</span><b id="v625ProfileScope">—</b></div>
+              </div>
+              <div class="v625-button-row"><a class="v625-btn outline" href="/settings?auth=v625">修改设置</a></div>
+            </section>
+          </div>
+        </section>
+
+        <!-- 404 -->
+        <section id="v625404" class="v625-page" hidden>
+          <section class="v625-panel v625-404-card">
+            <div class="v625-404">
+              <strong>404</strong>
+              <h2>页面不存在</h2>
+              <p>请检查地址，或返回首页继续使用系统。</p>
+              <a class="v625-btn primary" href="/?auth=v625">返回首页</a>
+            </div>
+          </section>
+        </section>
+
       </main>
     </div>
   </div>
-  <script src="/v625-shell.js?v=20261003-v625-1" defer></script>
+  <script src="/v625-shell.js?v=20261003-v625-2" defer></script>
 </body>
 </html>
