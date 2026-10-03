@@ -95,7 +95,7 @@ assert.match(stableShell,/retireIsolatedSidebar/,'V593 stable owner must retire 
 assert.doesNotMatch(stableShell,/frame\.srcdoc|isolatedSidebarMarkup|mountIsolatedSidebar/,'V593 primary sidebar must not create another iframe');
 assert.match(server,/X-Frame-Options', 'DENY'/,'normal authenticated HTML keeps frame denial');
 assert.match(server,/app\.route\('\/api\/bootstrap'\)\.get\(/,'V618 server.js must be the canonical bootstrap route owner');
-assert.match(server,/X-CE-QC-Bootstrap-Mode', 'V618_SERVER_CANONICAL'/,'V618 canonical bootstrap response must identify its owner');
+assert.match(server,/X-CE-QC-Bootstrap-Mode', 'V621_INTERACTION_FIRST'/,'V621 bootstrap must identify interaction-first mode');
 assert.doesNotMatch(v27ServerPatch,/if \(path === '\/api\/bootstrap' && handlers\.length\)/,'V618 V27 must not intercept bootstrap registration');
 assert.doesNotMatch(v43BootstrapPatch,/v43FastBootstrapRegistration/,'V618 V43 must not intercept bootstrap registration');
 assert.doesNotMatch(v90DashboardPatch,/v211ForceFastBootstrapListen|extractV43FastBootstrapHandler/,'V618 V90 must not replace bootstrap handlers at listen time');
@@ -107,8 +107,13 @@ assert.match(stableResponse,/appTag/,'final response pass must locate app.js as 
 assert.match(stableResponse,/V581_TAG\+'\\n'\+match/,'stable shell must be injected immediately before app.js');
 const earlyAt=indexHtml.indexOf('/v592-early-sidebar-capture.js?v=20261001-v608-1');
 const stableAt=indexHtml.indexOf('/v581-stable-shell-owner.js?v=20260929-v600-1');
-const appAt=indexHtml.indexOf('/app.js?v=');
-assert.ok(earlyAt>0&&stableAt>earlyAt&&appAt>stableAt,'native interaction bootstrap must load in head before the stable shell and app.js regardless of app cache-bust version');
+const appAt=indexHtml.indexOf('/app.js?v=20261003-v621-1');
+assert.ok(earlyAt>0&&stableAt>earlyAt&&appAt>stableAt,'V621 interaction-first app runtime must load after native interaction shell');
+assert.match(indexHtml,/app\.js\?v=20261003-v621-1/,'V621 app runtime must be cache-busted');
+assert.match(server,/shopeeState:\s*shopee/,'bootstrap shape must remain explicit');
+assert.match(server,/const shopee = null;/,'V621 first-paint bootstrap must defer SHOPEE state');
+assert.match(fs.readFileSync('public\/app.js','utf8'),/renderAll\(\);[\s\S]{0,500}ceQcV621InteractionFirst='1'/,'V621 app must paint an interactive shell before deferred refresh');
+assert.match(fs.readFileSync('public\/app.js','utf8'),/requestIdleCallback\(runInitialDataRefresh/,'V621 initial data refresh must be deferred until first interaction paint');
 
 assert.match(purgeConsole,/CE QC 直接清空业务数据/,'recovery page must expose the direct no-backup purge mode');
 assert.match(purgeConsole,/onclick="window\.openDirectDataPurge\?\.\(\)"/,'recovery page must delegate direct purge to the V560 owner');
