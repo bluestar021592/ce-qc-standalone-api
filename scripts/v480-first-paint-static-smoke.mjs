@@ -24,6 +24,8 @@ const dashboardV18=fs.readFileSync('public/dashboard-v18.js','utf8');
 const v625Shell=fs.readFileSync('public/v625-shell.html','utf8');
 const v625Runtime=fs.readFileSync('public/v625-shell.js','utf8');
 const homeQualitySummary=fs.readFileSync('src/homeQualitySummary.js','utf8');
+const directPurge=fs.readFileSync('src/directDataPurge.js','utf8');
+const backupModule=fs.readFileSync('src/backup.js','utf8');
 const purgeConsole=fs.readFileSync('public/purge-console.html','utf8');
 const server=fs.readFileSync('server.js','utf8');
 assert.match(source,/2026-09-08-v480-preauth-static-first-paint-v1/);
@@ -158,11 +160,21 @@ assert.match(v625Shell,/id="v625TimingSHOPEEVNOverall"/,'V625 approved home must
 assert.doesNotMatch(v625Shell,/质量监控概览/,'V625 approved home must not fall back to the old simplified quality-monitor block');
 assert.match(v625Runtime,/\/api\/home-quality-summary/,'V625 home UI must read the canonical quality summary rather than inventing metrics client-side');
 assert.match(homeQualitySummary,/classificationConflicts/,'V625 classification validation must expose real conflict counts');
-assert.match(homeQualitySummary,/signedDays/,'V625 signing time must be calculated from actual POD dates');
+assert.doesNotMatch(homeQualitySummary,/signedDays\(reportDate/,'V626 signing time must never use report/upload date as the delivery start');
+assert.match(homeQualitySummary,/eventCode\(event\) === '70'/,'V626 signing time must prefer real track 70 delivery start');
+assert.match(homeQualitySummary,/eventCode\(event\) === '60'/,'V626 signing time may use real track 60 only as assignment fallback');
+assert.match(homeQualitySummary,/eventCode\(event\) === '80'/,'V626 signing time terminal must be real track 80 POD');
+assert.match(homeQualitySummary,/DELIVERY_START_MISSING/,'V626 POD without real delivery-start evidence must be excluded rather than estimated');
 assert.match(homeQualitySummary,/region:\s*String\(row\.regionCode/,'V625 signing time must preserve PP and PV region truth');
 assert.match(homeQualitySummary,/attempt1/,'V625 signing summary must expose first-attempt timing');
 assert.match(homeQualitySummary,/attempt2/,'V625 signing summary must expose second-attempt timing');
 assert.match(homeQualitySummary,/attempt3/,'V625 signing summary must expose third-and-later timing');
+assert.match(homeQualitySummary,/RETURN_TYPES = new Set\(\['WHPP','SHOPEECN','SHOPEEVN'\]\)/,'V626 return metric scope must stay limited to WHPP/CN/VN');
+assert.match(directPurge,/existingBackupsPreserved:true/,'V626 direct clear must preserve existing backups');
+assert.doesNotMatch(directPurge,/正在删除业务缓存、证据归档和全部 CE QC 备份/,'V626 direct clear must not delete backups as a side effect');
+assert.match(backupModule,/chooseAutomaticBackupRoot/,'V626 database backup must automatically choose available C/D storage');
+assert.match(backupModule,/autoManagement:\s*true/,'V626 storage status must declare automatic management');
+
 
 
 
@@ -175,6 +187,21 @@ assert.match(server,/\['\/profile', \{ key:'profile', title:'个人中心', busi
 assert.match(v625Runtime,/\/api\/tracking-workspace/,'V625 tracking and exception pages must use the canonical workspace API');
 assert.match(v625Runtime,/\/api\/export-period\/prepare/,'V625 report page must use the canonical export owner');
 assert.match(v625Runtime,/\/api\/backups/,'V625 data-management page must use the canonical backup owner');
+
+assert.match(v625Shell,/data-data-tab="clear"/,'V626 data management must expose a real direct-clear tab');
+assert.match(v625Shell,/data-data-tab="backup"/,'V626 data management must expose a real backup tab');
+assert.match(v625Shell,/data-data-tab="storage"/,'V626 data management must expose real storage status');
+assert.doesNotMatch(v625Shell,/data-data-tab="migration"|data-data-tab="sync"|>数据迁移<|>数据同步</,'V626 must not expose fake migration/sync tabs');
+assert.match(v625Runtime,/\/api\/admin\/data-purge\/direct/,'V626 one-click clear must use the direct no-backup purge API');
+assert.match(v625Runtime,/\/api\/v246\/tracking\/reconcile/,'V626 unfinished POD refresh must use persistent QC tracking reconcile');
+assert.match(v625Runtime,/\/api\/v33\/run-progress/,'V626 processing screen must show real scan/track progress');
+assert.match(v625Runtime,/\/api\/whpp\/progress/,'V626 processing screen must include WHPP progress');
+assert.match(v625Shell,/id="v626ReturnWHPP"/,'V626 home must show WHPP return count');
+assert.match(v625Shell,/id="v626ReturnSHOPEECN"/,'V626 home must show SHOPEE CN return count');
+assert.match(v625Shell,/id="v626ReturnSHOPEEVN"/,'V626 home must show SHOPEE VN return count');
+assert.match(v625Shell,/id="v625TimingWHPPOverall"/,'V626 approved home must include WHPP real signing timing');
+assert.match(v625Shell,/id="v626OpenPodRows"/,'V626 home must expose refreshable unfinished POD rows');
+
 
 
 assert.doesNotMatch(v625Shell,/v581-stable-shell-owner|v592-early-sidebar-capture|app\.js|v14-geometry-fixture|dashboard-v18\.js/,'V625 clean shell must not load any legacy dashboard runtime');
