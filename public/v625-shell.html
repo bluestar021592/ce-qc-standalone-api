@@ -1,0 +1,296 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="ce-qc-shell" content="V625_FULL_SYSTEM_UI">
+  <title>__V625_PAGE_TITLE__ - CE EXPRESS 质量控制管理系统</title>
+  <link rel="stylesheet" href="/v625-shell.css?v=20261003-v625-1">
+</head>
+<body data-page="__V625_PAGE_KEY__" data-business="__V625_BUSINESS_TYPE__">
+  <div class="v625-app">
+    <aside class="v625-sidebar">
+      <a class="v625-brand" href="/?auth=v625">
+        <span class="v625-logo-wrap"><img src="/assets/ce-express-logo-main.png" alt="CE EXPRESS"></span>
+        <span class="v625-brand-copy"><strong>CE EXPRESS</strong><small>质量控制管理系统</small></span>
+      </a>
+      <nav class="v625-nav">
+        <a data-key="home" href="/?auth=v625"><svg><use href="/assets/ui-icons.svg#icon-home"/></svg><span>首页总看板</span></a>
+        <a data-key="ce" href="/ce?auth=v625"><svg><use href="/assets/ui-icons.svg#icon-package"/></svg><span>CE看板</span></a>
+        <a data-key="ceaf" href="/ceaf?auth=v625"><svg><use href="/assets/ui-icons.svg#icon-route"/></svg><span>CEAF空运看板</span></a>
+        <a data-key="tbkh" href="/tbkh?auth=v625"><svg><use href="/assets/ui-icons.svg#icon-package"/></svg><span>TBKH看板</span></a>
+        <a data-key="ali1688" href="/ali1688?auth=v625"><svg><use href="/assets/ui-icons.svg#icon-bag"/></svg><span>ALI1688看板</span></a>
+        <a data-key="whpp" href="/whpp?auth=v625"><svg><use href="/assets/ui-icons.svg#icon-home"/></svg><span>WHPP本土看板</span></a>
+        <a data-key="shopeecn" href="/shopeecn?auth=v625"><svg><use href="/assets/ui-icons.svg#icon-bag"/></svg><span>SHOPEE CN看板</span></a>
+        <a data-key="shopeevn" href="/shopeevn?auth=v625"><svg><use href="/assets/ui-icons.svg#icon-bag"/></svg><span>SHOPEE VN看板</span></a>
+        <div class="v625-nav-divider"></div>
+        <a data-key="import" href="/import?auth=v625"><svg><use href="/assets/ui-icons.svg#icon-file-up"/></svg><span>数据导入</span></a>
+        <a data-key="tracking" href="/tracking?auth=v625"><svg><use href="/assets/ui-icons.svg#icon-search"/></svg><span>轨迹查询</span></a>
+        <a data-key="exceptions" href="/exceptions?auth=v625"><svg><use href="/assets/ui-icons.svg#icon-alert"/></svg><span>异常明细</span></a>
+        <a data-key="reports" href="/reports?auth=v625"><svg><use href="/assets/ui-icons.svg#icon-clipboard"/></svg><span>报表导出</span></a>
+        <a data-key="settings" href="/settings?auth=v625"><svg><use href="/assets/ui-icons.svg#icon-settings"/></svg><span>系统设置</span></a>
+        <a data-key="logs" href="/logs?auth=v625"><svg><use href="/assets/ui-icons.svg#icon-history"/></svg><span>操作日志</span></a>
+        <a data-key="data-management" href="/data-management?auth=v625"><svg><use href="/assets/ui-icons.svg#icon-database"/></svg><span>数据管理</span></a>
+      </nav>
+    </aside>
+
+    <div class="v625-main">
+      <div class="v625-globalbar">
+        <div class="v625-global-spacer"></div>
+        <button class="v625-icon-btn" type="button" aria-label="通知"><svg><use href="/assets/ui-icons.svg#icon-bell"/></svg><i id="v625NotifyDot">0</i></button>
+        <a class="v625-user" href="/profile?auth=v625"><span class="v625-avatar"><svg><use href="/assets/ui-icons.svg#icon-user"/></svg></span><span><strong id="v625UserName">管理员</strong><small id="v625UserRole">VIEWER</small></span><svg class="v625-user-chevron"><use href="/assets/ui-icons.svg#icon-chevron"/></svg></a>
+      </div>
+
+      <header class="v625-pagebar">
+        <div class="v625-page-title">
+          <h1>__V625_PAGE_TITLE__</h1>
+          <p id="v625PageSub">全新独立前端 · 原生页面导航 · 实时整理各业务质量数据</p>
+        </div>
+        <div class="v625-page-actions" data-dashboard-actions>
+          <label class="v625-date-range"><svg><use href="/assets/ui-icons.svg#icon-calendar"/></svg><input id="v625FromDate" type="date"><span>至</span><input id="v625ToDate" type="date"></label>
+          <button id="v625Query" class="v625-btn primary" type="button"><svg><use href="/assets/ui-icons.svg#icon-search"/></svg>查询</button>
+          <button id="v625Reload" class="v625-btn outline" type="button"><svg><use href="/assets/ui-icons.svg#icon-refresh"/></svg>刷新数据</button>
+          <select id="v625BoardJump" class="v625-select">
+            <option value="/ce?auth=v625">CE看板</option>
+            <option value="/ceaf?auth=v625">CEAF空运</option>
+            <option value="/tbkh?auth=v625">TBKH</option>
+            <option value="/ali1688?auth=v625">ALI1688</option>
+            <option value="/whpp?auth=v625">WHPP本土</option>
+            <option value="/shopeecn?auth=v625">SHOPEE CN</option>
+            <option value="/shopeevn?auth=v625">SHOPEE VN</option>
+          </select>
+        </div>
+      </header>
+
+      <main class="v625-content">
+        <!-- HOME -->
+        <section id="v625Home" class="v625-page" hidden>
+          <section class="v625-panel">
+            <div class="v625-section-head"><h2><span class="v625-title-icon">▥</span>业务概览</h2><span id="v625HomeDateMeta">今日数据统计</span></div>
+            <div class="v625-business-grid">
+              <a class="v625-business-card tone-blue" href="/ce?auth=v625" data-card="CE"><div class="v625-card-label"><span class="v625-card-icon"><svg><use href="/assets/ui-icons.svg#icon-package"/></svg></span><b>CE</b></div><strong>—</strong><small>今日票数</small><div class="v625-card-foot"><span>占比 <b data-ratio>—</b></span><i><em></em></i></div></a>
+              <a class="v625-business-card tone-green" href="/ceaf?auth=v625" data-card="CEAF"><div class="v625-card-label"><span class="v625-card-icon"><svg><use href="/assets/ui-icons.svg#icon-route"/></svg></span><b>CEAF空运</b></div><strong>—</strong><small>今日票数</small><div class="v625-card-foot"><span>占比 <b data-ratio>—</b></span><i><em></em></i></div></a>
+              <a class="v625-business-card tone-orange" href="/tbkh?auth=v625" data-card="TBKH"><div class="v625-card-label"><span class="v625-card-icon"><svg><use href="/assets/ui-icons.svg#icon-package"/></svg></span><b>TBKH</b></div><strong>—</strong><small>今日票数</small><div class="v625-card-foot"><span>占比 <b data-ratio>—</b></span><i><em></em></i></div></a>
+              <a class="v625-business-card tone-purple" href="/ali1688?auth=v625" data-card="ALI1688"><div class="v625-card-label"><span class="v625-card-icon"><svg><use href="/assets/ui-icons.svg#icon-bag"/></svg></span><b>ALI1688</b></div><strong>—</strong><small>今日票数</small><div class="v625-card-foot"><span>占比 <b data-ratio>—</b></span><i><em></em></i></div></a>
+              <a class="v625-business-card tone-red" href="/whpp?auth=v625" data-card="WHPP"><div class="v625-card-label"><span class="v625-card-icon"><svg><use href="/assets/ui-icons.svg#icon-home"/></svg></span><b>WHPP本土</b></div><strong>—</strong><small>今日票数</small><div class="v625-card-foot"><span>占比 <b data-ratio>—</b></span><i><em></em></i></div></a>
+              <a class="v625-business-card tone-blue" href="/shopeecn?auth=v625" data-card="SHOPEECN"><div class="v625-card-label"><span class="v625-card-icon"><svg><use href="/assets/ui-icons.svg#icon-bag"/></svg></span><b>SHOPEE CN</b></div><strong>—</strong><small>今日票数</small><div class="v625-card-foot"><span>占比 <b data-ratio>—</b></span><i><em></em></i></div></a>
+              <a class="v625-business-card tone-pink" href="/shopeevn?auth=v625" data-card="SHOPEEVN"><div class="v625-card-label"><span class="v625-card-icon"><svg><use href="/assets/ui-icons.svg#icon-bag"/></svg></span><b>SHOPEE VN</b></div><strong>—</strong><small>今日票数</small><div class="v625-card-foot"><span>占比 <b data-ratio>—</b></span><i><em></em></i></div></a>
+            </div>
+          </section>
+
+          <div class="v625-two-col">
+            <section class="v625-panel">
+              <div class="v625-section-head"><h2><span class="v625-title-icon">⌁</span>系统状态</h2><span class="v625-status-dot ok">系统运行正常</span></div>
+              <div class="v625-status-banner"><span class="v625-status-check"><svg><use href="/assets/ui-icons.svg#icon-check"/></svg></span><div><b id="v625HomeStatusTitle">正在读取业务快照</b><p id="v625HomeStatus">业务数据正在分项读取。</p></div></div>
+              <div class="v625-status-meta">
+                <div><svg><use href="/assets/ui-icons.svg#icon-check"/></svg><span>数据状态<b id="v625DataStatus">正常</b></span></div>
+                <div><svg><use href="/assets/ui-icons.svg#icon-clock"/></svg><span>最后更新时间<b id="v625UpdatedAt">—</b></span></div>
+                <div><svg><use href="/assets/ui-icons.svg#icon-database"/></svg><span>数据来源<b>综合日报分类结果</b></span></div>
+              </div>
+            </section>
+
+            <section class="v625-panel">
+              <div class="v625-section-head"><h2><span class="v625-title-icon">▦</span>快捷入口</h2><span>常用功能快捷操作</span></div>
+              <div class="v625-quick-grid">
+                <a class="q-blue" href="/import?auth=v625"><svg><use href="/assets/ui-icons.svg#icon-file-up"/></svg><span>数据导入</span></a>
+                <a class="q-green" href="/tracking?auth=v625"><svg><use href="/assets/ui-icons.svg#icon-search"/></svg><span>轨迹查询</span></a>
+                <a class="q-red" href="/exceptions?auth=v625"><svg><use href="/assets/ui-icons.svg#icon-alert"/></svg><span>异常明细</span></a>
+                <a class="q-purple" href="/reports?auth=v625"><svg><use href="/assets/ui-icons.svg#icon-clipboard"/></svg><span>报表导出</span></a>
+                <a class="q-blue" href="/ce?auth=v625"><svg><use href="/assets/ui-icons.svg#icon-package"/></svg><span>CE看板</span></a>
+                <a class="q-green" href="/ceaf?auth=v625"><svg><use href="/assets/ui-icons.svg#icon-route"/></svg><span>CEAF空运看板</span></a>
+                <a class="q-orange" href="/tbkh?auth=v625"><svg><use href="/assets/ui-icons.svg#icon-package"/></svg><span>TBKH看板</span></a>
+                <a class="q-gray" href="/shopeecn?auth=v625"><svg><use href="/assets/ui-icons.svg#icon-package"/></svg><span>更多看板</span></a>
+              </div>
+            </section>
+          </div>
+
+          <div class="v625-two-col">
+            <section class="v625-panel">
+              <div class="v625-section-head"><h2><span class="v625-title-icon">◔</span>质量监控概览</h2></div>
+              <div class="v625-quality-grid">
+                <article class="metric-blue"><svg><use href="/assets/ui-icons.svg#icon-database"/></svg><span>总票数</span><b id="v625TotalTickets">—</b><small>较昨日 <em>—</em></small></article>
+                <article class="metric-red"><svg><use href="/assets/ui-icons.svg#icon-alert"/></svg><span>异常票数</span><b id="v625AbnormalTickets">—</b><small>较昨日 <em>—</em></small></article>
+                <article class="metric-orange"><span class="pct-icon">%</span><span>异常率</span><b id="v625AbnormalRate">—</b><small>较昨日 <em>—</em></small></article>
+                <article class="metric-green"><svg><use href="/assets/ui-icons.svg#icon-check"/></svg><span>已处理异常</span><b id="v625ResolvedTickets">—</b><small>较昨日 <em>—</em></small></article>
+              </div>
+            </section>
+            <section class="v625-panel">
+              <div class="v625-section-head"><h2><span class="v625-title-icon">▥</span>数据趋势（近7天）</h2><select id="v625TrendMetric" class="v625-mini-select"><option value="total">票数趋势</option><option value="pod">POD趋势</option><option value="pending">Pending趋势</option><option value="abnormal">异常趋势</option></select></div>
+              <div id="v625HomeTrend" class="v625-chart"></div>
+            </section>
+          </div>
+        </section>
+
+        <!-- BUSINESS -->
+        <section id="v625Business" class="v625-page" hidden>
+          <div class="v625-kpi-row">
+            <article class="kpi blue"><span>总票数</span><b id="kpiTotal">—</b><small>今日业务总量</small></article>
+            <article class="kpi green"><span>派送中</span><b id="kpiDelivery">—</b><small>当前在途</small></article>
+            <article class="kpi mint"><span>已签收(POD)</span><b id="kpiPod">—</b><small>POD率 <em id="kpiPodRate">—</em></small></article>
+            <article class="kpi orange"><span>Pending</span><b id="kpiPending">—</b><small>待继续跟进</small></article>
+            <article class="kpi red"><span>异常</span><b id="kpiOpen">—</b><small>OC <em id="kpiOc">—</em></small></article>
+            <article class="kpi gray"><span>平均签收天数</span><b id="kpiAvgDays">—</b><small>当前业务口径</small></article>
+          </div>
+          <div class="v625-two-col business-charts">
+            <section class="v625-panel">
+              <div class="v625-section-head"><h2>月度趋势</h2><select id="v625BusinessTrendRange" class="v625-mini-select"><option>近7天</option><option>近30天</option></select></div>
+              <div id="v625BusinessTrend" class="v625-chart"></div>
+            </section>
+            <section class="v625-panel">
+              <div class="v625-section-head"><h2>状态分布</h2></div>
+              <div class="v625-donut-wrap"><div id="v625BusinessDonut" class="v625-donut"></div><div id="v625BusinessLegend" class="v625-legend"></div></div>
+            </section>
+          </div>
+          <section class="v625-panel">
+            <div class="v625-section-head"><h2>最新异常明细</h2><a href="/exceptions?auth=v625">查看全部</a></div>
+            <div class="v625-table-wrap"><table class="v625-table"><thead><tr><th>运单号</th><th>业务类型</th><th>异常类型</th><th>异常天数</th><th>最新状态</th><th>更新时间</th><th>操作</th></tr></thead><tbody id="v625BusinessRows"><tr><td colspan="7">正在读取…</td></tr></tbody></table></div>
+          </section>
+        </section>
+
+        <!-- IMPORT -->
+        <section id="v625Import" class="v625-page" hidden>
+          <div class="v625-stepper"><div class="active"><i>1</i><span>选择文件</span></div><div><i>2</i><span>自动校验</span></div><div><i>3</i><span>导入处理</span></div><div><i>4</i><span>完成</span></div></div>
+          <section class="v625-panel">
+            <div class="v625-section-head"><h2>上传综合日报</h2><span id="v625ImportState">未导入</span></div>
+            <label class="v625-field-inline"><span>日报日期</span><input id="v625ReportDate" type="date"></label>
+            <label class="v625-dropzone"><input id="v625ImportFile" type="file" accept=".xlsx,.xls"><svg><use href="/assets/ui-icons.svg#icon-file-up"/></svg><b>点击或拖拽文件到此处上传</b><small>支持 Excel（.xlsx / .xls），单个文件最大 80MB</small><em id="v625ImportFileName">选择文件</em></label>
+            <div class="v625-import-actions"><button id="v625ImportButton" class="v625-btn primary" type="button">导入综合日报并自动分类</button><button id="v625RunStart" class="v625-btn outline" type="button">开始全自动处理</button><button id="v625RunResume" class="v625-btn outline" type="button">继续处理</button><button id="v625RunPause" class="v625-btn danger-lite" type="button">暂停</button></div>
+            <div id="v625ImportMessage" class="v625-inline-note">请选择日报文件。</div>
+          </section>
+          <section class="v625-panel">
+            <div class="v625-section-head"><h2>自动分类结果</h2><span id="v625ImportDateMeta">—</span></div>
+            <div class="v625-classification-grid">
+              <article><span>CE</span><b data-classification="CE">—</b></article><article><span>CEAF</span><b data-classification="CEAF">—</b></article><article><span>TBKH</span><b data-classification="TBKH">—</b></article><article><span>ALI1688</span><b data-classification="ALI1688">—</b></article><article><span>WHPP</span><b data-classification="WHPP">—</b></article><article><span>SHOPEE CN</span><b data-classification="SHOPEECN">—</b></article><article><span>SHOPEE VN</span><b data-classification="SHOPEEVN">—</b></article>
+            </div>
+            <div id="v625RunMessage" class="v625-inline-note">导入日报后可开始处理。</div>
+          </section>
+          <section class="v625-panel">
+            <div class="v625-section-head"><h2>导入记录</h2><span>最近批次</span></div>
+            <div class="v625-table-wrap"><table class="v625-table"><thead><tr><th>导入时间</th><th>文件名称</th><th>记录数</th><th>状态</th><th>操作</th></tr></thead><tbody id="v625ImportHistory"><tr><td colspan="5">暂无记录</td></tr></tbody></table></div>
+          </section>
+        </section>
+
+        <!-- TRACKING -->
+        <section id="v625Tracking" class="v625-page" hidden>
+          <section class="v625-panel">
+            <div class="v625-filter-row">
+              <label><span>运单号</span><input id="v625TrackCode" placeholder="请输入运单号"></label>
+              <label><span>业务类型</span><select id="v625TrackBusiness"><option value="CCSL">CCSL</option><option value="SHOPEE">SHOPEE</option></select></label>
+              <label><span>日期</span><input id="v625TrackDate" type="date"></label>
+              <button id="v625TrackSearch" class="v625-btn primary"><svg><use href="/assets/ui-icons.svg#icon-search"/></svg>查询</button>
+              <button id="v625TrackReset" class="v625-btn outline">重置</button>
+            </div>
+          </section>
+          <section class="v625-panel">
+            <div class="v625-section-head"><h2>轨迹信息</h2><span id="v625TrackMeta">输入运单号后查询</span></div>
+            <div id="v625TrackTimeline" class="v625-timeline"><div class="v625-empty-state">暂无轨迹数据</div></div>
+          </section>
+        </section>
+
+        <!-- EXCEPTIONS -->
+        <section id="v625Exceptions" class="v625-page" hidden>
+          <section class="v625-panel">
+            <div class="v625-filter-row">
+              <label><span>异常类型</span><select id="v625ExceptionType"><option value="">全部</option><option>Pending不连续</option><option>Pending 3天+</option><option>OC 1天+</option><option>门店滞留</option></select></label>
+              <label><span>业务类型</span><select id="v625ExceptionBusiness"><option value="">全部</option><option>CE</option><option>CEAF</option><option>TBKH</option><option>ALI1688</option><option>WHPP</option><option>SHOPEECN</option><option>SHOPEEVN</option></select></label>
+              <label><span>时间范围</span><input id="v625ExceptionDate" type="date"></label>
+              <button id="v625ExceptionSearch" class="v625-btn primary"><svg><use href="/assets/ui-icons.svg#icon-search"/></svg>查询</button>
+            </div>
+          </section>
+          <div class="v625-quality-grid exception-summary">
+            <article class="metric-red"><span>Pending不连续</span><b id="exPendingGap">—</b><small>实时异常</small></article>
+            <article class="metric-orange"><span>Pending 3天+</span><b id="exPending3">—</b><small>需优先处理</small></article>
+            <article class="metric-orange"><span>OC 1天+</span><b id="exOc1">—</b><small>在仓异常</small></article>
+            <article class="metric-blue"><span>门店滞留</span><b id="exShopStay">—</b><small>门店异常</small></article>
+          </div>
+          <section class="v625-panel">
+            <div class="v625-section-head"><h2>异常列表</h2><span id="v625ExceptionMeta">—</span></div>
+            <div class="v625-table-wrap"><table class="v625-table"><thead><tr><th>运单号</th><th>业务类型</th><th>异常类型</th><th>异常天数</th><th>当前状态</th><th>最新轨迹</th><th>操作</th></tr></thead><tbody id="v625ExceptionRows"><tr><td colspan="7">正在读取…</td></tr></tbody></table></div>
+          </section>
+        </section>
+
+        <!-- REPORTS -->
+        <section id="v625Reports" class="v625-page" hidden>
+          <section class="v625-panel">
+            <div class="v625-tabs"><button class="active" data-period="daily">日报模板</button><button data-period="monthly">月报模板</button><button data-period="custom">自定义报表</button></div>
+            <div class="v625-filter-row report-controls">
+              <label><span>日期范围</span><input id="v625ReportDate" type="date"></label>
+              <label><span>业务类型</span><select id="v625ReportBusiness"><option value="ALL">全部</option><option value="CE">CE</option><option value="TBKH">TBKH</option><option value="ALI1688">ALI1688</option><option value="WHPP">WHPP</option><option value="SHOPEECN">SHOPEE CN</option><option value="SHOPEEVN">SHOPEE VN</option></select></label>
+              <button id="v625GenerateReport" class="v625-btn primary">生成报表</button>
+            </div>
+          </section>
+          <section class="v625-panel">
+            <div class="v625-section-head"><h2>报表历史</h2><span id="v625ReportMeta">当前会话</span></div>
+            <div class="v625-table-wrap"><table class="v625-table"><thead><tr><th>报表名称</th><th>生成时间</th><th>状态</th><th>操作</th></tr></thead><tbody id="v625ReportRows"><tr><td colspan="4">暂无生成记录</td></tr></tbody></table></div>
+          </section>
+        </section>
+
+        <!-- SETTINGS -->
+        <section id="v625Settings" class="v625-page" hidden>
+          <div class="v625-tabs settings-tabs"><button class="active">基本设置</button><button>账号管理</button><button>接口设置</button><button>数据设置</button><button>系统维护</button></div>
+          <div class="v625-settings-grid">
+            <section class="v625-panel">
+              <div class="v625-section-head"><h2>当前账号信息</h2><span id="v625SettingsRole">—</span></div>
+              <div class="v625-profile-row"><span class="v625-profile-avatar"><svg><use href="/assets/ui-icons.svg#icon-user"/></svg></span><div><b id="v625SettingsUser">—</b><p id="v625SettingsEmail">—</p></div><a class="v625-btn outline" href="/profile?auth=v625">修改资料</a></div>
+            </section>
+            <section class="v625-panel">
+              <div class="v625-section-head"><h2>CE系统连接</h2><span id="v625CeStatus">读取中</span></div>
+              <div class="v625-form-grid"><label>Tenant ID<input id="v625CeTenant" value="000000"></label><label>CE账号<input id="v625CeUser"></label><label>CE密码<input id="v625CePassword" type="password"></label></div>
+              <div class="v625-button-row"><button id="v625CeLogin" class="v625-btn primary">重新登录</button><button id="v625CeLogout" class="v625-btn danger-lite">退出登录</button></div>
+              <div id="v625CeMessage" class="v625-inline-note">正在读取CE连接状态。</div>
+            </section>
+            <section class="v625-panel">
+              <div class="v625-section-head"><h2>门店CP码设置</h2><span id="v625ShopMeta">—</span></div>
+              <div class="v625-inline-form"><label class="v625-file-mini"><input id="v625ShopFile" type="file" accept=".xlsx,.xls"><span id="v625ShopFileName">请选择CP码文件</span></label><button id="v625ShopImport" class="v625-btn primary">保存</button></div>
+            </section>
+            <section class="v625-panel">
+              <div class="v625-section-head"><h2>数据库状态</h2><span class="v625-status-dot ok">正常</span></div>
+              <div class="v625-info-list"><div><span>数据库</span><b id="v625DbState">—</b></div><div><span>本机地址</span><b id="v625LocalUrl">—</b></div><div><span>局域网地址</span><b id="v625LanUrl">—</b></div></div>
+            </section>
+          </div>
+        </section>
+
+        <!-- LOGS -->
+        <section id="v625Logs" class="v625-page" hidden>
+          <section class="v625-panel">
+            <div class="v625-filter-row"><label><span>日志类型</span><select id="v625LogType"><option value="">全部</option></select></label><label><span>操作人员</span><input id="v625LogUser" placeholder="全部"></label><label><span>时间范围</span><input id="v625LogDate" type="date"></label><button id="v625LogSearch" class="v625-btn primary"><svg><use href="/assets/ui-icons.svg#icon-search"/></svg>查询</button></div>
+          </section>
+          <section class="v625-panel">
+            <div class="v625-section-head"><h2>操作日志列表</h2><span id="v625AuditMeta">—</span></div>
+            <div class="v625-table-wrap"><table class="v625-table"><thead><tr><th>时间</th><th>操作人员</th><th>操作类型</th><th>操作内容</th><th>IP地址</th></tr></thead><tbody id="v625AuditRows"><tr><td colspan="5">正在读取…</td></tr></tbody></table></div>
+          </section>
+        </section>
+
+        <!-- DATA MANAGEMENT -->
+        <section id="v625DataManagement" class="v625-page" hidden>
+          <div class="v625-tabs"><button class="active">数据清理</button><button>数据备份</button><button>数据迁移</button><button>数据同步</button></div>
+          <section class="v625-panel">
+            <div class="v625-warning-strip"><svg><use href="/assets/ui-icons.svg#icon-alert"/></svg><span>数据管理仅限管理员操作，执行前请确认当前无运行任务。</span></div>
+            <div class="v625-data-manage-grid">
+              <div><h3>清理类型</h3><label><input type="radio" name="cleanup" checked> 按时间清理</label><label><input type="radio" name="cleanup"> 按业务清理</label></div>
+              <div><h3>保留时间</h3><select><option>保留 6 个月</option><option>保留 12 个月</option></select></div>
+              <div><h3>业务类型</h3><div class="v625-check-grid"><label><input type="checkbox" checked> CE</label><label><input type="checkbox"> CEAF空运</label><label><input type="checkbox"> TBKH</label><label><input type="checkbox"> ALI1688</label><label><input type="checkbox"> WHPP本土</label><label><input type="checkbox"> SHOPEE CN</label><label><input type="checkbox"> SHOPEE VN</label></div></div>
+            </div>
+            <button id="v625BackupNow" class="v625-btn outline">立即备份数据库</button>
+          </section>
+          <section class="v625-panel">
+            <div class="v625-section-head"><h2>备份记录</h2><span id="v625BackupMeta">—</span></div>
+            <div class="v625-table-wrap"><table class="v625-table"><thead><tr><th>备份时间</th><th>文件名称</th><th>类型</th><th>大小</th><th>操作</th></tr></thead><tbody id="v625BackupRows"><tr><td colspan="5">正在读取…</td></tr></tbody></table></div>
+          </section>
+        </section>
+
+        <!-- AUXILIARY -->
+        <section id="v625Aux" class="v625-page" hidden>
+          <div class="v625-aux-grid">
+            <section class="v625-panel" id="v625UsersCard"><div class="v625-section-head"><h2>用户管理</h2><span>ADMIN</span></div><div class="v625-table-wrap"><table class="v625-table compact"><thead><tr><th>用户名</th><th>角色</th><th>状态</th></tr></thead><tbody id="v625UserRows"><tr><td colspan="3">正在读取…</td></tr></tbody></table></div></section>
+            <section class="v625-panel" id="v625RolesCard"><div class="v625-section-head"><h2>角色权限</h2><span>权限模板</span></div><div class="v625-role-list"><div><b>管理员</b><span>全部权限</span></div><div><b>操作员</b><span>业务操作</span></div><div><b>查看员</b><span>只读访问</span></div></div></section>
+            <section class="v625-panel" id="v625ProfileCard"><div class="v625-profile-center"><span class="v625-profile-avatar large"><svg><use href="/assets/ui-icons.svg#icon-user"/></svg></span><h2 id="v625ProfileName">当前用户</h2><p id="v625ProfileEmail">—</p><a class="v625-btn outline" href="/settings?auth=v625">修改设置</a></div></section>
+            <section class="v625-panel" id="v625404Card"><div class="v625-404"><strong>404</strong><h2>页面不存在</h2><p>请检查地址或返回首页。</p><a class="v625-btn primary" href="/?auth=v625">返回首页</a></div></section>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+  <script src="/v625-shell.js?v=20261003-v625-1" defer></script>
+</body>
+</html>
