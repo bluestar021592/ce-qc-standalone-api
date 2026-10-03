@@ -15,9 +15,10 @@ assert.equal(pkg.scripts['test:golive'],'node scripts/v584-local-candidate-gate.
 assert.equal(pkg.scripts['test:ci'],'npm run test:golive-full','CI must retain the full soak suite');
 assert.match(pkg.scripts['test:golive-full'],/v505-purge-postcommit-precleanup-gate\.test\.js/,'full CI must retain the slow post-COMMIT safety regression');
 assert.doesNotMatch(gate,/v505-purge-postcommit-precleanup-gate\.test\.js/,'desktop update gate must not depend on the slow detached PREPARE soak');
-assert.match(gate,/browserRequired/,'desktop update gate must decide whether real Edge is relevant to the candidate diff');
+assert.match(gate,/browserSensitive/,'desktop update gate must still identify browser-sensitive candidate diffs');
 assert.match(gate,/isBrowserSensitive/,'desktop update gate must keep an explicit browser-sensitive file policy');
-assert.match(gate,/v587-production-browser-retry\.mjs'\]\,300_000/,'browser-relevant candidates must keep the transient-only real Edge retry wrapper');
+assert.doesNotMatch(gate,/TASKS\.splice\([^\n]*v587-production-browser-retry/,'V621 desktop release gate must not reinsert cloud Edge as a blocking task');
+assert.match(gate,/cloud Edge smoke is NON-BLOCKING diagnostic only/,'V621 browser-sensitive candidates must keep Edge as non-blocking diagnostics');
 assert.match(gate,/changed-file detection unavailable; real browser gate stays enabled \(fail-safe\)/,'diff detection failure must never silently skip browser validation');
 assert.match(launcher,/CE_QC_INSTALLED_COMMIT/,'managed launcher must tell the candidate gate which exact installed commit it is replacing');
 const browserRetry=fs.readFileSync(new URL('./v587-production-browser-retry.mjs',import.meta.url),'utf8');
