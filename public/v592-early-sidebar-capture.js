@@ -237,6 +237,7 @@
     try{
       if(redispatching||event?.defaultPrevented||event?.metaKey||event?.ctrlKey||event?.shiftKey||event?.altKey)return;
       if(Number(event?.button||0)!==0||String(global.location?.pathname||'/')!=='/')return;
+      if(event?.target?.closest?.('#homeNativeBusinessGrid,#ceDirectTopLink'))return;
       if(blockedByLegitimateOverlay(event.target)||directControl(event.target))return;
       const x=Number(event?.clientX),y=Number(event?.clientY);
       if(!Number.isFinite(x)||!Number.isFinite(y))return;
