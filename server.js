@@ -147,7 +147,7 @@ app.use((req, res, next) => {
   next();
 });
 
-const V624_DASHBOARD_PAGES = new Map([
+const V625_UI_PAGES = new Map([
   ['/', { key:'home', title:'首页总看板', business:'' }],
   ['/ce', { key:'ce', title:'CE看板', business:'CE' }],
   ['/ceaf', { key:'ceaf', title:'CEAF空运看板', business:'CEAF' }],
@@ -162,17 +162,21 @@ const V624_DASHBOARD_PAGES = new Map([
   ['/reports', { key:'reports', title:'报表导出', business:'' }],
   ['/settings', { key:'settings', title:'系统设置', business:'' }],
   ['/logs', { key:'logs', title:'操作日志', business:'' }],
-  ['/data-management', { key:'data-management', title:'数据管理', business:'' }]
+  ['/data-management', { key:'data-management', title:'数据管理', business:'' }],
+  ['/users', { key:'users', title:'用户管理', business:'' }],
+  ['/roles', { key:'roles', title:'角色权限', business:'' }],
+  ['/profile', { key:'profile', title:'个人中心', business:'' }],
+  ['/404', { key:'not-found', title:'页面不存在', business:'' }]
 ]);
 
-app.get([...V624_DASHBOARD_PAGES.keys()], async (req, res, next) => {
+app.get([...V625_UI_PAGES.keys()], async (req, res, next) => {
   try {
-    const page = V624_DASHBOARD_PAGES.get(req.path) || V624_DASHBOARD_PAGES.get('/');
-    const template = await fs.readFile(path.join(__dirname, 'public', 'v624-shell.html'), 'utf8');
+    const page = V625_UI_PAGES.get(req.path) || V625_UI_PAGES.get('/');
+    const template = await fs.readFile(path.join(__dirname, 'public', 'v625-shell.html'), 'utf8');
     const html = template
-      .replaceAll('__V624_PAGE_TITLE__', page.title)
-      .replaceAll('__V624_PAGE_KEY__', page.key)
-      .replaceAll('__V624_BUSINESS_TYPE__', page.business);
+      .replaceAll('__V625_PAGE_TITLE__', page.title)
+      .replaceAll('__V625_PAGE_KEY__', page.key)
+      .replaceAll('__V625_BUSINESS_TYPE__', page.business);
     res.type('html').send(html);
   } catch (error) {
     next(error);
