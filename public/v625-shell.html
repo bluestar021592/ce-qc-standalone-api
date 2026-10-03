@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="ce-qc-shell" content="V625_FULL_SYSTEM_UI">
   <title>__V625_PAGE_TITLE__ - CE EXPRESS 质量控制管理系统</title>
-  <link rel="stylesheet" href="/v625-shell.css?v=20261003-v625-3">
+  <link rel="stylesheet" href="/v625-shell.css?v=20261003-v625-4">
 </head>
 <body data-page="__V625_PAGE_KEY__" data-business="__V625_BUSINESS_TYPE__">
   <div class="v625-app">
@@ -65,7 +65,7 @@
       <main class="v625-content">
         <!-- HOME -->
         <section id="v625Home" class="v625-page" hidden>
-          <section class="v625-panel">
+          <section class="v625-panel v625-home-business-panel">
             <div class="v625-section-head"><h2><span class="v625-title-icon">▥</span>业务概览</h2><span id="v625HomeDateMeta">今日数据统计</span></div>
             <div class="v625-business-grid">
               <a class="v625-business-card tone-blue" href="/ce?auth=v625" data-card="CE"><div class="v625-card-label"><span class="v625-card-icon"><svg><use href="/assets/ui-icons-v625.svg#icon-package"/></svg></span><b>CE</b></div><strong>—</strong><small>今日票数</small><div class="v625-card-foot"><span>占比 <b data-ratio>—</b></span><i><em></em></i></div></a>
@@ -78,18 +78,18 @@
             </div>
           </section>
 
-          <div class="v625-two-col">
-            <section class="v625-panel">
+          <div class="v625-home-three">
+            <section class="v625-panel v625-home-status-panel">
               <div class="v625-section-head"><h2><span class="v625-title-icon">⌁</span>系统状态</h2><span class="v625-status-dot ok">系统运行正常</span></div>
-              <div class="v625-status-banner"><span class="v625-status-check"><svg><use href="/assets/ui-icons-v625.svg#icon-check"/></svg></span><div><b id="v625HomeStatusTitle">正在读取业务快照</b><p id="v625HomeStatus">业务数据正在分项读取。</p></div></div>
+              <div class="v625-status-banner"><span class="v625-status-check"><svg><use href="/assets/ui-icons-v625.svg#icon-check"/></svg></span><div><b id="v625HomeStatusTitle">正在读取业务数据</b><p id="v625HomeStatus">正在核对综合日报与业务快照。</p></div></div>
               <div class="v625-status-meta">
-                <div><svg><use href="/assets/ui-icons-v625.svg#icon-check"/></svg><span>数据状态<b id="v625DataStatus">正常</b></span></div>
+                <div><svg><use href="/assets/ui-icons-v625.svg#icon-check"/></svg><span>数据状态<b id="v625DataStatus">读取中</b></span></div>
                 <div><svg><use href="/assets/ui-icons-v625.svg#icon-clock"/></svg><span>最后更新时间<b id="v625UpdatedAt">—</b></span></div>
                 <div><svg><use href="/assets/ui-icons-v625.svg#icon-database"/></svg><span>数据来源<b>综合日报分类结果</b></span></div>
               </div>
             </section>
 
-            <section class="v625-panel">
+            <section class="v625-panel v625-home-quick-panel">
               <div class="v625-section-head"><h2><span class="v625-title-icon">▦</span>快捷入口</h2><span>常用功能快捷操作</span></div>
               <div class="v625-quick-grid">
                 <a class="q-blue" href="/import?auth=v625"><svg><use href="/assets/ui-icons-v625.svg#icon-file-up"/></svg><span>数据导入</span></a>
@@ -102,23 +102,70 @@
                 <a class="q-gray" href="/shopeecn?auth=v625"><svg><use href="/assets/ui-icons-v625.svg#icon-package"/></svg><span>更多看板</span></a>
               </div>
             </section>
-          </div>
 
-          <div class="v625-two-col">
-            <section class="v625-panel">
-              <div class="v625-section-head"><h2><span class="v625-title-icon">◔</span>质量监控概览</h2></div>
-              <div class="v625-quality-grid">
-                <article class="metric-blue"><svg><use href="/assets/ui-icons-v625.svg#icon-database"/></svg><span>总票数</span><b id="v625TotalTickets">—</b><small>较昨日 <em>—</em></small></article>
-                <article class="metric-red"><svg><use href="/assets/ui-icons-v625.svg#icon-alert"/></svg><span>异常票数</span><b id="v625AbnormalTickets">—</b><small>较昨日 <em>—</em></small></article>
-                <article class="metric-orange"><span class="pct-icon">%</span><span>异常率</span><b id="v625AbnormalRate">—</b><small>较昨日 <em>—</em></small></article>
-                <article class="metric-green"><svg><use href="/assets/ui-icons-v625.svg#icon-check"/></svg><span>已处理异常</span><b id="v625ResolvedTickets">—</b><small>较昨日 <em>—</em></small></article>
-              </div>
-            </section>
-            <section class="v625-panel">
-              <div class="v625-section-head"><h2><span class="v625-title-icon">▥</span>数据趋势（近7天）</h2><select id="v625TrendMetric" class="v625-mini-select"><option value="total">票数趋势</option><option value="pod">POD趋势</option><option value="pending">Pending趋势</option><option value="abnormal">异常趋势</option></select></div>
+            <section class="v625-panel v625-home-trend-panel">
+              <div class="v625-section-head"><h2><span class="v625-title-icon">▥</span>数据趋势（近7天）</h2><select id="v625TrendMetric" class="v625-mini-select"><option value="total">综合总票数</option></select></div>
               <div id="v625HomeTrend" class="v625-chart"></div>
             </section>
           </div>
+
+          <div class="v625-home-validation">
+            <section class="v625-panel">
+              <div class="v625-section-head"><h2><span class="v625-title-icon">▣</span>分类准确性校验</h2><a href="/import?auth=v625">查看分类明细</a></div>
+              <div class="v625-classification-kpis">
+                <article class="class-total"><span>综合日报总票数</span><b id="v625ClassTotal">—</b><small>有效唯一运单</small></article>
+                <article class="class-auto"><span>已自动识别</span><b id="v625ClassAuto">—</b><small id="v625ClassAutoShare">—</small></article>
+                <article class="class-unknown"><span>未识别票数</span><b id="v625ClassUnknown">—</b><small id="v625ClassUnknownShare">—</small></article>
+                <article class="class-conflict"><span>冲突 / 待确认</span><b id="v625ClassConflict">—</b><small id="v625ClassConflictShare">—</small></article>
+                <article class="class-rate"><span>分类准确率</span><b id="v625ClassAccuracy">—</b><small id="v625ClassBalanced">正在核验</small></article>
+              </div>
+            </section>
+
+            <section class="v625-panel">
+              <div class="v625-section-head"><h2>各业务识别情况</h2><span id="v625RecognitionMeta">本次日报</span></div>
+              <div class="v625-table-wrap v625-recognition-table-wrap">
+                <table class="v625-table v625-recognition-table">
+                  <thead><tr><th>业务类型</th><th>识别票数</th><th>占比</th><th>状态</th></tr></thead>
+                  <tbody id="v625RecognitionRows"><tr><td colspan="4">正在读取…</td></tr></tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+
+          <section class="v625-panel v625-signing-panel">
+            <div class="v625-section-head"><h2><span class="v625-title-icon">⌁</span>签收时效总览</h2><span id="v625TimingPeriod">统计当前日报POD</span></div>
+            <div class="v625-timing-grid">
+              <article class="v625-timing-card timing-tbkh" data-timing="TBKH">
+                <div class="v625-timing-head"><span class="v625-timing-icon"><svg><use href="/assets/ui-icons-v625.svg#icon-package"/></svg></span><div><b>TBKH</b><small>签收时效</small></div></div>
+                <div class="v625-timing-body">
+                  <div class="v625-timing-primary"><small>平均签收天数</small><strong id="v625TimingTBKHOverall">—</strong><em id="v625TimingTBKHPod">基于 — 票POD</em></div>
+                  <div class="v625-timing-regions"><div><span>PP（金边）</span><b id="v625TimingTBKHPP">—</b><small id="v625TimingTBKHPPPod">—</small></div><div><span>PV（外省）</span><b id="v625TimingTBKHPV">—</b><small id="v625TimingTBKHPVPod">—</small></div></div>
+                </div>
+                <div class="v625-attempt-grid"><div><span>1派平均签收</span><b id="v625TimingTBKHA1">—</b></div><div><span>2派平均签收</span><b id="v625TimingTBKHA2">—</b></div><div><span>3派平均签收</span><b id="v625TimingTBKHA3">—</b></div></div>
+                <div id="v625TimingTrendTBKH" class="v625-mini-trend"></div>
+              </article>
+
+              <article class="v625-timing-card timing-cn" data-timing="SHOPEECN">
+                <div class="v625-timing-head"><span class="v625-timing-icon"><svg><use href="/assets/ui-icons-v625.svg#icon-shopee-card"/></svg></span><div><b>SHOPEE CN</b><small>签收时效</small></div></div>
+                <div class="v625-timing-body">
+                  <div class="v625-timing-primary"><small>平均签收天数</small><strong id="v625TimingSHOPEECNOverall">—</strong><em id="v625TimingSHOPEECNPod">基于 — 票POD</em></div>
+                  <div class="v625-timing-regions"><div><span>PP（金边）</span><b id="v625TimingSHOPEECNPP">—</b><small id="v625TimingSHOPEECNPPPod">—</small></div><div><span>PV（外省）</span><b id="v625TimingSHOPEECNPV">—</b><small id="v625TimingSHOPEECNPVPod">—</small></div></div>
+                </div>
+                <div class="v625-attempt-grid"><div><span>1派平均签收</span><b id="v625TimingSHOPEECNA1">—</b></div><div><span>2派平均签收</span><b id="v625TimingSHOPEECNA2">—</b></div><div><span>3派平均签收</span><b id="v625TimingSHOPEECNA3">—</b></div></div>
+                <div id="v625TimingTrendSHOPEECN" class="v625-mini-trend"></div>
+              </article>
+
+              <article class="v625-timing-card timing-vn" data-timing="SHOPEEVN">
+                <div class="v625-timing-head"><span class="v625-timing-icon"><svg><use href="/assets/ui-icons-v625.svg#icon-shopee-card"/></svg></span><div><b>SHOPEE VN</b><small>签收时效</small></div></div>
+                <div class="v625-timing-body">
+                  <div class="v625-timing-primary"><small>平均签收天数</small><strong id="v625TimingSHOPEEVNOverall">—</strong><em id="v625TimingSHOPEEVNPod">基于 — 票POD</em></div>
+                  <div class="v625-timing-regions"><div><span>PP（金边）</span><b id="v625TimingSHOPEEVNPP">—</b><small id="v625TimingSHOPEEVNPPPod">—</small></div><div><span>PV（外省）</span><b id="v625TimingSHOPEEVNPV">—</b><small id="v625TimingSHOPEEVNPVPod">—</small></div></div>
+                </div>
+                <div class="v625-attempt-grid"><div><span>1派平均签收</span><b id="v625TimingSHOPEEVNA1">—</b></div><div><span>2派平均签收</span><b id="v625TimingSHOPEEVNA2">—</b></div><div><span>3派平均签收</span><b id="v625TimingSHOPEEVNA3">—</b></div></div>
+                <div id="v625TimingTrendSHOPEEVN" class="v625-mini-trend"></div>
+              </article>
+            </div>
+          </section>
         </section>
 
         <!-- BUSINESS -->
@@ -450,6 +497,6 @@
       </main>
     </div>
   </div>
-  <script src="/v625-shell.js?v=20261003-v625-3" defer></script>
+  <script src="/v625-shell.js?v=20261003-v625-4" defer></script>
 </body>
 </html>
