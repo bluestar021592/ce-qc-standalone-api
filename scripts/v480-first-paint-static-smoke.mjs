@@ -109,6 +109,15 @@ assert.match(server,/\['\/import', \{ key:'import', title:'数据导入', busine
 assert.match(server,/\['\/tracking', \{ key:'tracking', title:'轨迹查询', business:'' \}\]/,'V624 server must own the tracking route');
 assert.match(v624Runtime,/\/api\/import\/unified-daily-report/,'V624 import page must call the canonical unified daily-report API');
 assert.match(v624Runtime,/\/api\/shopee\/run\/start/,'V624 unified processing must keep the SHOPEE processing owner');
+assert.match(v624Runtime,/\/api\/import\/unified-latest/,'V624 home/import pages must read the latest unified classification truth');
+assert.match(v624Runtime,/classificationCounts/,'V624 home cards must prioritize imported seven-business classification counts');
+assert.match(v624Shell,/id="v624Settings"/,'V624 system settings must be a real migrated page');
+assert.match(v624Runtime,/\/api\/ce-auth-status/,'V624 settings must read CE login status');
+assert.match(v624Runtime,/\/api\/import-shop-codes/,'V624 settings must keep shop-code import');
+assert.match(v624Shell,/id="v624Logs"/,'V624 operation logs must be a real migrated page');
+assert.match(v624Runtime,/\/api\/admin\/audit-logs/,'V624 logs must render audit records instead of raw JSON only');
+assert.match(v624Runtime,/renderAuditRows/,'V624 logs must render structured rows');
+
 
 assert.doesNotMatch(v624Shell,/v581-stable-shell-owner|v592-early-sidebar-capture|app\.js|v14-geometry-fixture|dashboard-v18\.js/,'V624 clean shell must not load any legacy dashboard runtime');
 assert.doesNotMatch(v624Runtime,/preventDefault\(|stopPropagation\(|stopImmediatePropagation\(/,'V624 data runtime must never own or cancel navigation clicks');
