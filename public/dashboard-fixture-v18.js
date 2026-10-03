@@ -267,18 +267,18 @@
   setTimeout(v607SelfCheck,500);
   setTimeout(v607SelfCheck,3000);
 
-  function v620CeHitCheck(){
+  function v620CeHitCheck(ms){
     try{
       const card=doc.querySelector('.main-content .v18-business-card[href^="/ce?"]')||doc.querySelector('.v18-business-card[href^="/ce?"]');
       const r=card?.getBoundingClientRect?.();
       const x=r?Math.round(r.left+r.width/2):-1;
       const y=r?Math.round(r.top+r.height/2):-1;
       const top=r?doc.elementFromPoint?.(x,y):null;
-      send('V620_CE_HIT','x='+x+'|y='+y+'|w='+(r?Math.round(r.width):0)+'|h='+(r?Math.round(r.height):0)+'|card='+label(card)+'|top='+label(top)+'|ready='+doc.readyState);
-    }catch(error){send('V620_CE_HIT_ERROR',String(error?.message||error).slice(0,160));}
+      send('V620_CE_HIT','ms='+ms+'|x='+x+'|y='+y+'|w='+(r?Math.round(r.width):0)+'|h='+(r?Math.round(r.height):0)+'|card='+label(card)+'|top='+label(top)+'|ready='+doc.readyState);
+    }catch(error){send('V620_CE_HIT_ERROR','ms='+ms+'|'+String(error?.message||error).slice(0,150));}
   }
-  setTimeout(v620CeHitCheck,700);
-  setTimeout(v620CeHitCheck,2600);
+  setTimeout(()=>v620CeHitCheck(700),700);
+  setTimeout(()=>v620CeHitCheck(2600),2600);
 
   send('V598_START',[
     'ready='+doc.readyState,
