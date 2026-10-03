@@ -54,7 +54,7 @@ assert.match(response,/X-CE-QC-V581-Shell/);
 const assetAt=server.indexOf('const v575PublicAssetStatic');
 const authAt=server.indexOf('app.use(accessIdentity)');
 assert.ok(assetAt>0&&assetAt<authAt,'browser JS/CSS/image fast lane must remain before accessIdentity');
-assert.match(server,/\['\/ce', '\/ceaf', '\/tbkh', '\/ali1688', '\/whpp'/,'server routes must include /whpp');
+assert.match(server,/\['\/whpp', \{ key:'whpp', title:'WHPP本土看板', business:'WHPP' \}\]/,'V624 server route map must include WHPP as a first-class dashboard');
 assert.doesNotMatch(server,/sidebar-v590\.html/,'V591 must remove the obsolete remote sidebar route');
 assert.match(server,/X-Frame-Options', 'DENY'/,'authenticated HTML must retain frame denial');
 assert.match(server,/app\.get\('\/api\/client-diag'/,'server must keep bounded client diagnostics');
