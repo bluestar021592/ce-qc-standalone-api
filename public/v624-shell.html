@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="ce-qc-shell" content="V624_CLEAN_MULTI_PAGE">
   <title>__V624_PAGE_TITLE__ - CE Express 质量控制管理系统</title>
-  <link rel="stylesheet" href="/v624-shell.css?v=20261003-v624-2">
+  <link rel="stylesheet" href="/v624-shell.css?v=20261003-v624-3">
 </head>
 <body data-page="__V624_PAGE_KEY__" data-business="__V624_BUSINESS_TYPE__">
   <div class="v624-shell">
@@ -104,6 +104,71 @@
           </section>
         </section>
 
+        <section id="v624Settings" class="v624-operation" hidden>
+          <div class="v624-settings-grid">
+            <section class="v624-panel v624-panel-flat">
+              <div class="v624-panel-head"><h2>当前账号</h2><span id="v624UserRole">—</span></div>
+              <div class="v624-info-list">
+                <div><span>用户</span><b id="v624UserName">—</b></div>
+                <div><span>业务权限</span><b id="v624UserScope">—</b></div>
+                <div><span>系统状态</span><b id="v624SessionState">读取中</b></div>
+              </div>
+            </section>
+
+            <section class="v624-panel v624-panel-flat">
+              <div class="v624-panel-head"><h2>CE系统连接</h2><span id="v624CeStatus">读取中</span></div>
+              <div class="v624-form-grid">
+                <label>Tenant ID<input id="v624CeTenant" value="000000"></label>
+                <label>CE账号<input id="v624CeUser" autocomplete="username"></label>
+                <label>CE密码<input id="v624CePassword" type="password" autocomplete="current-password"></label>
+              </div>
+              <div class="v624-button-row">
+                <button id="v624CeLogin" class="v624-primary" type="button">登录CE系统</button>
+                <button id="v624CeLogout" type="button">退出CE系统</button>
+              </div>
+              <div id="v624CeMessage" class="v624-message">正在读取CE连接状态。</div>
+            </section>
+
+            <section class="v624-panel v624-panel-flat">
+              <div class="v624-panel-head"><h2>门店CP码</h2><span id="v624ShopMeta">—</span></div>
+              <label class="v624-file">
+                <input id="v624ShopFile" type="file" accept=".xlsx,.xls">
+                <span id="v624ShopFileName">选择门店CP码 Excel</span>
+              </label>
+              <button id="v624ShopImport" class="v624-primary" type="button">更新门店CP码</button>
+              <div id="v624ShopMessage" class="v624-message">读取当前门店配置中。</div>
+            </section>
+
+            <section class="v624-panel v624-panel-flat">
+              <div class="v624-panel-head"><h2>运行环境</h2><span>只读</span></div>
+              <div class="v624-info-list">
+                <div><span>数据库</span><b id="v624DbState">—</b></div>
+                <div><span>本机地址</span><b id="v624LocalUrl">—</b></div>
+                <div><span>局域网地址</span><b id="v624LanUrl">—</b></div>
+              </div>
+              <div class="v624-button-row">
+                <a class="v624-link-button" href="/data-management?auth=v624">进入数据管理</a>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <section id="v624Logs" class="v624-operation" hidden>
+          <section class="v624-panel v624-panel-flat">
+            <div class="v624-panel-head"><h2>最近操作记录</h2><span id="v624AuditMeta">—</span></div>
+            <div class="v624-table-wrap">
+              <table class="v624-table">
+                <thead><tr><th>时间</th><th>用户</th><th>角色</th><th>操作</th><th>业务</th><th>日期</th><th>IP</th></tr></thead>
+                <tbody id="v624AuditRows"><tr><td colspan="7">正在读取…</td></tr></tbody>
+              </table>
+            </div>
+          </section>
+          <section class="v624-panel">
+            <div class="v624-panel-head"><h2>运行日志</h2><span id="v624RuntimeLogMeta">—</span></div>
+            <div id="v624RuntimeLogs" class="v624-log-list">正在读取…</div>
+          </section>
+        </section>
+
         <section id="v624SimpleOperation" class="v624-operation" hidden>
           <section class="v624-panel">
             <div class="v624-panel-head"><h2 id="v624SimpleTitle">功能页面</h2><span>V624</span></div>
@@ -131,6 +196,6 @@
       </main>
     </div>
   </div>
-  <script src="/v624-shell.js?v=20261003-v624-2" defer></script>
+  <script src="/v624-shell.js?v=20261003-v624-3" defer></script>
 </body>
 </html>
