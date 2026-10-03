@@ -138,6 +138,17 @@ assert.match(localLogin,/id="forgot"/,'V625 login must include the forgot-passwo
 assert.doesNotMatch(localLogin,/独立认证通道\s*5179|本机入口\s*·\s*登录后进入质量控制管理系统/,'V625 login must not expose legacy technical channel copy');
 assert.match(localLogin,/location\.replace\('\/\?auth=v625&t='/,'V625 login must enter the V625 UI after authentication');
 
+assert.match(v625Shell,/data-settings-tab="basic"/,'V625 settings must expose the real basic-settings tab');
+assert.match(v625Shell,/data-settings-tab="accounts"/,'V625 settings must expose the real account-management tab');
+assert.match(v625Shell,/data-settings-tab="interface"/,'V625 settings must expose the real interface-settings tab');
+assert.match(v625Shell,/data-settings-tab="maintenance"/,'V625 settings must expose the real maintenance tab');
+assert.doesNotMatch(v625Shell,/>数据设置</,'V625 must not show a fake data-settings tab without a real writable backend');
+assert.match(v625Runtime,/switchSettingsTab/,'V625 settings tabs must be interactive rather than decorative');
+assert.match(v625Runtime,/\/api\/admin\/users/,'V625 account-management tab must use the real admin-users API');
+assert.match(v625Runtime,/method:'PATCH'/,'V625 account-management tab must support real user updates');
+assert.match(v625Runtime,/\/api\/admin\/backup-now/,'V625 maintenance tab must use the real backup API');
+
+
 assert.doesNotMatch(v625Shell,/data-key="shopeecn"[^\n]*icon-bag|data-key="shopeevn"[^\n]*icon-bag/,'V625 Shopee navigation must never fall back to generic bag icon');
 assert.match(fs.readFileSync('public/assets/ui-icons-v625.svg','utf8'),/id="icon-shopee-card"/,'V625 dedicated icon sprite must include Shopee card icon');
 
