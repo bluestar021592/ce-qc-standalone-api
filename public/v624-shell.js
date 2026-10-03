@@ -7,13 +7,17 @@ const business=String(body.dataset.business||'');
 const home=document.getElementById('v624Home');
 const biz=document.getElementById('v624Business');
 const imp=document.getElementById('v624Import');
+const settings=document.getElementById('v624Settings');
+const logsPage=document.getElementById('v624Logs');
 const simple=document.getElementById('v624SimpleOperation');
 
 document.querySelectorAll('.v624-nav a[data-key]').forEach(a=>a.classList.toggle('active',a.dataset.key===page));
 if(home)home.hidden=page!=='home';
 if(biz)biz.hidden=!business;
 if(imp)imp.hidden=page!=='import';
-if(simple)simple.hidden=page==='home'||Boolean(business)||page==='import';
+if(settings)settings.hidden=page!=='settings';
+if(logsPage)logsPage.hidden=page!=='logs';
+if(simple)simple.hidden=page==='home'||Boolean(business)||['import','settings','logs'].includes(page);
 
 const num=v=>Number.isFinite(Number(v))?Number(v):null;
 const fmt=v=>v===null||v===undefined?'—':Number(v).toLocaleString('zh-CN');
@@ -46,12 +50,12 @@ async function request(url,options={},timeout=10000){
 const json=(url,timeout=7000)=>request(url,{},timeout);
 
 function metrics(state){
-  const total=num(first(state,['total','today','dashboard.metrics.total','dashboard.total','dailySummary.total','dailyParseSummary.totalRecognized']));
-  const pod=num(first(state,['pod','podCount','dashboard.metrics.pod','dashboard.metrics.todayPod','dashboard.pod']));
+  const total=num(first(state,['total','today','dashboard.metrics.total','dashboard.totalMonitored','dashboard.pnh','dailySummary.total','dailyParseSummary.totalRecognized']));
+  const pod=num(first(state,['pod','podCount','dashboard.metrics.pod','dashboard.metrics.todayPod','dashboard.todayPod','dashboard.pod']));
   const podRate=num(first(state,['podRate','dashboard.metrics.podRate','dashboard.podRate']));
-  const pending=num(first(state,['pending','pendingCount','dashboard.metrics.pending','dashboard.metrics.pending1','dashboard.pending']));
-  const oc=num(first(state,['oc','ocCount','dashboard.metrics.oc','dashboard.metrics.oc1','dashboard.oc']));
-  const open=num(first(state,['unresolved','open','dashboard.metrics.unresolved','dashboard.metrics.currentOpen','dashboard.open']));
+  const pending=num(first(state,['pending','pendingCount','dashboard.metrics.pendingNonContinuous','dashboard.metrics.pending1','dashboard.categories.pendingTotal','dashboard.pending']));
+  const oc=num(first(state,['oc','ocCount','dashboard.metrics.ocCurrent','dashboard.metrics.oc1','dashboard.categories.ocTotal','dashboard.oc']));
+  const open=num(first(state,['unresolved','open','dashboard.metrics.unresolved','dashboard.abnormalCount','dashboard.metrics.currentOpen','dashboard.open']));
   return{total,pod,podRate:podRate??(total&&pod!==null?pod/total*100:null),pending,oc,open};
 }
 
@@ -78,17 +82,31 @@ async function loadBusiness(type){
 async function loadHome(){
   const status=document.getElementById('v624HomeStatus');
   const types=['CE','CEAF','TBKH','ALI1688','WHPP','SHOPEECN','SHOPEEVN'];
+  let importedCounts={};
+  let importDate='';
+  try{
+    const latest=await json('/api/import/unified-latest',5000);
+    importedCounts=latest?.import?.classificationCounts||{};
+    importDate=latest?.import?.reportDate||'';
+    for(const type of types){
+      const value=num(importedCounts?.[type]);
+      const card=document.querySelector('[data-card="'+type+'"] b');
+      if(card&&value!==null)card.textContent=fmt(value);
+    }
+  }catch{}
   let ok=0;
   await Promise.all(types.map(async type=>{
     try{
       const payload=await json('/api/business-state/'+encodeURIComponent(type)+'?compact=1',5000);
       const state=payload.state||payload;
+      const processed=metrics(state).total;
+      const imported=num(importedCounts?.[type]);
       const card=document.querySelector('[data-card="'+type+'"] b');
-      if(card)card.textContent=fmt(metrics(state).total);
+      if(card&&(imported===null||imported===0)&&processed!==null)card.textContent=fmt(processed);
       ok++;
     }catch{}
   }));
-  status.textContent='已读取 '+ok+' / '+types.length+' 个业务看板。未返回的数据不会阻塞其他页面。';
+  status.textContent=(importDate?'当前日报 '+importDate+' · ':'')+'已读取 '+ok+' / '+types.length+' 个业务快照；今日票数优先按综合日报分类结果显示。';
 }
 
 function setMessage(id,message,tone=''){
@@ -237,32 +255,164 @@ function setupImport(){
   void loadLatestImport();
 }
 
+function setText(id,value){
+  const el=document.getElementById(id);
+  if(el)el.textContent=value===undefined||value===null||value===''?'—':String(value);
+}
+
+async function loadSettings(){
+  setMessage('v624CeMessage','正在读取CE连接状态。');
+  try{
+    const [sessionResult,ceResult,stateResult]=await Promise.allSettled([
+      json('/api/session',7000),
+      json('/api/ce-auth-status',7000),
+      json('/api/state?compact=1',7000)
+    ]);
+    if(sessionResult.status==='fulfilled'){
+      const user=sessionResult.value?.user||{};
+      setText('v624UserName',user.displayName||user.username||user.email||'当前用户');
+      setText('v624UserRole',user.role||'—');
+      setText('v624UserScope',user.businessScope||'ALL');
+      setText('v624SessionState','已登录');
+    }else setText('v624SessionState','读取失败');
+
+    if(ceResult.status==='fulfilled'){
+      const auth=ceResult.value?.authStatus||{};
+      setText('v624CeStatus',auth.loggedIn&&!auth.expired?'已连接':'未连接');
+      if(auth.tenantId)document.getElementById('v624CeTenant').value=auth.tenantId;
+      if(auth.account)document.getElementById('v624CeUser').value=auth.account;
+      setMessage('v624CeMessage',auth.loggedIn
+        ? 'CE账号 '+(auth.account||'—')+' 已登录'+(auth.expiresAt?' · 到期 '+auth.expiresAt:'')
+        : 'CE系统当前未登录。',auth.loggedIn?'success':'');
+    }else{
+      setText('v624CeStatus','读取失败');
+      setMessage('v624CeMessage','CE连接状态读取失败。','error');
+    }
+
+    if(stateResult.status==='fulfilled'){
+      const state=stateResult.value?.state||{};
+      const db=state.dbStatus||{};
+      const network=state.network||{};
+      const shops=state.shopCodes||{};
+      setText('v624DbState',db.ok===false?'异常':(db.sqlite||'正常')+(db.lastProcessedReportDate?' · '+db.lastProcessedReportDate:''));
+      setText('v624LocalUrl',network.localUrl||location.origin);
+      setText('v624LanUrl',network.lanUrl||'未启用');
+      const shopCount=num(first(shops,['count','total','active','size']));
+      setText('v624ShopMeta',shopCount!==null?fmt(shopCount)+' 个CP码':'已读取');
+      setMessage('v624ShopMessage',shopCount!==null?'当前已配置 '+fmt(shopCount)+' 个门店CP码。':'门店CP码状态已读取。','success');
+    }
+  }catch(err){
+    setMessage('v624CeMessage','系统设置读取失败：'+String(err?.message||err),'error');
+  }
+}
+
+async function loginCe(){
+  const username=document.getElementById('v624CeUser')?.value?.trim()||'';
+  const password=document.getElementById('v624CePassword')?.value||'';
+  const tenantId=document.getElementById('v624CeTenant')?.value?.trim()||'000000';
+  if(!username||!password){setMessage('v624CeMessage','请输入CE账号和密码。','error');return;}
+  setMessage('v624CeMessage','正在登录CE系统…');
+  try{
+    const result=await request('/api/ce-login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tenantId,username,password})},30000);
+    document.getElementById('v624CePassword').value='';
+    setText('v624CeStatus','已连接');
+    setMessage('v624CeMessage','CE系统登录成功：'+(result?.authStatus?.account||username),'success');
+  }catch(err){setMessage('v624CeMessage','CE登录失败：'+String(err?.message||err),'error');}
+}
+async function logoutCe(){
+  try{
+    await request('/api/ce-logout',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'},15000);
+    setText('v624CeStatus','未连接');
+    setMessage('v624CeMessage','已退出CE系统。','success');
+  }catch(err){setMessage('v624CeMessage','退出失败：'+String(err?.message||err),'error');}
+}
+async function importShopCodes(){
+  const file=document.getElementById('v624ShopFile')?.files?.[0];
+  if(!file){setMessage('v624ShopMessage','请选择门店CP码 Excel。','error');return;}
+  const fd=new FormData();fd.append('file',file);
+  setMessage('v624ShopMessage','正在更新门店CP码…');
+  try{
+    const result=await request('/api/import-shop-codes',{method:'POST',body:fd},60000);
+    const count=num(first(result,['imported.count','imported.total','imported.active']));
+    setText('v624ShopMeta',count!==null?fmt(count)+' 个CP码':'更新完成');
+    setMessage('v624ShopMessage','门店CP码更新成功。','success');
+  }catch(err){setMessage('v624ShopMessage','更新失败：'+String(err?.message||err),'error');}
+}
+
+function renderAuditRows(rows){
+  const tbody=document.getElementById('v624AuditRows');
+  if(!tbody)return;
+  tbody.replaceChildren();
+  if(!rows?.length){
+    const tr=document.createElement('tr'),td=document.createElement('td');
+    td.colSpan=7;td.textContent='暂无审计记录';tr.appendChild(td);tbody.appendChild(tr);return;
+  }
+  for(const row of rows){
+    const tr=document.createElement('tr');
+    const values=[row.createdAt,row.userEmail,row.userRole,row.action,row.businessType,row.reportDate,row.ipAddress];
+    for(const value of values){const td=document.createElement('td');td.textContent=value||'—';tr.appendChild(td);}
+    tbody.appendChild(tr);
+  }
+}
+function renderRuntimeLogs(rows){
+  const root=document.getElementById('v624RuntimeLogs');
+  if(!root)return;
+  root.replaceChildren();
+  if(!rows?.length){root.textContent='暂无运行日志';return;}
+  for(const line of rows.slice().reverse().slice(0,120)){
+    const div=document.createElement('div');
+    div.className='v624-log-item';
+    div.textContent=String(line||'');
+    root.appendChild(div);
+  }
+}
+
+async function loadLogs(){
+  const [auditResult,runtimeResult]=await Promise.allSettled([
+    json('/api/admin/audit-logs',7000),
+    json('/api/logs/recent',7000)
+  ]);
+  if(auditResult.status==='fulfilled'){
+    const rows=auditResult.value?.rows||[];
+    renderAuditRows(rows);
+    setText('v624AuditMeta',rows.length+' 条');
+  }else{
+    renderAuditRows([]);
+    setText('v624AuditMeta','无管理员权限或读取失败');
+  }
+  if(runtimeResult.status==='fulfilled'){
+    const rows=runtimeResult.value?.logs||[];
+    renderRuntimeLogs(rows);
+    setText('v624RuntimeLogMeta',rows.length+' 条');
+  }else{
+    renderRuntimeLogs([]);
+    setText('v624RuntimeLogMeta','读取失败');
+  }
+}
+
 async function loadSimpleOperation(){
   const title=document.getElementById('v624SimpleTitle');
   const body=document.getElementById('v624SimpleBody');
-  const labels={
-    tracking:'轨迹查询',
-    exceptions:'异常明细',
-    reports:'报表导出',
-    settings:'系统设置',
-    logs:'操作日志',
-    'data-management':'数据管理'
-  };
+  const labels={tracking:'轨迹查询',exceptions:'异常明细',reports:'报表导出','data-management':'数据管理'};
   title.textContent=labels[page]||'功能页面';
-  body.textContent='该模块已经退出旧前端主路径。当前页面保持可操作，下一步继续迁移对应业务功能。';
-  if(page==='logs'){
-    try{
-      const result=await json('/api/logs/recent',7000);
-      body.textContent=JSON.stringify(result,null,2).slice(0,12000);
-      body.style.whiteSpace='pre-wrap';
-    }catch{}
-  }
+  body.textContent='该模块已脱离旧前端，目前正在迁移正式业务内容。页面导航和其他已迁移模块不受影响。';
+}
+
+function setupSettings(){
+  document.getElementById('v624CeLogin')?.addEventListener('click',loginCe);
+  document.getElementById('v624CeLogout')?.addEventListener('click',logoutCe);
+  const shop=document.getElementById('v624ShopFile');
+  shop?.addEventListener('change',()=>setText('v624ShopFileName',shop.files?.[0]?.name||'选择门店CP码 Excel'));
+  document.getElementById('v624ShopImport')?.addEventListener('click',importShopCodes);
+  void loadSettings();
 }
 
 function reload(){
   if(page==='home')void loadHome();
   else if(business)void loadBusiness(business);
   else if(page==='import')void loadLatestImport();
+  else if(page==='settings')void loadSettings();
+  else if(page==='logs')void loadLogs();
   else void loadSimpleOperation();
 }
 
@@ -271,5 +421,7 @@ document.getElementById('v624Reload')?.addEventListener('click',reload);
 if(page==='home')void loadHome();
 else if(business)void loadBusiness(business);
 else if(page==='import')setupImport();
+else if(page==='settings')setupSettings();
+else if(page==='logs')void loadLogs();
 else void loadSimpleOperation();
 })();
