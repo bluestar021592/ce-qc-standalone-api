@@ -106,7 +106,7 @@ assert.match(stableResponse,/v580-visible-shell-recovery\.js/,'final delivered H
 assert.match(stableResponse,/V581_TAG/,'final response pass must preserve exactly one V581 owner');
 assert.match(stableResponse,/appTag/,'final response pass must locate app.js as the bootstrap boundary');
 assert.match(stableResponse,/V581_TAG\+'\\n'\+match/,'stable shell must be injected immediately before app.js');
-const earlyAt=indexHtml.indexOf('/v592-early-sidebar-capture.js?v=20261001-v608-1');
+const earlyAt=indexHtml.indexOf('/v592-early-sidebar-capture.js?v=20261003-v622-1');
 const stableAt=indexHtml.indexOf('/v581-stable-shell-owner.js?v=20260929-v600-1');
 const appAt=indexHtml.indexOf('/app.js?v=20261003-v621-1');
 assert.ok(earlyAt>0&&stableAt>earlyAt&&appAt>stableAt,'V621 interaction-first app runtime must load after native interaction shell');
