@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="ce-qc-shell" content="V625_FULL_SYSTEM_UI">
   <title>__V625_PAGE_TITLE__ - CE EXPRESS 质量控制管理系统</title>
-  <link rel="stylesheet" href="/v625-shell.css?v=20261003-v625-4">
+  <link rel="stylesheet" href="/v625-shell.css?v=20261003-v626-1">
 </head>
 <body data-page="__V625_PAGE_KEY__" data-business="__V625_BUSINESS_TYPE__">
   <div class="v625-app">
@@ -72,10 +72,50 @@
               <a class="v625-business-card tone-green" href="/ceaf?auth=v625" data-card="CEAF"><div class="v625-card-label"><span class="v625-card-icon"><svg><use href="/assets/ui-icons-v625.svg#icon-plane"/></svg></span><b>CEAF空运</b></div><strong>—</strong><small>今日票数</small><div class="v625-card-foot"><span>占比 <b data-ratio>—</b></span><i><em></em></i></div></a>
               <a class="v625-business-card tone-orange" href="/tbkh?auth=v625" data-card="TBKH"><div class="v625-card-label"><span class="v625-card-icon"><svg><use href="/assets/ui-icons-v625.svg#icon-package"/></svg></span><b>TBKH</b></div><strong>—</strong><small>今日票数</small><div class="v625-card-foot"><span>占比 <b data-ratio>—</b></span><i><em></em></i></div></a>
               <a class="v625-business-card tone-purple" href="/ali1688?auth=v625" data-card="ALI1688"><div class="v625-card-label"><span class="v625-card-icon"><svg><use href="/assets/ui-icons-v625.svg#icon-bag"/></svg></span><b>ALI1688</b></div><strong>—</strong><small>今日票数</small><div class="v625-card-foot"><span>占比 <b data-ratio>—</b></span><i><em></em></i></div></a>
-              <a class="v625-business-card tone-red" href="/whpp?auth=v625" data-card="WHPP"><div class="v625-card-label"><span class="v625-card-icon"><svg><use href="/assets/ui-icons-v625.svg#icon-home"/></svg></span><b>WHPP本土</b></div><strong>—</strong><small>今日票数</small><div class="v625-card-foot"><span>占比 <b data-ratio>—</b></span><i><em></em></i></div></a>
-              <a class="v625-business-card tone-blue" href="/shopeecn?auth=v625" data-card="SHOPEECN"><div class="v625-card-label"><span class="v625-card-icon"><svg><use href="/assets/ui-icons-v625.svg#icon-shopee-card"/></svg></span><b>SHOPEE CN</b></div><strong>—</strong><small>今日票数</small><div class="v625-card-foot"><span>占比 <b data-ratio>—</b></span><i><em></em></i></div></a>
-              <a class="v625-business-card tone-pink" href="/shopeevn?auth=v625" data-card="SHOPEEVN"><div class="v625-card-label"><span class="v625-card-icon"><svg><use href="/assets/ui-icons-v625.svg#icon-shopee-card"/></svg></span><b>SHOPEE VN</b></div><strong>—</strong><small>今日票数</small><div class="v625-card-foot"><span>占比 <b data-ratio>—</b></span><i><em></em></i></div></a>
+              <a class="v625-business-card tone-red" href="/whpp?auth=v625" data-card="WHPP"><div class="v625-card-label"><span class="v625-card-icon"><svg><use href="/assets/ui-icons-v625.svg#icon-home"/></svg></span><b>WHPP本土</b></div><strong>—</strong><small>今日票数</small><div class="v626-return-mini"><span>退回件 <b id="v626ReturnWHPP">—</b></span><span>退回率 <b id="v626ReturnRateWHPP">—</b></span></div><div class="v625-card-foot"><span>占比 <b data-ratio>—</b></span><i><em></em></i></div></a>
+              <a class="v625-business-card tone-blue" href="/shopeecn?auth=v625" data-card="SHOPEECN"><div class="v625-card-label"><span class="v625-card-icon"><svg><use href="/assets/ui-icons-v625.svg#icon-shopee-card"/></svg></span><b>SHOPEE CN</b></div><strong>—</strong><small>今日票数</small><div class="v626-return-mini"><span>退回件 <b id="v626ReturnSHOPEECN">—</b></span><span>退回率 <b id="v626ReturnRateSHOPEECN">—</b></span></div><div class="v625-card-foot"><span>占比 <b data-ratio>—</b></span><i><em></em></i></div></a>
+              <a class="v625-business-card tone-pink" href="/shopeevn?auth=v625" data-card="SHOPEEVN"><div class="v625-card-label"><span class="v625-card-icon"><svg><use href="/assets/ui-icons-v625.svg#icon-shopee-card"/></svg></span><b>SHOPEE VN</b></div><strong>—</strong><small>今日票数</small><div class="v626-return-mini"><span>退回件 <b id="v626ReturnSHOPEEVN">—</b></span><span>退回率 <b id="v626ReturnRateSHOPEEVN">—</b></span></div><div class="v625-card-foot"><span>占比 <b data-ratio>—</b></span><i><em></em></i></div></a>
             </div>
+          </section>
+
+          <div class="v626-live-grid">
+            <section class="v625-panel v626-processing-panel">
+              <div class="v625-section-head"><h2><span class="v625-title-icon">↻</span>日报处理进度</h2><span id="v626ProcessReportDate">等待日报</span></div>
+              <div class="v626-file-line">
+                <div><svg><use href="/assets/ui-icons-v625.svg#icon-file-up"/></svg><span><b id="v626ProcessFile">尚未上传综合日报</b><small id="v626ProcessDateSource">日报日期将由系统自动识别</small></span></div>
+                <span id="v626ProcessState" class="v625-badge warning">待处理</span>
+              </div>
+              <div class="v626-stage-row">
+                <div data-stage="parse"><i>1</i><span>文件解析</span><b id="v626StageParse">等待</b></div>
+                <div data-stage="classify"><i>2</i><span>业务分类</span><b id="v626StageClassify">等待</b></div>
+                <div data-stage="scan"><i>3</i><span>订单扫描</span><b id="v626StageScan">等待</b></div>
+                <div data-stage="track"><i>4</i><span>轨迹查询</span><b id="v626StageTrack">等待</b></div>
+                <div data-stage="done"><i>5</i><span>生成看板</span><b id="v626StageDone">等待</b></div>
+              </div>
+              <div class="v626-progress-bar"><i id="v626ProcessBar"></i></div>
+              <div class="v626-progress-meta"><b id="v626ProcessText">等待开始处理</b><span id="v626ProcessCount">0 / 0</span></div>
+              <div class="v626-family-progress">
+                <span>CCSL <b id="v626CcslProgress">—</b></span>
+                <span>SHOPEE <b id="v626ShopeeProgress">—</b></span>
+                <span>WHPP <b id="v626WhppProgress">—</b></span>
+              </div>
+            </section>
+
+            <section class="v625-panel v626-open-pod-panel">
+              <div class="v625-section-head"><h2><span class="v625-title-icon">⌁</span>未完成POD</h2><button id="v626RefreshOpenPod" class="v625-btn primary" type="button">批量更新最新轨迹</button></div>
+              <div class="v626-open-tabs">
+                <button class="active" type="button" data-open-filter="all">全部 <b id="v626OpenAll">0</b></button>
+                <button type="button" data-open-filter="today">当日新增 <b id="v626OpenToday">0</b></button>
+                <button type="button" data-open-filter="retry">待重试 <b id="v626OpenRetry">0</b></button>
+              </div>
+              <div class="v625-table-wrap v626-open-table"><table class="v625-table"><thead><tr><th>运单号</th><th>业务</th><th>当前状态</th><th>最后更新时间</th><th>操作</th></tr></thead><tbody id="v626OpenPodRows"><tr><td colspan="5">暂无未完成POD</td></tr></tbody></table></div>
+              <div id="v626RefreshPodMessage" class="v625-inline-note">未完成票可持续刷新，不需要重新上传日报。</div>
+            </section>
+          </div>
+
+          <section class="v625-panel v626-log-panel">
+            <div class="v625-section-head"><h2><span class="v625-title-icon">≡</span>实时处理明细</h2><span id="v626LogMeta">动态刷新</span></div>
+            <div id="v626LiveLog" class="v626-live-log"><div><time>—</time><span>等待处理任务</span></div></div>
           </section>
 
           <div class="v625-home-three">
@@ -142,7 +182,18 @@
                   <div class="v625-timing-regions"><div><span>PP（金边）</span><b id="v625TimingTBKHPP">—</b><small id="v625TimingTBKHPPPod">—</small></div><div><span>PV（外省）</span><b id="v625TimingTBKHPV">—</b><small id="v625TimingTBKHPVPod">—</small></div></div>
                 </div>
                 <div class="v625-attempt-grid"><div><span>1派平均签收</span><b id="v625TimingTBKHA1">—</b></div><div><span>2派平均签收</span><b id="v625TimingTBKHA2">—</b></div><div><span>3派平均签收</span><b id="v625TimingTBKHA3">—</b></div></div>
-                <div id="v625TimingTrendTBKH" class="v625-mini-trend"></div>
+                <div class="v626-timing-evidence"><span>有效轨迹 <b id="v626TimingTBKHValid">—</b></span><span>待补轨迹 <b id="v626TimingTBKHMissing">—</b></span></div><div id="v625TimingTrendTBKH" class="v625-mini-trend"></div>
+              </article>
+
+              <article class="v625-timing-card timing-whpp" data-timing="WHPP">
+                <div class="v625-timing-head"><span class="v625-timing-icon"><svg><use href="/assets/ui-icons-v625.svg#icon-home"/></svg></span><div><b>WHPP本土</b><small>签收时效 · 含退回</small></div></div>
+                <div class="v625-timing-body">
+                  <div class="v625-timing-primary"><small>平均签收天数</small><strong id="v625TimingWHPPOverall">—</strong><em id="v625TimingWHPPPod">基于 — 票有效轨迹POD</em></div>
+                  <div class="v625-timing-regions"><div><span>PP（金边）</span><b id="v625TimingWHPPPP">—</b><small id="v625TimingWHPPPPPod">—</small></div><div><span>PV（外省）</span><b id="v625TimingWHPPPV">—</b><small id="v625TimingWHPPPVPod">—</small></div></div>
+                </div>
+                <div class="v625-attempt-grid"><div><span>1派平均签收</span><b id="v625TimingWHPPA1">—</b></div><div><span>2派平均签收</span><b id="v625TimingWHPPA2">—</b></div><div><span>3派平均签收</span><b id="v625TimingWHPPA3">—</b></div></div>
+                <div class="v626-timing-evidence"><span>退回 <b id="v626TimingWHPPReturn">—</b></span><span>退回率 <b id="v626TimingWHPPReturnRate">—</b></span><span>待补轨迹 <b id="v626TimingWHPPMissing">—</b></span></div>
+                <div id="v625TimingTrendWHPP" class="v625-mini-trend"></div>
               </article>
 
               <article class="v625-timing-card timing-cn" data-timing="SHOPEECN">
@@ -152,7 +203,7 @@
                   <div class="v625-timing-regions"><div><span>PP（金边）</span><b id="v625TimingSHOPEECNPP">—</b><small id="v625TimingSHOPEECNPPPod">—</small></div><div><span>PV（外省）</span><b id="v625TimingSHOPEECNPV">—</b><small id="v625TimingSHOPEECNPVPod">—</small></div></div>
                 </div>
                 <div class="v625-attempt-grid"><div><span>1派平均签收</span><b id="v625TimingSHOPEECNA1">—</b></div><div><span>2派平均签收</span><b id="v625TimingSHOPEECNA2">—</b></div><div><span>3派平均签收</span><b id="v625TimingSHOPEECNA3">—</b></div></div>
-                <div id="v625TimingTrendSHOPEECN" class="v625-mini-trend"></div>
+                <div class="v626-timing-evidence"><span>退回 <b id="v626TimingSHOPEECNReturn">—</b></span><span>退回率 <b id="v626TimingSHOPEECNReturnRate">—</b></span><span>待补轨迹 <b id="v626TimingSHOPEECNMissing">—</b></span></div><div id="v625TimingTrendSHOPEECN" class="v625-mini-trend"></div>
               </article>
 
               <article class="v625-timing-card timing-vn" data-timing="SHOPEEVN">
@@ -162,7 +213,7 @@
                   <div class="v625-timing-regions"><div><span>PP（金边）</span><b id="v625TimingSHOPEEVNPP">—</b><small id="v625TimingSHOPEEVNPPPod">—</small></div><div><span>PV（外省）</span><b id="v625TimingSHOPEEVNPV">—</b><small id="v625TimingSHOPEEVNPVPod">—</small></div></div>
                 </div>
                 <div class="v625-attempt-grid"><div><span>1派平均签收</span><b id="v625TimingSHOPEEVNA1">—</b></div><div><span>2派平均签收</span><b id="v625TimingSHOPEEVNA2">—</b></div><div><span>3派平均签收</span><b id="v625TimingSHOPEEVNA3">—</b></div></div>
-                <div id="v625TimingTrendSHOPEEVN" class="v625-mini-trend"></div>
+                <div class="v626-timing-evidence"><span>退回 <b id="v626TimingSHOPEEVNReturn">—</b></span><span>退回率 <b id="v626TimingSHOPEEVNReturnRate">—</b></span><span>待补轨迹 <b id="v626TimingSHOPEEVNMissing">—</b></span></div><div id="v625TimingTrendSHOPEEVN" class="v625-mini-trend"></div>
               </article>
             </div>
           </section>
@@ -177,6 +228,8 @@
             <article class="kpi orange"><span>Pending</span><b id="kpiPending">—</b><small>待继续跟进</small></article>
             <article class="kpi red"><span>异常</span><b id="kpiOpen">—</b><small>OC <em id="kpiOc">—</em></small></article>
             <article class="kpi gray"><span>平均签收天数</span><b id="kpiAvgDays">—</b><small>当前业务口径</small></article>
+            <article id="kpiReturnedCard" class="kpi blue" hidden><span>退回件</span><b id="kpiReturned">—</b><small>仅WHPP / SHOPEE CN / VN</small></article>
+            <article id="kpiReturnRateCard" class="kpi red" hidden><span>退回率</span><b id="kpiReturnRate">—</b><small>退回件 ÷ 总票数</small></article>
           </div>
           <div class="v625-two-col business-charts">
             <section class="v625-panel">
@@ -196,24 +249,66 @@
 
         <!-- IMPORT -->
         <section id="v625Import" class="v625-page" hidden>
-          <div class="v625-stepper"><div class="active"><i>1</i><span>选择文件</span></div><div><i>2</i><span>自动校验</span></div><div><i>3</i><span>导入处理</span></div><div><i>4</i><span>完成</span></div></div>
           <section class="v625-panel">
-            <div class="v625-section-head"><h2>上传综合日报</h2><span id="v625ImportState">未导入</span></div>
-            <label class="v625-field-inline"><span>日报日期</span><input id="v625ReportDate" type="date"></label>
-            <label class="v625-dropzone"><input id="v625ImportFile" type="file" accept=".xlsx,.xls"><svg><use href="/assets/ui-icons-v625.svg#icon-file-up"/></svg><b>点击或拖拽文件到此处上传</b><small>支持 Excel（.xlsx / .xls），单个文件最大 80MB</small><em id="v625ImportFileName">选择文件</em></label>
-            <div class="v625-import-actions"><button id="v625ImportButton" class="v625-btn primary" type="button">导入综合日报并自动分类</button><button id="v625RunStart" class="v625-btn outline" type="button">开始全自动处理</button><button id="v625RunResume" class="v625-btn outline" type="button">继续处理</button><button id="v625RunPause" class="v625-btn danger-lite" type="button">暂停</button></div>
-            <div id="v625ImportMessage" class="v625-inline-note">请选择日报文件。</div>
+            <div class="v625-section-head"><h2>综合日报上传与处理</h2><span id="v625ImportState">未导入</span></div>
+            <div class="v626-import-top">
+              <label class="v625-dropzone"><input id="v625ImportFile" type="file" accept=".xlsx,.xls"><svg><use href="/assets/ui-icons-v625.svg#icon-file-up"/></svg><b>点击或拖拽综合日报Excel</b><small>系统自动识别日报日期并完成7业务分类；仅识别失败时才需要人工处理</small><em id="v625ImportFileName">选择文件</em></label>
+              <div class="v626-date-detect-card">
+                <span>系统识别日报日期</span><strong id="v626DetectedReportDate">—</strong>
+                <small id="v626DetectedDateSource">等待上传日报</small>
+                <button id="v626ManualDateToggle" type="button" class="v625-btn outline">日期识别异常时人工修正</button>
+                <label id="v626ManualDateWrap" class="v625-field-inline" hidden><span>人工修正</span><input id="v625ReportDate" type="date"></label>
+              </div>
+            </div>
+            <div class="v625-import-actions">
+              <button id="v625ImportButton" class="v625-btn primary" type="button">上传并自动分类</button>
+              <button id="v625RunStart" class="v625-btn primary" type="button">开始7业务自动处理</button>
+              <button id="v625RunResume" class="v625-btn outline" type="button">继续未完成处理</button>
+            </div>
+            <div id="v625ImportMessage" class="v625-inline-note">请选择综合日报文件。</div>
           </section>
+
+          <div class="v626-import-live-grid">
+            <section class="v625-panel">
+              <div class="v625-section-head"><h2>实时处理进度</h2><span id="v626ImportProgressDate">—</span></div>
+              <div class="v626-stage-row">
+                <div data-import-stage="parse"><i>1</i><span>文件解析</span><b id="v626ImportParse">等待</b></div>
+                <div data-import-stage="classify"><i>2</i><span>7业务分类</span><b id="v626ImportClassify">等待</b></div>
+                <div data-import-stage="scan"><i>3</i><span>订单扫描</span><b id="v626ImportScan">等待</b></div>
+                <div data-import-stage="track"><i>4</i><span>轨迹查询</span><b id="v626ImportTrack">等待</b></div>
+                <div data-import-stage="done"><i>5</i><span>完成</span><b id="v626ImportDone">等待</b></div>
+              </div>
+              <div class="v626-progress-bar"><i id="v626ImportBar"></i></div>
+              <div class="v626-progress-meta"><b id="v626ImportProgressText">等待开始</b><span id="v626ImportProgressCount">0 / 0</span></div>
+              <div class="v626-family-progress">
+                <span>CCSL <b id="v626ImportCcsl">—</b></span>
+                <span>SHOPEE <b id="v626ImportShopee">—</b></span>
+                <span>WHPP <b id="v626ImportWhpp">—</b></span>
+              </div>
+              <div id="v625RunMessage" class="v625-inline-note">导入日报后可开始处理。</div>
+            </section>
+
+            <section class="v625-panel">
+              <div class="v625-section-head"><h2>动态处理日志</h2><span>自动刷新</span></div>
+              <div id="v626ImportLiveLog" class="v626-live-log tall"><div><time>—</time><span>等待处理任务</span></div></div>
+            </section>
+          </div>
+
           <section class="v625-panel">
             <div class="v625-section-head"><h2>自动分类结果</h2><span id="v625ImportDateMeta">—</span></div>
             <div class="v625-classification-grid">
               <article><span>CE</span><b data-classification="CE">—</b></article><article><span>CEAF</span><b data-classification="CEAF">—</b></article><article><span>TBKH</span><b data-classification="TBKH">—</b></article><article><span>ALI1688</span><b data-classification="ALI1688">—</b></article><article><span>WHPP</span><b data-classification="WHPP">—</b></article><article><span>SHOPEE CN</span><b data-classification="SHOPEECN">—</b></article><article><span>SHOPEE VN</span><b data-classification="SHOPEEVN">—</b></article>
             </div>
-            <div id="v625RunMessage" class="v625-inline-note">导入日报后可开始处理。</div>
           </section>
+
+          <section class="v625-panel">
+            <div class="v625-section-head"><h2>未完成POD续查</h2><button id="v626ImportRefreshOpen" class="v625-btn primary" type="button">更新全部未完成最新轨迹</button></div>
+            <div class="v625-table-wrap"><table class="v625-table"><thead><tr><th>运单号</th><th>业务类型</th><th>当前状态</th><th>查询状态</th><th>最后更新时间</th><th>操作</th></tr></thead><tbody id="v626ImportOpenRows"><tr><td colspan="6">暂无未完成POD</td></tr></tbody></table></div>
+          </section>
+
           <section class="v625-panel">
             <div class="v625-section-head"><h2>导入记录</h2><span>最近批次</span></div>
-            <div class="v625-table-wrap"><table class="v625-table"><thead><tr><th>导入时间</th><th>文件名称</th><th>记录数</th><th>状态</th><th>操作</th></tr></thead><tbody id="v625ImportHistory"><tr><td colspan="5">暂无记录</td></tr></tbody></table></div>
+            <div class="v625-table-wrap"><table class="v625-table"><thead><tr><th>导入时间</th><th>文件名称</th><th>日报日期</th><th>识别来源</th><th>记录数</th><th>状态</th></tr></thead><tbody id="v625ImportHistory"><tr><td colspan="6">暂无记录</td></tr></tbody></table></div>
           </section>
         </section>
 
@@ -405,20 +500,42 @@
 
         <!-- DATA MANAGEMENT -->
         <section id="v625DataManagement" class="v625-page" hidden>
-          <div class="v625-tabs"><button class="active">数据清理</button><button>数据备份</button><button>数据迁移</button><button>数据同步</button></div>
-          <section class="v625-panel">
-            <div class="v625-warning-strip"><svg><use href="/assets/ui-icons-v625.svg#icon-alert"/></svg><span>数据管理仅限管理员操作，执行前请确认当前无运行任务。</span></div>
-            <div class="v625-data-manage-grid">
-              <div><h3>清理类型</h3><label><input type="radio" name="cleanup" checked> 按时间清理</label><label><input type="radio" name="cleanup"> 按业务清理</label></div>
-              <div><h3>保留时间</h3><select><option>保留 6 个月</option><option>保留 12 个月</option></select></div>
-              <div><h3>业务类型</h3><div class="v625-check-grid"><label><input type="checkbox" checked> CE</label><label><input type="checkbox"> CEAF空运</label><label><input type="checkbox"> TBKH</label><label><input type="checkbox"> ALI1688</label><label><input type="checkbox"> WHPP本土</label><label><input type="checkbox"> SHOPEE CN</label><label><input type="checkbox"> SHOPEE VN</label></div></div>
+          <div class="v625-tabs" id="v626DataTabs">
+            <button class="active" data-data-tab="clear" type="button">数据清理</button>
+            <button data-data-tab="backup" type="button">数据备份</button>
+            <button data-data-tab="storage" type="button">存储状态</button>
+          </div>
+
+          <div data-data-panel="clear">
+            <section class="v625-panel">
+              <div class="v625-warning-strip"><svg><use href="/assets/ui-icons-v625.svg#icon-alert"/></svg><span>直接清空业务数据，不强制创建备份；账号、权限、CE设置、门店CP码及已有数据库备份均保留。</span></div>
+              <div class="v626-data-action-grid">
+                <article class="v626-danger-card">
+                  <div><h2>一键清空全部业务数据</h2><p>清除日报、分类结果、扫描/轨迹、POD、Pending、异常、趋势及业务快照。清空与备份互不绑定。</p></div>
+                  <button id="v626ClearAllData" class="v625-btn danger-lite" type="button">一键清空全部业务数据</button>
+                </article>
+                <article class="v626-safe-card">
+                  <div><h2>可选数据库备份</h2><p>需要保留当前业务数据时再手动备份；不备份也可以直接执行清空。</p></div>
+                  <button id="v625BackupNow" class="v625-btn primary" type="button">立即备份数据库</button>
+                </article>
+              </div>
+              <div id="v626ClearStatus" class="v625-inline-note">当前没有清空任务。</div>
+            </section>
+          </div>
+
+          <div data-data-panel="backup" hidden>
+            <section class="v625-panel">
+              <div class="v625-section-head"><h2>数据库备份</h2><button id="v626BackupNowTop" class="v625-btn primary" type="button">立即备份数据库</button></div>
+              <div class="v625-table-wrap"><table class="v625-table"><thead><tr><th>备份时间</th><th>文件名称</th><th>类型</th><th>大小</th><th>保存位置</th></tr></thead><tbody id="v625BackupRows"><tr><td colspan="5">正在读取…</td></tr></tbody></table></div>
+            </section>
+          </div>
+
+          <div data-data-panel="storage" hidden>
+            <div class="v626-storage-grid">
+              <section class="v625-panel"><div class="v625-section-head"><h2>自动存储管理</h2><span class="v625-status-dot ok">自动管理中</span></div><div class="v625-info-list"><div><span>数据库当前盘</span><b id="v626DatabaseDrive">—</b></div><div><span>数据库实际路径</span><b id="v626DatabaseFile">—</b></div><div><span>当前备份盘</span><b id="v626BackupDrive">—</b></div><div><span>备份目录</span><b id="v626BackupDirectory">—</b></div></div></section>
+              <section class="v625-panel"><div class="v625-section-head"><h2>C / D盘状态</h2><span>系统自动选择可写且空间更充足的位置</span></div><div id="v626DriveCards" class="v626-drive-cards"><div class="v625-empty-state">正在读取磁盘状态…</div></div></section>
             </div>
-            <button id="v625BackupNow" class="v625-btn outline">立即备份数据库</button>
-          </section>
-          <section class="v625-panel">
-            <div class="v625-section-head"><h2>备份记录</h2><span id="v625BackupMeta">—</span></div>
-            <div class="v625-table-wrap"><table class="v625-table"><thead><tr><th>备份时间</th><th>文件名称</th><th>类型</th><th>大小</th><th>操作</th></tr></thead><tbody id="v625BackupRows"><tr><td colspan="5">正在读取…</td></tr></tbody></table></div>
-          </section>
+          </div>
         </section>
 
         <!-- USER MANAGEMENT -->
@@ -497,6 +614,6 @@
       </main>
     </div>
   </div>
-  <script src="/v625-shell.js?v=20261003-v625-4" defer></script>
+  <script src="/v625-shell.js?v=20261003-v626-1" defer></script>
 </body>
 </html>
