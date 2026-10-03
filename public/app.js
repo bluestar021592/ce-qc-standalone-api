@@ -204,7 +204,7 @@ async function refreshInternal() {
       };
       unifiedImportState = boot?.unifiedImport || null;
       businessStates = { ...(boot?.businessStates || {}) };
-      if (boot?.bootstrapMode === 'V599_HOME_ZERO_DETAIL') document.documentElement.dataset.ceQcV599Bootstrap='ZERO_DETAIL';
+      if (boot?.bootstrapMode === 'V621_INTERACTION_FIRST') document.documentElement.dataset.ceQcV621Bootstrap='INTERACTION_FIRST';
       const serverHasBusinessData = Boolean(
         unifiedImportState?.snapshotId
         || historyCatalog.UNIFIED.length
