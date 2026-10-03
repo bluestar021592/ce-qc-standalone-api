@@ -155,7 +155,14 @@ const V624_DASHBOARD_PAGES = new Map([
   ['/ali1688', { key:'ali1688', title:'ALI1688看板', business:'ALI1688' }],
   ['/whpp', { key:'whpp', title:'WHPP本土看板', business:'WHPP' }],
   ['/shopeecn', { key:'shopeecn', title:'SHOPEE CN看板', business:'SHOPEECN' }],
-  ['/shopeevn', { key:'shopeevn', title:'SHOPEE VN看板', business:'SHOPEEVN' }]
+  ['/shopeevn', { key:'shopeevn', title:'SHOPEE VN看板', business:'SHOPEEVN' }],
+  ['/import', { key:'import', title:'数据导入', business:'' }],
+  ['/tracking', { key:'tracking', title:'轨迹查询', business:'' }],
+  ['/exceptions', { key:'exceptions', title:'异常明细', business:'' }],
+  ['/reports', { key:'reports', title:'报表导出', business:'' }],
+  ['/settings', { key:'settings', title:'系统设置', business:'' }],
+  ['/logs', { key:'logs', title:'操作日志', business:'' }],
+  ['/data-management', { key:'data-management', title:'数据管理', business:'' }]
 ]);
 
 app.get([...V624_DASHBOARD_PAGES.keys()], async (req, res, next) => {
@@ -230,7 +237,7 @@ app.get('/detail', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'detail.html'));
 });
 
-app.get(['/ccsl', '/shopee', '/tracking', '/exceptions', '/reports', '/import', '/settings', '/logs', '/data-management'], (req, res) => {
+app.get(['/ccsl', '/shopee'], (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
