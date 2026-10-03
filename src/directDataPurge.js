@@ -9,7 +9,7 @@ import { getRuntimeConfig, nowIso } from './db.js';
 import { BUSINESS_DATA_TABLES } from './store.js';
 import { inspectV541PurgeJobWorker } from './v541PurgePidOwnership.js';
 
-export const DIRECT_PURGE_ID='2026-09-21-v568-direct-no-backup-space-reclaim-v1';
+export const DIRECT_PURGE_ID='2026-10-03-v626-direct-no-backup-preserve-existing-backups-v1';
 export const DIRECT_PURGE_PHRASE='永久清除全部业务数据';
 
 const ACTIVE_JOB_STATUS=new Set(['QUEUED','RUNNING']);
@@ -223,19 +223,18 @@ export async function executeDirectDataPurge({phrase,user={},onProgress=()=>{}}=
     try{db.close();}catch{}
   }
   const compactResult=compactPurgedDatabase(cfg.dbFile,onProgress);
-  onProgress({status:'RUNNING',stage:'FILE_CLEANUP',message:'数据库已清空，正在删除业务缓存、证据归档和全部 CE QC 备份。',deletedRows:Object.values(reset.before||{}).reduce((sum,value)=>sum+Number(value||0),0)});
+  onProgress({status:'RUNNING',stage:'FILE_CLEANUP',message:'数据库已清空，正在清理可再生成业务缓存；已有数据库备份会保留。',deletedRows:Object.values(reset.before||{}).reduce((sum,value)=>sum+Number(value||0),0)});
   const fileCleanupWarnings=await clearRegenerableFiles();
-  let backupCleanup={deletedCount:0,deletedBytes:0,retainedCount:0,failedCount:0};
-  try{backupCleanup=clearManagedBackups(cfg);}
-  catch(error){fileCleanupWarnings.push(`备份清理失败: ${error?.message||String(error)}`);}
+  const backupCleanup={preserved:true,deletedCount:0,deletedBytes:0,retainedCount:null,failedCount:0};
   return {
     ok:true,
     direct:true,
     backupCreated:false,
+    existingBackupsPreserved:true,
     sealed:false,
     administrator,
     event:'DATA_RESET',
-    deleteMode:'DIRECT_NO_BACKUP_TRANSACTION',
+    deleteMode:'DIRECT_NO_BACKUP_TRANSACTION_PRESERVE_EXISTING_BACKUPS',
     before:reset.before,
     after:reset.after,
     completedAt:reset.completedAt,
@@ -368,7 +367,7 @@ if(!isMainThread&&workerData?.ceQcDirectPurgeWorker===true){
       onProgress:progress=>send({...progress,status:'RUNNING',updatedAt:Date.now()})
     });
     send({
-      status:'SUCCEEDED',stage:'SUCCEEDED',message:'全部业务数据已直接清空。',
+      status:'SUCCEEDED',stage:'SUCCEEDED',message:'全部业务数据已直接清空；已有数据库备份已保留。',
       completedAt:result.completedAt,deletedRows:Object.values(result.before||{}).reduce((sum,value)=>sum+Number(value||0),0),
       before:result.before,after:result.after,fileCleanupWarnings:result.fileCleanupWarnings||[],updatedAt:Date.now()
     });
