@@ -150,8 +150,8 @@ test('post-purge empty bootstrap clears stale browser business state instead of 
   assert.match(app,/dashboardPeriodMode = ''/);
   assert.match(app,/\^ce_qc_/,'full purge must retire CE QC browser caches when server has no business data');
   assert.match(app,/sessionStorage\.removeItem\('trackingReturnContext'\)/);
-  assert.match(html,/app\.js\?v=20261003-v621-1/,'browser must receive the V621 interaction-first runtime immediately after update');
-  assert.match(html,/dashboard-fixture-v18\.js\?v=20261003-v620-1/,'browser must receive the current passive forensic startup guard immediately after update');
+  assert.match(html,/app\.js\?v=20261003-v623-1/,'business routes must receive the V623 application runtime after update');
+  assert.match(html,/dashboard-fixture-v18\.js\?v=20261003-v623-1/,'business routes must receive the current V623 bounded startup diagnostics after update');
   assert.doesNotMatch(html,/dashboard-fixture-v18\.js\?v=20260929-v598-1/,'retired V598 cache URL must not return after update');
 });
 
