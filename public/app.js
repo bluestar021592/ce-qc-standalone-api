@@ -2880,19 +2880,32 @@ function updateClock() {
 
 window.addEventListener('popstate', () => { currentPage = pageFromPath(); renderAll(); });
 updateClock(); setInterval(updateClock, 1000);
-v612StartupDiag('V612_BEFORE_REFRESH_CALL','ready='+document.readyState);
-refresh().catch(async error => {
-  console.error('Initial page refresh failed:', error);
-  const backendHealthy = await rawHealthProbe();
-  if (!backendHealthy) {
-    alert('后台服务当前不可达，请确认Start_CE_QC仍在运行后重试。');
-    return;
-  }
-  // Backend and SQLite are healthy. Do not show a false global "backend disconnected"
-  // alert for a recoverable single-interface/startup timing failure.
-  console.warn('页面部分数据读取失败，但后台服务仍在线。页面将保留已成功加载的数据。', error);
-  renderAll();
-});
+// V621: interaction-first startup. The shell and native anchors must become usable
+// before any bootstrap/database request is allowed to influence first paint.
+renderAll();
+document.documentElement.dataset.ceQcV621InteractionFirst='1';
+v612StartupDiag('V621_FIRST_PAINT_READY','page='+currentPage+'|ready='+document.readyState);
+
+function runInitialDataRefresh(){
+  v612StartupDiag('V621_DEFERRED_REFRESH_START','page='+currentPage);
+  void refresh().catch(async error => {
+    console.error('Deferred initial page refresh failed:', error);
+    const backendHealthy = await rawHealthProbe();
+    if (!backendHealthy) {
+      console.warn('后台服务暂时不可达；页面保持可操作，等待下次手动刷新。');
+      return;
+    }
+    console.warn('页面部分数据读取失败，但后台服务仍在线；保留当前可操作页面。', error);
+    renderAll();
+  });
+}
+if (visualMode) {
+  runInitialDataRefresh();
+} else if (typeof requestIdleCallback === 'function') {
+  requestIdleCallback(runInitialDataRefresh,{timeout:1200});
+} else {
+  setTimeout(runInitialDataRefresh,500);
+}
 document.getElementById('adminDataNav')?.addEventListener('click', openDataPurge);
 let processingPollBusy = false;
 setInterval(async () => {
