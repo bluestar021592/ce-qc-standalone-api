@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="ce-qc-shell" content="V624_CLEAN_MULTI_PAGE">
   <title>__V624_PAGE_TITLE__ - CE Express 质量控制管理系统</title>
-  <link rel="stylesheet" href="/v624-shell.css?v=20261003-v624-1">
+  <link rel="stylesheet" href="/v624-shell.css?v=20261003-v624-2">
 </head>
 <body data-page="__V624_PAGE_KEY__" data-business="__V624_BUSINESS_TYPE__">
   <div class="v624-shell">
@@ -24,12 +24,13 @@
         <a data-key="shopeecn" href="/shopeecn?auth=v624">SHOPEE CN看板</a>
         <a data-key="shopeevn" href="/shopeevn?auth=v624">SHOPEE VN看板</a>
         <hr>
-        <a href="/import?legacy=1&auth=v581">数据导入</a>
-        <a href="/tracking?legacy=1&auth=v581">轨迹查询</a>
-        <a href="/exceptions?legacy=1&auth=v581">异常明细</a>
-        <a href="/reports?legacy=1&auth=v581">报表导出</a>
-        <a href="/settings?legacy=1&auth=v581">系统设置</a>
-        <a href="/logs?legacy=1&auth=v581">操作日志</a>
+        <a data-key="import" href="/import?auth=v624">数据导入</a>
+        <a data-key="tracking" href="/tracking?auth=v624">轨迹查询</a>
+        <a data-key="exceptions" href="/exceptions?auth=v624">异常明细</a>
+        <a data-key="reports" href="/reports?auth=v624">报表导出</a>
+        <a data-key="settings" href="/settings?auth=v624">系统设置</a>
+        <a data-key="logs" href="/logs?auth=v624">操作日志</a>
+        <a data-key="data-management" href="/data-management?auth=v624">数据管理</a>
       </nav>
     </aside>
 
@@ -62,6 +63,54 @@
           </section>
         </section>
 
+        <section id="v624Import" class="v624-operation" hidden>
+          <div class="v624-operation-grid">
+            <section class="v624-panel v624-panel-flat">
+              <div class="v624-panel-head"><h2>综合日报导入</h2><span id="v624ImportState">未导入</span></div>
+              <label class="v624-field">日报日期（可选，留空自动识别）
+                <input id="v624ReportDate" type="date">
+              </label>
+              <label class="v624-file">
+                <input id="v624ImportFile" type="file" accept=".xlsx,.xls">
+                <span id="v624ImportFileName">选择综合日报 Excel</span>
+              </label>
+              <button id="v624ImportButton" class="v624-primary" type="button">导入综合日报并自动分类</button>
+              <div id="v624ImportMessage" class="v624-message">请选择日报文件。</div>
+            </section>
+
+            <section class="v624-panel v624-panel-flat">
+              <div class="v624-panel-head"><h2>自动分类结果</h2><span id="v624ImportDateMeta">—</span></div>
+              <div class="v624-classification-grid">
+                <article><span>CE</span><b data-classification="CE">—</b></article>
+                <article><span>CEAF</span><b data-classification="CEAF">—</b></article>
+                <article><span>TBKH</span><b data-classification="TBKH">—</b></article>
+                <article><span>ALI1688</span><b data-classification="ALI1688">—</b></article>
+                <article><span>WHPP</span><b data-classification="WHPP">—</b></article>
+                <article><span>SHOPEE CN</span><b data-classification="SHOPEECN">—</b></article>
+                <article><span>SHOPEE VN</span><b data-classification="SHOPEEVN">—</b></article>
+              </div>
+              <div id="v624CarryMeta" class="v624-message">尚无分类结果。</div>
+            </section>
+          </div>
+
+          <section class="v624-panel">
+            <div class="v624-panel-head"><h2>统一处理</h2><span id="v624RunMeta">待处理</span></div>
+            <div class="v624-button-row">
+              <button id="v624RunStart" class="v624-primary" type="button">开始全自动处理</button>
+              <button id="v624RunResume" type="button">继续处理</button>
+              <button id="v624RunPause" class="v624-warning" type="button">暂停</button>
+            </div>
+            <div id="v624RunMessage" class="v624-message">导入日报后可开始处理。</div>
+          </section>
+        </section>
+
+        <section id="v624SimpleOperation" class="v624-operation" hidden>
+          <section class="v624-panel">
+            <div class="v624-panel-head"><h2 id="v624SimpleTitle">功能页面</h2><span>V624</span></div>
+            <div id="v624SimpleBody" class="v624-empty">页面已迁移到新前端，正在加载对应功能。</div>
+          </section>
+        </section>
+
         <section id="v624Business" class="v624-business" hidden>
           <div class="v624-kpis">
             <article><span>今日票数</span><b id="kpiTotal">—</b></article>
@@ -82,6 +131,6 @@
       </main>
     </div>
   </div>
-  <script src="/v624-shell.js?v=20261003-v624-1" defer></script>
+  <script src="/v624-shell.js?v=20261003-v624-2" defer></script>
 </body>
 </html>
