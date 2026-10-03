@@ -14,6 +14,7 @@ function stripInlineV575(body){
 }
 export function rewriteV581StableShellHtml(body){
   if(typeof body!=='string'||!body.includes('CE Express')||!body.includes('</body>'))return body;
+  if(body.includes('V624_CLEAN_MULTI_PAGE'))return body;
   body=stripInlineV575(body);
   for(const file of ['v580-visible-shell-recovery.js','v569-final-interaction-owner.js','v573-head-interaction-bridge.js','v581-stable-shell-owner.js']){
     body=stripScriptSrc(body,file);
