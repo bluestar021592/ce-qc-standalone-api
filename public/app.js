@@ -18,6 +18,7 @@ let accessSession = {};
 let currentPage = pageFromPath();
 let runInFlight = false;
 let refreshPromise = null;
+let deferredShopeePromise = null;
 const pageLoadPromises = new Map();
 const pageLoadAt = new Map();
 let unifiedImportState = null;
@@ -300,7 +301,35 @@ async function refreshInternal() {
   v612StartupDiag('V612_RENDER_ALL_START','page='+currentPage);
   renderAll();
   v612StartupDiag('V612_RENDER_ALL_DONE','page='+currentPage);
+  if (!visualMode && !Object.keys(shopeeState || {}).length && ['home','shopeecn','shopeevn'].includes(currentPage)) {
+    scheduleDeferredShopeeState();
+  }
   if (currentPage === 'tracking') loadTrackingWorkspace();
+}
+
+async function loadDeferredShopeeState(){
+  if (visualMode) return;
+  if (deferredShopeePromise) return deferredShopeePromise;
+  deferredShopeePromise = (async()=>{
+    try{
+      const result = await api('/api/shopee/state?compact=1');
+      if(result?.state) shopeeState = result.state;
+      v612StartupDiag('V621_SHOPEE_DEFERRED_DONE','bytes=compact|page='+currentPage);
+      if(['home','shopeecn','shopeevn'].includes(currentPage)) renderAll();
+    }catch(error){
+      console.warn('[V621] SHOPEE延后加载失败，页面保持可操作',error);
+    }finally{
+      deferredShopeePromise = null;
+    }
+  })();
+  return deferredShopeePromise;
+}
+
+function scheduleDeferredShopeeState(){
+  if(visualMode) return;
+  const run=()=>void loadDeferredShopeeState();
+  if(typeof requestIdleCallback==='function') requestIdleCallback(run,{timeout:1800});
+  else setTimeout(run,900);
 }
 
 function runSingleFlight(key, task) {
