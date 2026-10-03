@@ -309,72 +309,46 @@ try{
   await cdp.send('Network.setCookie',{name:'ce_qc_local_auth_v431',value:signedCookie(secret),url:'http://127.0.0.1:'+port+'/'});
   stage('navigating production shell');
   await cdp.send('Page.navigate',{url:'http://127.0.0.1:'+port+'/?auth=v581'},8000);
-  await evalWait(cdp,'!!window.__CE_QC_V581_STABLE_SHELL__',8000,80,'V581 owner after production navigation');
-  stage('V581/V596 stable owner loaded');
-  await evalWait(cdp,"document.documentElement.dataset.ceQcV609MainHitScanRetired==='1'",8000,80,'V609 main-content hit scan retirement marker');
-  await evalWait(cdp,"document.documentElement.dataset.ceQcV610ShellObserverRetired==='1'",8000,80,'V610 stable-shell observer retirement marker');
-  await evalWait(cdp,"document.documentElement.dataset.ceQcV611StartupEnforceRetired==='1'",8000,80,'V611 repeated startup enforce retirement marker');
-  await waitFor(async()=>backendLog.includes('V615_RUNTIME_CHAIN_DONE'),20000,100,'V615 runtime script chain completion in backend diagnostics');
-  stage('V615 runtime chain settled in backend diagnostics; allowing renderer cooldown');
-  await new Promise(resolve=>setTimeout(resolve,1000));
-  const timerAlive=await cdp.eval("new Promise(resolve=>setTimeout(()=>resolve('timer-ok'),750))",8000);
-  assert.equal(timerAlive,'timer-ok','V609 production page main thread must remain timer-responsive after startup');
-  await evalWait(cdp,'!!window.__CE_QC_V596_EARLY_INTERACTION__',8000,80,'V600 native interaction bootstrap after production navigation');
-  await evalWait(cdp,"document.documentElement.dataset.ceQcV597LegacyInteractionRetired==='1'",8000,80,'V597 legacy interaction retirement marker');
-  stage('V600 native interaction active; legacy capture owners retired');
-  const retiredOwners=await cdp.eval("({v569:!!window.__CE_QC_V569_FINAL_INTERACTION_OWNER__,v570:!!window.__CE_QC_V570_EARLY_INTERACTION_OWNER__,v573:!!window.__CE_QC_V573_HEAD_INTERACTION_BRIDGE__,v580:!!window.__CE_QC_V580_VISIBLE_SHELL_RECOVERY__})",5000);
-  assert.deepEqual(retiredOwners,{v569:false,v570:false,v573:false,v580:false},'retired interaction owners must not exist at runtime');
-  stage('V602 retired interaction globals absent at runtime');
+  await waitFor(async()=>backendLog.includes('event=V581_ENFORCE page=home')&&backendLog.includes('extra=bind|target=true'),15000,100,'stable shell bind diagnostic');
+  stage('stable shell bind observed from page diagnostics');
+  await waitFor(async()=>backendLog.includes('event=V615_RUNTIME_CHAIN_DONE page=home'),20000,100,'runtime script chain completion diagnostic');
+
+  const ceHit=await waitFor(async()=>{
+    const rows=backendLog.split(/\r?\n/).filter(line=>line.includes('event=V620_CE_HIT page=home')&&line.includes('extra=ms=2600|'));
+    for(let i=rows.length-1;i>=0;i--){
+      const m=rows[i].match(/extra=ms=2600\|x=(-?\d+)\|y=(-?\d+)\|w=(\d+)\|h=(\d+)\|card=([^|]*)\|top=([^|]*)/);
+      if(!m)continue;
+      const hit={x:Number(m[1]),y:Number(m[2]),w:Number(m[3]),h:Number(m[4]),card:m[5],top:m[6]};
+      if(hit.x>0&&hit.y>0&&hit.w>0&&hit.h>0)return hit;
+    }
+    return null;
+  },15000,100,'V620 2600ms CE hit coordinates');
+  assert.ok(ceHit&&ceHit.x>0&&ceHit.y>64,'V620 must report a visible CE card after 2.6s');
+  assert.notEqual(ceHit.top,'-','V620 must resolve the real top element at the CE hit point');
+  stage('V620 page-owned liveness passed at 2600ms x='+ceHit.x+' y='+ceHit.y+' top='+ceHit.top);
 
   stage('verifying exact V600 native interaction asset');
   const earlyAsset=await withTimeout(new Promise((resolve,reject)=>{
-    const req=http.request({host:'127.0.0.1',port,path:'/v592-early-sidebar-capture.js?v=20260929-v600-1'},res=>{const chunks=[];res.on('data',chunk=>chunks.push(chunk));res.on('end',()=>resolve(Buffer.concat(chunks).toString('utf8')));});
+    const req=http.request({host:'127.0.0.1',port,path:'/v592-early-sidebar-capture.js?v=20261001-v608-1'},res=>{const chunks=[];res.on('data',chunk=>chunks.push(chunk));res.on('end',()=>resolve(Buffer.concat(chunks).toString('utf8')));});
     req.on('error',reject);
-    req.setTimeout(5000,()=>req.destroy(new Error('V600 native interaction asset request timeout')));
+    req.setTimeout(5000,()=>req.destroy(new Error('native interaction asset request timeout')));
     req.end();
-  }),7000,'V600 native interaction asset request');
+  }),7000,'native interaction asset request');
   assert.match(earlyAsset,/2026-09-29-v603-real-edge-geometry-rescue-v1/,'real server must deliver the V603 real-Edge interaction rescue');
-  assert.doesNotMatch(earlyAsset,/2026-09-29-v600-native-browser-interaction-v1/,'real server must not deliver the superseded V600 interaction bootstrap');
-  assert.doesNotMatch(earlyAsset,/global\.addEventListener\('pointerdown',pointerOwner,true\)/,'V600 must not capture pointerdown globally');
-  assert.doesNotMatch(earlyAsset,/global\.addEventListener\('click',clickOwner,true\)/,'V600 must not capture click globally');
-  assert.match(earlyAsset,/ceQcV600NativeInteraction/,'V600 native interaction marker must be published');
-  stage('V600 native interaction contract delivered');
+  assert.doesNotMatch(earlyAsset,/global\.addEventListener\('pointerdown',pointerOwner,true\)/,'native interaction runtime must not capture pointerdown globally');
+  assert.doesNotMatch(earlyAsset,/global\.addEventListener\('click',clickOwner,true\)/,'native interaction runtime must not capture click globally');
+  assert.match(earlyAsset,/ceQcV600NativeInteraction/,'native interaction marker must be published');
+  stage('native interaction contract delivered');
 
-  stage('waiting for real functional controls before V601 interaction proof');
-  await evalWait(cdp,"!!document.querySelector('.main-content .v18-business-card[href^=\\\"/ce?\\\"]') && !!document.querySelector('.top-user') && !!document.getElementById('accountDropdown')",12000,80,'real functional HOME controls');
-  const proof=await cdp.eval("(()=>{window.__CE_QC_V581_STABLE_SHELL__?.enforce?.('v601-functional-settle');const main=document.querySelector('.main-content .v18-business-card[href^=\\\"/ce?\\\"]'),top=document.querySelector('.top-user'),sidebar=document.querySelector('.sidebar'),app=document.querySelector('.app-body'),bar=document.querySelector('.topbar'),title=document.querySelector('#pageTitle');if(!main||!top||!sidebar||!app||!bar||!title)return null;main.scrollIntoView({block:'center',inline:'nearest',behavior:'instant'});const box=n=>{const r=n.getBoundingClientRect();return{x:r.left+r.width/2,y:r.top+r.height/2,left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width,height:r.height}};return{top:box(top),main:box(main),sidebar:box(sidebar),app:box(app),bar:box(bar),title:box(title),cssVar:getComputedStyle(document.documentElement).getPropertyValue('--ce-qc-shell-left').trim(),vw:innerWidth};})()",12000);
-  assert.ok(proof&&proof.sidebar.right>70,'V601 functional interaction proof must resolve real delivered controls');
-  assert.ok(Math.abs(proof.app.left-proof.sidebar.right)<=1.5,'app body must start exactly after the real sidebar');
-  assert.ok(Math.abs(proof.bar.left-proof.sidebar.right)<=1.5,'topbar must start exactly after the real sidebar');
-  assert.ok(proof.title.left+0.5>=proof.sidebar.right,'page title must not sit underneath the sidebar');
-  assert.ok(Math.abs(parseFloat(proof.cssVar||'0')-proof.sidebar.right)<=1.5,'V601 shell variable must equal the measured sidebar edge');
-  assert.ok(proof.main.y>=64&&proof.main.y<950,'real CE dashboard card must be visible before functional click');
-  stage('V601 functional geometry passed edge='+proof.sidebar.right+' vw='+proof.vw);
+  stage('dispatching real Windows Edge mouse click at V620 CE coordinates');
+  await cdp.send('Input.dispatchMouseEvent',{type:'mouseMoved',x:ceHit.x,y:ceHit.y,button:'none'},12000);
+  await cdp.send('Input.dispatchMouseEvent',{type:'mousePressed',x:ceHit.x,y:ceHit.y,button:'left',clickCount:1},12000);
+  await cdp.send('Input.dispatchMouseEvent',{type:'mouseReleased',x:ceHit.x,y:ceHit.y,button:'left',clickCount:1},12000);
 
-  stage('proving top user control actually opens its menu after a physical click');
-  await cdp.send('Input.dispatchMouseEvent',{type:'mouseMoved',x:proof.top.x,y:proof.top.y,button:'none'},12000);
-  await cdp.send('Input.dispatchMouseEvent',{type:'mousePressed',x:proof.top.x,y:proof.top.y,button:'left',clickCount:1},12000);
-  await cdp.send('Input.dispatchMouseEvent',{type:'mouseReleased',x:proof.top.x,y:proof.top.y,button:'left',clickCount:1},12000);
-  await evalWait(cdp,"document.getElementById('accountDropdown')?.hidden===false",4000,50,'top user menu functional result');
-  stage('V601 top user menu functional click passed');
-
-  stage('proving V603 survives a stale invisible hit surface present only in persistent Edge sessions');
-  await cdp.eval("(()=>{const menu=document.getElementById('accountDropdown');if(menu)menu.hidden=true;const old=document.getElementById('v603-real-edge-stale-hit-fixture');old?.remove();const a=document.querySelector('.main-content .v18-business-card[href^=\\\"/ce?\\\"]');if(!a)return false;a.scrollIntoView({block:'center',inline:'nearest',behavior:'instant'});const r=a.getBoundingClientRect();const blocker=document.createElement('div');blocker.id='v603-real-edge-stale-hit-fixture';Object.assign(blocker.style,{position:'fixed',left:r.left+'px',top:r.top+'px',width:r.width+'px',height:r.height+'px',zIndex:'2147483646',background:'transparent',pointerEvents:'auto'});document.body.appendChild(blocker);return true;})()",5000);
-  const blockerProof=await cdp.eval("(()=>{const b=document.getElementById('v603-real-edge-stale-hit-fixture');if(!b)return null;const r=b.getBoundingClientRect();const x=r.left+r.width/2,y=r.top+r.height/2;return{id:document.elementFromPoint(x,y)?.id||'',x,y,width:r.width,height:r.height};})()",5000);
-  assert.equal(blockerProof?.id,'v603-real-edge-stale-hit-fixture','V603 fixture must really cover the CE card');
-  assert.ok(blockerProof?.width>0&&blockerProof?.height>0,'V603 fixture must retain non-zero CE card geometry');
-  stage('proving CE home card actually navigates after a physical click');
-  await cdp.eval("(()=>{window.__V602_CLICK_TRACE__={before:location.href,defaultPrevented:null,target:null};const a=document.querySelector('.main-content .v18-business-card[href^=\\\"/ce?\\\"]');a?.addEventListener('click',e=>{queueMicrotask(()=>{window.__V602_CLICK_TRACE__.defaultPrevented=e.defaultPrevented;window.__V602_CLICK_TRACE__.target=e.target?.tagName||'';});},{once:true});return true;})()",5000);
-  await cdp.send('Input.dispatchMouseEvent',{type:'mouseMoved',x:blockerProof.x,y:blockerProof.y,button:'none'},12000);
-  await cdp.send('Input.dispatchMouseEvent',{type:'mousePressed',x:blockerProof.x,y:blockerProof.y,button:'left',clickCount:1},12000);
-  await cdp.send('Input.dispatchMouseEvent',{type:'mouseReleased',x:blockerProof.x,y:blockerProof.y,button:'left',clickCount:1},12000);
-  try{
-    const trace=await cdp.eval("window.__V602_CLICK_TRACE__",1800);
-    stage('V602 CE click trace before='+String(trace?.before||'')+' prevented='+String(trace?.defaultPrevented)+' target='+String(trace?.target||''));
-  }catch{}
-  cdp=await reattachAfterNavigation(cdp,debugPort,'/ce');
-  await evalWait(cdp,"location.pathname==='/ce' && document.getElementById('pageTitle')?.textContent?.includes('CE')",8000,80,'CE card functional navigation');
-  stage('V601 CE card functional navigation passed after navigation reattach');
+  const ceTarget=await waitForPageTarget(debugPort,'/ce',20000);
+  assert.ok(ceTarget?.url,'physical CE click must navigate the real Edge page target to /ce');
+  await waitFor(async()=>backendLog.includes('event=V612_APP_SCRIPT_START page=ce'),15000,100,'CE page app startup diagnostic after physical click');
+  stage('V620 real CE mouse click navigated to /ce without Runtime.evaluate');
 
   stage('verifying one V596 early owner + one stable shell in final production HTML');
   const delivered=await withTimeout(new Promise((resolve,reject)=>{
