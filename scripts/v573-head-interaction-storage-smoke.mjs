@@ -18,8 +18,10 @@ assert.match(index,/v581-stable-shell-owner\.js\?v=20260929-v600-1/,'static shel
 assert.match(index,/<a class="side-link active" data-page="home"[^>]*href="\/?\?auth=v581"/,'HOME must be a native hard link');
 assert.match(index,/<a class="side-link" data-page="ce"[^>]*href="\/ce\?auth=v581"/,'CE must be a native hard link');
 assert.match(index,/<a class="side-link" data-page="import"[^>]*href="\/import\?auth=v581"/,'import must be a native hard link');
+assert.match(index,/ceQcV623HomeRuntime\s*=\s*'ZERO_JS'/,'V623 HOME must remain a native zero-application-runtime shell');
+assert.doesNotMatch(index,/dashboard-components\.js/,'V623 must not deliver the retired legacy dashboard component runtime');
 assert.match(stable,/browser-native controls own all clicks/i,'stable shell must remain layout-only under V600');
-assert.match(index,/v592-early-sidebar-capture\.js\?v=20261003-v622-1/,'V622 native interaction bootstrap must be cache-busted in the head');
+assert.match(index,/v592-early-sidebar-capture\.js\?v=20261003-v623-1/,'V622 native interaction bootstrap must be cache-busted in the head');
 assert.doesNotMatch(stable,/subtree:true/,'stable-shell observer must never watch the whole dashboard subtree');
 assert.doesNotMatch(stable,/shell-structure-mutation/,'V610 stable shell must not revive the self-triggering structural observer repair loop');
 assert.match(stable,/ceQcV610ShellObserverRetired='1'/,'V610 stable shell must publish observer retirement marker');
@@ -46,6 +48,7 @@ assert.match(response,/stripInlineV575/,'final response pass must remove V575 if
 assert.match(response,/v580-visible-shell-recovery\.js/,'final response pass must remove V580 if any older wrapper re-injects it');
 assert.match(response,/const appTag=/,'V582 response pass must locate app.js as the bootstrap boundary');
 assert.match(response,/V581_TAG\+'\\n'\+match/,'V582 response pass must inject the stable owner before app.js');
+assert.match(response,/body\.includes\('ceQcV623HomeRuntime'\)\)return body/,'V623 conditional runtime must prevent response-layer shell reinjection');
 assert.match(response,/X-CE-QC-V581-Shell/);
 
 const assetAt=server.indexOf('const v575PublicAssetStatic');
