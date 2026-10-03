@@ -192,6 +192,19 @@
   <script src="/dashboard-v18.js?v=20260929-v603-1"></script>
   <script src="/dashboard-components.js?v=20260805-v18-1"></script>
   <script src="/v581-stable-shell-owner.js?v=20260929-v600-1"></script>\n  <script src="/app.js?v=20261003-v621-1"></script>
-  <script src="/v14-geometry-fixture.js?v=20260925-v582-1"></script>
+  <script>
+    (function(){
+      const loadLegacyRuntime=()=>{
+        if(document.getElementById('ceQcDeferredV14'))return;
+        const script=document.createElement('script');
+        script.id='ceQcDeferredV14';
+        script.src='/v14-geometry-fixture.js?v=20261003-v621-1';
+        script.async=false;
+        document.head.appendChild(script);
+      };
+      if(typeof requestIdleCallback==='function')requestIdleCallback(loadLegacyRuntime,{timeout:2500});
+      else setTimeout(loadLegacyRuntime,1800);
+    })();
+  </script>
 </body>
 </html>
