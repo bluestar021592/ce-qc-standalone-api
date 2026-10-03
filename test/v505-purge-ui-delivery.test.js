@@ -21,9 +21,9 @@ test('V545 cache-busted purge owner is delivered after app.js and requires expli
   const startupProbe=read('public/v505-purge-startup-probe.js');
   const purgeConsole=read('public/purge-console.html');
 
-  const appAt=index.indexOf('/app.js?v=20261003-v621-1');
-  const runtimeAt=index.indexOf('/v14-geometry-fixture.js?v=20261003-v621-1');
-  assert.ok(appAt>=0&&runtimeAt>appAt,'V621 deferred runtime loader must remain after app.js so the modern purge owner can still supersede legacy inline functions');
+  const appAt=index.indexOf('/app.js?v=20261003-v623-1');
+  const runtimeAt=index.indexOf('/v14-geometry-fixture.js?v=20261003-v623-1');
+  assert.ok(appAt>=0&&runtimeAt>appAt,'V623 business runtime loader must remain after app.js so the modern purge owner can still supersede legacy inline functions');
 
   // The always-loaded compatibility chain may still bootstrap the older owner,
   // but V502 and the data-route lazy group must cache-bust and supersede it with V545.
