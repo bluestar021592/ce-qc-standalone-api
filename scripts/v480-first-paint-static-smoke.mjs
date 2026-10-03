@@ -121,7 +121,11 @@ assert.match(v625Shell,/id="v625Tracking"/,'V625 tracking page must ship in the 
 assert.match(v625Shell,/id="v625Exceptions"/,'V625 exception page must ship in the unified system UI');
 assert.match(v625Shell,/id="v625Reports"/,'V625 report page must ship in the unified system UI');
 assert.match(v625Shell,/id="v625DataManagement"/,'V625 data-management page must ship in the unified system UI');
-assert.match(v625Shell,/id="v625Aux"/,'V625 auxiliary user-role-profile-404 surface must ship');
+assert.match(v625Shell,/id="v625Users"/,'V625 user-management page must ship independently');
+assert.match(v625Shell,/id="v625Roles"/,'V625 role-permission page must ship independently');
+assert.match(v625Shell,/id="v625Profile"/,'V625 personal-center page must ship independently');
+assert.match(v625Shell,/id="v625404"/,'V625 404 page must ship independently');
+assert.doesNotMatch(v625Shell,/id="v625Aux"/,'V625 must not merge users roles profile and 404 into one auxiliary surface');
 assert.match(server,/\['\/users', \{ key:'users', title:'用户管理', business:'' \}\]/,'V625 user-management route must be first-class');
 assert.match(server,/\['\/profile', \{ key:'profile', title:'个人中心', business:'' \}\]/,'V625 personal-center route must be first-class');
 assert.match(v625Runtime,/\/api\/tracking-workspace/,'V625 tracking and exception pages must use the canonical workspace API');
