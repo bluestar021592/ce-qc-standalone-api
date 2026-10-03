@@ -4,12 +4,13 @@ import crypto from 'crypto';
 
 import { getDb, getRuntimeConfig, nowIso } from './db.js';
 
-export const V502_MULTI_DRIVE_BACKUP_CLEANUP_ID='2026-09-10-v502-cd-ce-backup-cleanup-v1';
+export const V502_MULTI_DRIVE_BACKUP_CLEANUP_ID='2026-10-03-v626-auto-cd-backup-storage-v1';
 
 export function createDatabaseBackup(reason = 'manual') {
   const cfg = getRuntimeConfig();
   if (!fs.existsSync(cfg.dbFile)) return null;
-  fs.mkdirSync(cfg.backupsDir, { recursive: true });
+  const storage = chooseAutomaticBackupRoot(cfg);
+  fs.mkdirSync(storage.directory, { recursive: true });
   getDb().exec('PRAGMA wal_checkpoint(FULL)');
   const stamp = nowIso().replace(/[:.]/g, '-');
   const fileName = reason === 'before-full-clear'
@@ -17,7 +18,7 @@ export function createDatabaseBackup(reason = 'manual') {
     : reason === 'before-clear-state'
       ? `backup_before_clear_${stamp}.db`
       : `ce_qc_monitor_${safeName(reason)}_${stamp}.db`;
-  const filePath = path.join(cfg.backupsDir, fileName);
+  const filePath = path.join(storage.directory, fileName);
   fs.copyFileSync(cfg.dbFile, filePath);
 
   recordBackup({
@@ -152,9 +153,16 @@ export function getBackupStorageSummary() {
     byDrive.set(root.drive, current);
   }
   const safety = newestVerifiedSafetyBackup(roots, cfg);
+  const automatic = automaticBackupStorageStatus(cfg);
   return {
     patchId: V502_MULTI_DRIVE_BACKUP_CLEANUP_ID,
-    directory: cfg.backupsDir,
+    directory: automatic.selected?.directory || cfg.backupsDir,
+    autoManagement: true,
+    selectedDrive: automatic.selected?.drive || driveLabel(cfg.backupsDir),
+    selectedDirectory: automatic.selected?.directory || cfg.backupsDir,
+    candidates: automatic.candidates,
+    databaseFile: cfg.dbFile,
+    databaseDrive: driveLabel(cfg.dbFile),
     fileCount: rootSummaries.reduce((sum, row) => sum + Number(row.fileCount || 0), 0),
     totalBytes: rootSummaries.reduce((sum, row) => sum + Number(row.totalBytes || 0), 0),
     roots: rootSummaries,
@@ -190,7 +198,7 @@ export function fileHash(filePath) {
 
 function managedBackupRoots(cfg) {
   const values = [
-    { kind: 'DATA_BACKUPS', path: path.resolve(cfg.backupsDir) },
+    ...dataBackupRoots(cfg),
     { kind: 'LAUNCHER_PRE_UPDATE', path: managedLauncherBackupRoot(cfg) }
   ];
   const seen = new Set();
@@ -200,6 +208,52 @@ function managedBackupRoots(cfg) {
     seen.add(key);
     return true;
   });
+}
+
+function dataBackupRoots(cfg) {
+  const values = [{ kind:'DATA_BACKUPS_CONFIGURED', path:path.resolve(cfg.backupsDir) }];
+  if (process.platform === 'win32') {
+    const dRoot='D:\\';
+    if (fs.existsSync(dRoot)) values.push({ kind:'DATA_BACKUPS_AUTO_D', path:path.resolve('D:\\CE_QC_RUNTIME\\backups') });
+  }
+  const seen=new Set();
+  return values.filter(item=>{
+    const key=pathKey(item.path);
+    if(!item.path||seen.has(key))return false;
+    seen.add(key);return true;
+  });
+}
+function inspectBackupRoot(root) {
+  const value={kind:root.kind,directory:root.path,drive:driveLabel(root.path),writable:false,freeBytes:0,totalBytes:0,error:''};
+  try {
+    fs.mkdirSync(root.path,{recursive:true});
+    fs.accessSync(root.path,fs.constants.W_OK);
+    value.writable=true;
+    if(typeof fs.statfsSync==='function'){
+      const stat=fs.statfsSync(root.path);
+      value.freeBytes=Number(stat.bavail||stat.bfree||0)*Number(stat.bsize||stat.frsize||0);
+      value.totalBytes=Number(stat.blocks||0)*Number(stat.bsize||stat.frsize||0);
+    }
+  } catch(error) { value.error=String(error?.message||error); }
+  return value;
+}
+function automaticBackupStorageStatus(cfg) {
+  const candidates=dataBackupRoots(cfg).map(inspectBackupRoot);
+  const usable=candidates.filter(row=>row.writable);
+  usable.sort((a,b)=>{
+    const freeDiff=Number(b.freeBytes||0)-Number(a.freeBytes||0);
+    if(freeDiff!==0)return freeDiff;
+    if(/^D:/i.test(b.drive)&&!/^D:/i.test(a.drive))return 1;
+    if(/^D:/i.test(a.drive)&&!/^D:/i.test(b.drive))return -1;
+    return String(a.directory).localeCompare(String(b.directory));
+  });
+  return{selected:usable[0]||inspectBackupRoot({kind:'DATA_BACKUPS_CONFIGURED',path:path.resolve(cfg.backupsDir)}),candidates};
+}
+function chooseAutomaticBackupRoot(cfg) {
+  const status=automaticBackupStorageStatus(cfg);
+  const selected=status.selected;
+  if(!selected?.writable)throw new Error('C/D盘均没有可写备份目录，请检查磁盘状态。');
+  return selected;
 }
 
 function managedLauncherBackupRoot(cfg) {
@@ -271,8 +325,8 @@ function deleteManagedBackupFiles({ cfg, roots, trackedPaths, retainedDir, delet
 }
 
 function ensureBackupFileTarget(resolved, cfg) {
-  const backupRoot = path.resolve(cfg.backupsDir);
-  if (!isInsideOrSame(resolved, backupRoot) || samePath(resolved, backupRoot)) throw new Error('备份文件不在受控目录。');
+  const roots = dataBackupRoots(cfg);
+  if (!isInsideAnyRoot(resolved, roots) || roots.some(root => samePath(resolved, root.path))) throw new Error('备份文件不在受控目录。');
   protectFormalDatabase(resolved, cfg);
 }
 
