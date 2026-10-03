@@ -48,7 +48,11 @@ else if(page==='reports')showOnly('v625Reports');
 else if(page==='settings')showOnly('v625Settings');
 else if(page==='logs')showOnly('v625Logs');
 else if(page==='data-management')showOnly('v625DataManagement');
-else showOnly('v625Aux');
+else if(page==='users')showOnly('v625Users');
+else if(page==='roles')showOnly('v625Roles');
+else if(page==='profile')showOnly('v625Profile');
+else if(page==='not-found')showOnly('v625404');
+else showOnly('v625404');
 
 if(!business&& !['home'].includes(page))q('[data-dashboard-actions]')?.setAttribute('hidden','');
 const boardJump=byId('v625BoardJump');if(boardJump)boardJump.addEventListener('change',()=>location.href=boardJump.value);
@@ -96,7 +100,11 @@ async function loadSession(){
     const r=await json('/api/session',7000);const u=r.user||{};
     setText('v625UserName',u.displayName||u.username||'管理员');setText('v625UserRole',u.role||'VIEWER');setText('v625NotifyDot',r.unreadNotifications||0);
     setText('v625SettingsUser',u.displayName||u.username||'当前用户');setText('v625SettingsRole',u.role||'—');setText('v625SettingsEmail',u.email||u.username||'—');
-    setText('v625ProfileName',u.displayName||u.username||'当前用户');setText('v625ProfileEmail',u.email||u.role||'—');
+    const display=u.displayName||u.username||'当前用户';
+    setText('v625ProfileName',display);setText('v625ProfileEmail',u.email||u.username||'—');
+    setText('v625ProfileRole',u.role||'—');setText('v625ProfileDisplayName',display);
+    setText('v625ProfileLogin',u.username||u.email||'—');setText('v625ProfileRoleInfo',u.role||'—');
+    setText('v625ProfileScope',u.businessScope||'ALL');
   }catch{}
 }
 
@@ -242,7 +250,14 @@ async function loadBackups(){
 }
 async function backupNow(){try{await post('/api/admin/backup-now',{},60000);await loadBackups()}catch(e){alert(e.message)}}
 async function loadUsers(){
-  try{const r=await json('/api/admin/users',7000),rows=r.rows||[];const tbody=byId('v625UserRows');tbody.replaceChildren();for(const x of rows.slice(0,20))tbody.appendChild(rowTr([x.username,x.role,x.enabled?'启用':'停用']))}catch{byId('v625UserRows').innerHTML='<tr><td colspan="3">需要管理员权限</td></tr>'}
+  try{
+    const r=await json('/api/admin/users',7000),rows=r.rows||[];
+    const tbody=byId('v625UserRows');tbody.replaceChildren();
+    if(!rows.length){tbody.innerHTML='<tr><td colspan="5">暂无用户</td></tr>';return}
+    for(const x of rows.slice(0,100))tbody.appendChild(rowTr([x.username,x.role,x.businessScope||'ALL',x.enabled?'启用':'停用','查看']));
+  }catch{
+    const tbody=byId('v625UserRows');if(tbody)tbody.innerHTML='<tr><td colspan="5">需要管理员权限</td></tr>';
+  }
 }
 
 function bind(){
@@ -269,7 +284,8 @@ async function init(){
   else if(page==='settings')await loadSettings();
   else if(page==='logs')await loadLogs();
   else if(page==='data-management')await loadBackups();
-  else if(page==='users'||page==='roles'||page==='profile'||page==='not-found')await loadUsers();
+  else if(page==='users')await loadUsers();
+  else if(page==='profile')await loadSession();
 }
 void init();
 })();
