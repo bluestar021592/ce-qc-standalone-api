@@ -603,16 +603,16 @@ app.route('/api/bootstrap').get(async (req, res) => {
   bootstrapLog('ENTER');
   try {
     const fastCcsl = loadFastSqlAggregateState('CCSL');
-    const fastShopee = loadFastSqlAggregateState('SHOPEE');
     bootstrapLog('FAST_SQL_READ_DONE');
     const ccsl = fastCcsl
       ? compactDashboardState(fastCcsl)
       : compactDashboardState(summarizeLightweightCcslState(loadLightweightAggregateState('CCSL'), { dbStatus: getDbStatus(), network: buildNetworkInfo(getRuntimeConfig()), shopCodes: getShopCodeSummary() }));
     bootstrapLog('CCSL_READY');
-    const shopee = fastShopee
-      ? compactDashboardState(fastShopee)
-      : compactDashboardState(summarizeLightweightShopeeState(loadLightweightAggregateState('SHOPEE'), { dbStatus: getDbStatus() }));
-    bootstrapLog('SHOPEE_READY');
+    // V621: SHOPEE state is intentionally excluded from first-paint bootstrap.
+    // It is loaded after the shell is interactive so a large SHOPEE summary can
+    // never delay navigation/clickability.
+    const shopee = null;
+    bootstrapLog('SHOPEE_DEFERRED');
     const unifiedHistory = listUnifiedImportHistory(120);
     bootstrapLog('UNIFIED_HISTORY_READY');
     const latestUnified = getLatestUnifiedImport();
@@ -635,11 +635,11 @@ app.route('/api/bootstrap').get(async (req, res) => {
       },
       unifiedImport: latestUnified,
       businessStates: {},
-      bootstrapMode: 'V599_HOME_ZERO_DETAIL',
+      bootstrapMode: 'V621_INTERACTION_FIRST',
       generatedAt: new Date().toISOString()
     };
     res.setHeader('Cache-Control', 'private, max-age=5');
-    res.setHeader('X-CE-QC-Bootstrap-Mode', 'V618_SERVER_CANONICAL');
+    res.setHeader('X-CE-QC-Bootstrap-Mode', 'V621_INTERACTION_FIRST');
     res.setHeader('X-CE-QC-Bootstrap-Owner', 'server.js');
     res.setHeader('X-CE-QC-Bootstrap-Ms', String(Date.now() - bootstrapStartedAt));
     const payloadBytes = Buffer.byteLength(JSON.stringify(payload), 'utf8');
