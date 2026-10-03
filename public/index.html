@@ -58,6 +58,7 @@
             <small id="topRangeStatus" class="top-range-status"></small>
           </div>
           <label class="cycle-wrap"><select id="dashboardPeriodMode" class="cycle-select" aria-label="周期" onchange="changeDashboardPeriod(this.value)"><option value="">周期</option><option value="weekly">周</option><option value="monthly">月</option></select><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-chevron"></use></svg></label>
+          <a id="ceDirectTopLink" class="ce-direct-top-link" href="/ce?auth=v581" target="_self">CE看板</a>
           <button class="notification-button" title="系统通知"><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-bell"></use></svg><b id="notificationCount" hidden></b></button>
           <div class="top-user-menu">
             <button class="top-user" type="button" aria-haspopup="menu" aria-expanded="false" onclick="toggleAccountMenu(event)"><span class="top-avatar"><svg class="ui-icon"><use href="/assets/ui-icons.svg#icon-user"></use></svg></span><span><b id="headerUserName">CE未登录</b><small id="headerUserRole">系统用户</small></span><svg class="ui-icon account-chevron"><use href="/assets/ui-icons.svg#icon-chevron"></use></svg></button>
@@ -70,29 +71,18 @@
       </header>
 
       <main class="main-content" data-testid="page-root">
-        <section id="homePage" class="app-page">
-          <div class="home-admin-actions admin-only">
-            <button class="btn danger-outline" data-testid="one-click-purge-home" onclick="openDataPurge()">一键清空所有数据</button>
-          </div>
-          <section class="dashboard-range-toolbar" aria-label="总看板日期范围">
-            <strong>总看板日期范围</strong>
-            <label>开始日期<input id="dashboardRangeFrom" type="date"></label>
-            <span>至</span>
-            <label>结束日期<input id="dashboardRangeTo" type="date"></label>
-            <button class="btn primary compact" type="button" onclick="loadCustomDashboardRange()">查询</button>
-            <button class="btn ghost compact" type="button" onclick="resetDashboardRange()">返回单日</button>
-            <small id="dashboardRangeStatus">可自由选择开始日期和结束日期</small>
+        <section id="homePage" class="app-page v18-dashboard-page">
+          <section id="homeNativeBusinessGrid" class="v18-business-grid" aria-label="业务直达">
+            <a class="v18-business-card blue" data-business-key="total" href="/?auth=v581" data-testid="business-card-total"><span>总览</span><small>今日票数</small><b>0</b><em>占总票数 100.00%</em></a>
+            <a class="v18-business-card green" data-business-key="ce" href="/ce?auth=v581" target="_self" data-testid="business-card-ce"><span>CE</span><small>今日票数</small><b>0</b><em>占总票数 0.00%</em></a>
+            <a class="v18-business-card blue" data-business-key="ceaf" href="/ceaf?auth=v581" target="_self" data-testid="business-card-ceaf"><span>CEAF空运</span><small>今日票数</small><b>0</b><em>占总票数 0.00%</em></a>
+            <a class="v18-business-card orange" data-business-key="tbkh" href="/tbkh?auth=v581" target="_self" data-testid="business-card-tbkh"><span>TBKH</span><small>今日票数</small><b>0</b><em>占总票数 0.00%</em></a>
+            <a class="v18-business-card cyan" data-business-key="ali1688" href="/ali1688?auth=v581" target="_self" data-testid="business-card-ali1688"><span>ALI1688</span><small>今日票数</small><b>0</b><em>占总票数 0.00%</em></a>
+            <a class="v18-business-card cyan" data-business-key="whpp" href="/whpp?auth=v581" target="_self" data-testid="business-card-whpp"><span>WHPP本土</span><small>今日票数</small><b>0</b><em>占总票数 0.00%</em></a>
+            <a class="v18-business-card purple" data-business-key="shopeecn" href="/shopeecn?auth=v581" target="_self" data-testid="business-card-shopeecn"><span>SHOPEE CN</span><small>今日票数</small><b>0</b><em>占总票数 0.00%</em></a>
+            <a class="v18-business-card red" data-business-key="shopeevn" href="/shopeevn?auth=v581" target="_self" data-testid="business-card-shopeevn"><span>SHOPEE VN</span><small>今日票数</small><b>0</b><em>占总票数 0.00%</em></a>
           </section>
-          <section id="homeBusinessCards" class="business-card-grid" aria-label="六业务总览"></section>
-          <section class="pixel-panel home-core-panel"><h2 class="pixel-panel-title">核心指标总览 <small>PP＝派送｜PV＝派件</small></h2><div id="homeCoreMetrics" class="core-metric-grid"></div></section>
-          <section class="home-special-row"><article class="pixel-panel"><h2 class="pixel-panel-title">SHOPEE 专项指标</h2><div id="homeShopeeSpecial"></div></article><article class="pixel-panel"><h2 class="pixel-panel-title">派送概率分布（按派次）</h2><div id="homeDispatchDistribution"></div></article></section>
-
-          <section id="homeTrendGrid" class="chart-row" aria-label="七天趋势"></section>
-
-          <section class="bottom-row">
-            <article class="pixel-panel"><h2 class="pixel-panel-title">当日遗留问题件 / 自动次日追踪 <span class="count">共 <b id="homeIssueCount">0</b> 条</span></h2><div id="homeIssueTable" class="pixel-carry-wrap"></div></article>
-            <article class="pixel-panel"><h2 class="pixel-panel-title">规则提醒</h2><div id="homeRules" class="pixel-rules"></div></article>
-          </section>
+          <div id="homeDashboardDynamic" aria-live="polite"></div>
         </section>
 
         <section id="ccslPage" class="app-page" hidden>
@@ -189,7 +179,7 @@
   <script src="/dashboard-fixture-v18.js?v=20261003-v620-1"></script>
   <script src="/dashboard-data-adapter-v18.js?v=20260805-1"></script>
   <script src="/dashboard-chart-v18.js?v=20260806-1"></script>
-  <script src="/dashboard-v18.js?v=20260929-v603-1"></script>
+  <script src="/dashboard-v18.js?v=20261003-v622-1"></script>
   <script src="/dashboard-components.js?v=20260805-v18-1"></script>
   <script src="/v581-stable-shell-owner.js?v=20260929-v600-1"></script>\n  <script src="/app.js?v=20261003-v621-1"></script>
   <script>
