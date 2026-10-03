@@ -19,7 +19,7 @@ assert.match(index,/<a class="side-link active" data-page="home"[^>]*href="\/?\?
 assert.match(index,/<a class="side-link" data-page="ce"[^>]*href="\/ce\?auth=v581"/,'CE must be a native hard link');
 assert.match(index,/<a class="side-link" data-page="import"[^>]*href="\/import\?auth=v581"/,'import must be a native hard link');
 assert.match(stable,/browser-native controls own all clicks/i,'stable shell must remain layout-only under V600');
-assert.match(index,/v592-early-sidebar-capture\.js\?v=20261001-v608-1/,'V600 native interaction bootstrap must be cache-busted in the head');
+assert.match(index,/v592-early-sidebar-capture\.js\?v=20261003-v622-1/,'V622 native interaction bootstrap must be cache-busted in the head');
 assert.doesNotMatch(stable,/subtree:true/,'stable-shell observer must never watch the whole dashboard subtree');
 assert.doesNotMatch(stable,/shell-structure-mutation/,'V610 stable shell must not revive the self-triggering structural observer repair loop');
 assert.match(stable,/ceQcV610ShellObserverRetired='1'/,'V610 stable shell must publish observer retirement marker');
