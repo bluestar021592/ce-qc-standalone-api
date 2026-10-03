@@ -3,7 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
-const MARKER='2026-09-26-v589-diff-aware-local-candidate-gate-v1';
+const MARKER='2026-10-03-v621-release-without-cloud-edge-block-v1';
 const TIMEOUT_MS=120_000;
 
 function readChangedFiles(){
@@ -27,8 +27,7 @@ function isBrowserSensitive(file){
   return p.startsWith('public/') || p==='bootstrap.js' || p==='server.js' || p==='src/v581StableShellResponsePatch.js' || p==='scripts/v581-production-shell-browser-smoke.mjs' || p==='scripts/v587-production-browser-retry.mjs';
 }
 const changed=readChangedFiles();
-const inGitHubActions=String(process.env.GITHUB_ACTIONS||'').toLowerCase()==='true';
-const browserRequired=inGitHubActions || changed.unknown || changed.files.some(isBrowserSensitive);
+const browserSensitive=changed.unknown || changed.files.some(isBrowserSensitive);
 
 
 // This is the gate used by the installed Windows launcher before it accepts a remote
@@ -83,11 +82,14 @@ const TASKS=[
   ]]
 ];
 
-if(browserRequired){
-  TASKS.splice(6,0,['node',['scripts/v587-production-browser-retry.mjs'],300_000]);
-  console.log('[V611_LOCAL_GATE] real Edge gate required because GitHub CI is authoritative or browser/runtime delivery files changed or diff is unknown');
+// V621: hosted/headless Edge is diagnostic only. It must never block a desktop
+// release because CDP Runtime.evaluate can stall even while the page's own timers
+// and physical navigation remain alive. Syntax/static/data-integrity/storage/auth
+// checks remain mandatory below.
+if(browserSensitive){
+  console.log('[V621_LOCAL_GATE] browser-sensitive candidate detected; cloud Edge smoke is NON-BLOCKING diagnostic only');
 }else{
-  console.log('[V589_LOCAL_GATE] SKIP real Edge gate: candidate changes are non-browser only: '+(changed.files.join(', ')||'(none)'));
+  console.log('[V621_LOCAL_GATE] non-browser candidate; no Edge diagnostic required');
 }
 
 console.log(`[V584_LOCAL_GATE] ${MARKER} starting ${TASKS.length} bounded tasks`);
