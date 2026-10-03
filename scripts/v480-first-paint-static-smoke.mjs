@@ -103,6 +103,13 @@ assert.ok(v624RouteAt>0&&staticAt>v624RouteAt,'V624 core dashboard routes must o
 assert.match(server,/\['\/ce', \{ key:'ce', title:'CE看板', business:'CE' \}\]/,'V624 server must map CE to the clean business page');
 assert.match(v624Shell,/V624_CLEAN_MULTI_PAGE/,'V624 clean shell ownership marker must ship');
 assert.match(v624Shell,/href="\/ce\?auth=v624"/,'V624 CE navigation must be a native hard link');
+assert.match(v624Shell,/href="\/import\?auth=v624"/,'V624 import navigation must stay inside the clean shell');
+assert.doesNotMatch(v624Shell,/legacy=1|auth=v581/,'V624 clean shell must never route users back into the legacy frozen frontend');
+assert.match(server,/\['\/import', \{ key:'import', title:'数据导入', business:'' \}\]/,'V624 server must own the data-import route');
+assert.match(server,/\['\/tracking', \{ key:'tracking', title:'轨迹查询', business:'' \}\]/,'V624 server must own the tracking route');
+assert.match(v624Runtime,/\/api\/import\/unified-daily-report/,'V624 import page must call the canonical unified daily-report API');
+assert.match(v624Runtime,/\/api\/shopee\/run\/start/,'V624 unified processing must keep the SHOPEE processing owner');
+
 assert.doesNotMatch(v624Shell,/v581-stable-shell-owner|v592-early-sidebar-capture|app\.js|v14-geometry-fixture|dashboard-v18\.js/,'V624 clean shell must not load any legacy dashboard runtime');
 assert.doesNotMatch(v624Runtime,/preventDefault\(|stopPropagation\(|stopImmediatePropagation\(/,'V624 data runtime must never own or cancel navigation clicks');
 assert.match(server,/app\.route\('\/api\/bootstrap'\)\.get\(/,'V618 server.js must be the canonical bootstrap route owner');
