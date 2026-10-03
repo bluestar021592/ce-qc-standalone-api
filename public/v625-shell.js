@@ -85,6 +85,27 @@ function renderTrend(rootId,points=[]){
   const labels=coords.map(p=>'<text class="axis-label" x="'+p.x+'" y="'+(h-6)+'" text-anchor="middle">'+esc(p.label.slice(5))+'</text>').join('');
   root.innerHTML='<svg viewBox="0 0 '+w+' '+h+'" preserveAspectRatio="none"><defs><linearGradient id="v625TrendFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1677f2"/><stop offset="1" stop-color="#1677f2" stop-opacity="0"/></linearGradient></defs><path class="trend-area" d="'+line+' L'+coords.at(-1).x+' '+(h-28)+' L'+coords[0].x+' '+(h-28)+' Z"></path><path class="trend-line" d="'+line+'"></path>'+circles+labels+'</svg>';
 }
+function renderMiniTrend(rootId,points=[],tone='#1677f2'){
+  const root=byId(rootId);if(!root)return;
+  const clean=(points||[]).filter(x=>x&&x.avgDays!==null&&x.avgDays!==undefined).slice(-7);
+  if(!clean.length){root.innerHTML='<div class="v625-empty-state" style="padding:28px 6px;font-size:10px">暂无签收趋势</div>';return}
+  const w=300,h=86,padX=18,padTop=18,padBottom=17;
+  const values=clean.map(x=>Number(x.avgDays||0));
+  const min=Math.min(...values),max=Math.max(...values),span=Math.max(.5,max-min);
+  const step=(w-padX*2)/Math.max(1,clean.length-1);
+  const coords=clean.map((item,i)=>({
+    x:padX+i*step,
+    y:padTop+(max-Number(item.avgDays||0))/span*(h-padTop-padBottom-10),
+    value:Number(item.avgDays||0),
+    label:String(item.reportDate||'').slice(5)
+  }));
+  const line=coords.map((p,i)=>(i?'L':'M')+p.x.toFixed(1)+' '+p.y.toFixed(1)).join(' ');
+  const dots=coords.map(p=>'<circle class="mini-dot" cx="'+p.x+'" cy="'+p.y+'" r="3" style="fill:'+tone+'"></circle>').join('');
+  const valuesText=coords.map(p=>'<text class="mini-value" x="'+p.x+'" y="'+Math.max(9,p.y-7)+'" text-anchor="middle">'+p.value.toFixed(1)+'</text>').join('');
+  const labels=coords.map(p=>'<text class="mini-label" x="'+p.x+'" y="'+(h-3)+'" text-anchor="middle">'+esc(p.label)+'</text>').join('');
+  root.innerHTML='<svg viewBox="0 0 '+w+' '+h+'" preserveAspectRatio="none"><path class="mini-line" style="stroke:'+tone+'" d="'+line+'"></path>'+dots+valuesText+labels+'</svg>';
+}
+
 function renderDonut(m){
   const total=Math.max(1,m.total);
   const parts=[
@@ -109,28 +130,88 @@ async function loadSession(){
 }
 
 async function loadHome(){
-  const [latestR,historyR]=await Promise.allSettled([json('/api/import/unified-latest',7000),json('/api/unified-history?limit=7',7000)]);
-  const latest=latestR.status==='fulfilled'?latestR.value?.import:null;
-  const counts=latest?.classificationCounts||{};
+  const [summaryR,historyR]=await Promise.allSettled([
+    json('/api/home-quality-summary',15000),
+    json('/api/unified-history?limit=7',7000)
+  ]);
+  const summary=summaryR.status==='fulfilled'?summaryR.value:null;
+  const classification=summary?.classification||{};
+  const counts=classification.counts||{};
   const types=['CE','CEAF','TBKH','ALI1688','WHPP','SHOPEECN','SHOPEEVN'];
-  const states={};
-  await Promise.all(types.map(async type=>{try{const r=await json('/api/business-state/'+type+'?compact=1',7000);states[type]=r.state||{};}catch{states[type]={}}}));
-  const totals={};let grand=0;
-  for(const type of types){const imported=num(counts[type]);const processed=metricState(states[type]).total;totals[type]=imported!==null?imported:processed;grand+=totals[type]||0}
+  const grand=Number(classification.total||0);
+
   for(const type of types){
     const card=q('[data-card="'+type+'"]');if(!card)continue;
-    const value=totals[type]||0;card.querySelector(':scope>strong').textContent=fmt(value);
-    const ratio=grand?value/grand*100:0;card.querySelector('[data-ratio]').textContent=pct(ratio);card.querySelector('.v625-card-foot em').style.width=Math.min(100,ratio)+'%';
+    const value=Number(counts[type]||0);
+    card.querySelector(':scope>strong').textContent=fmt(value);
+    const ratio=grand?value/grand*100:0;
+    card.querySelector('[data-ratio]').textContent=pct(ratio);
+    card.querySelector('.v625-card-foot em').style.width=Math.min(100,ratio)+'%';
   }
-  setText('v625HomeDateMeta',(latest?.reportDate?'今日数据统计（'+latest.reportDate+'）':'今日数据统计'));
-  const ms=types.map(t=>metricState(states[t]));
-  const abnormal=ms.reduce((s,m)=>s+m.unresolved,0),resolved=ms.reduce((s,m)=>s+m.pod,0);
-  setText('v625TotalTickets',fmt(grand));setText('v625AbnormalTickets',fmt(abnormal));setText('v625AbnormalRate',pct(grand?abnormal/grand*100:0));setText('v625ResolvedTickets',fmt(resolved));
-  setText('v625HomeStatusTitle','已读取 '+types.length+' / '+types.length+' 个业务快照');
-  setText('v625HomeStatus','今日票数优先按综合日报分类结果显示，数据更新于 '+new Date().toLocaleString('zh-CN',{hour12:false})+'。');
-  setText('v625UpdatedAt',new Date().toLocaleString('zh-CN',{hour12:false}));
+
+  setText('v625HomeDateMeta',summary?.reportDate?'今日数据统计（'+summary.reportDate+'）':'今日数据统计');
+  setText('v625HomeStatusTitle',classification.balanced?'已完成 7 / 7 个业务分类':'分类结果待核验');
+  setText('v625HomeStatus',classification.balanced
+    ? '七业务分类合计与综合日报有效唯一运单完全一致。'
+    : '当前分类总量与综合日报未完全守恒，请先检查分类结果。');
+  setText('v625DataStatus',classification.balanced?'正常':'待核验');
+  setText('v625UpdatedAt',summary?.generatedAt?dateTime(summary.generatedAt):new Date().toLocaleString('zh-CN',{hour12:false}));
+
+  setText('v625ClassTotal',fmt(classification.total||0));
+  setText('v625ClassAuto',fmt(classification.autoRecognized||0));
+  setText('v625ClassUnknown',fmt(classification.unrecognized||0));
+  setText('v625ClassConflict',fmt(classification.conflicts||0));
+  setText('v625ClassAccuracy',pct(classification.accuracyRate||0));
+  setText('v625ClassAutoShare','占比 '+pct(grand?(classification.autoRecognized||0)*100/grand:0));
+  setText('v625ClassUnknownShare','占比 '+pct(grand?(classification.unrecognized||0)*100/grand:0));
+  setText('v625ClassConflictShare','占比 '+pct(grand?(classification.conflicts||0)*100/grand:0));
+  setText('v625ClassBalanced',classification.balanced?'七业务总量守恒':'分类总量未守恒');
+  setText('v625RecognitionMeta',summary?.reportDate||'本次日报');
+
+  const tbody=byId('v625RecognitionRows');
+  if(tbody){
+    tbody.replaceChildren();
+    const labels={CE:'CE',CEAF:'CEAF空运',TBKH:'TBKH',ALI1688:'ALI1688',WHPP:'WHPP本土',SHOPEECN:'SHOPEE CN',SHOPEEVN:'SHOPEE VN'};
+    const businesses=classification.businesses||[];
+    if(!businesses.length) tbody.innerHTML='<tr><td colspan="4">暂无分类数据</td></tr>';
+    else for(const row of businesses){
+      const tr=document.createElement('tr');
+      const values=[labels[row.businessType]||row.businessType,fmt(row.count),pct(row.share)];
+      for(const value of values){const td=document.createElement('td');td.textContent=value;tr.appendChild(td)}
+      const statusTd=document.createElement('td');
+      const status=document.createElement('span');status.className='v625-recognition-status';status.textContent=row.status||'已分类';
+      statusTd.appendChild(status);tr.appendChild(statusTd);tbody.appendChild(tr);
+    }
+  }
+
+  const timing=summary?.timing||{};
+  const timingTrend=summary?.timingTrend||{};
+  const timingMeta=[
+    ['TBKH','v625TimingTBKH','#f4931b'],
+    ['SHOPEECN','v625TimingSHOPEECN','#ef6a3a'],
+    ['SHOPEEVN','v625TimingSHOPEEVN','#ed4b61']
+  ];
+  const showDays=value=>value===null||value===undefined?'—':Number(value).toFixed(2).replace(/\.00$/,'')+'天';
+  for(const [type,prefix,tone] of timingMeta){
+    const data=timing[type]||{};
+    setText(prefix+'Overall',showDays(data.overall?.avgDays));
+    setText(prefix+'Pod','基于 '+fmt(data.overall?.podCount||0)+' 票POD');
+    setText(prefix+'PP',showDays(data.pp?.avgDays));
+    setText(prefix+'PPPod',fmt(data.pp?.podCount||0)+'票POD');
+    setText(prefix+'PV',showDays(data.pv?.avgDays));
+    setText(prefix+'PVPod',fmt(data.pv?.podCount||0)+'票POD');
+    setText(prefix+'A1',showDays(data.attempt1?.avgDays));
+    setText(prefix+'A2',showDays(data.attempt2?.avgDays));
+    setText(prefix+'A3',showDays(data.attempt3?.avgDays));
+    renderMiniTrend('v625TimingTrend'+type,timingTrend[type]||[],tone);
+  }
+  setText('v625TimingPeriod',summary?.reportDate?'统计日报 '+summary.reportDate+' 已POD票':'统计当前日报POD');
+
   const history=(historyR.status==='fulfilled'?historyR.value?.rows:[])||[];
-  renderTrend('v625HomeTrend',history.slice().reverse().map(r=>({label:r.reportDate,value:Object.values(r.classificationCounts||{}).reduce((a,b)=>a+Number(b||0),0)})));
+  renderTrend('v625HomeTrend',history.slice().reverse().map(r=>({
+    label:r.reportDate,
+    value:Object.values(r.classificationCounts||{}).reduce((a,b)=>a+Number(b||0),0)
+  })));
 }
 
 async function loadBusiness(){
