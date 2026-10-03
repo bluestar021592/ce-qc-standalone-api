@@ -101,7 +101,7 @@ const v625RouteAt=server.indexOf('const V625_UI_PAGES');
 const staticAt=server.indexOf("app.use(express.static(path.join(__dirname, 'public')))");
 assert.ok(v625RouteAt>0&&staticAt>v625RouteAt,'V625 core dashboard routes must own / and business pages before legacy static index resolution');
 assert.match(server,/\['\/ce', \{ key:'ce', title:'CE看板', business:'CE' \}\]/,'V625 server must map CE to the clean business page');
-assert.match(v625Shell,/V625_CLEAN_MULTI_PAGE/,'V625 clean shell ownership marker must ship');
+assert.match(v625Shell,/V625_FULL_SYSTEM_UI/,'V625 clean shell ownership marker must ship');
 assert.match(v625Shell,/href="\/ce\?auth=v625"/,'V625 CE navigation must be a native hard link');
 assert.match(v625Shell,/href="\/import\?auth=v625"/,'V625 import navigation must stay inside the clean shell');
 assert.doesNotMatch(v625Shell,/legacy=1|auth=v581/,'V625 clean shell must never route users back into the legacy frozen frontend');
