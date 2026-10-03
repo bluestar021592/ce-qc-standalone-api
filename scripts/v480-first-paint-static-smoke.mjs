@@ -107,8 +107,8 @@ assert.match(stableResponse,/appTag/,'final response pass must locate app.js as 
 assert.match(stableResponse,/V581_TAG\+'\\n'\+match/,'stable shell must be injected immediately before app.js');
 const earlyAt=indexHtml.indexOf('/v592-early-sidebar-capture.js?v=20261001-v608-1');
 const stableAt=indexHtml.indexOf('/v581-stable-shell-owner.js?v=20260929-v600-1');
-const appAt=indexHtml.indexOf('/app.js?v=20260921-v564-1');
-assert.ok(earlyAt>0&&stableAt>earlyAt&&appAt>stableAt,'V600 native interaction bootstrap must load in head before the stable shell and app.js');
+const appAt=indexHtml.indexOf('/app.js?v=');
+assert.ok(earlyAt>0&&stableAt>earlyAt&&appAt>stableAt,'native interaction bootstrap must load in head before the stable shell and app.js regardless of app cache-bust version');
 
 assert.match(purgeConsole,/CE QC 直接清空业务数据/,'recovery page must expose the direct no-backup purge mode');
 assert.match(purgeConsole,/onclick="window\.openDirectDataPurge\?\.\(\)"/,'recovery page must delegate direct purge to the V560 owner');
