@@ -230,7 +230,7 @@ app.get('/detail', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'detail.html'));
 });
 
-app.get(['/ce', '/ceaf', '/tbkh', '/ali1688', '/whpp', '/shopeecn', '/shopeevn', '/ccsl', '/shopee', '/tracking', '/exceptions', '/reports', '/import', '/settings', '/logs', '/data-management'], (req, res) => {
+app.get(['/ccsl', '/shopee', '/tracking', '/exceptions', '/reports', '/import', '/settings', '/logs', '/data-management'], (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
