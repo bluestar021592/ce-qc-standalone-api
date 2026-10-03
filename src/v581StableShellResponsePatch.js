@@ -19,6 +19,7 @@ export function rewriteV581StableShellHtml(body){
     body=stripScriptSrc(body,file);
   }
   body=body.replace(/auth=v(?:575|578|579|580)/g,'auth=v581');
+  if(body.includes('ceQcV623HomeRuntime'))return body;
   // V581 must own interaction before app.js starts its asynchronous bootstrap.
   // The markup is already fully parsed at this point in index.html, so the owner
   // can bind immediately and keep sidebar navigation available even if app startup
