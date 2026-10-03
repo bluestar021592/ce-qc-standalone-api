@@ -19,6 +19,7 @@ const v27ServerPatch=fs.readFileSync('src/v27ServerPatch.js','utf8');
 const v43BootstrapPatch=fs.readFileSync('src/v43BootstrapPerfPatch.js','utf8');
 const v90DashboardPatch=fs.readFileSync('src/v90FastDashboardReadPatch.js','utf8');
 const indexHtml=fs.readFileSync('public/index.html','utf8');
+const localLogin=fs.readFileSync('public/local-login.html','utf8');
 const dashboardV18=fs.readFileSync('public/dashboard-v18.js','utf8');
 const v625Shell=fs.readFileSync('public/v625-shell.html','utf8');
 const v625Runtime=fs.readFileSync('public/v625-shell.js','utf8');
@@ -128,6 +129,15 @@ assert.match(v625Shell,/id="v625404"/,'V625 404 page must ship independently');
 assert.match(v625Shell,/icon-shopee-nav/,'V625 sidebar must use dedicated Shopee navigation icon');
 assert.match(v625Shell,/icon-shopee-card/,'V625 home business cards must use dedicated Shopee S-bag icon');
 assert.match(v625Shell,/icon-plane/,'V625 CEAF surfaces must use airplane icon');
+
+assert.match(localLogin,/class="login-stage"/,'V625 login must ship the full-screen branded stage');
+assert.match(localLogin,/ce-express-logo-main\.png/,'V625 login must show the CE EXPRESS logo');
+assert.match(localLogin,/>欢迎登录</,'V625 login must use the approved welcome title');
+assert.match(localLogin,/id="rememberUser"/,'V625 login must include the remember-account control');
+assert.match(localLogin,/id="forgot"/,'V625 login must include the forgot-password affordance');
+assert.doesNotMatch(localLogin,/独立认证通道\s*5179|本机入口\s*·\s*登录后进入质量控制管理系统/,'V625 login must not expose legacy technical channel copy');
+assert.match(localLogin,/location\.replace\('\/\?auth=v625&t='/,'V625 login must enter the V625 UI after authentication');
+
 assert.doesNotMatch(v625Shell,/data-key="shopeecn"[^\n]*icon-bag|data-key="shopeevn"[^\n]*icon-bag/,'V625 Shopee navigation must never fall back to generic bag icon');
 assert.match(fs.readFileSync('public/assets/ui-icons-v625.svg','utf8'),/id="icon-shopee-card"/,'V625 dedicated icon sprite must include Shopee card icon');
 
