@@ -65,7 +65,7 @@ assert.doesNotMatch(startup,/method\s*:\s*['"`](?:POST|PUT|PATCH|DELETE)['"`]/i,
 assert.doesNotMatch(startup,/observe\(document\.body,\s*\{\s*childList:\s*true,\s*subtree:\s*true\s*\}\)/,'first-paint guard must not observe the whole dashboard subtree');
 assert.doesNotMatch(v14,/observe\(document\.body,\s*\{\s*childList:\s*true,\s*subtree:\s*true\s*\}\)/,'V14 must not install a body-wide dashboard MutationObserver');
 assert.doesNotMatch(v304,/observe\(document\.body,\s*\{\s*childList:\s*true,\s*subtree:\s*true\s*\}\)/,'V304 upload owner must not observe unrelated dashboard mutations');
-assert.match(indexHtml,/dashboard-fixture-v18\.js\?v=20261001-v608-1/,'V598 passive forensic runtime must be cache-busted');
+assert.match(indexHtml,/dashboard-fixture-v18\.js\?v=20261003-v620-1/,'V620 physical CE hit diagnostics must be cache-busted');
 assert.match(indexHtml,/v14-geometry-fixture\.js\?v=20260925-v582-1/,'V582 V14 observer fix must be cache-busted');
 assert.match(v14,/v304-unified-upload-owner\.js\?v=20260925-v582-1/,'V582 V304 upload owner must be cache-busted by the runtime loader');
 assert.doesNotMatch(indexHtml,/installV575CoordinateOwner/,'V581 static shell must retire the V575 capture owner');
