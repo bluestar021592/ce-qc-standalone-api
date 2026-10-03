@@ -43,3 +43,22 @@ main{padding:28px}.v624-route-grid{display:grid;grid-template-columns:repeat(4,m
 .v624-classification-grid span{display:block;color:#6e8297;font-size:12px;margin-bottom:8px}
 .v624-classification-grid b{font-size:22px}
 @media(max-width:1100px){.v624-operation-grid{grid-template-columns:1fr}.v624-classification-grid{grid-template-columns:repeat(2,1fr)}}
+
+.v624-settings-grid{display:grid;grid-template-columns:repeat(2,minmax(360px,1fr));gap:18px}
+.v624-info-list{display:grid;gap:10px}
+.v624-info-list>div{display:flex;justify-content:space-between;gap:16px;padding:11px 0;border-bottom:1px solid #edf2f7}
+.v624-info-list>div:last-child{border-bottom:0}
+.v624-info-list span{color:#6c8095;font-size:13px}
+.v624-info-list b{font-size:13px;text-align:right;word-break:break-all}
+.v624-form-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-bottom:14px}
+.v624-form-grid label{display:grid;gap:7px;color:#60768d;font-size:12px}
+.v624-form-grid input{height:40px;border:1px solid #cbd8e6;border-radius:8px;padding:0 10px;font:inherit}
+.v624-link-button{display:inline-flex;align-items:center;justify-content:center;min-height:42px;padding:0 16px;border:1px solid #cbd8e6;border-radius:8px;text-decoration:none;font-weight:700;color:#174a7e;background:#fff}
+.v624-table-wrap{overflow:auto;border:1px solid #e0e8f1;border-radius:8px}
+.v624-table{width:100%;border-collapse:collapse;min-width:920px;background:#fff}
+.v624-table th,.v624-table td{padding:11px 12px;border-bottom:1px solid #edf2f7;text-align:left;font-size:12px;vertical-align:top}
+.v624-table th{position:sticky;top:0;background:#f6f9fc;color:#4f657b;font-weight:700}
+.v624-table td{color:#304b65}
+.v624-log-list{display:grid;gap:8px}
+.v624-log-item{padding:10px 12px;border:1px solid #e2e9f1;border-radius:7px;background:#f9fbfd;font-family:Consolas,"Microsoft YaHei",monospace;font-size:12px;line-height:1.5;white-space:pre-wrap;word-break:break-word}
+@media(max-width:1100px){.v624-settings-grid{grid-template-columns:1fr}.v624-form-grid{grid-template-columns:1fr}}
