@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>__V624_PAGE_TITLE__ - CE Express 质量控制管理系统</title>
+  <link rel="stylesheet" href="/v624-shell.css?v=20261003-v624-1">
+</head>
+<body data-page="__V624_PAGE_KEY__" data-business="__V624_BUSINESS_TYPE__">
+  <div class="v624-shell">
+    <aside class="v624-sidebar">
+      <a class="v624-brand" href="/?auth=v624">
+        <img src="/assets/ce-express-logo-main.png" alt="CE Express">
+        <span><strong>CE EXPRESS</strong><small>质量控制管理系统</small></span>
+      </a>
+      <nav class="v624-nav" aria-label="主导航">
+        <a data-key="home" href="/?auth=v624">首页总看板</a>
+        <a data-key="ce" href="/ce?auth=v624">CE看板</a>
+        <a data-key="ceaf" href="/ceaf?auth=v624">CEAF空运看板</a>
+        <a data-key="tbkh" href="/tbkh?auth=v624">TBKH看板</a>
+        <a data-key="ali1688" href="/ali1688?auth=v624">ALI1688看板</a>
+        <a data-key="whpp" href="/whpp?auth=v624">WHPP本土看板</a>
+        <a data-key="shopeecn" href="/shopeecn?auth=v624">SHOPEE CN看板</a>
+        <a data-key="shopeevn" href="/shopeevn?auth=v624">SHOPEE VN看板</a>
+        <hr>
+        <a href="/import?legacy=1&auth=v581">数据导入</a>
+        <a href="/tracking?legacy=1&auth=v581">轨迹查询</a>
+        <a href="/exceptions?legacy=1&auth=v581">异常明细</a>
+        <a href="/reports?legacy=1&auth=v581">报表导出</a>
+        <a href="/settings?legacy=1&auth=v581">系统设置</a>
+        <a href="/logs?legacy=1&auth=v581">操作日志</a>
+      </nav>
+    </aside>
+
+    <div class="v624-main">
+      <header class="v624-topbar">
+        <div>
+          <h1>__V624_PAGE_TITLE__</h1>
+          <p id="v624Meta">全新独立前端 · 原生页面导航</p>
+        </div>
+        <div class="v624-actions">
+          <a class="v624-direct" href="/ce?auth=v624">CE看板</a>
+          <button id="v624Reload" type="button">刷新数据</button>
+        </div>
+      </header>
+
+      <main>
+        <section id="v624Home" class="v624-home">
+          <div class="v624-route-grid">
+            <a href="/ce?auth=v624" data-card="CE"><span>CE</span><b>—</b><small>今日票数</small></a>
+            <a href="/ceaf?auth=v624" data-card="CEAF"><span>CEAF空运</span><b>—</b><small>今日票数</small></a>
+            <a href="/tbkh?auth=v624" data-card="TBKH"><span>TBKH</span><b>—</b><small>今日票数</small></a>
+            <a href="/ali1688?auth=v624" data-card="ALI1688"><span>ALI1688</span><b>—</b><small>今日票数</small></a>
+            <a href="/whpp?auth=v624" data-card="WHPP"><span>WHPP本土</span><b>—</b><small>今日票数</small></a>
+            <a href="/shopeecn?auth=v624" data-card="SHOPEECN"><span>SHOPEE CN</span><b>—</b><small>今日票数</small></a>
+            <a href="/shopeevn?auth=v624" data-card="SHOPEEVN"><span>SHOPEE VN</span><b>—</b><small>今日票数</small></a>
+          </div>
+          <section class="v624-panel">
+            <h2>系统状态</h2>
+            <div id="v624HomeStatus" class="v624-empty">页面已就绪，业务数据分项读取中。</div>
+          </section>
+        </section>
+
+        <section id="v624Business" class="v624-business" hidden>
+          <div class="v624-kpis">
+            <article><span>今日票数</span><b id="kpiTotal">—</b></article>
+            <article><span>今日POD</span><b id="kpiPod">—</b></article>
+            <article><span>POD率</span><b id="kpiPodRate">—</b></article>
+            <article><span>Pending</span><b id="kpiPending">—</b></article>
+            <article><span>OC</span><b id="kpiOc">—</b></article>
+            <article><span>当前未闭环</span><b id="kpiOpen">—</b></article>
+          </div>
+          <section class="v624-panel">
+            <div class="v624-panel-head">
+              <h2>业务快照</h2>
+              <span id="v624SnapshotMeta">正在读取</span>
+            </div>
+            <div id="v624BusinessStatus" class="v624-empty">正在读取当前业务快照…</div>
+          </section>
+        </section>
+      </main>
+    </div>
+  </div>
+  <script src="/v624-shell.js?v=20261003-v624-1" defer></script>
+</body>
+</html>
