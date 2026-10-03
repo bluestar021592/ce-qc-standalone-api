@@ -45,6 +45,7 @@ import {
 } from './src/businessStore.js';
 import { createPurgeChallenge, executePurge } from './src/dataPurge.js';
 import { queueDirectDataPurge, getDirectDataPurgeStatus, DIRECT_PURGE_ID } from './src/directDataPurge.js';
+import { buildHomeQualitySummary } from './src/homeQualitySummary.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -628,6 +629,14 @@ app.get('/api/dashboard-cache/status', (req, res) => {
 
 app.get('/api/unified-history', (req, res) => {
   res.json({ ok: true, rows: listUnifiedImportHistory(req.query.limit) });
+});
+
+app.get('/api/home-quality-summary', (req, res) => {
+  try {
+    res.json(buildHomeQualitySummary());
+  } catch (error) {
+    res.status(500).json({ ok:false, error:error?.message || String(error) });
+  }
 });
 
 // V26: one lightweight startup payload. The browser used to wait for nine API
