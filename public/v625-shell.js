@@ -222,11 +222,161 @@ function renderReports(){
   for(const f of generated){const tr=document.createElement('tr');const td1=document.createElement('td');td1.textContent=f.name;const td2=document.createElement('td');td2.textContent=new Date().toLocaleString('zh-CN',{hour12:false});const td3=document.createElement('td');td3.innerHTML='<span class="v625-badge success">已完成</span>';const td4=document.createElement('td');const a=document.createElement('a');a.href=f.url;a.textContent='下载';td4.appendChild(a);tr.append(td1,td2,td3,td4);tbody.appendChild(tr)}
 }
 
+let settingsUsers=[];
 async function loadSettings(){
   const [sessionR,ceR,stateR]=await Promise.allSettled([json('/api/session',7000),json('/api/ce-auth-status',7000),json('/api/state?compact=1',7000)]);
-  if(sessionR.status==='fulfilled'){const u=sessionR.value.user||{};setText('v625SettingsUser',u.displayName||u.username);setText('v625SettingsRole',u.role);setText('v625SettingsEmail',u.email||u.username)}
-  if(ceR.status==='fulfilled'){const a=ceR.value.authStatus||{};setText('v625CeStatus',a.loggedIn&&!a.expired?'已连接':'未连接');if(a.tenantId)byId('v625CeTenant').value=a.tenantId;if(a.account)byId('v625CeUser').value=a.account;note('v625CeMessage',a.loggedIn?'CE账号 '+(a.account||'—')+' 已连接':'CE系统当前未登录。',a.loggedIn?'success':'')}
-  if(stateR.status==='fulfilled'){const s=stateR.value.state||{},db=s.dbStatus||{},net=s.network||{},shops=s.shopCodes||{};setText('v625DbState',(db.sqlite||'正常')+(db.lastProcessedReportDate?' · '+db.lastProcessedReportDate:''));setText('v625LocalUrl',net.localUrl||location.origin);setText('v625LanUrl',net.lanUrl||'未启用');setText('v625ShopMeta',fmt(num(first(shops,['count','total','active','size']))??0)+' 个CP码')}
+  if(sessionR.status==='fulfilled'){
+    const u=sessionR.value.user||{};
+    setText('v625SettingsUser',u.displayName||u.username);
+    setText('v625SettingsRole',u.role);
+    setText('v625SettingsEmail',u.email||u.username);
+  }
+  if(ceR.status==='fulfilled'){
+    const a=ceR.value.authStatus||{};
+    setText('v625CeStatus',a.loggedIn&&!a.expired?'已连接':'未连接');
+    if(a.tenantId)byId('v625CeTenant').value=a.tenantId;
+    if(a.account)byId('v625CeUser').value=a.account;
+    note('v625CeMessage',a.loggedIn?'CE账号 '+(a.account||'—')+' 已连接':'CE系统当前未登录。',a.loggedIn?'success':'');
+  }
+  if(stateR.status==='fulfilled'){
+    const s=stateR.value.state||{},db=s.dbStatus||{},net=s.network||{},shops=s.shopCodes||{};
+    const dbLabel=(db.sqlite||'正常')+(db.lastProcessedReportDate?' · '+db.lastProcessedReportDate:'');
+    setText('v625DbState',dbLabel);
+    setText('v625MaintenanceDb',dbLabel);
+    setText('v625LocalUrl',net.localUrl||location.origin);
+    setText('v625LanUrl',net.lanUrl||'未启用');
+    setText('v625ShopMeta',fmt(num(first(shops,['count','total','active','size']))??0)+' 个CP码');
+  }
+}
+
+function switchSettingsTab(name){
+  qa('#v625SettingsTabs [data-settings-tab]').forEach(btn=>btn.classList.toggle('active',btn.dataset.settingsTab===name));
+  qa('[data-settings-panel]').forEach(panel=>panel.hidden=panel.dataset.settingsPanel!==name);
+  if(name==='accounts')void loadSettingsUsers();
+  if(name==='interface')void loadSettings();
+  if(name==='maintenance')void loadSettingsBackups();
+}
+
+function closeUserEditor(){
+  const editor=byId('v625UserEditor');if(editor)editor.hidden=true;
+  byId('v625EditUserId').value='';
+  byId('v625AccountUsername').disabled=false;
+  byId('v625TempPasswordWrap').hidden=false;
+  byId('v625AccountUsername').value='';
+  byId('v625AccountDisplayName').value='';
+  byId('v625AccountEmail').value='';
+  byId('v625AccountRole').value='VIEWER';
+  byId('v625AccountScope').value='ALL';
+  byId('v625AccountPassword').value='';
+  note('v625AccountMessage','新增用户需要至少10位临时密码。');
+}
+function openUserEditor(user=null){
+  const editor=byId('v625UserEditor');if(!editor)return;
+  editor.hidden=false;
+  if(user){
+    setText('v625UserEditorTitle','编辑用户');
+    byId('v625EditUserId').value=user.id;
+    byId('v625AccountUsername').value=user.username||'';
+    byId('v625AccountUsername').disabled=true;
+    byId('v625AccountDisplayName').value=user.displayName||'';
+    byId('v625AccountEmail').value=user.email||'';
+    byId('v625AccountRole').value=user.role||'VIEWER';
+    byId('v625AccountScope').value=user.businessScope||'ALL';
+    byId('v625TempPasswordWrap').hidden=true;
+    byId('v625AccountPassword').value='';
+    note('v625AccountMessage','编辑用户资料后点击保存。');
+  }else{
+    closeUserEditor();
+    editor.hidden=false;
+    setText('v625UserEditorTitle','新增用户');
+  }
+}
+async function saveSettingsUser(){
+  const id=Number(byId('v625EditUserId').value||0);
+  const payload={
+    displayName:byId('v625AccountDisplayName').value.trim(),
+    email:byId('v625AccountEmail').value.trim(),
+    role:byId('v625AccountRole').value,
+    businessScope:byId('v625AccountScope').value
+  };
+  try{
+    if(id){
+      await request('/api/admin/users/'+id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)},15000);
+      note('v625AccountMessage','用户资料已保存。','success');
+    }else{
+      payload.username=byId('v625AccountUsername').value.trim();
+      payload.temporaryPassword=byId('v625AccountPassword').value;
+      await request('/api/admin/users',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)},15000);
+      note('v625AccountMessage','用户创建成功。','success');
+    }
+    await loadSettingsUsers();
+    setTimeout(closeUserEditor,500);
+  }catch(e){note('v625AccountMessage','保存失败：'+e.message,'error')}
+}
+async function toggleSettingsUser(user){
+  try{
+    await request('/api/admin/users/'+user.id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:!Boolean(user.enabled)})},15000);
+    await loadSettingsUsers();
+  }catch(e){note('v625AccountMessage','状态更新失败：'+e.message,'error')}
+}
+function renderSettingsUsers(){
+  const tbody=byId('v625SettingsUserRows');if(!tbody)return;
+  tbody.replaceChildren();
+  if(!settingsUsers.length){tbody.innerHTML='<tr><td colspan="7">暂无用户</td></tr>';return}
+  for(const user of settingsUsers){
+    const tr=document.createElement('tr');
+    const cells=[
+      user.username||'—',
+      user.displayName||'—',
+      user.role||'—',
+      user.businessScope||'ALL',
+      user.enabled?'启用':'停用',
+      dateTime(user.lastLoginAt)
+    ];
+    for(const value of cells){const td=document.createElement('td');td.textContent=value;tr.appendChild(td)}
+    const actionTd=document.createElement('td');
+    const wrap=document.createElement('div');wrap.className='v625-table-action';
+    const edit=document.createElement('button');edit.type='button';edit.textContent='编辑';edit.addEventListener('click',()=>openUserEditor(user));
+    const toggle=document.createElement('button');toggle.type='button';toggle.textContent=user.enabled?'停用':'启用';toggle.className=user.enabled?'danger':'success';toggle.addEventListener('click',()=>toggleSettingsUser(user));
+    wrap.append(edit,toggle);actionTd.appendChild(wrap);tr.appendChild(actionTd);tbody.appendChild(tr);
+  }
+}
+async function loadSettingsUsers(){
+  const tbody=byId('v625SettingsUserRows');if(tbody)tbody.innerHTML='<tr><td colspan="7">正在读取…</td></tr>';
+  try{
+    const r=await json('/api/admin/users',7000);
+    settingsUsers=r.rows||[];
+    renderSettingsUsers();
+  }catch(e){
+    if(tbody)tbody.innerHTML='<tr><td colspan="7">需要管理员权限或读取失败</td></tr>';
+  }
+}
+async function loadSettingsBackups(){
+  try{
+    const r=await json('/api/backups',7000),rows=r.backups||[];
+    setText('v625SettingsBackupMeta',rows.length+' 条备份');
+    setText('v625LastBackup',rows.length?dateTime(rows[0].createdAt||rows[0].created_at):'暂无备份');
+    note('v625SettingsBackupMessage','备份系统正常，共 '+rows.length+' 条记录。','success');
+    const tbody=byId('v625SettingsBackupRows');if(!tbody)return;tbody.replaceChildren();
+    if(!rows.length){tbody.innerHTML='<tr><td colspan="4">暂无备份</td></tr>';return}
+    for(const x of rows.slice(0,10))tbody.appendChild(rowTr([
+      dateTime(x.createdAt||x.created_at),
+      x.fileName||'—',
+      x.backupType||x.reason||'数据库备份',
+      x.fileSize?fmt(Math.round(x.fileSize/1024/1024))+' MB':'—'
+    ]));
+  }catch(e){
+    note('v625SettingsBackupMessage','备份状态读取失败：'+e.message,'error');
+    const tbody=byId('v625SettingsBackupRows');if(tbody)tbody.innerHTML='<tr><td colspan="4">读取失败</td></tr>';
+  }
+}
+async function settingsBackupNow(){
+  note('v625SettingsBackupMessage','正在创建数据库备份…');
+  try{
+    await post('/api/admin/backup-now',{},60000);
+    note('v625SettingsBackupMessage','数据库备份创建成功。','success');
+    await loadSettingsBackups();
+  }catch(e){note('v625SettingsBackupMessage','备份失败：'+e.message,'error')}
 }
 async function ceLogin(){try{const r=await post('/api/ce-login',{tenantId:byId('v625CeTenant').value||'000000',username:byId('v625CeUser').value.trim(),password:byId('v625CePassword').value},30000);byId('v625CePassword').value='';setText('v625CeStatus','已连接');note('v625CeMessage','CE登录成功：'+(r.authStatus?.account||''),'success')}catch(e){note('v625CeMessage','登录失败：'+e.message,'error')}}
 async function ceLogout(){try{await post('/api/ce-logout',{},15000);setText('v625CeStatus','未连接');note('v625CeMessage','已退出CE系统。','success')}catch(e){note('v625CeMessage','退出失败：'+e.message,'error')}}
@@ -269,8 +419,13 @@ function bind(){
   byId('v625ExceptionSearch')?.addEventListener('click',loadExceptions);
   qa('.v625-tabs button[data-period]').forEach(b=>b.addEventListener('click',()=>{qa('.v625-tabs button[data-period]').forEach(x=>x.classList.toggle('active',x===b));reportPeriod=b.dataset.period}));
   byId('v625GenerateReport')?.addEventListener('click',generateReport);
+  qa('#v625SettingsTabs [data-settings-tab]').forEach(btn=>btn.addEventListener('click',()=>switchSettingsTab(btn.dataset.settingsTab)));
+  byId('v625AddUser')?.addEventListener('click',()=>openUserEditor());
+  byId('v625CancelUserEdit')?.addEventListener('click',closeUserEditor);
+  byId('v625SaveUser')?.addEventListener('click',saveSettingsUser);
   byId('v625CeLogin')?.addEventListener('click',ceLogin);byId('v625CeLogout')?.addEventListener('click',ceLogout);
   byId('v625ShopFile')?.addEventListener('change',()=>setText('v625ShopFileName',byId('v625ShopFile').files?.[0]?.name||'请选择CP码文件'));byId('v625ShopImport')?.addEventListener('click',importShop);
+  byId('v625SettingsBackupNow')?.addEventListener('click',settingsBackupNow);
   byId('v625LogSearch')?.addEventListener('click',loadLogs);byId('v625BackupNow')?.addEventListener('click',backupNow);
 }
 async function init(){
@@ -281,7 +436,7 @@ async function init(){
   else if(page==='exceptions')await loadExceptions();
   else if(page==='reports'){byId('v625ReportDate').value=today();renderReports()}
   else if(page==='tracking')byId('v625TrackDate').value=today();
-  else if(page==='settings')await loadSettings();
+  else if(page==='settings'){await loadSettings();switchSettingsTab('basic');}
   else if(page==='logs')await loadLogs();
   else if(page==='data-management')await loadBackups();
   else if(page==='users')await loadUsers();
