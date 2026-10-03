@@ -146,6 +146,32 @@ app.use((req, res, next) => {
   }
   next();
 });
+
+const V624_DASHBOARD_PAGES = new Map([
+  ['/', { key:'home', title:'首页总看板', business:'' }],
+  ['/ce', { key:'ce', title:'CE看板', business:'CE' }],
+  ['/ceaf', { key:'ceaf', title:'CEAF空运看板', business:'CEAF' }],
+  ['/tbkh', { key:'tbkh', title:'TBKH看板', business:'TBKH' }],
+  ['/ali1688', { key:'ali1688', title:'ALI1688看板', business:'ALI1688' }],
+  ['/whpp', { key:'whpp', title:'WHPP本土看板', business:'WHPP' }],
+  ['/shopeecn', { key:'shopeecn', title:'SHOPEE CN看板', business:'SHOPEECN' }],
+  ['/shopeevn', { key:'shopeevn', title:'SHOPEE VN看板', business:'SHOPEEVN' }]
+]);
+
+app.get([...V624_DASHBOARD_PAGES.keys()], async (req, res, next) => {
+  try {
+    const page = V624_DASHBOARD_PAGES.get(req.path) || V624_DASHBOARD_PAGES.get('/');
+    const template = await fs.readFile(path.join(__dirname, 'public', 'v624-shell.html'), 'utf8');
+    const html = template
+      .replaceAll('__V624_PAGE_TITLE__', page.title)
+      .replaceAll('__V624_PAGE_KEY__', page.key)
+      .replaceAll('__V624_BUSINESS_TYPE__', page.business);
+    res.type('html').send(html);
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 const client = new CEClient();
