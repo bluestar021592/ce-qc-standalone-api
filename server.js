@@ -633,7 +633,10 @@ app.get('/api/unified-history', (req, res) => {
 
 app.get('/api/home-quality-summary', (req, res) => {
   try {
-    res.json(buildHomeQualitySummary());
+    res.json(buildHomeQualitySummary({
+      reportDate:String(req.query.reportDate||''),
+      snapshotId:String(req.query.snapshotId||'')
+    }));
   } catch (error) {
     res.status(500).json({ ok:false, error:error?.message || String(error) });
   }
