@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="ce-qc-shell" content="V625_FULL_SYSTEM_UI">
   <title>__V625_PAGE_TITLE__ - CE EXPRESS 质量控制管理系统</title>
-  <link rel="stylesheet" href="/v625-shell.css?v=20261004-v629-1">
+  <link rel="stylesheet" href="/v625-shell.css?v=20261004-v630-1">
 </head>
 <body data-page="__V625_PAGE_KEY__" data-business="__V625_BUSINESS_TYPE__">
   <div class="v625-app">
@@ -228,8 +228,9 @@
             <article class="kpi orange v628-kpi-click" data-kpi-detail="pending" role="button" tabindex="0"><span>Pending</span><b id="kpiPending">—</b><small>点击查看待跟进明细</small></article>
             <article class="kpi red v628-kpi-click" data-kpi-detail="abnormal" role="button" tabindex="0"><span>异常</span><b id="kpiOpen">—</b><small>OC <em id="kpiOc">—</em> · 点击查看</small></article>
             <article class="kpi gray"><span>平均签收天数</span><b id="kpiAvgDays">—</b><small>当前业务口径</small></article>
-            <article id="kpiReturnedCard" class="kpi blue" hidden><span>退回件</span><b id="kpiReturned">—</b><small>仅WHPP / SHOPEE CN / VN</small></article>
+            <article id="kpiReturnedCard" class="kpi blue v628-kpi-click" data-kpi-detail="returned" role="button" tabindex="0" hidden><span>退回件</span><b id="kpiReturned">—</b><small>点击查看已退回明细</small></article>
             <article id="kpiReturnRateCard" class="kpi red" hidden><span>退回率</span><b id="kpiReturnRate">—</b><small>退回件 ÷ 总票数</small></article>
+            <article id="kpiOtherCard" class="kpi gray v628-kpi-click" data-kpi-detail="otherNormal" role="button" tabindex="0" hidden><span>其他正常状态</span><b id="kpiOtherNormal">—</b><small>取消 / 正常分流 / 门店状态 · 点击查看</small></article>
           </div>
           <section id="v628KpiDetailPanel" class="v625-panel v628-kpi-detail" hidden>
             <div class="v625-section-head">
@@ -627,6 +628,6 @@
       </main>
     </div>
   </div>
-  <script src="/v625-shell.js?v=20261004-v629-1" defer></script>
+  <script src="/v625-shell.js?v=20261004-v630-1" defer></script>
 </body>
 </html>
