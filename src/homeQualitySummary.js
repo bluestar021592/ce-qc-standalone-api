@@ -260,9 +260,8 @@ function classificationForBatch(batch) {
 
 function hasBusinessData(batch) {
   if (!batch) return false;
-  const total=n(batch?.summary?.validUniqueWaybills ?? batch?.summary?.totalUnique,0);
   const classified=TYPES.reduce((sum,type)=>sum+n(batch?.classificationCounts?.[type],0),0);
-  return total>0 || classified>0;
+  return classified>0;
 }
 function selectUnifiedBatch({ reportDate='', snapshotId='' }={}) {
   const latest=getLatestUnifiedImport();
@@ -277,16 +276,37 @@ function selectUnifiedBatch({ reportDate='', snapshotId='' }={}) {
   ) || null;
 }
 
+function safeTimingForBatch(batch,type){
+  try{return timingForBatch(batch,type)}
+  catch(error){
+    console.warn('[CE-QC][HOME_SUMMARY_TIMING_FALLBACK]',type,error?.message||String(error));
+    return {
+      businessType:type,reportDate:batch?.reportDate||'',
+      overall:{avgDays:null,podCount:0,totalPodCount:0,missingEvidenceCount:0},
+      pp:{avgDays:null,podCount:0,totalPodCount:0},pv:{avgDays:null,podCount:0,totalPodCount:0},
+      attempt1:{avgDays:null,podCount:0},attempt2:{avgDays:null,podCount:0},attempt3:{avgDays:null,podCount:0},
+      evidence:{valid:0,missing:0,missingBills:[]},degraded:true,error:String(error?.message||error)
+    };
+  }
+}
+function safeReturnSummaryForBatch(batch,type){
+  try{return returnSummaryForBatch(batch,type)}
+  catch(error){
+    console.warn('[CE-QC][HOME_SUMMARY_RETURN_FALLBACK]',type,error?.message||String(error));
+    return {count:0,rate:0,total:n(batch?.classificationCounts?.[type],0),degraded:true,error:String(error?.message||error)};
+  }
+}
+
 export function buildHomeQualitySummary(options={}) {
   const latest=selectUnifiedBatch(options);
   const history=listUnifiedImportHistory(30);
   const classification=classificationForBatch(latest);
-  const timing=Object.fromEntries(TIMING_TYPES.map(type=>[type,timingForBatch(latest,type)]));
-  const returns=Object.fromEntries(TYPES.map(type=>[type,returnSummaryForBatch(latest,type)]));
+  const timing=Object.fromEntries(TIMING_TYPES.map(type=>[type,safeTimingForBatch(latest,type)]));
+  const returns=Object.fromEntries(TYPES.map(type=>[type,safeReturnSummaryForBatch(latest,type)]));
   const timingTrend=Object.fromEntries(TIMING_TYPES.map(type=>[
     type,
     history.slice().reverse().map(batch=>{
-      const current=timingForBatch(batch,type);
+      const current=safeTimingForBatch(batch,type);
       return{reportDate:batch.reportDate||'',avgDays:current.overall.avgDays,podCount:current.overall.podCount,totalPodCount:current.overall.totalPodCount};
     })
   ]));
