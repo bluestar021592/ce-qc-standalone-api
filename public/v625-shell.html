@@ -222,15 +222,28 @@
         <!-- BUSINESS -->
         <section id="v625Business" class="v625-page" hidden>
           <div class="v625-kpi-row">
-            <article class="kpi blue"><span>总票数</span><b id="kpiTotal">—</b><small>今日业务总量</small></article>
-            <article class="kpi green"><span>派送中</span><b id="kpiDelivery">—</b><small>当前在途</small></article>
-            <article class="kpi mint"><span>已签收(POD)</span><b id="kpiPod">—</b><small>POD率 <em id="kpiPodRate">—</em></small></article>
-            <article class="kpi orange"><span>Pending</span><b id="kpiPending">—</b><small>待继续跟进</small></article>
-            <article class="kpi red"><span>异常</span><b id="kpiOpen">—</b><small>OC <em id="kpiOc">—</em></small></article>
+            <article class="kpi blue v628-kpi-click" data-kpi-detail="total" role="button" tabindex="0"><span>总票数</span><b id="kpiTotal">—</b><small>点击查看全部运单</small></article>
+            <article class="kpi green v628-kpi-click" data-kpi-detail="delivery" role="button" tabindex="0"><span>派送中</span><b id="kpiDelivery">—</b><small>点击查看当前在途明细</small></article>
+            <article class="kpi mint v628-kpi-click" data-kpi-detail="pod" role="button" tabindex="0"><span>已签收(POD)</span><b id="kpiPod">—</b><small>POD率 <em id="kpiPodRate">—</em> · 点击查看</small></article>
+            <article class="kpi orange v628-kpi-click" data-kpi-detail="pending" role="button" tabindex="0"><span>Pending</span><b id="kpiPending">—</b><small>点击查看待跟进明细</small></article>
+            <article class="kpi red v628-kpi-click" data-kpi-detail="abnormal" role="button" tabindex="0"><span>异常</span><b id="kpiOpen">—</b><small>OC <em id="kpiOc">—</em> · 点击查看</small></article>
             <article class="kpi gray"><span>平均签收天数</span><b id="kpiAvgDays">—</b><small>当前业务口径</small></article>
             <article id="kpiReturnedCard" class="kpi blue" hidden><span>退回件</span><b id="kpiReturned">—</b><small>仅WHPP / SHOPEE CN / VN</small></article>
             <article id="kpiReturnRateCard" class="kpi red" hidden><span>退回率</span><b id="kpiReturnRate">—</b><small>退回件 ÷ 总票数</small></article>
           </div>
+          <section id="v628KpiDetailPanel" class="v625-panel v628-kpi-detail" hidden>
+            <div class="v625-section-head">
+              <h2 id="v628KpiDetailTitle">指标明细</h2>
+              <span id="v628KpiDetailMeta">点击上方指标查看对应运单</span>
+            </div>
+            <div class="v625-table-wrap">
+              <table class="v625-table">
+                <thead><tr><th>运单号</th><th>业务类型</th><th>区域</th><th>当前状态</th><th>最新轨迹</th><th>更新时间</th><th>操作</th></tr></thead>
+                <tbody id="v628KpiDetailRows"><tr><td colspan="7">请选择上方指标</td></tr></tbody>
+              </table>
+            </div>
+          </section>
+
           <div class="v625-two-col business-charts">
             <section class="v625-panel">
               <div class="v625-section-head"><h2>月度趋势</h2><select id="v625BusinessTrendRange" class="v625-mini-select"><option>近7天</option><option>近30天</option></select></div>
