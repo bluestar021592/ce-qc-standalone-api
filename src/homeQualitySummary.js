@@ -258,13 +258,19 @@ function classificationForBatch(batch) {
   };
 }
 
+function hasBusinessData(batch) {
+  if (!batch) return false;
+  const total=n(batch?.summary?.validUniqueWaybills ?? batch?.summary?.totalUnique,0);
+  const classified=TYPES.reduce((sum,type)=>sum+n(batch?.classificationCounts?.[type],0),0);
+  return total>0 || classified>0;
+}
 function selectUnifiedBatch({ reportDate='', snapshotId='' }={}) {
   const latest=getLatestUnifiedImport();
   const wantedDate=String(reportDate||'').trim();
   const wantedSnapshot=String(snapshotId||'').trim();
-  if (!wantedDate && !wantedSnapshot) return latest;
-  if (latest && (!wantedSnapshot || latest.snapshotId===wantedSnapshot) && (!wantedDate || latest.reportDate===wantedDate)) return latest;
   const history=listUnifiedImportHistory(1000);
+  if (!wantedDate && !wantedSnapshot) return hasBusinessData(latest) ? latest : (history.find(hasBusinessData) || latest);
+  if (latest && (!wantedSnapshot || latest.snapshotId===wantedSnapshot) && (!wantedDate || latest.reportDate===wantedDate)) return latest;
   return history.find(batch =>
     (!wantedSnapshot || String(batch?.snapshotId||'')===wantedSnapshot) &&
     (!wantedDate || String(batch?.reportDate||'')===wantedDate)
