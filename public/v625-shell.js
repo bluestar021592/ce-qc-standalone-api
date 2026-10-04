@@ -447,7 +447,7 @@ async function doImport(){
   const file=byId('v625ImportFile').files?.[0];if(!file){note('v625ImportMessage','请选择综合日报文件。','error');return}
   const fd=new FormData();fd.append('file',file);
   const manualWrap=byId('v626ManualDateWrap');
-  if(manualWrap&&!manualWrap.hidden&&byId('v625ReportDate')?.value)fd.append('reportDate',byId('v625ReportDate').value);
+  if(manualWrap&&!manualWrap.hidden&&byId('v626ManualReportDate')?.value)fd.append('reportDate',byId('v626ManualReportDate').value);
   note('v625ImportMessage','正在读取Excel并自动识别日报日期、分类7个业务…');
   appendLiveLog('开始上传综合日报 '+file.name);
   try{
