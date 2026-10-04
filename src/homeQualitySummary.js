@@ -197,9 +197,11 @@ function eventsForBills(reportDate,businessType,bills=[]) {
 }
 function isReturned(row={}) {
   const raw=safeJson(row.rawJson);
-  const values=[row.primaryCategory,raw.primaryCategory,raw.主分类,raw.异常分类,raw.退回状态,raw.currentState,raw.scanNormalizedState]
-    .map(value=>String(value||'').toUpperCase());
-  return values.some(value=>value==='已退回'||value.includes('退回')||value==='RETURNED'||value==='RETURN_COMPLETED');
+  const rawValues=[row.primaryCategory,raw.primaryCategory,raw.主分类,raw.异常分类,raw.退回状态,raw.currentState,raw.scanNormalizedState]
+    .map(value=>String(value||'').trim().toUpperCase()).filter(Boolean);
+  const negative=/^(未退回|非退回|待退回|NOT_RETURNED|NO_RETURN|PENDING_RETURN)$/;
+  const positive=/^(已退回|退回|退回完成|RETURN|RETURNED|RETURN_COMPLETED)$/;
+  return rawValues.some(value=>!negative.test(value)&&positive.test(value));
 }
 function timingRows(snapshotId,reportDate,businessType) {
   if(!snapshotId||!reportDate||!TIMING_TYPES.includes(businessType))return[];
