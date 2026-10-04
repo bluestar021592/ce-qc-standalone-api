@@ -455,11 +455,11 @@ async function loadBusiness(){
     if(reportDate&&!selectedReportDate())applyDashboardDate(reportDate);
     if(reportDate){byId('v625FromDate')&&(byId('v625FromDate').value=reportDate);byId('v625ToDate')&&(byId('v625ToDate').value=reportDate)}
     setText('kpiTotal',fmt(m.total));setText('kpiDelivery',fmt(m.delivery));setText('kpiPod',fmt(m.pod));setText('kpiPodRate',pct(m.podRate));setText('kpiPending',fmt(m.pending));setText('kpiOpen',fmt(m.unresolved));setText('kpiOc',fmt(m.oc));
-    const timing=summary.reportDate===reportDate?summary.timing?.[business]:null;
+    const timing=summary?.reportDate===reportDate?summary?.timing?.[business]:null;
     setText('kpiAvgDays',timing?.overall?.avgDays==null?'—':Number(timing.overall.avgDays).toFixed(2).replace(/\.00$/,''));
     const returnCapable=['WHPP','SHOPEECN','SHOPEEVN'].includes(business);
     if(byId('kpiReturnedCard'))byId('kpiReturnedCard').hidden=!returnCapable;if(byId('kpiReturnRateCard'))byId('kpiReturnRateCard').hidden=!returnCapable;
-    if(returnCapable){setText('kpiReturned',fmt(summary.returns?.[business]?.count||0));setText('kpiReturnRate',pct(summary.returns?.[business]?.rate||0))}
+    if(returnCapable){setText('kpiReturned',fmt(summary?.returns?.[business]?.count||0));setText('kpiReturnRate',pct(summary?.returns?.[business]?.rate||0))}
     const hist=state.historySummary||[];renderTrend('v625BusinessTrend',hist.map(x=>({label:x.reportDate||'',value:first(x,['summary.today','summary.total','today','total'])||0})));renderDonut(m);
     const qs=new URLSearchParams({scope:'all'});if(snapshotId)qs.set('snapshotId',snapshotId);if(reportDate)qs.set('reportDate',reportDate);
     const wr=await json('/api/tracking-workspace?'+qs.toString(),10000).catch(()=>({rows:[]}));
