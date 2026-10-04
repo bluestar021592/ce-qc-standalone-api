@@ -79,9 +79,13 @@ function metricState(state={}){
   const unresolved=num(first(state,['dashboard.metrics.unresolved','dashboard.abnormalCount','unresolved']))??Math.max(0,total-pod);
   const returned=num(first(state,['dashboard.metrics.returned','returned']))??0;
   const cancelled=num(first(state,['dashboard.metrics.cancelled','cancelled']))??0;
-  const delivery=Math.max(0,total-pod-returned-cancelled);
+  const explicitDelivery=num(first(state,['dashboard.metrics.delivery','dashboard.metrics.deliveryStay','dashboard.categories.deliveryTotal']));
+  const delivery=explicitDelivery??Math.max(0,total-pod-returned-cancelled);
+  const normalDiversion=num(first(state,['dashboard.metrics.normalDiversion']))??0;
+  const shopTotal=num(first(state,['dashboard.metrics.shopTotal']))??0;
+  const otherNormal=Math.max(0,cancelled+normalDiversion+shopTotal);
   const avgDays=num(first(state,['dashboard.metrics.avgPodDays','avgPodDays','dashboard.avgPodDays']));
-  return{total,pod,podRate:total?pod/total*100:0,pending,oc,unresolved,returned,cancelled,delivery,avgDays};
+  return{total,pod,podRate:total?pod/total*100:0,pending,oc,unresolved,returned,cancelled,delivery,normalDiversion,shopTotal,otherNormal,avgDays};
 }
 
 function renderTrend(rootId,points=[]){
@@ -399,13 +403,48 @@ async function loadHome(options={}){
 }
 
 let v628BusinessWorkspaceRows=[];
+let v630BusinessDetailTabs={};
 let v628BusinessMetricState={};
 let v628BusinessReportDate='';
 function businessTypeMatches(row){
   const t=String(row?.businessType||'').toUpperCase();
   return business.startsWith('SHOPEE')?t===business||t===business.replace('SHOPEE',''):t===business;
 }
+function tabRows(...keys){
+  for(const key of keys){
+    const value=v630BusinessDetailTabs?.[key];
+    if(Array.isArray(value))return value;
+    if(Array.isArray(value?.rows))return value.rows;
+  }
+  return [];
+}
+function uniqueDetailRows(rows=[]){
+  const map=new Map();
+  for(const row of rows){
+    const code=String(row?.shipmentCode||row?.运单号||'').trim().toUpperCase();
+    if(code&&!map.has(code))map.set(code,row);
+  }
+  return [...map.values()];
+}
 function v628MetricRows(kind){
+  if(kind==='delivery'){
+    const exact=tabRows('deliveryAll','delivery','pvDelivery');
+    if(exact.length)return uniqueDetailRows(exact);
+  }
+  if(kind==='pod'){const exact=tabRows('podClosed','pod');if(exact.length)return uniqueDetailRows(exact)}
+  if(kind==='returned'){const exact=tabRows('returned');if(exact.length)return uniqueDetailRows(exact)}
+  if(kind==='pending'){const exact=tabRows('pendingAll','pending1');if(exact.length)return uniqueDetailRows(exact)}
+  if(kind==='abnormal'){const exact=tabRows('abnormalOpen','coreAbnormal','abnormal','unresolved');if(exact.length)return uniqueDetailRows(exact)}
+  if(kind==='otherNormal'){
+    return uniqueDetailRows([
+      ...tabRows('cancelled'),
+      ...tabRows('normalDiversion'),
+      ...tabRows('phnomPenhShop'),
+      ...tabRows('provinceShop'),
+      ...tabRows('unknownShop')
+    ]);
+  }
+  if(kind==='total'){const exact=tabRows('allData','all','dailyParse');if(exact.length)return uniqueDetailRows(exact)}
   const rows=v628BusinessWorkspaceRows;
   if(kind==='delivery')return rows.filter(row=>!row.isClosed);
   if(kind==='pod')return rows.filter(row=>row.scanStatus==='POD'||row.queryStatus==='POD跳过');
@@ -416,7 +455,7 @@ function v628MetricRows(kind){
 }
 function renderKpiDetail(kind){
   const panel=byId('v628KpiDetailPanel'),tbody=byId('v628KpiDetailRows');if(!panel||!tbody)return;
-  const labels={total:'总票数',delivery:'派送中',pod:'已签收(POD)',pending:'Pending',abnormal:'异常',returned:'退回件'};
+  const labels={total:'总票数',delivery:'派送中',pod:'已签收(POD)',pending:'Pending',abnormal:'异常',returned:'退回件',otherNormal:'其他正常状态'};
   const rows=v628MetricRows(kind);
   qa('[data-kpi-detail]').forEach(el=>el.classList.toggle('active',el.dataset.kpiDetail===kind));
   setText('v628KpiDetailTitle',(labels[kind]||'指标')+'明细');
@@ -425,12 +464,16 @@ function renderKpiDetail(kind){
   if(!rows.length)tbody.innerHTML='<tr><td colspan="7">当前指标暂无对应运单</td></tr>';
   else for(const row of rows){
     const tr=document.createElement('tr');
-    const status=row.category||row.latestNode||row.queryStatus||row.scanStatus||'—';
-    for(const value of [row.shipmentCode,row.businessType,row.region||'—',status,row.latestNode||'—',row.latestTime||'—']){
+    const code=row.shipmentCode||row.运单号||'';
+    const status=row.category||row.primaryCategory||row.主分类||row.异常分类||row.latestNode||row.最后节点||row.queryStatus||row.scanStatus||row.currentState||'—';
+    const latestNode=row.latestNode||row.latestEventDesc||row.最后节点||row.lastEventDesc||'—';
+    const latestTime=row.latestTime||row.latestEventTime||row.最后节点时间||row.lastEventTime||'—';
+    const region=row.region||row.regionCode||row.区域||'—';
+    for(const value of [code,row.businessType||business,region,status,latestNode,latestTime]){
       const td=document.createElement('td');td.textContent=value||'—';tr.appendChild(td);
     }
     const action=document.createElement('td'),a=document.createElement('a');
-    a.href='/tracking?auth=v625&code='+encodeURIComponent(row.shipmentCode||'')+'&reportDate='+encodeURIComponent(v628BusinessReportDate||'');
+    a.href='/tracking?auth=v625&code='+encodeURIComponent(code)+'&reportDate='+encodeURIComponent(v628BusinessReportDate||'');
     a.textContent='查看轨迹';action.appendChild(a);tr.appendChild(action);tbody.appendChild(tr);
   }
   panel.hidden=false;
@@ -451,6 +494,7 @@ async function loadBusiness(){
     const stateUrl='/api/business-state/'+business+(snapshotId?'?snapshotId='+encodeURIComponent(snapshotId):'');
     const r=await json(stateUrl,15000);
     const state=r.state||{},m=metricState(state);
+    v630BusinessDetailTabs=state.detailTabs||{};
     v628BusinessMetricState=m;v628BusinessReportDate=reportDate;
     if(reportDate&&!selectedReportDate())applyDashboardDate(reportDate);
     if(reportDate){byId('v625FromDate')&&(byId('v625FromDate').value=reportDate);byId('v625ToDate')&&(byId('v625ToDate').value=reportDate)}
@@ -459,7 +503,8 @@ async function loadBusiness(){
     setText('kpiAvgDays',timing?.overall?.avgDays==null?'—':Number(timing.overall.avgDays).toFixed(2).replace(/\.00$/,''));
     const returnCapable=['WHPP','SHOPEECN','SHOPEEVN'].includes(business);
     if(byId('kpiReturnedCard'))byId('kpiReturnedCard').hidden=!returnCapable;if(byId('kpiReturnRateCard'))byId('kpiReturnRateCard').hidden=!returnCapable;
-    if(returnCapable){setText('kpiReturned',fmt(summary?.returns?.[business]?.count||0));setText('kpiReturnRate',pct(summary?.returns?.[business]?.rate||0))}
+    if(returnCapable){setText('kpiReturned',fmt(m.returned||0));setText('kpiReturnRate',pct(m.total?m.returned*100/m.total:0))}
+    if(byId('kpiOtherCard')){byId('kpiOtherCard').hidden=business!=='WHPP';setText('kpiOtherNormal',fmt(m.otherNormal||0))}
     const hist=state.historySummary||[];renderTrend('v625BusinessTrend',hist.map(x=>({label:x.reportDate||'',value:first(x,['summary.today','summary.total','today','total'])||0})));renderDonut(m);
     const qs=new URLSearchParams({scope:'all'});if(snapshotId)qs.set('snapshotId',snapshotId);if(reportDate)qs.set('reportDate',reportDate);
     const wr=await json('/api/tracking-workspace?'+qs.toString(),10000).catch(()=>({rows:[]}));
