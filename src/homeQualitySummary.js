@@ -258,9 +258,22 @@ function classificationForBatch(batch) {
   };
 }
 
-export function buildHomeQualitySummary() {
+function selectUnifiedBatch({ reportDate='', snapshotId='' }={}) {
   const latest=getLatestUnifiedImport();
-  const history=listUnifiedImportHistory(7);
+  const wantedDate=String(reportDate||'').trim();
+  const wantedSnapshot=String(snapshotId||'').trim();
+  if (!wantedDate && !wantedSnapshot) return latest;
+  if (latest && (!wantedSnapshot || latest.snapshotId===wantedSnapshot) && (!wantedDate || latest.reportDate===wantedDate)) return latest;
+  const history=listUnifiedImportHistory(1000);
+  return history.find(batch =>
+    (!wantedSnapshot || String(batch?.snapshotId||'')===wantedSnapshot) &&
+    (!wantedDate || String(batch?.reportDate||'')===wantedDate)
+  ) || null;
+}
+
+export function buildHomeQualitySummary(options={}) {
+  const latest=selectUnifiedBatch(options);
+  const history=listUnifiedImportHistory(30);
   const classification=classificationForBatch(latest);
   const timing=Object.fromEntries(TIMING_TYPES.map(type=>[type,timingForBatch(latest,type)]));
   const returns=Object.fromEntries(TYPES.map(type=>[type,returnSummaryForBatch(latest,type)]));
@@ -278,6 +291,9 @@ export function buildHomeQualitySummary() {
     snapshotId:latest?.snapshotId||'',
     reportDateSource:latest?.reportDateSource||latest?.summary?.reportDateSource||'',
     reportDateAutoDetected:Boolean(latest?.reportDateAutoDetected??latest?.summary?.reportDateAutoDetected??true),
+    requestedReportDate:String(options?.reportDate||''),
+    requestedSnapshotId:String(options?.snapshotId||''),
+    selectionMatched:Boolean(latest),
     classification,
     timing,
     timingTrend,
