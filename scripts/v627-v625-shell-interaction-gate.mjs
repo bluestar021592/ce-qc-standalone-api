@@ -61,8 +61,8 @@ for(const endpoint of apiContracts){
 
 for(const id of ['v626ReturnWHPP','v626ReturnRateWHPP','v626ReturnSHOPEECN','v626ReturnRateSHOPEECN','v626ReturnSHOPEEVN','v626ReturnRateSHOPEEVN']){
   assert.ok(html.includes(`id="${id}"`),`missing return metric UI: ${id}`);
-  assert.ok(js.includes(id),`missing return metric runtime binding: ${id}`);
 }
+assert.match(js,/for\(const type of \['WHPP','SHOPEECN','SHOPEEVN'\]\)[\s\S]*setText\('v626Return'\+type[\s\S]*setText\('v626ReturnRate'\+type/,'return metrics must bind WHPP/CN/VN through the shared runtime loop');
 
 for(const id of ['v626ProcessReportDate','v626ProcessFile','v626StageParse','v626StageClassify','v626StageScan','v626StageTrack','v626StageDone','v626ProcessBar','v626LiveLog']){
   assert.ok(html.includes(`id="${id}"`),`missing live processing UI: ${id}`);
