@@ -37,6 +37,17 @@ const setText=(id,val)=>{const el=byId(id);if(el)el.textContent=val===undefined|
 const showOnly=id=>qa('.v625-page').forEach(el=>el.hidden=el.id!==id);
 const today=()=>new Date().toISOString().slice(0,10);
 const dateTime=val=>{if(!val)return'—';const d=new Date(val);return Number.isNaN(d.getTime())?String(val):d.toLocaleString('zh-CN',{hour12:false})};
+const currentParams=()=>new URLSearchParams(location.search);
+const selectedReportDate=()=>{
+  const p=currentParams();
+  return p.get('reportDate')||p.get('toDate')||p.get('fromDate')||byId('v625ToDate')?.value||byId('v625FromDate')?.value||'';
+};
+function applyDashboardDate(date){
+  const value=String(date||'').slice(0,10);
+  if(!value)return;
+  if(byId('v625FromDate'))byId('v625FromDate').value=value;
+  if(byId('v625ToDate'))byId('v625ToDate').value=value;
+}
 
 qa('.v625-nav a[data-key]').forEach(a=>a.classList.toggle('active',a.dataset.key===page));
 if(page==='home')showOnly('v625Home');
@@ -56,8 +67,9 @@ else showOnly('v625404');
 
 if(!business&& !['home'].includes(page))q('[data-dashboard-actions]')?.setAttribute('hidden','');
 const boardJump=byId('v625BoardJump');if(boardJump)boardJump.addEventListener('change',()=>location.href=boardJump.value);
-byId('v625FromDate')&&(byId('v625FromDate').value=today());
-byId('v625ToDate')&&(byId('v625ToDate').value=today());
+const initialDashboardDate=selectedReportDate()||today();
+byId('v625FromDate')&&(byId('v625FromDate').value=initialDashboardDate);
+byId('v625ToDate')&&(byId('v625ToDate').value=initialDashboardDate);
 
 function metricState(state={}){
   const total=num(first(state,['total','today','dashboard.metrics.total','dashboard.totalMonitored','dashboard.pnh','dailyParseSummary.totalRecognized']))??0;
@@ -302,8 +314,10 @@ async function refreshOpenPodNow(){
 }
 
 async function loadHome(options={}){
+  const requestedDate=selectedReportDate()||v626LatestImport?.reportDate||'';
+  const summaryUrl='/api/home-quality-summary'+(requestedDate?'?reportDate='+encodeURIComponent(requestedDate):'');
   const [summaryR,historyR]=await Promise.allSettled([
-    json('/api/home-quality-summary',20000),
+    json(summaryUrl,20000),
     json('/api/unified-history?limit=7',7000)
   ]);
   const summary=summaryR.status==='fulfilled'?summaryR.value:null;
@@ -383,15 +397,60 @@ async function loadHome(options={}){
   if(!options.skipAux){void refreshLiveProgress();void loadOpenPod()}
 }
 
+let v628BusinessWorkspaceRows=[];
+let v628BusinessMetricState={};
+let v628BusinessReportDate='';
+function businessTypeMatches(row){
+  const t=String(row?.businessType||'').toUpperCase();
+  return business.startsWith('SHOPEE')?t===business||t===business.replace('SHOPEE',''):t===business;
+}
+function v628MetricRows(kind){
+  const rows=v628BusinessWorkspaceRows;
+  if(kind==='delivery')return rows.filter(row=>!row.isClosed);
+  if(kind==='pod')return rows.filter(row=>row.scanStatus==='POD'||row.queryStatus==='POD跳过');
+  if(kind==='returned')return rows.filter(row=>row.scanStatus==='RETURN'||row.queryStatus==='退回跳过');
+  if(kind==='pending')return rows.filter(row=>/pending/i.test([row.category,row.latestNode,row.queryStatus,row.specialState].join(' ')));
+  if(kind==='abnormal')return rows.filter(row=>!row.isClosed&&/(OC|异常|PENDING|盘点|工单|滞留|未扫描|错分|失败|待重试)/i.test([row.category,row.latestNode,row.queryStatus,row.specialState,row.shopState].join(' ')));
+  return rows;
+}
+function renderKpiDetail(kind){
+  const panel=byId('v628KpiDetailPanel'),tbody=byId('v628KpiDetailRows');if(!panel||!tbody)return;
+  const labels={total:'总票数',delivery:'派送中',pod:'已签收(POD)',pending:'Pending',abnormal:'异常',returned:'退回件'};
+  const rows=v628MetricRows(kind);
+  qa('[data-kpi-detail]').forEach(el=>el.classList.toggle('active',el.dataset.kpiDetail===kind));
+  setText('v628KpiDetailTitle',(labels[kind]||'指标')+'明细');
+  setText('v628KpiDetailMeta',v628BusinessReportDate+' · '+business+' · '+rows.length+' 票');
+  tbody.replaceChildren();
+  if(!rows.length)tbody.innerHTML='<tr><td colspan="7">当前指标暂无对应运单</td></tr>';
+  else for(const row of rows){
+    const tr=document.createElement('tr');
+    const status=row.category||row.latestNode||row.queryStatus||row.scanStatus||'—';
+    for(const value of [row.shipmentCode,row.businessType,row.region||'—',status,row.latestNode||'—',row.latestTime||'—']){
+      const td=document.createElement('td');td.textContent=value||'—';tr.appendChild(td);
+    }
+    const action=document.createElement('td'),a=document.createElement('a');
+    a.href='/tracking?auth=v625&code='+encodeURIComponent(row.shipmentCode||'')+'&reportDate='+encodeURIComponent(v628BusinessReportDate||'');
+    a.textContent='查看轨迹';action.appendChild(a);tr.appendChild(action);tbody.appendChild(tr);
+  }
+  panel.hidden=false;
+  panel.scrollIntoView({behavior:'smooth',block:'start'});
+}
 async function loadBusiness(){
   try{
     const params=new URLSearchParams(location.search);
     const latest=v626LatestImport||await latestImportContext();
-    const snapshotId=params.get('snapshotId')||latest?.snapshotId||'';
-    const reportDate=params.get('reportDate')||latest?.reportDate||'';
+    const requestedDate=params.get('reportDate')||params.get('toDate')||params.get('fromDate')||latest?.reportDate||'';
+    const requestedSnapshot=params.get('snapshotId')||'';
+    const summaryQuery=new URLSearchParams();
+    if(requestedDate)summaryQuery.set('reportDate',requestedDate);
+    if(requestedSnapshot)summaryQuery.set('snapshotId',requestedSnapshot);
+    const summary=await json('/api/home-quality-summary?'+summaryQuery.toString(),20000).catch(()=>null);
+    const snapshotId=summary?.snapshotId||requestedSnapshot||latest?.snapshotId||'';
+    const reportDate=summary?.reportDate||requestedDate||latest?.reportDate||'';
     const stateUrl='/api/business-state/'+business+(snapshotId?'?snapshotId='+encodeURIComponent(snapshotId):'');
-    const [r,summaryR]=await Promise.all([json(stateUrl,15000),json('/api/home-quality-summary',20000).catch(()=>null)]);
-    const state=r.state||{},m=metricState(state),summary=summaryR||{};
+    const r=await json(stateUrl,15000);
+    const state=r.state||{},m=metricState(state);
+    v628BusinessMetricState=m;v628BusinessReportDate=reportDate;
     if(reportDate){byId('v625FromDate')&&(byId('v625FromDate').value=reportDate);byId('v625ToDate')&&(byId('v625ToDate').value=reportDate)}
     setText('kpiTotal',fmt(m.total));setText('kpiDelivery',fmt(m.delivery));setText('kpiPod',fmt(m.pod));setText('kpiPodRate',pct(m.podRate));setText('kpiPending',fmt(m.pending));setText('kpiOpen',fmt(m.unresolved));setText('kpiOc',fmt(m.oc));
     const timing=summary.reportDate===reportDate?summary.timing?.[business]:null;
@@ -400,12 +459,13 @@ async function loadBusiness(){
     if(byId('kpiReturnedCard'))byId('kpiReturnedCard').hidden=!returnCapable;if(byId('kpiReturnRateCard'))byId('kpiReturnRateCard').hidden=!returnCapable;
     if(returnCapable){setText('kpiReturned',fmt(summary.returns?.[business]?.count||0));setText('kpiReturnRate',pct(summary.returns?.[business]?.rate||0))}
     const hist=state.historySummary||[];renderTrend('v625BusinessTrend',hist.map(x=>({label:x.reportDate||'',value:first(x,['summary.today','summary.total','today','total'])||0})));renderDonut(m);
-    const qs=new URLSearchParams({scope:'actionable'});if(snapshotId)qs.set('snapshotId',snapshotId);if(reportDate)qs.set('reportDate',reportDate);
+    const qs=new URLSearchParams({scope:'all'});if(snapshotId)qs.set('snapshotId',snapshotId);if(reportDate)qs.set('reportDate',reportDate);
     const wr=await json('/api/tracking-workspace?'+qs.toString(),10000).catch(()=>({rows:[]}));
-    const rows=(wr.rows||[]).filter(x=>{const t=String(x.businessType||'').toUpperCase();return business.startsWith('SHOPEE')?t===business||t===business.replace('SHOPEE',''):t===business}).slice(0,8);
+    v628BusinessWorkspaceRows=(wr.rows||[]).filter(businessTypeMatches);
+    const rows=v628BusinessWorkspaceRows.filter(x=>x.isActionable).slice(0,8);
     const tbody=byId('v625BusinessRows');tbody.replaceChildren();
     if(!rows.length){tbody.innerHTML='<tr><td colspan="7">当前日报暂无异常记录</td></tr>'}
-    else for(const row of rows){tbody.appendChild(rowTr([row.shipmentCode,row.businessType,row.category||row.queryStatus||'异常',row.pendingDays||row.ocDays||'—',row.currentState||row.queryStatus||'—',row.lastEventTime||'—','查看']))}
+    else for(const row of rows){tbody.appendChild(rowTr([row.shipmentCode,row.businessType,row.category||row.queryStatus||'异常',row.pendingDays||row.ocDays||'—',row.currentState||row.queryStatus||'—',row.latestTime||row.lastEventTime||'—','查看']))}
   }catch(e){byId('v625BusinessRows').innerHTML='<tr><td colspan="7">业务快照暂未读取：'+esc(e.message)+'</td></tr>'}
 }
 
@@ -787,7 +847,19 @@ async function loadUsers(){
 
 function bind(){
   byId('v625Reload')?.addEventListener('click',()=>location.reload());
-  byId('v625Query')?.addEventListener('click',()=>location.reload());
+  byId('v625Query')?.addEventListener('click',()=>{
+    const from=byId('v625FromDate')?.value||'',to=byId('v625ToDate')?.value||from;
+    const p=currentParams();p.set('auth','v625');
+    if(from)p.set('fromDate',from);if(to)p.set('toDate',to);
+    const reportDate=to||from;if(reportDate)p.set('reportDate',reportDate);
+    p.delete('snapshotId');
+    location.search=p.toString();
+  });
+  qa('[data-kpi-detail]').forEach(card=>{
+    const open=()=>renderKpiDetail(card.dataset.kpiDetail||'total');
+    card.addEventListener('click',open);
+    card.addEventListener('keydown',event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();open()}});
+  });
   byId('v625ImportFile')?.addEventListener('change',()=>{const file=byId('v625ImportFile').files?.[0];setText('v625ImportFileName',file?.name||'选择文件');if(file)appendLiveLog('已选择日报文件 '+file.name)});
   byId('v626ManualDateToggle')?.addEventListener('click',()=>{const wrap=byId('v626ManualDateWrap');if(wrap)wrap.hidden=!wrap.hidden});
   byId('v625ImportButton')?.addEventListener('click',doImport);
@@ -812,13 +884,21 @@ function bind(){
 }
 async function init(){
   bind();void loadSession();
-  if(page==='home'){await latestImportContext();await loadHome()}
-  else if(business){await latestImportContext();await loadBusiness()}
+  if(page==='home'){
+    const latest=await latestImportContext();
+    if(!currentParams().get('reportDate')&&latest?.reportDate)applyDashboardDate(latest.reportDate);
+    await loadHome();
+  }
+  else if(business){
+    const latest=await latestImportContext();
+    if(!currentParams().get('reportDate')&&latest?.reportDate)applyDashboardDate(latest.reportDate);
+    await loadBusiness();
+  }
   else if(page==='import'){await loadImport()}
   else if(page==='exceptions')await loadExceptions();
   else if(page==='reports'){byId('v625ReportDate').value=today();renderReports()}
   else if(page==='tracking'){
-    byId('v625TrackDate').value=today();
+    byId('v625TrackDate').value=currentParams().get('reportDate')||today();
     const code=new URLSearchParams(location.search).get('code');if(code){byId('v625TrackCode').value=code;void queryTrack()}
   }
   else if(page==='settings'){await loadSettings();switchSettingsTab('basic');}
