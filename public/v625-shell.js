@@ -40,7 +40,7 @@ const dateTime=val=>{if(!val)return'—';const d=new Date(val);return Number.isN
 const currentParams=()=>new URLSearchParams(location.search);
 const selectedReportDate=()=>{
   const p=currentParams();
-  return p.get('reportDate')||p.get('toDate')||p.get('fromDate')||byId('v625ToDate')?.value||byId('v625FromDate')?.value||'';
+  return p.get('reportDate')||p.get('toDate')||p.get('fromDate')||'';
 };
 function applyDashboardDate(date){
   const value=String(date||'').slice(0,10);
@@ -314,13 +314,14 @@ async function refreshOpenPodNow(){
 }
 
 async function loadHome(options={}){
-  const requestedDate=selectedReportDate()||v626LatestImport?.reportDate||'';
+  const requestedDate=selectedReportDate();
   const summaryUrl='/api/home-quality-summary'+(requestedDate?'?reportDate='+encodeURIComponent(requestedDate):'');
   const [summaryR,historyR]=await Promise.allSettled([
     json(summaryUrl,20000),
     json('/api/unified-history?limit=7',7000)
   ]);
   const summary=summaryR.status==='fulfilled'?summaryR.value:null;
+  if(summary?.reportDate&&!selectedReportDate())applyDashboardDate(summary.reportDate);
   const classification=summary?.classification||{};
   const counts=classification.counts||{};
   const returns=summary?.returns||{};
@@ -439,7 +440,7 @@ async function loadBusiness(){
   try{
     const params=new URLSearchParams(location.search);
     const latest=v626LatestImport||await latestImportContext();
-    const requestedDate=params.get('reportDate')||params.get('toDate')||params.get('fromDate')||latest?.reportDate||'';
+    const requestedDate=params.get('reportDate')||params.get('toDate')||params.get('fromDate')||'';
     const requestedSnapshot=params.get('snapshotId')||'';
     const summaryQuery=new URLSearchParams();
     if(requestedDate)summaryQuery.set('reportDate',requestedDate);
@@ -451,6 +452,7 @@ async function loadBusiness(){
     const r=await json(stateUrl,15000);
     const state=r.state||{},m=metricState(state);
     v628BusinessMetricState=m;v628BusinessReportDate=reportDate;
+    if(reportDate&&!selectedReportDate())applyDashboardDate(reportDate);
     if(reportDate){byId('v625FromDate')&&(byId('v625FromDate').value=reportDate);byId('v625ToDate')&&(byId('v625ToDate').value=reportDate)}
     setText('kpiTotal',fmt(m.total));setText('kpiDelivery',fmt(m.delivery));setText('kpiPod',fmt(m.pod));setText('kpiPodRate',pct(m.podRate));setText('kpiPending',fmt(m.pending));setText('kpiOpen',fmt(m.unresolved));setText('kpiOc',fmt(m.oc));
     const timing=summary.reportDate===reportDate?summary.timing?.[business]:null;
@@ -885,13 +887,11 @@ function bind(){
 async function init(){
   bind();void loadSession();
   if(page==='home'){
-    const latest=await latestImportContext();
-    if(!currentParams().get('reportDate')&&latest?.reportDate)applyDashboardDate(latest.reportDate);
+    await latestImportContext();
     await loadHome();
   }
   else if(business){
-    const latest=await latestImportContext();
-    if(!currentParams().get('reportDate')&&latest?.reportDate)applyDashboardDate(latest.reportDate);
+    await latestImportContext();
     await loadBusiness();
   }
   else if(page==='import'){await loadImport()}
