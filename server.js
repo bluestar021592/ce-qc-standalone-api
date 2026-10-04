@@ -33,6 +33,8 @@ import { createDashboardSnapshot, getMatchingSnapshot, getSnapshotById, listSnap
 import { appendHistorySummary, buildLongBackupV2 } from './src/longBackup.js';
 import { mergeBackupModule } from './src/backupRecovery.js';
 import { buildShopeeDashboard } from './src/shopeeReporting.js';
+import { loadWhppState } from './src/whppStore.js';
+import { buildWhppDashboard } from './src/whppReporting.js';
 import { analyzeShopeeShipment, SHOPEE_ANALYSIS_RULE_VERSION } from './src/shopeeAnalyzer.js';
 import { queryBatchWithFallback, splitTrackBatches } from './src/trackBatching.js';
 import {
@@ -750,6 +752,22 @@ app.get('/api/shopee/state', async (req, res) => {
 app.get('/api/business-state/:businessType', (req, res) => {
   try {
     const requestedSnapshotId = String(req.query.snapshotId || '');
+    const requestedType = String(req.params.businessType || '').toUpperCase();
+    if (requestedType === 'WHPP') {
+      const source = loadWhppState();
+      const dashboard = buildWhppDashboard(source);
+      const state = {
+        ...source,
+        viewBusinessType:'WHPP',
+        total:source.pnhBills?.length || source.dailyParseRows?.length || dashboard.metrics?.total || 0,
+        dashboard,
+        detailTabs:dashboard.detailTabs || {}
+      };
+      return res.json({
+        ok:true,businessType:'WHPP',reportDate:source.reportDate||'',snapshotId:source.snapshotId||'',
+        snapshotStatus:source.snapshotStatus||'',state:req.query.compact==='1'?compactDashboardState(state):state
+      });
+    }
     if (req.query.compact === '1') {
       const fast = loadFastSqlBusinessState(req.params.businessType, requestedSnapshotId);
       if (fast) return res.json({ ok: true, businessType: fast.viewBusinessType || fast.businessType, reportDate: fast.reportDate, snapshotId: fast.snapshotId, snapshotStatus: fast.snapshotStatus, state: fast });
@@ -1426,8 +1444,12 @@ app.get('/api/tracking-workspace', async (req, res) => {
   const reportDate = String(req.query.reportDate || unified?.reportDate || '');
   const scope = ['all', 'pod'].includes(String(req.query.scope || '')) ? String(req.query.scope) : 'actionable';
   let states = [];
-  if (snapshotId) states = ['CE', 'CEAF', 'TBKH', 'ALI1688', 'WHPP', 'SHOPEECN', 'SHOPEEVN'].map(type => loadLightweightUnifiedBusinessState(type, snapshotId));
-  if (!states.some(state => state?.finalRows?.length)) states = [await loadState(), loadBusinessState(SHOPEE)];
+  if (snapshotId) {
+    states = ['CE', 'CEAF', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN'].map(type => loadLightweightUnifiedBusinessState(type, snapshotId));
+    const whppState = loadWhppState();
+    if (!reportDate || String(whppState.reportDate || '') === reportDate) states.push(whppState);
+  }
+  if (!states.some(state => state?.finalRows?.length)) states = [await loadState(), loadBusinessState(SHOPEE), loadWhppState()];
   const allRows = states.flatMap(state => workspaceRows(state, state.businessType || 'CCSL'));
   const priority = row => row.queryStatus === '待重试' ? 0 : row.isActionable ? 1 : 2;
   allRows.sort((a, b) => priority(a) - priority(b) || String(a.businessType).localeCompare(String(b.businessType)) || String(a.shipmentCode).localeCompare(String(b.shipmentCode)));
