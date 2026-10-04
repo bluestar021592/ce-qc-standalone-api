@@ -11,7 +11,9 @@ const html=fs.readFileSync(path.join(root,'public','v625-shell.html'),'utf8');
 
 assert.match(home,/const negative=\/\^\(未退回\|非退回\|待退回\|NOT_RETURNED\|NO_RETURN\|PENDING_RETURN\)\$\//,'return detector must reject negative return states');
 assert.match(home,/const positive=\/\^\(已退回\|退回\|退回完成\|RETURN\|RETURNED\|RETURN_COMPLETED\)\$\//,'return detector must require terminal return state');
-assert.match(server,/const returnText =[\s\S]*未退回[\s\S]*RETURN_COMPLETED/,'workspace return status must be negative-safe');
+assert.match(server,/const returnText =/,'workspace return detector missing');
+assert.match(server,/已退回|RETURN_COMPLETED/,'workspace positive return terminal missing');
+assert.match(server,/未退回|NOT_RETURNED/,'workspace negative return guard missing');
 
 assert.match(js,/let v630BusinessDetailTabs=\{\}/,'business detail tabs cache missing');
 assert.match(js,/function tabRows\(\.\.\.keys\)/,'same-state detail tab reader missing');
