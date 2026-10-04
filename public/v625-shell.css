@@ -317,3 +317,10 @@ svg{width:1em;height:1em;display:inline-block;vertical-align:middle}
   .v626-stage-row{grid-template-columns:1fr 1fr}
   .v626-family-progress,.v625-timing-grid,.v626-drive-cards{grid-template-columns:1fr}
 }
+
+/* V628: business KPI drill-down */
+.v628-kpi-click{cursor:pointer;transition:transform .15s,box-shadow .15s,border-color .15s}
+.v628-kpi-click:hover,.v628-kpi-click:focus{transform:translateY(-2px);box-shadow:0 8px 20px rgba(20,73,124,.12);outline:2px solid rgba(22,119,242,.16);outline-offset:1px}
+.v628-kpi-click.active{border-color:#2787f7;box-shadow:0 0 0 2px rgba(39,135,247,.12)}
+.v628-kpi-detail{scroll-margin-top:18px}
+.v628-kpi-detail .v625-table td:last-child a{color:#1477ee;font-weight:700;text-decoration:none}
