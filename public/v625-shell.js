@@ -860,7 +860,7 @@ function bind(){
   qa('[data-kpi-detail]').forEach(card=>{
     const open=()=>renderKpiDetail(card.dataset.kpiDetail||'total');
     card.addEventListener('click',open);
-    card.addEventListener('keydown',event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();open()}});
+    card.addEventListener('keydown',event=>{if(event.key==='Enter'||event.key===' ')open()});
   });
   byId('v625ImportFile')?.addEventListener('change',()=>{const file=byId('v625ImportFile').files?.[0];setText('v625ImportFileName',file?.name||'选择文件');if(file)appendLiveLog('已选择日报文件 '+file.name)});
   byId('v626ManualDateToggle')?.addEventListener('click',()=>{const wrap=byId('v626ManualDateWrap');if(wrap)wrap.hidden=!wrap.hidden});
