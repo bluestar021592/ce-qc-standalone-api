@@ -31,11 +31,13 @@ const manualGateImport = v206.indexOf("import './v501FreshStartManualTrackingGat
 const runtimeImport = v206.indexOf("import './v246QcTrackingRuntimePatch.js';");
 assert.ok(policyImport >= 0 && manualGateImport > policyImport && runtimeImport > manualGateImport, 'V501 manual gate must install after V500 policy and before V246 route registration');
 
-assert.match(manualGate, /V501_FRESH_START_MANUAL_TRACKING_GATE_ID='2026-09-10-v501-block-legacy-manual-v246-before-purge-v1'/);
+assert.match(manualGate, /V501_FRESH_START_MANUAL_TRACKING_GATE_ID='2026-10-05-v641-allow-explicit-single-day-manual-v246-v1'/);
 assert.match(manualGate, /TARGET_PATH='\/api\/v246\/tracking\/reconcile'/);
 assert.match(manualGate, /policy\.waitingForFreshStart/);
 assert.match(manualGate, /status\(423\)/);
-assert.match(manualGate, /V501_FRESH_PURGE_REQUIRED/);
+assert.match(manualGate, /V501_LEGACY_WIDE_RANGE_BLOCKED/);
+assert.match(manualGate, /explicitSingleDay/);
+assert.match(manualGate, /无需清空数据/);
 assert.match(manualGate, /150,000\+票补核/);
 
 assert.match(runtime, /STARTUP_90DAY_ANTI_LEAK/);
@@ -88,4 +90,4 @@ const disabled = JSON.parse(disabledProbe);
 assert.equal(disabled.hardDisable, true);
 assert.equal(disabled.v246Enabled, false, 'explicit emergency hard-disable must remain available');
 
-console.log('[V501/V500] managed fresh-start gate passed · legacy startup keeps V246 auto + manual reconcile disabled before purge · isolated purge arms tracking · next managed restart enables hourly/02:00 + manual tracking · explicit hard stop preserved');
+console.log('[V641/V501/V500] managed fresh-start gate passed · legacy wide-range reconcile remains blocked · explicit single-day manual reconcile is allowed without purge · isolated purge arms background tracking · explicit hard stop preserved');
