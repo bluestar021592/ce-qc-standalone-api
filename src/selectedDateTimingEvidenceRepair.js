@@ -3,6 +3,7 @@ import { getDb } from './db.js';
 import { normalizeEvent } from './analyzer.js';
 import { queryTrackBatchWithFallback, splitTrackBatches } from './trackBatching.js';
 import { loadWhppCanonicalTruth } from './whppCanonicalTruth.js';
+import { normalizeV485TrackRows, archiveV485TrackQueryResponse } from './v485StrictTrackEvidence.js';
 
 export const V645_SELECTED_DATE_TIMING_REPAIR_ID='2026-10-05-v645-selected-date-pod-track-repair-v1';
 const TYPES=new Set(['TBKH','WHPP','SHOPEECN','SHOPEEVN']);
@@ -81,13 +82,14 @@ function podBills(type,date,snapshotId=''){
   if(type==='TBKH')return tbkhPodBills(date,snapshotId);
   return shopeePodBills(type,date,snapshotId);
 }
-function groupRows(rows=[]){
+function groupRows(rows=[],fallbackBills=[]){
   const map=new Map();
-  for(const raw of rows||[]){
+  const normalizedRows=normalizeV485TrackRows(rows,{fallbackBills});
+  for(const raw of normalizedRows){
     const row={...normalizeEvent(raw)},bill=billOf(row);
     if(!bill)continue;
     if(!map.has(bill))map.set(bill,[]);
-    map.get(bill).push(row);
+    map.get(bill).push({...raw,...row,shipmentCode:bill});
   }
   return map;
 }
@@ -122,7 +124,7 @@ async function runOne(type,date,snapshotId=''){
   patch(type,date,snapshotId,{status:'RUNNING',phase:'TRACK_QUERY',total:bills.length,completed:0,failed:0,queried:0,startedAt:now(),message:`${type} ${date} 签收时效补证：真实POD ${bills.length}票`});
   if(!bills.length)return patch(type,date,snapshotId,{status:'WAITING_FOR_POD_MEMBERS',phase:'WAITING_FOR_POD_MEMBERS',completedAt:now(),message:`${type} ${date} 当前尚未形成真实POD成员；等待扫描/轨迹处理完成后自动重试。`});
   const client=new CEClient(),batches=splitTrackBatches(bills),totalBatches=batches.length;
-  let completed=0,failed=0,queried=0;
+  let completed=0,failed=0,queried=0,persistedEvents=0;
   for(let offset=0;offset<totalBatches;offset+=4){
     const wave=batches.slice(offset,offset+4);
     const results=await Promise.all(wave.map(async batch=>{
@@ -132,17 +134,19 @@ async function runOne(type,date,snapshotId=''){
     }));
     for(const outcome of results){
       for(const success of outcome.successes||[]){
-        const grouped=groupRows(success.events||[]);
-        for(const codeRaw of success.batch||[]){
+        const successBatch=success.batch||[];
+        try{await archiveV485TrackQueryResponse(successBatch,success.events||[])}catch{}
+        const grouped=groupRows(success.events||[],successBatch);
+        for(const codeRaw of successBatch){
           const code=String(codeRaw||'').trim().toUpperCase(),rows=grouped.get(code)||[];
-          if(rows.length){persistBillEvents(type,date,code,rows);completed+=1}else failed+=1;
+          if(rows.length){persistedEvents+=persistBillEvents(type,date,code,rows);completed+=1}else failed+=1;
         }
       }
       for(const failure of outcome.failures||[])failed+=(failure.batch||[]).length;
     }
-    patch(type,date,snapshotId,{status:'RUNNING',phase:'TRACK_QUERY',completed,failed,queried,message:`${type} ${date} 轨迹补证 ${Math.min(offset+4,totalBatches)}/${totalBatches}批：成功 ${completed}/${bills.length}，失败 ${failed}`});
+    patch(type,date,snapshotId,{status:'RUNNING',phase:'TRACK_QUERY',completed,failed,queried,persistedEvents,message:`${type} ${date} 轨迹补证 ${Math.min(offset+4,totalBatches)}/${totalBatches}批：成功 ${completed}/${bills.length}，失败 ${failed}`});
   }
-  return patch(type,date,snapshotId,{status:failed?'COMPLETED_WITH_GAPS':'COMPLETED',phase:'DONE',completed,failed,queried,completedAt:now(),message:failed?`${type} ${date} 轨迹补证完成，仍有 ${failed}票待补。`:`${type} ${date} 轨迹补证完成。`});
+  return patch(type,date,snapshotId,{status:failed?'COMPLETED_WITH_GAPS':'COMPLETED',phase:'DONE',completed,failed,queried,persistedEvents,completedAt:now(),message:failed?`${type} ${date} 轨迹补证完成，仍有 ${failed}票待补。`:`${type} ${date} 轨迹补证完成。`});
 }
 async function pump(){
   if(runningKey||!queue.size)return;
