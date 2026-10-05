@@ -318,7 +318,7 @@ function timingRows(snapshotId,reportDate,businessType) {
     const ledgerRow=ledger.get(shipmentCode)||{};
     return {
       shipmentCode,region:String(row.regionCode||'').toUpperCase(),
-      isPod:positivePodMembership(row,ledgerRow),isReturned:isReturned(row),
+      isPod:Boolean(canonicalPodSet.has(shipmentCode)||positivePodMembership(row,ledgerRow)),isReturned:isReturned(row),
       evidence:direct.ok?{...direct,evidenceSource:(events.get(shipmentCode)||[]).some(x=>x.evidenceSource==='track_events')?'track_events':'business_track_events'}:(strictLedger||direct),
       membershipSource:Number(row.isPod||0)===1?'final_rows':(String(ledgerRow.terminalReason||'').toUpperCase()==='POD'?'qc_tracking_ledger':'raw_terminal_proof')
     };
