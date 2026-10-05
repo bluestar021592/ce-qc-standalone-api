@@ -319,17 +319,36 @@ async function pollTrackingJob(jobId){
 async function refreshOpenPodNow(){
   if(runBusy)return;
   const latest=v626LatestImport||await latestImportContext();if(!latest?.reportDate){note('v626RefreshPodMessage','请先上传综合日报。','error');return}
-  const to=cambodiaToday();let from=latest.reportDate;
-  if(Date.parse(to+'T00:00:00Z')-Date.parse(from+'T00:00:00Z')>179*86400000)from=addDaysKey(to,-179);
-  note('v626RefreshPodMessage','正在建立未完成POD追踪任务…');
+  const reportDate=selectedReportDate()||latest.reportDate;
+  note('v626RefreshPodMessage','正在补查 '+reportDate+' 当日报表未完成POD与签收轨迹…');
   try{
-    const r=await post('/api/v246/tracking/reconcile',{businessType:'ALL',fromDate:from,toDate:to},30000);
+    const r=await post('/api/v246/tracking/reconcile',{businessType:'ALL',fromDate:reportDate,toDate:reportDate},30000);
     const job=await pollTrackingJob(r.job?.jobId||'');
-    note('v626RefreshPodMessage','未完成POD已更新：成功刷新 '+fmt(job.refreshed||0)+' 票，待重试 '+fmt(job.failed||0)+' 票。','success');
-    await Promise.all([loadOpenPod(),page==='home'?loadHome({skipAux:true}):Promise.resolve()]);
+    note('v626RefreshPodMessage',reportDate+' 定向补查完成：成功刷新 '+fmt(job.refreshed||0)+' 票，待重试 '+fmt(job.failed||0)+' 票。','success');
+    await Promise.all([loadOpenPod(),page==='home'?loadHome({skipAux:true}):Promise.resolve(),page==='business'?loadBusiness():Promise.resolve()]);
   }catch(error){note('v626RefreshPodMessage','更新失败：'+error.message,'error')}
 }
 
+async function scanWhppPending(){
+  if(runBusy)return;
+  const reportDate=selectedReportDate()||v626LatestImport?.reportDate||(await latestImportContext())?.reportDate||'';
+  if(!reportDate){return}
+  runBusy=true;
+  const btn=byId('v641WhppScanPending');if(btn){btn.disabled=true;btn.textContent='WHPP扫描中…'}
+  startProgressPolling();
+  try{
+    appendLiveLog('开始WHPP '+reportDate+' 待扫描成员处理');
+    await safeWhppRun('resume',reportDate);
+    appendLiveLog('WHPP '+reportDate+' 扫描/轨迹处理完成');
+    await Promise.all([refreshLiveProgress(),loadBusiness(),loadOpenPod()]);
+  }catch(error){
+    appendLiveLog('WHPP处理未完成：'+error.message);
+    const meta=byId('v637BusinessIntegrity');if(meta)meta.textContent=(meta.textContent||'')+' · WHPP处理失败：'+error.message;
+  }finally{
+    runBusy=false;stopProgressPolling();
+    if(btn){btn.disabled=false;btn.textContent='扫描WHPP待处理票'}
+  }
+}
 async function loadHome(options={}){
   const requestedDate=selectedReportDate();
   const summaryUrl='/api/home-quality-summary'+(requestedDate?'?reportDate='+encodeURIComponent(requestedDate):'');
@@ -1026,6 +1045,7 @@ function bind(){
   byId('v625RunStart')?.addEventListener('click',()=>runTask('start'));
   byId('v625RunResume')?.addEventListener('click',()=>runTask('resume'));
   byId('v626RefreshOpenPod')?.addEventListener('click',refreshOpenPodNow);
+  byId('v641WhppScanPending')?.addEventListener('click',scanWhppPending);
   byId('v626ImportRefreshOpen')?.addEventListener('click',refreshOpenPodNow);
   qa('[data-open-filter]').forEach(btn=>btn.addEventListener('click',()=>{v626OpenFilter=btn.dataset.openFilter;qa('[data-open-filter]').forEach(x=>x.classList.toggle('active',x===btn));renderOpenPodRows()}));
   byId('v625TrackSearch')?.addEventListener('click',queryTrack);byId('v625TrackReset')?.addEventListener('click',()=>{byId('v625TrackCode').value='';byId('v625TrackTimeline').innerHTML='<div class="v625-empty-state">暂无轨迹数据</div>'});
