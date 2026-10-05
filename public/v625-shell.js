@@ -227,8 +227,13 @@ async function fetchLiveProgress(reportDate=''){
 }
 function renderLiveProgress(bundle={}){
   const {ccsl={},shopee={},whpp={}}=bundle;
-  setText('v626CcslProgress',familyProgressLabel(ccsl));setText('v626ShopeeProgress',familyProgressLabel(shopee));setText('v626WhppProgress',familyProgressLabel(whpp));
-  setText('v626ImportCcsl',familyProgressLabel(ccsl));setText('v626ImportShopee',familyProgressLabel(shopee));setText('v626ImportWhpp',familyProgressLabel(whpp));
+  const familyLabels={
+    ccsl:familyProgressLabel(ccsl),
+    shopee:familyProgressLabel(shopee),
+    whpp:familyProgressLabel(whpp)
+  };
+  setText('v626CcslProgress',familyLabels.ccsl);setText('v626ShopeeProgress',familyLabels.shopee);setText('v626WhppProgress',familyLabels.whpp);
+  setText('v626ImportCcsl',familyLabels.ccsl);setText('v626ImportShopee',familyLabels.shopee);setText('v626ImportWhpp',familyLabels.whpp);
 
   const scanDone=Number(ccsl.scanDone||0)+Number(shopee.scanDone||0);
   const scanTotal=Number(ccsl.scanTotal||0)+Number(shopee.scanTotal||0);
@@ -236,7 +241,7 @@ function renderLiveProgress(bundle={}){
   const trackTotal=Number(ccsl.trackTotal||0)+Number(shopee.trackTotal||0);
   const whppBatch=Number(whpp.batchIndex||0),whppBatches=Number(whpp.totalBatches||0);
   const allRunning=Boolean(ccsl.running||shopee.running||whpp.active);
-  const completeFamilies=[ccsl,shopee,whpp].filter(familyComplete).length;
+  const completeFamilies=Object.values(familyLabels).filter(label=>label==='完成').length;
   const allComplete=completeFamilies===3;
   const scanPct=allComplete?100:progressPercent(scanDone,scanTotal),trackPct=allComplete?100:progressPercent(trackDone,trackTotal);
   const whppPct=allComplete?100:progressPercent(whppBatch,whppBatches);
