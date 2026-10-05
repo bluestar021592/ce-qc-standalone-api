@@ -457,12 +457,17 @@ function rowIsAbnormal(row={}){
 }
 function rowIsOtherNormal(row={}){
   const text=rowText(row),special=String(row.specialState||'').toUpperCase(),shop=String(row.shopState||'').toUpperCase();
-  return ['SELF_PICKUP','CECN_RETENTION','CEZT_RETENTION','CCSL580_RETENTION'].includes(special)||
+  return ['SELF_PICKUP','CECN_RETENTION','CEZT_RETENTION','CCSLCN_DIVERSION','CCSLZT_DIVERSION','CCSL580_RETENTION','CCSL580_DIVERSION'].includes(special)||
     row.matchedRule==='NORMAL_FINAL_HUB'||/正常分流|自提|CECN|CEZT|580/.test(text)||
-    /^SHOP_/.test(shop)||/门店途中|到达门店|门店入库/.test(text);
+    /^SHOP_/.test(shop)||/门店途中|到达门店|门店入库/.test(text)||/订单取消|已取消|CANCELLED|CANCELED/.test(text);
 }
 function buildBusinessAccounting(state={},fallback={}){
-  const source=uniqueDetailRows(Array.isArray(state.finalRows)?state.finalRows:Object.values(state.finalRows||{}));
+  const authoritativeRows=
+    state?.detailTabs?.all?.rows||
+    state?.detailTabs?.allData?.rows||
+    state?.detailTabs?.dashboard?.rows||
+    (Array.isArray(state.finalRows)?state.finalRows:Object.values(state.finalRows||{}));
+  const source=uniqueDetailRows(authoritativeRows||[]);
   const total=Number(fallback.total||source.length||0);
   if(!source.length)return{total,accounted:0,difference:total,rowsByKind:{total:[],pod:[],returned:[],pending:[],abnormal:[],otherNormal:[],delivery:[]}};
   const rowsByKind={total:source,pod:[],returned:[],pending:[],abnormal:[],otherNormal:[],delivery:[]};
