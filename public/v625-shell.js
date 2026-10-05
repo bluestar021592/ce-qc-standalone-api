@@ -151,8 +151,20 @@ let v626OpenRows=[];
 let v626OpenFilter='all';
 let v626ProgressTimer=null;
 let v626TrackingJobId='';
+let v640EvidenceRefreshTimer=null;
 const v626LogKeys=new Set();
 
+function scheduleHistoricalEvidenceRefresh(target='home'){
+  if(v640EvidenceRefreshTimer)clearTimeout(v640EvidenceRefreshTimer);
+  v640EvidenceRefreshTimer=setTimeout(()=>{
+    v640EvidenceRefreshTimer=null;
+    if(target==='business'&&page==='business')void loadBusiness();
+    else if(page==='home')void loadHome({skipAux:true});
+  },3000);
+}
+function stopHistoricalEvidenceRefresh(){
+  if(v640EvidenceRefreshTimer){clearTimeout(v640EvidenceRefreshTimer);v640EvidenceRefreshTimer=null}
+}
 function cambodiaToday(){
   try{return new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Phnom_Penh',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date())}
   catch{return today()}
@@ -329,6 +341,8 @@ async function loadHome(options={}){
   ]);
   const summary=summaryR.status==='fulfilled'?summaryR.value:null;
   const integrity=integrityR.status==='fulfilled'?integrityR.value:null;
+  if(summary?.historicalEvidenceRecovery?.state==='RUNNING')scheduleHistoricalEvidenceRefresh('home');
+  else if(summary?.historicalEvidenceRecovery?.state==='COMPLETED')stopHistoricalEvidenceRefresh();
   if(summary?.reportDate&&!selectedReportDate())applyDashboardDate(summary.reportDate);
   const classification=summary?.classification||{};
   const counts=classification.counts||{};
@@ -576,6 +590,9 @@ async function loadBusiness(){
     const stateUrl='/api/business-state/'+business+(snapshotId?'?snapshotId='+encodeURIComponent(snapshotId):'');
     const r=await json(stateUrl,15000);
     const state=r.state||{},m=metricState(state);
+    const evidenceState=state?.historicalEvidenceRecovery?.state||summary?.historicalEvidenceRecovery?.state||'';
+    if(evidenceState==='RUNNING')scheduleHistoricalEvidenceRefresh('business');
+    else if(evidenceState==='COMPLETED')stopHistoricalEvidenceRefresh();
     v630BusinessDetailTabs=state.detailTabs||state?.dashboard?.detailTabs||{};
     v631BusinessAccounting=(state.accounting?.rowsByKind?state.accounting:(business==='WHPP'?buildWhppCanonicalAccounting(state,m):buildBusinessAccounting(state,m)));
     v628BusinessMetricState=m;v628BusinessReportDate=reportDate;
