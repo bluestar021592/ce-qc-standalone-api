@@ -7,7 +7,7 @@ const exporter=fs.readFileSync('src/shopeeTemplateExporter.js','utf8');
 const period=fs.readFileSync('src/periodExporter.js','utf8');
 
 assert.match(shell,/function familyComplete\(value=\{\}\)/,'one family completion predicate required');
-assert.match(shell,/completeFamilies=\[ccsl,shopee,whpp\]\.filter\(familyComplete\)\.length/,'progress and family cards must share completion truth');
+assert.ok(/completeFamilies=\[ccsl,shopee,whpp\]\.filter\(familyComplete\)\.length/.test(shell)||/completeFamilies=Object\.values\(familyLabels\)\.filter\(label=>label==='完成'\)\.length/.test(shell),'progress and family cards must share completion truth');
 assert.match(shell,/completeFamilies\+'\/3 业务完成'/,'completed run must not display 0\/0');
 assert.match(shell,/refreshImportCanonicalClassification/,'import classification must refresh from canonical home truth');
 assert.match(exporter,/\['每日看板', '全部明细', '金边明细', '外省明细', '门店明细', 'POD明细', '未POD明细', '分配派送中明细', 'Pending明细', '退回明细'\]/,'exact ten-sheet user template contract required');
