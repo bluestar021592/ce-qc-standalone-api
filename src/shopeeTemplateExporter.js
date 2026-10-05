@@ -4,14 +4,16 @@ import ExcelJS from 'exceljs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TEMPLATE = path.resolve(__dirname, '../templates/shopee_daily_dashboard_template.xlsx');
-const FIRST_SHEETS = ['看板首页', '每日汇总', '全部明细', '金边明细', '外省明细', '门店明细', 'POD明细', '未POD明细', '分配派送中明细', 'Pending明细', '退回明细'];
-const DETAIL_HEADERS = ['日期', '运单编号', '下单时间', '派件时间', '状态标识', '状态说明', '收件省份', '区域分类', '当前门店', '当前省份', '收件人', '收件人手机', '收件地址', '派件快递员', '异常描述'];
+const FIRST_SHEETS = ['每日看板', '全部明细', '金边明细', '外省明细', '门店明细', 'POD明细', '未POD明细', '分配派送中明细', 'Pending明细', '退回明细'];
+const DETAIL_HEADERS = ['日期','运单编号','下单时间','状态标识','状态说明','收件省份','区域分类','当前门店','当前省份','收件人','收件人手机','收件地址','派件时间','派件门店','派件省份','派件快递员','异常编码','异常描述','备注'];
 const EXPORT_PARTITION_CACHE_VERSION = '2026-08-14-v111-single-pass-export-partition-v1';
 const BUSINESS_LABELS = {
-  ALL: '五业务综合',
+  ALL: '七业务综合',
   CE: 'CE',
+  CEAF: 'CEAF空运',
   TBKH: 'TBKH',
   ALI1688: 'ALI1688',
+  WHPP: 'WHPP本土',
   SHOPEECN: '中国虾皮',
   SHOPEEVN: '越南虾皮'
 };
@@ -19,6 +21,7 @@ const BUSINESS_LABELS = {
 export async function createShopeeTemplateWorkbook({ type, periodType, range, snapshots, outputDir }) {
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.readFile(TEMPLATE);
+  normalizeTemplateWorkbook(workbook);
   assertTemplate(workbook);
   repairReturnLinks(workbook);
 
@@ -40,8 +43,7 @@ export async function createShopeeTemplateWorkbook({ type, periodType, range, sn
   const groups = { all: totalBuckets.all.length, pp: totalBuckets.pp.length, pv: totalBuckets.pv.length };
   const dateMetrics = prepared.map(item => ({ date: item.date, ...metricsFromBuckets(item.buckets) }));
 
-  fillDashboard(workbook.getWorksheet('看板首页'), type, range, totalMetrics, dateMetrics);
-  fillDailySummary(workbook.getWorksheet('每日汇总'), range, dateMetrics);
+  fillDashboard(workbook.getWorksheet('每日看板'), type, range, totalMetrics, dateMetrics);
   fillDetailPrepared(workbook.getWorksheet('全部明细'), range, prepared, 'all');
   fillDetailPrepared(workbook.getWorksheet('金边明细'), range, prepared, 'pp');
   fillDetailPrepared(workbook.getWorksheet('外省明细'), range, prepared, 'pv');
@@ -51,16 +53,11 @@ export async function createShopeeTemplateWorkbook({ type, periodType, range, sn
   fillDetailPrepared(workbook.getWorksheet('分配派送中明细'), range, prepared, 'delivery');
   fillDetailPrepared(workbook.getWorksheet('Pending明细'), range, prepared, 'pending');
   fillDetailPrepared(workbook.getWorksheet('退回明细'), range, prepared, 'returned');
-  if (type === 'SHOPEECN' || type === 'SHOPEEVN') {
-    appendPvOpenDetailPrepared(workbook, '外省派送中', range, prepared, 'pvDelivery');
-    appendPvOpenDetailPrepared(workbook, '外省门店滞留', range, prepared, 'pvStoreRetention');
-    appendPvOpenDetailPrepared(workbook, '外省门店入库无节点', range, prepared, 'pvStoreInboundNoScan');
-    appendPvOpenDetailPrepared(workbook, '外省其他未闭环', range, prepared, 'pvOtherUnresolved');
-  }
+  // V650: exports are locked to the user's 10-sheet master; no extra sheets are appended.
 
   workbook.title = `${type}每日数据看板（${range.from} 至 ${range.to}）`;
   workbook.views = [{ activeTab: 0, firstSheet: 0, visibility: 'visible' }];
-  const label = type === 'SHOPEECN' ? 'SHOPEE_CN' : type === 'SHOPEEVN' ? 'SHOPEE_VN' : type === 'ALL' ? '五业务综合' : type;
+  const label = type === 'SHOPEECN' ? 'SHOPEE_CN' : type === 'SHOPEEVN' ? 'SHOPEE_VN' : type === 'ALL' ? '七业务综合' : type;
   const file = path.join(outputDir, `${label}_${periodType}_每日数据看板（${range.from} 至 ${range.to}）.xlsx`);
   await workbook.xlsx.writeFile(file);
   return {
@@ -68,12 +65,22 @@ export async function createShopeeTemplateWorkbook({ type, periodType, range, sn
     audit: {
       rows: allRows.length,
       groups,
-      sheetNames: workbook.worksheets.slice(0, 11).map(sheet => sheet.name),
+      sheetNames: workbook.worksheets.slice(0, 10).map(sheet => sheet.name),
       exportPartitionVersion: EXPORT_PARTITION_CACHE_VERSION
     }
   };
 }
 
+function normalizeTemplateWorkbook(workbook) {
+  const dashboard=workbook.getWorksheet('看板首页')||workbook.getWorksheet('每日看板');
+  if(dashboard) dashboard.name='每日看板';
+  const daily=workbook.getWorksheet('每日汇总');
+  if(daily) workbook.removeWorksheet(daily.id);
+  const wanted=['每日看板','全部明细','金边明细','外省明细','门店明细','POD明细','未POD明细','分配派送中明细','Pending明细','退回明细'];
+  for(const name of wanted){
+    if(!workbook.getWorksheet(name)) workbook.addWorksheet(name);
+  }
+}
 function assertTemplate(workbook) {
   const actual = workbook.worksheets.slice(0, 11).map(sheet => sheet.name);
   if (actual.join('|') !== FIRST_SHEETS.join('|')) throw new Error(`SHOPEE母版Sheet结构不一致：${actual.join(', ')}`);
@@ -90,28 +97,55 @@ function repairReturnLinks(workbook) {
 
 function fillDashboard(sheet, type, range, total, daily) {
   sheet.getCell('A1').value = `${BUSINESS_LABELS[type] || type}每日数据看板`;
-  const top = [
-    ['A5', '全部明细', total.all, 1], ['C5', '金边明细', total.pp, total.all], ['E5', '外省明细', total.pv, total.all],
-    ['G5', '门店明细', total.store, total.all], ['I5', 'POD明细', total.pod, total.all], ['K5', '未POD明细', total.notPod, total.all],
-    ['M5', '分配派送中明细', total.delivery, total.all], ['O5', '退回明细', total.returned, total.all]
+
+  const topSpecs=[
+    ['A5','全部明细',total.all,1],
+    ['C5','金边明细',total.pp,total.all],
+    ['E5','外省明细',total.pv,total.all],
+    ['F5','门店明细',total.store,total.all],
+    ['H5','POD明细',total.pod,total.all],
+    ['J5','未POD明细',total.notPod,total.all],
+    ['L5','分配派送中明细',total.delivery,total.all],
+    ['N5','退回明细',total.returned,total.all]
   ];
-  for (const [address, target, count, denominator] of top) {
-    const column = sheet.getCell(address).col;
-    setMergedFormula(sheet, 5, column, target, count);
-    setMergedFormula(sheet, 6, column, target, denominator ? count / denominator : 0);
-    setMergedFormula(sheet, 7, column, target, '点击查看明细');
+  for(const [address,target,count,denominator] of topSpecs){
+    const col=sheet.getCell(address).col;
+    setMergedFormula(sheet,5,col,target,count);
+    setMergedFormula(sheet,6,col,target,denominator?count/denominator:0);
+    setMergedFormula(sheet,7,col,target,'点击查看明细');
   }
-  for (let index = 0; index < 31; index += 1) {
-    const row = 11 + index;
-    const item = daily[index];
-    const date = item?.date || '';
-    sheet.getCell(row, 1).value = date;
-    sheet.getCell(row, 7).value = date;
-    const values = item ? [item.all, item.pp, item.pv, item.store, item.pod, item.delivery, item.pending, item.returned, item.notPod, item.podRate, item.deliveryRate, item.pendingRate, item.returnRate] : Array(13).fill('');
-    const columns = [2, 3, 4, 5, 8, 9, 10, 11, 12, 13, 14, 15, 16];
-    const targets = ['全部明细', '金边明细', '外省明细', '门店明细', 'POD明细', '分配派送中明细', 'Pending明细', '退回明细', '未POD明细', 'POD明细', '分配派送中明细', 'Pending明细', '退回明细'];
-    columns.forEach((column, i) => { sheet.getCell(row, column).value = item ? hyperlink(targets[i], values[i]) : ''; });
+  setMergedValue(sheet,5,16,total.returnRate);
+  setMergedValue(sheet,6,16,'退回票数 / 总票数');
+  setMergedValue(sheet,7,16,'');
+  setMergedValue(sheet,5,18,total.avgSigningDays);
+  setMergedValue(sheet,6,18,'平均签收天数');
+  setMergedValue(sheet,7,18,'平均签收天数');
+  setMergedValue(sheet,5,20,total.ppAvgSigningDays);
+  setMergedValue(sheet,6,20,'平均签收天数');
+  setMergedValue(sheet,7,20,'平均签收天数');
+  setMergedValue(sheet,5,22,total.pvAvgSigningDays);
+  setMergedValue(sheet,6,22,'平均签收天数');
+  setMergedValue(sheet,7,22,'平均签收天数');
+
+  const headers=['日期','总票数','金边','外省','门店','日期','POD','派送中','Pending','退回','未POD','POD率','派送中率','Pending率','退回率','总平均签收','金边平均签收','外省平均签收'];
+  headers.forEach((value,index)=>{sheet.getCell(10,index+1).value=value;});
+
+  const clearTo=Math.max(sheet.rowCount,11+daily.length+5);
+  for(let row=11;row<=clearTo;row+=1){
+    for(let col=1;col<=18;col+=1) sheet.getCell(row,col).value=null;
   }
+  daily.forEach((item,index)=>{
+    const row=11+index;
+    sheet.getCell(row,1).value=item.date;
+    sheet.getCell(row,6).value=item.date;
+    const values=[item.all,item.pp,item.pv,item.store,item.pod,item.delivery,item.pending,item.returned,item.notPod,item.podRate,item.deliveryRate,item.pendingRate,item.returnRate];
+    const columns=[2,3,4,5,7,8,9,10,11,12,13,14,15];
+    const targets=['全部明细','金边明细','外省明细','门店明细','POD明细','分配派送中明细','Pending明细','退回明细','未POD明细','POD明细','分配派送中明细','Pending明细','退回明细'];
+    columns.forEach((column,i)=>{sheet.getCell(row,column).value=hyperlink(targets[i],values[i]);});
+    sheet.getCell(row,16).value=item.avgSigningDays??'';
+    sheet.getCell(row,17).value=item.ppAvgSigningDays??'';
+    sheet.getCell(row,18).value=item.pvAvgSigningDays??'';
+  });
 }
 
 function fillDailySummary(sheet, range, daily) {
@@ -126,37 +160,25 @@ function fillDailySummary(sheet, range, daily) {
 }
 
 function fillDetailPrepared(sheet, range, prepared, bucketKey) {
-  const title = sheet.name;
-  clearDataRows(sheet, 2);
-  let rowNumber = 2;
-  for (const item of prepared) {
-    const rows = item.buckets?.[bucketKey] || [];
-    const titleRow = sheet.getRow(rowNumber++);
-    titleRow.values = [`${item.date} 明细（${rows.length}票）`];
-    titleRow.height = 24;
-    titleRow.font = { bold: true, color: { argb: 'FF18324F' } };
-    const header = sheet.getRow(rowNumber++);
-    header.values = DETAIL_HEADERS;
-    header.height = 24;
-    header.eachCell(cell => { cell.font = { bold: true, color: { argb: 'FFFFFFFF' } }; cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF195A8D' } }; });
-    if (!rows.length) sheet.getRow(rowNumber++).values = ['当日无数据'];
-    for (const row of rows) {
-      const dataRow = sheet.getRow(rowNumber++);
-      dataRow.values = detailValues(row);
-      const shipmentCode = bill(row);
-      if (shipmentCode) {
-        const billCell = dataRow.getCell(2);
-        billCell.value = { text: shipmentCode, hyperlink: detailUrl(row) };
-        billCell.font = { ...billCell.font, color: { argb: 'FF0563C1' }, underline: true };
-        billCell.numFmt = '@';
-      }
-    }
-    sheet.getRow(rowNumber++).values = [];
+  for(let col=1;col<=DETAIL_HEADERS.length;col+=1) sheet.getCell(1,col).value=DETAIL_HEADERS[col-1];
+  clearDataRows(sheet,2);
+  const rows=[];
+  for(const item of prepared){
+    for(const row of item.buckets?.[bucketKey]||[]) rows.push(row);
   }
-  sheet.getCell('A1').value = title;
-  sheet.getCell('O1').value = { formula: 'HYPERLINK("#看板首页!A1","返回看板")', result: '返回看板' };
-  sheet.getCell('O1').font = { bold: true, underline: true, color: { argb: 'FF0563C1' } };
-  sheet.views = [{ state: 'frozen', ySplit: 1 }];
+  rows.sort((a,b)=>String(a.reportDate||'').localeCompare(String(b.reportDate||''))||bill(a).localeCompare(bill(b)));
+  rows.forEach((row,index)=>{
+    const dataRow=sheet.getRow(index+2);
+    dataRow.values=detailValues(row);
+    const shipmentCode=bill(row);
+    if(shipmentCode){
+      const billCell=dataRow.getCell(2);
+      billCell.value=shipmentCode;
+      billCell.numFmt='@';
+    }
+  });
+  sheet.views=[{state:'frozen',ySplit:1}];
+  sheet.autoFilter={from:'A1',to:`S${Math.max(2,rows.length+1)}`};
 }
 
 function appendPvOpenDetailPrepared(workbook, name, range, prepared, bucketKey) {
@@ -173,7 +195,27 @@ function clearDataRows(sheet, startRow) {
 }
 
 function detailValues(row) {
-  return [row.reportDate || '', bill(row), row.orderTime || row.下单时间 || '', row.deliveryTime || row.派件时间 || '', row.statusCode || row.状态标识 || '', row.statusDesc || row.状态说明 || row.currentState || '', row.recipientProvince || row.收件省份 || '', regionLabel(row), row.currentStore || row.当前门店 || '', row.currentProvince || row.当前省份 || '', row.recipient || row.收件人 || '', row.recipientPhone || row.收件人手机 || '', row.recipientAddress || row.收件地址 || '', row.courier || row.派件快递员 || '', row.exceptionDescription || row.异常描述 || row.外省未闭环分流 || row.primaryCategory || ''];
+  return [
+    row.reportDate||'',
+    bill(row),
+    row.orderTime||row.下单时间||'',
+    row.statusCode||row.状态标识||(isReturned(row)?'R':isPod(row)?'Y':''),
+    row.statusDesc||row.状态说明||row.currentState||row.primaryCategory||'',
+    row.recipientProvince||row.收件省份||'',
+    regionLabel(row),
+    row.currentStore||row.当前门店||row.storeCode||'',
+    row.currentProvince||row.当前省份||'',
+    row.recipient||row.收件人||row.recipientName||'',
+    row.recipientPhone||row.收件人手机||'',
+    row.recipientAddress||row.收件地址||'',
+    row.deliveryTime||row.派件时间||row.podDate||row.POD时间||'',
+    row.deliveryStore||row.派件门店||row.deliveryStation||'',
+    row.deliveryProvince||row.派件省份||'',
+    row.courier||row.派件快递员||'',
+    row.exceptionCode||row.异常编码||'',
+    row.exceptionDescription||row.异常描述||row.primaryCategory||'',
+    row.remark||row.备注||''
+  ];
 }
 
 function emptyBuckets(rows) {
@@ -197,10 +239,11 @@ function partitionRows(rows = []) {
     if (rowRegion === 'PP') buckets.pp.push(row);
     else if (rowRegion === 'PV') buckets.pv.push(row);
     if (store) buckets.store.push(row);
-    (pod ? buckets.pod : buckets.notPod).push(row);
+    if (pod) buckets.pod.push(row);
     if (delivery) buckets.delivery.push(row);
     if (pending) buckets.pending.push(row);
     if (returned) buckets.returned.push(row);
+    if (!pod && !returned && !delivery && !pending) buckets.notPod.push(row);
 
     const disposition = pvDisposition(row, { rowRegion, pod, returned, delivery });
     if (disposition === 'PV_DELIVERY_IN_PROGRESS') buckets.pvDelivery.push(row);
@@ -232,11 +275,15 @@ function metricsFromBuckets(buckets) {
     notPodRate: ratio(notPod, all),
     deliveryRate: ratio(delivery, all),
     pendingRate: ratio(pending, all),
-    returnRate: ratio(returned, all)
+    returnRate: ratio(returned, all),
+    avgSigningDays: averageSigningDays(buckets.pod),
+    ppAvgSigningDays: averageSigningDays(buckets.pod.filter(row=>region(row)==='PP')),
+    pvAvgSigningDays: averageSigningDays(buckets.pod.filter(row=>region(row)==='PV'))
   };
 }
 
 function setMergedFormula(sheet, row, column, target, display) { sheet.getCell(row, column).value = hyperlink(target, display); sheet.getCell(row, column + 1).value = hyperlink(target, display); }
+function setMergedValue(sheet,row,column,value){sheet.getCell(row,column).value=value;sheet.getCell(row,column+1).value=value;}
 function hyperlink(target, display) { const text = typeof display === 'string' ? `"${display.replaceAll('"', '""')}"` : Number(display || 0); return { formula: `HYPERLINK("#${target}!A1",${text})`, result: display }; }
 function copyRowStyle(source, target) { target.height = source.height; source.eachCell({ includeEmpty: true }, (cell, col) => { target.getCell(col).style = { ...cell.style }; }); }
 function uniqueRows(rows) { const map = new Map(); for (const row of rows) { const code = bill(row); if (code) map.set(code, row); } return [...map.values()]; }
@@ -278,6 +325,15 @@ function pvDisposition(row = {}, precomputed = {}) {
   if (row.shopState === 'SHOP_ARRIVED_CURRENT') return Number(row.shopRetentionNaturalDays || 0) >= 2 ? 'PV_STORE_RETENTION' : 'PV_STORE_INBOUND_NO_SCAN';
   if (row.shopState === 'SHOP_TRANSFER_IN_PROGRESS' || delivery) return 'PV_DELIVERY_IN_PROGRESS';
   return 'PV_OTHER_UNRESOLVED';
+}
+function signingDays(row = {}) {
+  const value=Number(row.signingDays??row.签收天数??row.averageSigningDays??row.平均签收天数??0);
+  return Number.isFinite(value)&&value>0?value:0;
+}
+function averageSigningDays(rows = []) {
+  const values=rows.map(signingDays).filter(value=>value>0);
+  if(!values.length)return '';
+  return Number((values.reduce((sum,value)=>sum+value,0)/values.length).toFixed(2));
 }
 function pendingDays(row = {}) { return Number(row.pendingUniqueDayCount || row.pendingDays || row.Pending天数 || 0); }
 function ratio(a, b) { return b ? a / b : 0; }
