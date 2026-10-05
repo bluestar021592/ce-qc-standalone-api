@@ -22,7 +22,8 @@ assert.match(js,/p\.delete\('snapshotId'\)/,'changing date must not retain stale
 assert.match(js,/summary=await json\('\/api\/home-quality-summary\?'/,'business board must resolve selected date to exact summary/snapshot');
 assert.match(js,/new URLSearchParams\(\{scope:'all'\}\)/,'business KPI drilldown must load all membership rows');
 assert.match(js,/function renderKpiDetail\(kind\)/,'business KPI drilldown renderer missing');
-assert.match(js,/kind==='delivery'\)return rows\.filter\(row=>!row\.isClosed\)/,'delivery drilldown must show all non-terminal parcels');
+assert.match(js,/function buildBusinessAccounting\(state=\{\},fallback=\{\}\)/,'delivery drilldown must use exclusive same-state accounting');
+assert.match(js,/rowsByKind\.delivery\.push\(row\)/,'delivery detail must come from the same exclusive accounting bucket');
 
 for(const kind of ['total','delivery','pod','pending','abnormal']){
   assert.ok(html.includes(`data-kpi-detail="${kind}"`),`missing clickable KPI ${kind}`);
