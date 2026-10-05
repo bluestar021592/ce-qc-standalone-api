@@ -771,7 +771,7 @@ app.get('/api/shopee/state', async (req, res) => {
   res.json({ ok: true, state: req.query.compact === '1' ? compactDashboardState(summary) : summary });
 });
 
-app.get('/api/business-state/:businessType', (req, res) => {
+app.get('/api/business-state/:businessType', async (req, res) => {
   try {
     const requestedSnapshotId = String(req.query.snapshotId || '');
     const requestedType = String(req.params.businessType || '').toUpperCase();
