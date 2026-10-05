@@ -835,21 +835,64 @@ function renderExceptionRows(rows){
   for(const r of filtered)tbody.appendChild(rowTr([r.shipmentCode,r.businessType,r.category||r.queryStatus||'异常',r.pendingDays||r.ocDays||'—',r.currentState||r.queryStatus||'—',r.lastEventTime||r.rawSummary||'—','查看']));
 }
 
-let reportPeriod='daily',generated=[];
+let reportPeriod='daily',generated=[],v652ExportJobId='',v652ExportBusy=false;
+function renderExportProgress(job={}){
+  const progress=Math.max(0,Math.min(100,Number(job.progress||0)));
+  const labels={QUEUED:'等待生成',PREPARING:'准备数据',VALIDATING:'校验数据',GENERATING:'生成Excel',PACKAGING:'整理文件',COMPLETED:'生成完成',FAILED:'生成失败'};
+  setText('v652ExportPhase',labels[job.phase]||labels[job.status]||job.phase||'生成报表');
+  setText('v652ExportPercent',Math.round(progress)+'%');
+  const bar=byId('v652ExportBar');if(bar)bar.style.width=progress+'%';
+  const msg=job.status==='FAILED'?(job.error||job.message||'生成失败'):(job.message||'正在生成报表');
+  note('v652ExportMessage',msg,job.status==='FAILED'?'error':job.status==='COMPLETED'?'success':'');
+}
+async function pollExportJob(jobId){
+  for(let i=0;i<1800;i++){
+    const r=await json('/api/export-period/job/'+encodeURIComponent(jobId),15000);
+    const job=r.job||{};renderExportProgress(job);
+    if(job.status==='COMPLETED')return job;
+    if(job.status==='FAILED')throw new Error(job.error||job.message||'报表生成失败');
+    await new Promise(resolve=>setTimeout(resolve,1000));
+  }
+  throw new Error('报表生成等待超时，请查看报表历史或重试。');
+}
 async function generateReport(){
+  if(v652ExportBusy)return;
   const date=byId('v625ReportDate').value||today(),businessType=byId('v625ReportBusiness').value;
+  const btn=byId('v625GenerateReport');
+  v652ExportBusy=true;if(btn){btn.disabled=true;btn.textContent='生成中…'}
+  renderExportProgress({status:'RUNNING',phase:'PREPARING',progress:1,message:'正在创建报表任务…'});
   try{
-    const r=await post('/api/export-period/prepare',{periodType:reportPeriod,date,businessType},120000);
-    generated=[...(r.files||[]),...generated];renderReports();
-  }catch(e){setText('v625ReportMeta','生成失败：'+e.message)}
+    const r=await post('/api/export-period/job',{periodType:reportPeriod,date,businessType},15000);
+    v652ExportJobId=r.job?.jobId||'';
+    if(!v652ExportJobId)throw new Error('系统未返回报表任务编号。');
+    const job=await pollExportJob(v652ExportJobId);
+    const files=job.files||[];
+    generated=[...files,...generated];
+    renderReports();
+    setText('v625ReportMeta','生成完成 · '+files.length+' 个文件');
+    if(files.length===1){
+      const a=document.createElement('a');a.href=files[0].url;a.download=files[0].name;document.body.appendChild(a);a.click();a.remove();
+    }
+  }catch(e){
+    renderExportProgress({status:'FAILED',phase:'FAILED',progress:0,error:e.message});
+    setText('v625ReportMeta','生成失败：'+e.message);
+  }finally{
+    v652ExportBusy=false;if(btn){btn.disabled=false;btn.textContent='生成报表'}
+  }
 }
 function renderReports(){
   const tbody=byId('v625ReportRows');tbody.replaceChildren();
   if(!generated.length){tbody.innerHTML='<tr><td colspan="4">暂无生成记录</td></tr>';return}
-  for(const f of generated){const tr=document.createElement('tr');const td1=document.createElement('td');td1.textContent=f.name;const td2=document.createElement('td');td2.textContent=new Date().toLocaleString('zh-CN',{hour12:false});const td3=document.createElement('td');td3.innerHTML='<span class="v625-badge success">已完成</span>';const td4=document.createElement('td');const a=document.createElement('a');a.href=f.url;a.textContent='下载';td4.appendChild(a);tr.append(td1,td2,td3,td4);tbody.appendChild(tr)}
+  for(const f of generated){
+    const tr=document.createElement('tr');
+    const td1=document.createElement('td');td1.textContent=f.name;
+    const td2=document.createElement('td');td2.textContent=new Date().toLocaleString('zh-CN',{hour12:false});
+    const td3=document.createElement('td');td3.innerHTML='<span class="v625-badge success">已完成</span>';
+    const td4=document.createElement('td');const a=document.createElement('a');a.href=f.url;a.textContent='下载';a.setAttribute('download',f.name);td4.appendChild(a);
+    tr.append(td1,td2,td3,td4);tbody.appendChild(tr)
+  }
 }
 
-let settingsUsers=[];
 async function loadSettings(){
   const [sessionR,ceR,stateR]=await Promise.allSettled([json('/api/session',7000),json('/api/ce-auth-status',7000),json('/api/state?compact=1',7000)]);
   if(sessionR.status==='fulfilled'){
