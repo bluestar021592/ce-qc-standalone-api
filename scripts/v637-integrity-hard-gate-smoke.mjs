@@ -36,7 +36,7 @@ assert.match(js,/Array\.isArray\(state\.finalRows\)&&state\.finalRows\.length\?s
 
 assert.match(html,/id="v637HomeIntegrity"/,'home integrity ledger UI missing');
 assert.match(html,/id="v637BusinessIntegrity"/,'business integrity ledger UI missing');
-assert.match(html,/v625-shell\.js\?v=20261005-v(?:637|640)-1/,'V637 JS cache bust missing');
-assert.match(html,/v625-shell\.css\?v=20261005-v(?:637|640)-1/,'V637 CSS cache bust missing');
+assert.match(html,/v625-shell\.js\?v=20261005-v(?:637|640|641)-1/,'V637 JS cache bust missing');
+assert.match(html,/v625-shell\.css\?v=20261005-v(?:637|640|641)-1/,'V637 CSS cache bust missing');
 
 console.log('[V637] source-processing-scan-dashboard conservation hard gate passed');
