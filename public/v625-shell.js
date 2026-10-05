@@ -354,7 +354,9 @@ async function scanWhppPending(){
       const currentText=String(byId('v637BusinessIntegrity')?.textContent||'');
       const match=currentText.match(/待扫描\s*([\d,]+)/);
       const waiting=Number(String(match?.[1]||'0').replace(/,/g,''));
-      btn.hidden=!(business==='WHPP'&&waiting>0);
+      const showWhppScan=business==='WHPP'&&waiting>0;
+      btn.hidden=!showWhppScan;
+      btn.style.setProperty('display',showWhppScan?'inline-flex':'none','important');
       btn.textContent=waiting>0?'扫描WHPP待处理 '+fmt(waiting)+' 票':'扫描WHPP待处理票';
     }
   }
@@ -635,8 +637,9 @@ async function loadBusiness(){
     const r=await json(stateUrl,15000);
     const state=r.state||{},m=metricState(state);
     const evidenceState=state?.historicalEvidenceRecovery?.state||summary?.historicalEvidenceRecovery?.state||'';
-    if(evidenceState==='RUNNING')scheduleHistoricalEvidenceRefresh('business');
-    else if(evidenceState==='COMPLETED')stopHistoricalEvidenceRefresh();
+    const timingRepairRunning=Boolean(summary?.timingEvidenceRepair?.active);
+    if(evidenceState==='RUNNING'||timingRepairRunning)scheduleHistoricalEvidenceRefresh('business');
+    else if(evidenceState==='COMPLETED'||summary?.timingEvidenceRepair)stopHistoricalEvidenceRefresh();
     v630BusinessDetailTabs=state.detailTabs||state?.dashboard?.detailTabs||{};
     v631BusinessAccounting=(state.accounting?.rowsByKind?state.accounting:(business==='WHPP'?buildWhppCanonicalAccounting(state,m):buildBusinessAccounting(state,m)));
     v628BusinessMetricState=m;v628BusinessReportDate=reportDate;
