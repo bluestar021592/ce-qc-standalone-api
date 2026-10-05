@@ -180,10 +180,13 @@ app.get([...V625_UI_PAGES.keys()], async (req, res, next) => {
   try {
     const page = V625_UI_PAGES.get(req.path) || V625_UI_PAGES.get('/');
     const template = await fs.readFile(path.join(__dirname, 'public', 'v625-shell.html'), 'utf8');
-    const html = template
+    let html = template
       .replaceAll('__V625_PAGE_TITLE__', page.title)
       .replaceAll('__V625_PAGE_KEY__', page.key)
       .replaceAll('__V625_BUSINESS_TYPE__', page.business);
+    if(page.business!=='WHPP'){
+      html=html.replace(/<button id="v641WhppScanPending"[\\s\\S]*?<\\/button>/,'');
+    }
     res.type('html').send(html);
   } catch (error) {
     next(error);
