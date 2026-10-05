@@ -2,6 +2,7 @@ import { CEClient } from './ceClient.js';
 import { getDb } from './db.js';
 import { normalizeEvent } from './analyzer.js';
 import { queryTrackBatchWithFallback, splitTrackBatches } from './trackBatching.js';
+import { loadWhppCanonicalTruth } from './whppCanonicalTruth.js';
 
 export const V642_WHPP_SIGNING_EVIDENCE_ID='2026-10-05-v642-whpp-pod-signing-track-repair-v1';
 const states=new Map();
@@ -15,7 +16,21 @@ function stateFor(date){
 }
 function patch(date,value){const next={...stateFor(date),...value,reportDate:date,id:V642_WHPP_SIGNING_EVIDENCE_ID,updatedAt:now()};states.set(date,next);return next;}
 function podBills(date){
-  try{return getDb().prepare("SELECT shipmentCode FROM business_final_rows WHERE businessType='WHPP' AND reportDate=? AND isPod=1 ORDER BY shipmentCode").all(date).map(r=>billOf(r)).filter(Boolean);}catch{return[]}
+  const out=new Set();
+  try{
+    const truth=loadWhppCanonicalTruth(date);
+    for(const row of truth.rows||[]){
+      const isPod=Boolean(row?.truthEvidence?.pod||Number(row?.isPod||0)===1||row?.是否POD==='是'||row?.POD状态==='POD'||String(row?.currentState||'').toUpperCase()==='POD');
+      const code=billOf(row);
+      if(isPod&&code)out.add(code);
+    }
+  }catch{}
+  try{
+    for(const row of getDb().prepare("SELECT shipmentCode FROM business_final_rows WHERE businessType='WHPP' AND reportDate=? AND isPod=1 ORDER BY shipmentCode").all(date)){
+      const code=billOf(row);if(code)out.add(code);
+    }
+  }catch{}
+  return [...out].sort();
 }
 function existingEventBills(date,bills){
   if(!bills.length)return new Set();
