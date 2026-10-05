@@ -58,6 +58,7 @@ const TASKS=[
   ['node',['scripts/v486-strict-track-semantic-start-smoke.mjs']],
   ['node',['scripts/v489-formal-export-canonical-ledger-hotpath-smoke.mjs']],
   ['node',['scripts/v645-selected-date-timing-and-board-isolation-smoke.mjs']],
+  ['node',['scripts/v647-local-timing-publication-smoke.mjs']],
   ['node',['--test',
     'test/unified-import-v7.test.js',
     'test/unified-import-ceaf.test.js',
