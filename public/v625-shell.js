@@ -513,7 +513,7 @@ async function loadBusiness(){
     setText('kpiAvgDays',timing?.overall?.avgDays==null?'—':Number(timing.overall.avgDays).toFixed(2).replace(/\.00$/,''));
     const returnCapable=['WHPP','SHOPEECN','SHOPEEVN'].includes(business);
     if(byId('kpiReturnedCard'))byId('kpiReturnedCard').hidden=!returnCapable;if(byId('kpiReturnRateCard'))byId('kpiReturnRateCard').hidden=!returnCapable;
-    if(returnCapable){setText('kpiReturned',fmt(counts.returned??m.returned||0));setText('kpiReturnRate',pct((a.total||m.total)?Number(counts.returned??m.returned||0)*100/Number(a.total||m.total):0))}
+    if(returnCapable){setText('kpiReturned',fmt((counts.returned??m.returned)||0));setText('kpiReturnRate',pct((a.total||m.total)?Number((counts.returned??m.returned)||0)*100/Number(a.total||m.total):0))}
     if(byId('kpiOtherCard')){byId('kpiOtherCard').hidden=false;setText('kpiOtherNormal',fmt(counts.otherNormal||0))}
     const hist=state.historySummary||[];renderTrend('v625BusinessTrend',hist.map(x=>({label:x.reportDate||'',value:first(x,['summary.today','summary.total','today','total'])||0})));renderDonut(m);
     const qs=new URLSearchParams({scope:'all'});if(snapshotId)qs.set('snapshotId',snapshotId);if(reportDate)qs.set('reportDate',reportDate);
