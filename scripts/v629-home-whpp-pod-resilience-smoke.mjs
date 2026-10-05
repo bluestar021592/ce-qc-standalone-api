@@ -19,8 +19,8 @@ assert.match(js,/summary\?\.reportDate===reportDate/,'business timing read must 
 assert.match(js,/setText\('kpiReturned',fmt\(\(counts\.returned\?\?m\.returned\)\|\|0\)\)/,'business return card must use exclusive same-state return truth');
 assert.match(js,/function renderKpiDetail\(kind\)/,'KPI detail drilldown must remain installed');
 
-assert.match(server,/import \{ loadWhppState \} from '\.\/src\/whppStore\.js'/,'WHPP dedicated state import missing');
-assert.match(server,/requestedType === 'WHPP'[\s\S]*loadWhppState\(\)[\s\S]*buildWhppDashboard/,'WHPP business board must use dedicated state');
+assert.match(server,/import \{ loadWhppState, saveWhppDailyImport \} from '\.\/src\/whppStore\.js'/,'WHPP state/import integration missing');
+assert.match(server,/requestedType === 'WHPP'[\s\S]*loadWhppState\(\)[\s\S]*loadWhppCanonicalTruth\([\s\S]*buildWhppDashboard/,'WHPP business board must use canonical merged truth');
 assert.match(server,/\['CE', 'CEAF', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN'\]\.map\(type => loadLightweightUnifiedBusinessState/,'POD workspace lightweight readers must exclude WHPP');
 assert.match(server,/const whppState = loadWhppState\(\)/,'POD workspace must add WHPP through dedicated state');
 assert.doesNotMatch(server,/\['CE', 'CEAF', 'TBKH', 'ALI1688', 'WHPP', 'SHOPEECN', 'SHOPEEVN'\]\.map\(type => loadLightweightUnifiedBusinessState/,'WHPP must never enter unsupported lightweight reader');
