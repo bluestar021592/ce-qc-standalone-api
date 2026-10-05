@@ -77,7 +77,7 @@ function shopeePodBills(type,date,snapshotId=''){
     return unique(rows.map(r=>r.shipmentCode));
   }catch{return[]}
 }
-function podBills(type,date,snapshotId=''){
+export function selectedDatePodBills(type,date,snapshotId=''){
   if(type==='WHPP')return whppPodBills(date);
   if(type==='TBKH')return tbkhPodBills(date,snapshotId);
   return shopeePodBills(type,date,snapshotId);
@@ -120,7 +120,7 @@ function persistBillEvents(type,date,bill,rows=[]){
 }
 
 async function runOne(type,date,snapshotId=''){
-  const bills=podBills(type,date,snapshotId);
+  const bills=selectedDatePodBills(type,date,snapshotId);
   patch(type,date,snapshotId,{status:'RUNNING',phase:'TRACK_QUERY',total:bills.length,completed:0,failed:0,queried:0,startedAt:now(),message:`${type} ${date} 签收时效补证：真实POD ${bills.length}票`});
   if(!bills.length)return patch(type,date,snapshotId,{status:'WAITING_FOR_POD_MEMBERS',phase:'WAITING_FOR_POD_MEMBERS',completedAt:now(),message:`${type} ${date} 当前尚未形成真实POD成员；等待扫描/轨迹处理完成后自动重试。`});
   const client=new CEClient(),batches=splitTrackBatches(bills),totalBatches=batches.length;
