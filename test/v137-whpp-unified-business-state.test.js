@@ -12,11 +12,13 @@ const syntax=file=>{
   assert.equal(result.status,0,`${file}: ${result.stderr||result.stdout}`);
 };
 
-test('V137 WHPP adapter is syntax-valid and exposes the common business-state route',()=>{
+test('V137 WHPP adapter is syntax-valid but no longer intercepts the common business-state route',()=>{
   syntax('src/v137WhppUnifiedBusinessStatePatch.js');
   syntax('public/v137-whpp-unified-snapshot-view.js');
   const patch=read('src/v137WhppUnifiedBusinessStatePatch.js');
   assert.match(patch,/\/api\/business-state\/:businessType/);
+  assert.match(patch,/retire the legacy WHPP interception/);
+  assert.match(patch,/return previousGet\.apply\(this,args\)/);
   assert.match(patch,/\/api\/v132\/whpp-fast-summary/);
   assert.match(patch,/sourceTruth:'NORMALIZED_SQLITE'/);
   assert.match(patch,/business_daily_reports/);
