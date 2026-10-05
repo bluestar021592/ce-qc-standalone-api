@@ -23,7 +23,7 @@ assert.match(js,/setText\('kpiReturned',fmt\(m\.returned\|\|0\)\)/,'business ret
 assert.match(js,/setText\('kpiOtherNormal',fmt\(m\.otherNormal\|\|0\)\)/,'WHPP other-normal status must be visible');
 assert.match(html,/data-kpi-detail="returned"/,'returned KPI must be clickable');
 assert.match(html,/data-kpi-detail="otherNormal"/,'other-normal KPI must be clickable');
-assert.match(html,/v625-shell\.js\?v=20261004-v630-1/,'V630 JS cache bust missing');
-assert.match(html,/v625-shell\.css\?v=20261004-v630-1/,'V630 CSS cache bust missing');
+assert.match(html,/v625-shell\.js\?v=202610(?:04-v630-1|05-v631-1)/,'V630 JS cache bust missing');
+assert.match(html,/v625-shell\.css\?v=202610(?:04-v630-1|05-v631-1)/,'V630 CSS cache bust missing');
 
 console.log('[V630] strict return truth + same-state KPI drilldown + WHPP remainder visibility smoke passed');
