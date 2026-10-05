@@ -36,6 +36,7 @@ import { buildShopeeDashboard } from './src/shopeeReporting.js';
 import { loadWhppState, saveWhppDailyImport } from './src/whppStore.js';
 import { buildWhppDashboard } from './src/whppReporting.js';
 import { loadWhppCanonicalTruth } from './src/whppCanonicalTruth.js';
+import { recoverHistoricalMemberEvidence } from './src/historicalMemberEvidence.js';
 import { analyzeShopeeShipment, SHOPEE_ANALYSIS_RULE_VERSION } from './src/shopeeAnalyzer.js';
 import { queryBatchWithFallback, splitTrackBatches } from './src/trackBatching.js';
 import {
@@ -48,7 +49,7 @@ import {
 } from './src/businessStore.js';
 import { createPurgeChallenge, executePurge } from './src/dataPurge.js';
 import { queueDirectDataPurge, getDirectDataPurgeStatus, DIRECT_PURGE_ID } from './src/directDataPurge.js';
-import { buildHomeQualitySummary } from './src/homeQualitySummary.js';
+import { buildHomeQualitySummary, buildHomeQualitySummaryWithArchive } from './src/homeQualitySummary.js';
 import { buildCanonicalBusinessAccounting } from './src/businessAccounting.js';
 import { buildDataIntegrityReport } from './src/dataIntegrity.js';
 
@@ -636,14 +637,22 @@ app.get('/api/unified-history', (req, res) => {
   res.json({ ok: true, rows: listUnifiedImportHistory(req.query.limit) });
 });
 
-app.get('/api/home-quality-summary', (req, res) => {
+app.get('/api/home-quality-summary', async (req, res) => {
   try {
-    res.json(buildHomeQualitySummary({
+    res.json(await buildHomeQualitySummaryWithArchive({
       reportDate:String(req.query.reportDate||''),
       snapshotId:String(req.query.snapshotId||'')
     }));
   } catch (error) {
-    res.status(500).json({ ok:false, error:error?.message || String(error) });
+    console.warn('[CE-QC][HOME_SUMMARY_ARCHIVE_FALLBACK]',error?.message||String(error));
+    try{
+      res.json(buildHomeQualitySummary({
+        reportDate:String(req.query.reportDate||''),
+        snapshotId:String(req.query.snapshotId||'')
+      }));
+    }catch(inner){
+      res.status(500).json({ ok:false, error:inner?.message || String(inner) });
+    }
   }
 });
 app.get('/api/data-integrity', (req,res)=>{
@@ -770,12 +779,25 @@ app.get('/api/business-state/:businessType', (req, res) => {
       const source = loadWhppState();
       const reportDate = String(source.reportDate || req.query.reportDate || '').trim();
       const truth = loadWhppCanonicalTruth(reportDate, requestedSnapshotId || source.sourceSnapshotId || source.snapshotId || '');
+      const archiveEvidence = truth.total>0
+        ? await recoverHistoricalMemberEvidence({reportDate:truth.reportDate||reportDate,businessType:'WHPP',targetBills:(truth.rows||[]).map(row=>row.shipmentCode)})
+        : null;
+      const enrichedRows=(truth.rows||[]).map(row=>{
+        const code=String(row.shipmentCode||row.运单号||'').trim().toUpperCase();
+        const archivePod=Boolean(archiveEvidence?.podBills?.has?.(code));
+        if(!archivePod)return row;
+        return{
+          ...row,isPod:1,是否POD:'是',POD状态:'POD',currentState:'POD',
+          primaryCategory:row.primaryCategory||'POD',
+          truthEvidence:{...(row.truthEvidence||{}),pod:true,archivePod:true,archivePodSource:archiveEvidence?.podEvidenceByBill?.get?.(code)?.source||'historical_archive'}
+        };
+      });
       const truthSource = {
         ...source,
         reportDate: truth.reportDate || reportDate,
-        pnhBills: truth.rows.map(row=>row.shipmentCode),
-        dailyParseRows: truth.rows,
-        finalRows: truth.rows
+        pnhBills: enrichedRows.map(row=>row.shipmentCode),
+        dailyParseRows: enrichedRows,
+        finalRows: enrichedRows
       };
       const dashboard = buildWhppDashboard(truthSource);
       const accounting=buildCanonicalBusinessAccounting(truthSource,'WHPP');
@@ -786,7 +808,7 @@ app.get('/api/business-state/:businessType', (req, res) => {
         dashboard,
         detailTabs:dashboard.detailTabs || {},
         accounting,
-        canonicalTruthEvidence:truth.evidence
+        canonicalTruthEvidence:{...(truth.evidence||{}),archiveRecovery:archiveEvidence?.stats||null}
       };
       return res.json({
         ok:true,businessType:'WHPP',reportDate:truth.reportDate||reportDate,snapshotId:truth.snapshotId||source.snapshotId||'',
