@@ -626,7 +626,15 @@ async function loadBusiness(){
     const integrityQuery=new URLSearchParams();if(snapshotId)integrityQuery.set('snapshotId',snapshotId);if(reportDate)integrityQuery.set('reportDate',reportDate);
     const integrity=await json('/api/data-integrity?'+integrityQuery.toString(),15000).catch(()=>null);
     const bi=integrity?.businesses?.[business];
-    if(bi)setText('v637BusinessIntegrity','源票 '+fmt(bi.sourceCount)+' · 已进入处理 '+fmt(bi.stateMemberCount)+' · 已扫描 '+fmt(bi.scanCount)+' · 待扫描 '+fmt(bi.waitingScan)+' · 已归类 '+fmt(bi.accounted)+' · 差异 '+fmt(bi.difference));
+    if(bi){
+      setText('v637BusinessIntegrity','源票 '+fmt(bi.sourceCount)+' · 已进入处理 '+fmt(bi.stateMemberCount)+' · 已扫描 '+fmt(bi.scanCount)+' · 待扫描 '+fmt(bi.waitingScan)+' · 已归类 '+fmt(bi.accounted)+' · 差异 '+fmt(bi.difference));
+      const whppScanBtn=byId('v641WhppScanPending');
+      if(whppScanBtn){
+        const waiting=Number(bi.waitingScan||0);
+        whppScanBtn.hidden=!(business==='WHPP'&&waiting>0);
+        whppScanBtn.textContent=waiting>0?'扫描WHPP待处理 '+fmt(waiting)+' 票':'扫描WHPP待处理票';
+      }
+    }
     const timing=summary?.reportDate===reportDate?summary?.timing?.[business]:null;
     setText('kpiAvgDays',timing?.overall?.avgDays==null?'—':Number(timing.overall.avgDays).toFixed(2).replace(/\.00$/,''));
     const returnCapable=['WHPP','SHOPEECN','SHOPEEVN'].includes(business);
