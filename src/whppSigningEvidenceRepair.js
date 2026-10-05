@@ -19,14 +19,27 @@ function podBills(date){
 }
 function existingEventBills(date,bills){
   if(!bills.length)return new Set();
-  const out=new Set();
+  const grouped=new Map();
   for(let i=0;i<bills.length;i+=350){
     const chunk=bills.slice(i,i+350),marks=chunk.map(()=>'?').join(',');
     try{
-      for(const row of getDb().prepare(`SELECT DISTINCT shipmentCode FROM business_track_events WHERE businessType='WHPP' AND reportDate=? AND shipmentCode IN (${marks})`).all(date,...chunk))out.add(billOf(row));
+      const rows=getDb().prepare(`SELECT shipmentCode,eventCode,rawJson FROM business_track_events WHERE businessType='WHPP' AND reportDate=? AND shipmentCode IN (${marks})`).all(date,...chunk);
+      for(const raw of rows){
+        const code=billOf(raw);if(!code)continue;
+        if(!grouped.has(code))grouped.set(code,[]);
+        let payload={};try{payload=JSON.parse(String(raw.rawJson||'{}'))}catch{}
+        grouped.get(code).push({...payload,eventCode:String(raw.eventCode??payload.eventCode??payload.trackingEventCode??payload.statusCode??'')});
+      }
     }catch{}
   }
-  return out;
+  const complete=new Set();
+  for(const [code,rows] of grouped){
+    const codes=rows.map(row=>String(row.eventCode??row.trackingEventCode??row.statusCode??'').trim());
+    const hasStart=codes.some(value=>['60','70'].includes(value));
+    const hasPod=codes.some(value=>value==='80');
+    if(hasStart&&hasPod)complete.add(code);
+  }
+  return complete;
 }
 function groupRows(rows=[]){
   const map=new Map();
