@@ -185,6 +185,31 @@ export function saveWhppDailyImport({ reportDate, sourceName = '', rows = [], ba
     );
   }
 
+  // Same report date + exact same membership is never a new lifecycle merely
+  // because an old completion marker is missing. Preserve scan/track/final state
+  // instead of deleting normalized evidence and forcing a destructive re-run.
+  if (existingDaily.exists && existingDaily.identicalMembership && String(prior.reportDate || '') === String(reportDate || '')) {
+    const preserved = saveWhppState({
+      ...prior,
+      reportDate,
+      sourceName: sourceName || prior.sourceName || '',
+      batchId: batchId || prior.batchId || '',
+      sourceSnapshotId: snapshotId || prior.sourceSnapshotId || '',
+      dailyReportReady: true,
+      pnhBills: unique.map(billOf),
+      dailyParseRows: unique,
+      processing: {
+        ...(prior.processing || {}),
+        running: false,
+        paused: false,
+        phase: prior.processing?.phase || '待处理'
+      }
+    });
+    preserved.sameMembershipEvidencePreserved = true;
+    console.log(`[CE-QC][WHPP_IDENTICAL_REIMPORT_PRESERVED] reportDate=${reportDate} members=${unique.length} scan=${(prior.scanResults||[]).length} final=${(prior.finalRows||[]).length}`);
+    return preserved;
+  }
+
   const carryBills = db.prepare("SELECT shipmentCode FROM carryover_open_items WHERE businessType='WHPP' AND status='OPEN' ORDER BY shipmentCode").all().map(row => row.shipmentCode);
 
   db.exec('BEGIN IMMEDIATE');
