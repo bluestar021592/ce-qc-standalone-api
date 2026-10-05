@@ -404,6 +404,7 @@ async function loadHome(options={}){
 
 let v628BusinessWorkspaceRows=[];
 let v630BusinessDetailTabs={};
+let v631BusinessAccounting={rowsByKind:{},total:0,accounted:0,difference:0};
 let v628BusinessMetricState={};
 let v628BusinessReportDate='';
 function businessTypeMatches(row){
@@ -418,40 +419,44 @@ function tabRows(...keys){
   }
   return [];
 }
-function uniqueDetailRows(rows=[]){
-  const map=new Map();
-  for(const row of rows){
-    const code=String(row?.shipmentCode||row?.运单号||'').trim().toUpperCase();
-    if(code&&!map.has(code))map.set(code,row);
+function detailCode(row={}){return String(row.shipmentCode||row.运单号||row.waybill||'').trim().toUpperCase()}
+function uniqueDetailRows(rows=[]){const map=new Map();for(const row of rows){const code=detailCode(row);if(code&&!map.has(code))map.set(code,row)}return[...map.values()]}
+function rowText(row={}){return [row.primaryCategory,row.主分类,row.异常分类,row.currentState,row.scanNormalizedState,row.退回状态,row.specialState,row.shopState,row.最后节点,row.latestEventDesc,row.QC判断].map(v=>String(v||'')).join(' ').toUpperCase()}
+function rowIsPod(row={}){const text=rowText(row);return row.是否POD==='是'||String(row.orderStatus||'')==='85'||/(^|\s)(POD|已签收|签收成功|已妥投|DELIVERED|SIGNED)(\s|$)/i.test(text)&&!/未签收|未妥投|签收失败/.test(text)}
+function rowIsReturned(row={}){const text=rowText(row);return !/未退回|非退回|待退回|退回处理中|NOT_RETURNED|PENDING_RETURN/i.test(text)&&/(已退回|退回完成|RETURN_COMPLETED|RETURNED)/i.test(text)}
+function rowIsPending(row={}){return Number(row.Pending次数||row.Pending天数||row.pendingDistinctDayCount||0)>0||/(^|\s)PENDING(\s|$)|Pending/i.test(rowText(row))}
+function rowIsAbnormal(row={}){
+  const text=rowText(row);
+  return Number(row.OC天数||row.ocDays||0)>0||Number(row.盘点天数||row.盘点次数||0)>0||
+    row.入库无扫描节点==='是'||/(OC|异常|盘点|工单|入库无扫描|节点未更新|无轨迹|失败待重试|严重超时|滞留)/i.test(text);
+}
+function rowIsOtherNormal(row={}){
+  const text=rowText(row),special=String(row.specialState||'').toUpperCase(),shop=String(row.shopState||'').toUpperCase();
+  return ['SELF_PICKUP','CECN_RETENTION','CEZT_RETENTION','CCSL580_RETENTION'].includes(special)||
+    row.matchedRule==='NORMAL_FINAL_HUB'||/正常分流|自提|CECN|CEZT|580/.test(text)||
+    /^SHOP_/.test(shop)||/门店途中|到达门店|门店入库/.test(text);
+}
+function buildBusinessAccounting(state={},fallback={}){
+  const source=uniqueDetailRows(Array.isArray(state.finalRows)?state.finalRows:Object.values(state.finalRows||{}));
+  const total=Number(fallback.total||source.length||0);
+  if(!source.length)return{total,accounted:0,difference:total,rowsByKind:{total:[],pod:[],returned:[],pending:[],abnormal:[],otherNormal:[],delivery:[]}};
+  const rowsByKind={total:source,pod:[],returned:[],pending:[],abnormal:[],otherNormal:[],delivery:[]};
+  for(const row of source){
+    if(rowIsPod(row))rowsByKind.pod.push(row);
+    else if(rowIsReturned(row))rowsByKind.returned.push(row);
+    else if(rowIsPending(row))rowsByKind.pending.push(row);
+    else if(rowIsAbnormal(row))rowsByKind.abnormal.push(row);
+    else if(rowIsOtherNormal(row))rowsByKind.otherNormal.push(row);
+    else rowsByKind.delivery.push(row);
   }
-  return [...map.values()];
+  const accounted=['pod','returned','pending','abnormal','otherNormal','delivery'].reduce((n,key)=>n+rowsByKind[key].length,0);
+  return{total:total||source.length,accounted,difference:(total||source.length)-accounted,rowsByKind};
 }
 function v628MetricRows(kind){
-  if(kind==='delivery'){
-    const exact=tabRows('deliveryAll','delivery','pvDelivery');
-    if(exact.length)return uniqueDetailRows(exact);
-  }
-  if(kind==='pod'){const exact=tabRows('podClosed','pod');if(exact.length)return uniqueDetailRows(exact)}
-  if(kind==='returned'){const exact=tabRows('returned');if(exact.length)return uniqueDetailRows(exact)}
-  if(kind==='pending'){const exact=tabRows('pendingAll','pending1');if(exact.length)return uniqueDetailRows(exact)}
-  if(kind==='abnormal'){const exact=tabRows('abnormalOpen','coreAbnormal','abnormal','unresolved');if(exact.length)return uniqueDetailRows(exact)}
-  if(kind==='otherNormal'){
-    return uniqueDetailRows([
-      ...tabRows('cancelled'),
-      ...tabRows('normalDiversion'),
-      ...tabRows('phnomPenhShop'),
-      ...tabRows('provinceShop'),
-      ...tabRows('unknownShop')
-    ]);
-  }
-  if(kind==='total'){const exact=tabRows('allData','all','dailyParse');if(exact.length)return uniqueDetailRows(exact)}
-  const rows=v628BusinessWorkspaceRows;
-  if(kind==='delivery')return rows.filter(row=>!row.isClosed);
-  if(kind==='pod')return rows.filter(row=>row.scanStatus==='POD'||row.queryStatus==='POD跳过');
-  if(kind==='returned')return rows.filter(row=>row.scanStatus==='RETURN'||row.queryStatus==='退回跳过');
-  if(kind==='pending')return rows.filter(row=>/pending/i.test([row.category,row.latestNode,row.queryStatus,row.specialState].join(' ')));
-  if(kind==='abnormal')return rows.filter(row=>!row.isClosed&&/(OC|异常|PENDING|盘点|工单|滞留|未扫描|错分|失败|待重试)/i.test([row.category,row.latestNode,row.queryStatus,row.specialState,row.shopState].join(' ')));
-  return rows;
+  const exact=v631BusinessAccounting?.rowsByKind?.[kind];
+  if(Array.isArray(exact)&&exact.length)return exact;
+  if(kind==='total'&&Array.isArray(v631BusinessAccounting?.rowsByKind?.total))return v631BusinessAccounting.rowsByKind.total;
+  return [];
 }
 function renderKpiDetail(kind){
   const panel=byId('v628KpiDetailPanel'),tbody=byId('v628KpiDetailRows');if(!panel||!tbody)return;
@@ -473,7 +478,7 @@ function renderKpiDetail(kind){
       const td=document.createElement('td');td.textContent=value||'—';tr.appendChild(td);
     }
     const action=document.createElement('td'),a=document.createElement('a');
-    a.href='/tracking?auth=v625&code='+encodeURIComponent(code)+'&reportDate='+encodeURIComponent(v628BusinessReportDate||'');
+    a.href='/tracking?auth=v625&code='+encodeURIComponent(code)+'&reportDate='+encodeURIComponent(v628BusinessReportDate||'')+'&businessType='+encodeURIComponent(business);
     a.textContent='查看轨迹';action.appendChild(a);tr.appendChild(action);tbody.appendChild(tr);
   }
   panel.hidden=false;
@@ -495,16 +500,21 @@ async function loadBusiness(){
     const r=await json(stateUrl,15000);
     const state=r.state||{},m=metricState(state);
     v630BusinessDetailTabs=state.detailTabs||{};
+    v631BusinessAccounting=buildBusinessAccounting(state,m);
     v628BusinessMetricState=m;v628BusinessReportDate=reportDate;
     if(reportDate&&!selectedReportDate())applyDashboardDate(reportDate);
     if(reportDate){byId('v625FromDate')&&(byId('v625FromDate').value=reportDate);byId('v625ToDate')&&(byId('v625ToDate').value=reportDate)}
-    setText('kpiTotal',fmt(m.total));setText('kpiDelivery',fmt(m.delivery));setText('kpiPod',fmt(m.pod));setText('kpiPodRate',pct(m.podRate));setText('kpiPending',fmt(m.pending));setText('kpiOpen',fmt(m.unresolved));setText('kpiOc',fmt(m.oc));
+    const a=v631BusinessAccounting,counts=Object.fromEntries(Object.entries(a.rowsByKind||{}).map(([k,v])=>[k,v.length]));
+    setText('kpiTotal',fmt(a.total||m.total));setText('kpiDelivery',fmt(counts.delivery??m.delivery));setText('kpiPod',fmt(counts.pod??m.pod));
+    setText('kpiPodRate',pct((a.total||m.total)?Number(counts.pod??m.pod)*100/Number(a.total||m.total):0));
+    setText('kpiPending',fmt(counts.pending??m.pending));setText('kpiOpen',fmt(counts.abnormal??m.unresolved));setText('kpiOc',fmt(m.oc));
+    setText('v631AccountingMeta','已归类 '+fmt(a.accounted)+' / '+fmt(a.total)+' · 差异 '+fmt(a.difference));
     const timing=summary?.reportDate===reportDate?summary?.timing?.[business]:null;
     setText('kpiAvgDays',timing?.overall?.avgDays==null?'—':Number(timing.overall.avgDays).toFixed(2).replace(/\.00$/,''));
     const returnCapable=['WHPP','SHOPEECN','SHOPEEVN'].includes(business);
     if(byId('kpiReturnedCard'))byId('kpiReturnedCard').hidden=!returnCapable;if(byId('kpiReturnRateCard'))byId('kpiReturnRateCard').hidden=!returnCapable;
-    if(returnCapable){setText('kpiReturned',fmt(m.returned||0));setText('kpiReturnRate',pct(m.total?m.returned*100/m.total:0))}
-    if(byId('kpiOtherCard')){byId('kpiOtherCard').hidden=business!=='WHPP';setText('kpiOtherNormal',fmt(m.otherNormal||0))}
+    if(returnCapable){setText('kpiReturned',fmt(counts.returned??m.returned||0));setText('kpiReturnRate',pct((a.total||m.total)?Number(counts.returned??m.returned||0)*100/Number(a.total||m.total):0))}
+    if(byId('kpiOtherCard')){byId('kpiOtherCard').hidden=false;setText('kpiOtherNormal',fmt(counts.otherNormal||0))}
     const hist=state.historySummary||[];renderTrend('v625BusinessTrend',hist.map(x=>({label:x.reportDate||'',value:first(x,['summary.today','summary.total','today','total'])||0})));renderDonut(m);
     const qs=new URLSearchParams({scope:'all'});if(snapshotId)qs.set('snapshotId',snapshotId);if(reportDate)qs.set('reportDate',reportDate);
     const wr=await json('/api/tracking-workspace?'+qs.toString(),10000).catch(()=>({rows:[]}));
@@ -616,9 +626,10 @@ async function queryTrack(){
   setText('v625TrackMeta','查询中…');byId('v625TrackTimeline').innerHTML='<div class="v625-empty-state">查询中…</div>';
   try{
     const r=await post('/api/track-query',{businessType:byId('v625TrackBusiness').value,shipmentCodes:[code],reportDate:byId('v625TrackDate').value||today()},60000);
-    const events=(r.trackEvents||[]).filter(x=>String(x.shipmentCode||x.waybill||x.orderNo||'')===code||!x.shipmentCode);
-    byId('v625TrackTimeline').innerHTML=events.length?events.map(e=>'<div class="v625-timeline-item"><b>'+esc(first(e,['eventTime','time','updateTime','createdAt'])||'—')+'</b><p>'+esc(first(e,['eventName','statusName','description','content','remark'])||JSON.stringify(e).slice(0,160))+'</p></div>').join(''):'<div class="v625-empty-state">暂无轨迹节点</div>';
-    setText('v625TrackMeta','查询完成 · '+events.length+' 个节点');
+    const events=(r.trackEvents||[]).filter(x=>String(x.shipmentCode||x.waybill||x.orderNo||'').toUpperCase()===code.toUpperCase()||!x.shipmentCode);
+    const eventDesc=e=>{let raw={};try{raw=typeof e.rawJson==='string'?JSON.parse(e.rawJson):e.rawJson||{}}catch{}return first(e,['trackingEventDescZh','trackingEventDesc','eventName','statusName','description','content','remark'])||first(raw,['trackingEventDescZh','trackingEventDesc','statusText','statusName','eventName','remark','message'])||'已保存轨迹证据'};
+    byId('v625TrackTimeline').innerHTML=events.length?events.map(e=>'<div class="v625-timeline-item"><b>'+esc(first(e,['eventTime','time','updateTime','createdAt'])||'—')+'</b><p>'+esc(eventDesc(e))+'</p><small>'+esc(e.evidenceSource||'CE实时轨迹')+'</small></div>').join(''):'<div class="v625-empty-state">暂无轨迹节点</div>';
+    setText('v625TrackMeta','查询完成 · '+events.length+' 个节点'+(r.localEvidence?' · 含本地已保存证据':''));
   }catch(e){byId('v625TrackTimeline').innerHTML='<div class="v625-empty-state">'+esc(e.message)+'</div>';setText('v625TrackMeta','查询失败')}
 }
 async function loadExceptions(){
@@ -944,7 +955,9 @@ async function init(){
   else if(page==='reports'){byId('v625ReportDate').value=today();renderReports()}
   else if(page==='tracking'){
     byId('v625TrackDate').value=currentParams().get('reportDate')||today();
-    const code=new URLSearchParams(location.search).get('code');if(code){byId('v625TrackCode').value=code;void queryTrack()}
+    const params=currentParams(),requestedBusiness=params.get('businessType')||'';
+    if(requestedBusiness&&byId('v625TrackBusiness'))byId('v625TrackBusiness').value=requestedBusiness;
+    const code=params.get('code');if(code){byId('v625TrackCode').value=code;void queryTrack()}
   }
   else if(page==='settings'){await loadSettings();switchSettingsTab('basic');}
   else if(page==='logs')await loadLogs();
