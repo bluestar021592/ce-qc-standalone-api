@@ -19,7 +19,7 @@ assert.match(js,/let v630BusinessDetailTabs=\{\}/,'business detail tabs cache mi
 assert.match(js,/function tabRows\(\.\.\.keys\)/,'same-state detail tab reader missing');
 assert.match(js,/function buildBusinessAccounting\(state=\{\},fallback=\{\}\)/,'delivery drilldown must use exclusive same-state accounting');
 assert.match(js,/rowsByKind\.delivery\.push\(row\)/,'delivery detail must come from exclusive accounting');
-assert.match(js,/v630BusinessDetailTabs=state\.detailTabs\|\|\{\}/,'business state detail tabs must feed drilldown');
+assert.match(js,/v630BusinessDetailTabs=state\.detailTabs\|\|state\?\.dashboard\?\.detailTabs\|\|\{\}/,'business state or canonical dashboard detail tabs must feed drilldown');
 assert.match(js,/setText\('kpiReturned',fmt\(\(counts\.returned\?\?m\.returned\)\|\|0\)\)/,'business returned card must use same-state accounting metric');
 assert.match(js,/setText\('kpiOtherNormal',fmt\(counts\.otherNormal\|\|0\)\)/,'other-normal status must be visible from exclusive accounting');
 assert.match(html,/data-kpi-detail="returned"/,'returned KPI must be clickable');
