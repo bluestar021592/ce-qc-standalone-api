@@ -17,10 +17,11 @@ assert.match(server,/未退回|NOT_RETURNED/,'workspace negative return guard mi
 
 assert.match(js,/let v630BusinessDetailTabs=\{\}/,'business detail tabs cache missing');
 assert.match(js,/function tabRows\(\.\.\.keys\)/,'same-state detail tab reader missing');
-assert.match(js,/if\(kind==='delivery'\)[\s\S]*tabRows\('deliveryAll','delivery','pvDelivery'\)/,'delivery drilldown must use exact business detail buckets first');
+assert.match(js,/function buildBusinessAccounting\(state=\{\},fallback=\{\}\)/,'delivery drilldown must use exclusive same-state accounting');
+assert.match(js,/rowsByKind\.delivery\.push\(row\)/,'delivery detail must come from exclusive accounting');
 assert.match(js,/v630BusinessDetailTabs=state\.detailTabs\|\|\{\}/,'business state detail tabs must feed drilldown');
-assert.match(js,/setText\('kpiReturned',fmt\(m\.returned\|\|0\)\)/,'business returned card must use same-state metric');
-assert.match(js,/setText\('kpiOtherNormal',fmt\(m\.otherNormal\|\|0\)\)/,'WHPP other-normal status must be visible');
+assert.match(js,/setText\('kpiReturned',fmt\(\(counts\.returned\?\?m\.returned\)\|\|0\)\)/,'business returned card must use same-state accounting metric');
+assert.match(js,/setText\('kpiOtherNormal',fmt\(counts\.otherNormal\|\|0\)\)/,'other-normal status must be visible from exclusive accounting');
 assert.match(html,/data-kpi-detail="returned"/,'returned KPI must be clickable');
 assert.match(html,/data-kpi-detail="otherNormal"/,'other-normal KPI must be clickable');
 assert.match(html,/v625-shell\.js\?v=202610(?:04-v630-1|05-v631-1)/,'V630 JS cache bust missing');
