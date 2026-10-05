@@ -38,7 +38,7 @@ assert.match(js,/scheduleHistoricalEvidenceRefresh/,'browser auto-refresh after 
 assert.match(js,/historicalEvidenceRecovery\?\.state==='RUNNING'/,'home auto-poll trigger missing');
 assert.match(js,/state\?\.historicalEvidenceRecovery\?\.state/,'business auto-poll trigger missing');
 
-assert.match(html,/v625-shell\.js\?v=20261005-v(?:640|641|642)-1/,'V640 JS cache bust missing');
-assert.match(html,/v625-shell\.css\?v=20261005-v(?:640|641|642)-1/,'V640 CSS cache bust missing');
+assert.match(html,/v625-shell\.js\?v=20261005-v(?:640|641|642|643)-1/,'V640 JS cache bust missing');
+assert.match(html,/v625-shell\.css\?v=20261005-v(?:640|641|642|643)-1/,'V640 CSS cache bust missing');
 
 console.log('[V640] non-blocking exact-member archive recovery + auto-refresh smoke passed');
