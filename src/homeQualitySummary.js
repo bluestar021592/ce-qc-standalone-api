@@ -8,6 +8,7 @@ import { recoverHistoricalMemberEvidence } from './historicalMemberEvidence.js';
 import { ensureHistoricalEvidenceJob } from './historicalEvidenceWorkerManager.js';
 import { requestV328EvidenceRepair, inspectV328EvidenceRepair } from './v328EvidenceRepairCoordinator.js';
 import { requestWhppSigningEvidenceRepair, inspectWhppSigningEvidenceRepair } from './whppSigningEvidenceRepair.js';
+import { readV329ThreeBusinessDailyCache } from './v329ThreeBusinessDailyCache.js';
 
 const TYPES = Object.freeze(['CE','CEAF','TBKH','ALI1688','WHPP','SHOPEECN','SHOPEEVN']);
 const TIMING_TYPES = Object.freeze(['TBKH','WHPP','SHOPEECN','SHOPEEVN']);
@@ -433,8 +434,28 @@ function selectUnifiedBatch({ reportDate='', snapshotId='' }={}) {
   ) || null;
 }
 
+function timingWithSavedCacheFallback(batch,type,current){
+  if(!batch?.reportDate||!['TBKH','SHOPEECN','SHOPEEVN'].includes(type))return current;
+  if(current?.overall?.avgDays!==null&&current?.overall?.avgDays!==undefined)return current;
+  try{
+    const cache=readV329ThreeBusinessDailyCache(type,batch.reportDate,getDb(),batch.reportDate);
+    const row=(cache.daily||[]).find(item=>String(item.reportDate||'')===String(batch.reportDate||''))||null;
+    if(!row||row.avgSigningDays===null||row.avgSigningDays===undefined)return current;
+    const podCount=n(row.signingSampleCount||row.signingDaysCount,0);
+    const totalPod=n(row.pod,0);
+    return{
+      ...current,
+      overall:{...(current?.overall||{}),avgDays:row.avgSigningDays,podCount,totalPodCount:totalPod,missingEvidenceCount:Math.max(0,totalPod-podCount)},
+      pp:{...(current?.pp||{}),avgDays:row.ppAvgSigningDays,podCount:n(row.ppSigningSampleCount||row.ppSigningDaysCount,0),totalPodCount:n(current?.pp?.totalPodCount,0)},
+      pv:{...(current?.pv||{}),avgDays:row.pvAvgSigningDays,podCount:n(row.pvSigningSampleCount||row.pvSigningDaysCount,0),totalPodCount:n(current?.pv?.totalPodCount,0)},
+      evidence:{...(current?.evidence||{}),valid:podCount,missing:Math.max(0,totalPod-podCount),cacheSource:row.source||cache.source||'V329_DAILY_CACHE'},
+      cacheFallback:{source:row.source||cache.source||'V329_DAILY_CACHE',updatedAt:row.updatedAt||'',truthfulSavedEvidence:true}
+    };
+  }catch{return current}
+}
+
 function safeTimingForBatch(batch,type){
-  try{return timingForBatch(batch,type)}
+  try{return timingWithSavedCacheFallback(batch,type,timingForBatch(batch,type))}
   catch(error){
     console.warn('[CE-QC][HOME_SUMMARY_TIMING_FALLBACK]',type,error?.message||String(error));
     return {
@@ -489,7 +510,7 @@ export async function buildHomeQualitySummaryWithArchive(options={}){
   }
   const timingEntries=await Promise.all(TIMING_TYPES.map(async type=>[
     type,
-    await timingForBatchWithArchive(batch,type,job.result[type]||null)
+    timingWithSavedCacheFallback(batch,type,await timingForBatchWithArchive(batch,type,job.result[type]||null))
   ]));
   return{...base,timing:Object.fromEntries(timingEntries),historicalEvidenceRecovery:{state:'COMPLETED',readOnly:true},timingEvidenceRepair:repairSummary};
 }
