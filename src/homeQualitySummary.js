@@ -9,7 +9,7 @@ import { ensureHistoricalEvidenceJob } from './historicalEvidenceWorkerManager.j
 import { requestV328EvidenceRepair, inspectV328EvidenceRepair } from './v328EvidenceRepairCoordinator.js';
 import { requestWhppSigningEvidenceRepair, inspectWhppSigningEvidenceRepair } from './whppSigningEvidenceRepair.js';
 import { readV329ThreeBusinessDailyCache } from './v329ThreeBusinessDailyCache.js';
-import { requestSelectedDateTimingRepair, inspectSelectedDateTimingRepair } from './selectedDateTimingEvidenceRepair.js';
+import { requestSelectedDateTimingRepair, inspectSelectedDateTimingRepair, selectedDatePodBills } from './selectedDateTimingEvidenceRepair.js';
 
 const TYPES = Object.freeze(['CE','CEAF','TBKH','ALI1688','WHPP','SHOPEECN','SHOPEEVN']);
 const TIMING_TYPES = Object.freeze(['TBKH','WHPP','SHOPEECN','SHOPEEVN']);
@@ -306,6 +306,7 @@ function timingRows(snapshotId,reportDate,businessType) {
         rawJson:JSON.stringify(row)
       }))
     : membershipFinalRows(snapshotId,reportDate,businessType);
+  const canonicalPodSet=new Set(selectedDatePodBills(businessType,reportDate,snapshotId));
   const bills=rows.map(row=>row.shipmentCode);
   const events=eventsForBills(reportDate,businessType,bills);
   if(whppTruth?.recoveredTrackEvents?.length)pushEvidenceRows(events,whppTruth.recoveredTrackEvents,'whpp_recovered_snapshot');
