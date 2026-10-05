@@ -324,3 +324,8 @@ svg{width:1em;height:1em;display:inline-block;vertical-align:middle}
 .v628-kpi-click.active{border-color:#2787f7;box-shadow:0 0 0 2px rgba(39,135,247,.12)}
 .v628-kpi-detail{scroll-margin-top:18px}
 .v628-kpi-detail .v625-table td:last-child a{color:#1477ee;font-weight:700;text-decoration:none}
+
+/* V631 traceable accounting */
+.v631-accounting-bar{display:flex;align-items:center;gap:10px;margin:-4px 0 16px;padding:9px 12px;border:1px solid #dbe7f3;border-radius:8px;background:#f8fbff;color:#597087;font-size:11px}
+.v631-accounting-bar b{color:#153957;font-size:12px}
+.v625-timeline-item small{display:block;margin-top:4px;color:#8a9caf;font-size:10px}
