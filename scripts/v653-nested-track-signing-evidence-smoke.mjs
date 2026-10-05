@@ -11,5 +11,5 @@ assert.match(repair,/normalizeV485TrackRows\(rows,\{fallbackBills\}\)/,'nested C
 assert.match(repair,/archiveV485TrackQueryResponse/,'fresh timing-repair responses must also enter durable CE evidence archive');
 assert.match(repair,/persistedEvents/,'repair state must expose actual persisted event count');
 assert.match(shell,/有效轨迹 .* POD总数/,'timing UI must expose valid versus total POD coverage');
-assert.match(html,/v625-shell\.js\?v=20261005-v653-1/,'V653 JS asset revision missing');
+assert.match(html,/v625-shell\.js\?v=20261005-v6(?:5[3-9]|[6-9]\d)-1/,'V653+ JS asset revision missing');
 console.log('[V653] nested CE track flattening + signing evidence coverage diagnostics smoke passed');
