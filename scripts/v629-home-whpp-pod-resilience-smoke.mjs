@@ -16,7 +16,7 @@ assert.match(home,/safeTimingForBatch\(latest,type\)/,'home must use resilient t
 assert.match(home,/safeReturnSummaryForBatch\(latest,type\)/,'home must use resilient return summary');
 
 assert.match(js,/summary\?\.reportDate===reportDate/,'business timing read must be null-safe');
-assert.match(js,/setText\('kpiReturned',fmt\(m\.returned\|\|0\)\)/,'business return card must use same-state return truth');
+assert.match(js,/setText\('kpiReturned',fmt\(\(counts\.returned\?\?m\.returned\)\|\|0\)\)/,'business return card must use exclusive same-state return truth');
 assert.match(js,/function renderKpiDetail\(kind\)/,'KPI detail drilldown must remain installed');
 
 assert.match(server,/import \{ loadWhppState \} from '\.\/src\/whppStore\.js'/,'WHPP dedicated state import missing');
