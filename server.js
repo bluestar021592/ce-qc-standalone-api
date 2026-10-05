@@ -6,6 +6,7 @@ import fs from 'fs/promises';
 import { fileURLToPath } from 'url';
 import { networkInterfaces } from 'os';
 import { spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 
 import { CEClient, normalizeLoginToken } from './src/ceClient.js';
 import { parseDailyExcel } from './src/excelParser.js';
@@ -61,6 +62,9 @@ const clientInteractionLogReady = fs.mkdir(path.dirname(clientInteractionLogFile
   .catch(() => {});
 
 const app = express();
+const v652ExportJobs=new Map();
+function updateExportJob(jobId,patch={}){const current=v652ExportJobs.get(jobId)||{};const next={...current,...patch,jobId,updatedAt:new Date().toISOString()};v652ExportJobs.set(jobId,next);return next;}
+function publicExportJob(job={}){return{jobId:job.jobId,status:job.status,progress:job.progress||0,phase:job.phase||'',message:job.message||'',error:job.error||'',files:job.files||[],range:job.range||null,createdAt:job.createdAt||'',updatedAt:job.updatedAt||'',completedAt:job.completedAt||''};}
 validateAccessConfiguration();
 const initialRuntimeConfig = getRuntimeConfig();
 ensureRuntimeDirs(initialRuntimeConfig);
@@ -1740,6 +1744,30 @@ app.get('/api/export-period', async (req, res) => {
   } catch (error) {
     res.status(400).json({ ok: false, error: error.message });
   }
+});
+
+app.post('/api/export-period/job', (req, res) => {
+  const jobId=randomUUID();
+  const createdAt=new Date().toISOString();
+  updateExportJob(jobId,{status:'QUEUED',progress:1,phase:'QUEUED',message:'导出任务已创建，等待生成',createdAt,files:[]});
+  const payload={periodType:req.body?.periodType||'daily',date:req.body?.date||'',fromDate:req.body?.fromDate||'',toDate:req.body?.toDate||'',businessType:req.body?.businessType||'ALL'};
+  setImmediate(async()=>{
+    try{
+      updateExportJob(jobId,{status:'RUNNING',progress:3,phase:'PREPARING',message:'正在准备报表数据'});
+      const result=await exportPeriodReports({...payload,onProgress:info=>updateExportJob(jobId,{status:'RUNNING',progress:Number(info.progress||0),phase:info.phase||'GENERATING',message:info.message||'正在生成报表'})});
+      const files=[...result.files,result.file].filter((value,index,list)=>list.indexOf(value)===index).map(file=>({name:path.basename(file),url:`/api/export-file?name=${encodeURIComponent(path.basename(file))}`}));
+      updateExportJob(jobId,{status:'COMPLETED',progress:100,phase:'COMPLETED',message:'报表生成完成，可下载',files,range:result.range,completedAt:new Date().toISOString()});
+    }catch(error){
+      updateExportJob(jobId,{status:'FAILED',phase:'FAILED',message:'报表生成失败',error:error?.message||String(error),completedAt:new Date().toISOString()});
+    }
+  });
+  res.json({ok:true,job:publicExportJob(v652ExportJobs.get(jobId))});
+});
+
+app.get('/api/export-period/job/:jobId', (req,res)=>{
+  const job=v652ExportJobs.get(String(req.params.jobId||''));
+  if(!job)return res.status(404).json({ok:false,error:'未找到该报表任务，可能已重启系统。'});
+  res.json({ok:true,job:publicExportJob(job)});
 });
 
 app.post('/api/export-period/prepare', async (req, res) => {
