@@ -496,10 +496,11 @@ function buildWhppCanonicalAccounting(state={},fallback={}){
 }
 function buildBusinessAccounting(state={},fallback={}){
   const authoritativeRows=
+    (Array.isArray(state.finalRows)&&state.finalRows.length?state.finalRows:null)||
     state?.detailTabs?.all?.rows||
     state?.detailTabs?.allData?.rows||
     state?.detailTabs?.dashboard?.rows||
-    (Array.isArray(state.finalRows)?state.finalRows:Object.values(state.finalRows||{}));
+    [];
   const source=uniqueDetailRows(authoritativeRows||[]);
   const total=Number(fallback.total||source.length||0);
   if(!source.length)return{total,accounted:0,difference:total,rowsByKind:{total:[],pod:[],returned:[],pending:[],abnormal:[],otherNormal:[],delivery:[]}};
@@ -564,15 +565,20 @@ async function loadBusiness(){
     const r=await json(stateUrl,15000);
     const state=r.state||{},m=metricState(state);
     v630BusinessDetailTabs=state.detailTabs||state?.dashboard?.detailTabs||{};
-    v631BusinessAccounting=business==='WHPP'?buildWhppCanonicalAccounting(state,m):buildBusinessAccounting(state,m);
+    v631BusinessAccounting=(state.accounting?.rowsByKind?state.accounting:(business==='WHPP'?buildWhppCanonicalAccounting(state,m):buildBusinessAccounting(state,m)));
     v628BusinessMetricState=m;v628BusinessReportDate=reportDate;
     if(reportDate&&!selectedReportDate())applyDashboardDate(reportDate);
     if(reportDate){byId('v625FromDate')&&(byId('v625FromDate').value=reportDate);byId('v625ToDate')&&(byId('v625ToDate').value=reportDate)}
-    const a=v631BusinessAccounting,counts=Object.fromEntries(Object.entries(a.rowsByKind||{}).map(([k,v])=>[k,v.length]));
+    const a=v631BusinessAccounting;
+    const counts=a.counts||Object.fromEntries(Object.entries(a.rowsByKind||{}).map(([k,v])=>[k,Array.isArray(v)?v.length:Number(v||0)]));
     setText('kpiTotal',fmt(a.total||m.total));setText('kpiDelivery',fmt(counts.delivery??m.delivery));setText('kpiPod',fmt(counts.pod??m.pod));
     setText('kpiPodRate',pct((a.total||m.total)?Number(counts.pod??m.pod)*100/Number(a.total||m.total):0));
     setText('kpiPending',fmt(counts.pending??m.pending));setText('kpiOpen',fmt(counts.abnormal??m.unresolved));setText('kpiOc',fmt(m.oc));
     setText('v631AccountingMeta','已归类 '+fmt(a.accounted)+' / '+fmt(a.total)+' · 差异 '+fmt(a.difference));
+    const integrityQuery=new URLSearchParams();if(snapshotId)integrityQuery.set('snapshotId',snapshotId);if(reportDate)integrityQuery.set('reportDate',reportDate);
+    const integrity=await json('/api/data-integrity?'+integrityQuery.toString(),15000).catch(()=>null);
+    const bi=integrity?.businesses?.[business];
+    if(bi)setText('v637BusinessIntegrity','源票 '+fmt(bi.sourceCount)+' · 已进入处理 '+fmt(bi.stateMemberCount)+' · 已扫描 '+fmt(bi.scanCount)+' · 待扫描 '+fmt(bi.waitingScan)+' · 已归类 '+fmt(bi.accounted)+' · 差异 '+fmt(bi.difference));
     const timing=summary?.reportDate===reportDate?summary?.timing?.[business]:null;
     setText('kpiAvgDays',timing?.overall?.avgDays==null?'—':Number(timing.overall.avgDays).toFixed(2).replace(/\.00$/,''));
     const returnCapable=['WHPP','SHOPEECN','SHOPEEVN'].includes(business);
@@ -581,9 +587,7 @@ async function loadBusiness(){
     if(byId('kpiOtherCard')){byId('kpiOtherCard').hidden=false;setText('kpiOtherNormal',fmt(counts.otherNormal||0))}
     if(byId('kpiUnprocessedCard')){byId('kpiUnprocessedCard').hidden=!(counts.unprocessed>0);setText('kpiUnprocessed',fmt(counts.unprocessed||0))}
     const hist=state.historySummary||[];renderTrend('v625BusinessTrend',hist.map(x=>({label:x.reportDate||'',value:first(x,['summary.today','summary.total','today','total'])||0})));
-    if(business==='WHPP'){
-      renderDonut({total:a.total,delivery:counts.delivery||0,pod:counts.pod||0,pending:counts.pending||0,unresolved:(counts.abnormal||0)+(counts.unprocessed||0)});
-    }else renderDonut(m);
+    renderDonut({total:a.total,delivery:counts.delivery||0,pod:counts.pod||0,pending:counts.pending||0,unresolved:(counts.abnormal||0)+(counts.unprocessed||0)});
     const qs=new URLSearchParams({scope:'all'});if(snapshotId)qs.set('snapshotId',snapshotId);if(reportDate)qs.set('reportDate',reportDate);
     const wr=await json('/api/tracking-workspace?'+qs.toString(),10000).catch(()=>({rows:[]}));
     v628BusinessWorkspaceRows=(wr.rows||[]).filter(businessTypeMatches);
