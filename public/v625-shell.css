@@ -357,3 +357,5 @@ svg{width:1em;height:1em;display:inline-block;vertical-align:middle}
 .v637-integrity-bar.ok{border-color:#bfe8d7;background:#f4fcf8}
 .v637-integrity-bar.error{border-color:#f0a8aa;background:#fff6f6;color:#b23c40}
 .v637-integrity-bar.error b{color:#b23c40}
+
+.v652-export-status{margin-top:18px;padding:16px 18px;border:1px solid #d8e6f7;border-radius:12px;background:#f8fbff}.v652-export-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;color:#163a5f}.v652-export-head b{font-size:15px}.v652-export-head span{font-weight:700;color:#1677f2}.v652-export-status .v625-inline-note{margin-top:10px}
