@@ -1402,39 +1402,84 @@ async function executeShopeeRunRequest(req, res, options = {}) {
   }
 }
 
+function localTrackEvidence(shipmentCodes=[], requestedBusinessType='', reportDate=''){
+  const db=getDb();const codes=mergeUnique(shipmentCodes,[]).map(x=>String(x).trim().toUpperCase()).filter(Boolean);
+  const events=[];const ledger=[];if(!codes.length)return{events,ledger};
+  const storageType=/^SHOPEE/.test(String(requestedBusinessType||'').toUpperCase())?'SHOPEE':String(requestedBusinessType||'').toUpperCase();
+  for(let i=0;i<codes.length;i+=300){
+    const chunk=codes.slice(i,i+300),marks=chunk.map(()=>'?').join(',');
+    try{
+      const rows=db.prepare(`SELECT shipmentCode,eventCode,trackingEventCode,trackingEventDesc,trackingEventDescZh,trackingEventDescKm,eventTime,place,rawJson
+        FROM track_events WHERE shipmentCode IN (${marks}) ${reportDate?'AND reportDate=?':''} ORDER BY eventTime,id`).all(...chunk,...(reportDate?[reportDate]:[]));
+      events.push(...rows.map(row=>({...row,evidenceSource:'track_events'})));
+    }catch{}
+    try{
+      const params=storageType?[storageType,...chunk,...(reportDate?[reportDate]:[])]:[...chunk,...(reportDate?[reportDate]:[])];
+      const rows=storageType
+        ? db.prepare(`SELECT shipmentCode,eventTime,eventCode,rawJson FROM business_track_events WHERE businessType=? AND shipmentCode IN (${marks}) ${reportDate?'AND reportDate=?':''} ORDER BY eventTime,id`).all(...params)
+        : db.prepare(`SELECT shipmentCode,eventTime,eventCode,rawJson FROM business_track_events WHERE shipmentCode IN (${marks}) ${reportDate?'AND reportDate=?':''} ORDER BY eventTime,id`).all(...params);
+      events.push(...rows.map(row=>({...row,evidenceSource:'business_track_events'})));
+    }catch{}
+    try{
+      ledger.push(...db.prepare(`SELECT shipmentCode,businessType,trackingStatus,terminalReason,terminalAt,currentState,currentCategory,lastEventTime,podDate,attemptNo,attemptSource,signingDays,evidenceJson,currentStateJson,lastCheckedAt
+        FROM qc_tracking_ledger WHERE shipmentCode IN (${marks})`).all(...chunk));
+    }catch{}
+  }
+  const seen=new Set();
+  const unique=events.filter(row=>{
+    const raw=(()=>{try{return typeof row.rawJson==='string'?JSON.parse(row.rawJson):row.rawJson||{}}catch{return{}}})();
+    const key=[String(row.shipmentCode||'').toUpperCase(),row.eventTime||raw.eventTime||raw.creationDate||'',row.eventCode||row.trackingEventCode||raw.eventCode||'',row.trackingEventDesc||row.trackingEventDescZh||raw.trackingEventDesc||raw.statusText||''].join('|');
+    if(seen.has(key))return false;seen.add(key);return true;
+  });
+  return{events:unique,ledger};
+}
+function ledgerAsTrackEvents(rows=[]){
+  return rows.flatMap(row=>{
+    let evidence={};let current={};try{evidence=JSON.parse(row.evidenceJson||'{}')}catch{}try{current=JSON.parse(row.currentStateJson||'{}')}catch{}
+    const list=[];
+    for(const start of evidence.starts||[])list.push({shipmentCode:row.shipmentCode,eventTime:start.time||start.eventTime||'',eventCode:start.eventCode||start.code||'70',trackingEventDesc:start.description||start.text||'严格派送起点',evidenceSource:'qc_tracking_ledger'});
+    if(row.terminalReason==='POD'&&row.podDate)list.push({shipmentCode:row.shipmentCode,eventTime:row.podDate,eventCode:'80',trackingEventDesc:'POD（本地严格轨迹账本）',evidenceSource:'qc_tracking_ledger'});
+    else if(row.lastEventTime)list.push({shipmentCode:row.shipmentCode,eventTime:row.lastEventTime,eventCode:current.lastEventCode||'',trackingEventDesc:current.latestEventDesc||current.最后节点||row.currentCategory||row.currentState||'本地最后有效状态',evidenceSource:'qc_tracking_ledger'});
+    return list;
+  });
+}
+
 app.post('/api/track-query', async (req, res) => {
-  const businessType = String(req.body?.businessType || 'SHOPEE').toUpperCase() === SHOPEE ? SHOPEE : 'CCSL';
-  const shipmentCodes = mergeUnique(req.body?.shipmentCodes || [], []).slice(0, 200);
-  if (!shipmentCodes.length) return res.status(400).json({ ok: false, error: '请至少输入一个运单号。' });
-  if (!summarizeToken(await loadToken()).hasAccessToken) return res.status(400).json({ ok: false, error: '请先登录CE系统。' });
-  try {
-    const reportDate = String(req.body?.reportDate || new Date().toISOString().slice(0, 10));
-    if (businessType === SHOPEE) {
-      const shipment = await manualBatchQuery(shipmentCodes, codes => client.shipmentTrack(codes), 'tms-shipment/track');
-      const events = await manualBatchQuery(shipmentCodes, codes => client.trackQuery(codes), 'tms-shipment-event/query');
-      const exceptions = await manualBatchQuery(shipmentCodes, codes => client.exceptionQuery(codes), 'exception-item/query');
-      const shipmentByBill = groupManualRows(shipment.rows);
-      const eventByBill = groupManualRows(events.rows);
-      const exceptionByBill = groupManualRows(exceptions.rows);
-      const rows = shipmentCodes.map(shipmentCode => analyzeShopeeShipment({
-        waybill: shipmentCode, reportDate,
-        scanRow: { shipmentCode, 运单号: shipmentCode, 来源类型: '手工查询' },
-        shipmentTrackRow: shipmentByBill.get(shipmentCode)?.[0] || {},
-        events: eventByBill.get(shipmentCode) || [],
-        exceptions: exceptionByBill.get(shipmentCode) || [],
-        apiStatus: {
-          shipment: shipment.failedBills.includes(shipmentCode) ? 'failed' : 'success',
-          event: events.failedBills.includes(shipmentCode) ? 'failed' : 'success',
-          exception: exceptions.failedBills.includes(shipmentCode) ? 'failed' : 'success'
-        }
+  const requestedBusinessType=String(req.body?.businessType||'CE').toUpperCase();
+  const businessType=/^SHOPEE/.test(requestedBusinessType)?SHOPEE:'CCSL';
+  const shipmentCodes=mergeUnique(req.body?.shipmentCodes||[],[]).slice(0,200);
+  if(!shipmentCodes.length)return res.status(400).json({ok:false,error:'请至少输入一个运单号。'});
+  const reportDate=String(req.body?.reportDate||new Date().toISOString().slice(0,10));
+  const local=localTrackEvidence(shipmentCodes,requestedBusinessType,reportDate);
+  const localEvents=[...local.events,...ledgerAsTrackEvents(local.ledger)];
+  const auth=summarizeToken(await loadToken());
+  if(!auth.hasAccessToken){
+    if(localEvents.length)return res.json({ok:true,businessType:requestedBusinessType,reportDate,shipmentCodes,trackEvents:localEvents,localEvidence:true,remoteSkipped:'CE_AUTH_REQUIRED',ledger:local.ledger});
+    return res.status(400).json({ok:false,error:'本地暂无轨迹证据，且CE系统尚未登录。'});
+  }
+  try{
+    if(businessType===SHOPEE){
+      const shipment=await manualBatchQuery(shipmentCodes,codes=>client.shipmentTrack(codes),'tms-shipment/track');
+      const events=await manualBatchQuery(shipmentCodes,codes=>client.trackQuery(codes),'tms-shipment-event/query');
+      const exceptions=await manualBatchQuery(shipmentCodes,codes=>client.exceptionQuery(codes),'exception-item/query');
+      const shipmentByBill=groupManualRows(shipment.rows),eventByBill=groupManualRows(events.rows),exceptionByBill=groupManualRows(exceptions.rows);
+      const rows=shipmentCodes.map(shipmentCode=>analyzeShopeeShipment({
+        waybill:shipmentCode,reportDate,scanRow:{shipmentCode,运单号:shipmentCode,来源类型:'手工查询'},
+        shipmentTrackRow:shipmentByBill.get(shipmentCode)?.[0]||{},events:eventByBill.get(shipmentCode)||[],exceptions:exceptionByBill.get(shipmentCode)||[],
+        apiStatus:{shipment:shipment.failedBills.includes(shipmentCode)?'failed':'success',event:events.failedBills.includes(shipmentCode)?'failed':'success',exception:exceptions.failedBills.includes(shipmentCode)?'failed':'success'}
       }));
-      return res.json({ ok: true, businessType, reportDate, shipmentCodes, rows, shipmentRows: shipment.rows, trackEvents: events.rows, exceptionItems: exceptions.rows, batches: [...shipment.batches, ...events.batches, ...exceptions.batches] });
+      const merged=[...events.rows,...localEvents];const seen=new Set();
+      const trackEvents=merged.filter(row=>{const key=JSON.stringify([row.shipmentCode||row.waybill||'',row.eventTime||row.time||'',row.eventCode||row.trackingEventCode||'',row.trackingEventDesc||row.description||row.rawJson||'']);if(seen.has(key))return false;seen.add(key);return true});
+      return res.json({ok:true,businessType:requestedBusinessType,reportDate,shipmentCodes,rows,shipmentRows:shipment.rows,trackEvents,localEvidence:localEvents.length>0,ledger:local.ledger,exceptionItems:exceptions.rows,batches:[...shipment.batches,...events.batches,...exceptions.batches]});
     }
-    const scans = await manualBatchQuery(shipmentCodes, codes => client.confirmQuery(codes), 'confirm-query');
-    const events = await manualBatchQuery(shipmentCodes, codes => client.trackQuery(codes), 'tms-shipment-event/query');
-    return res.json({ ok: true, businessType, reportDate, shipmentCodes, scanRows: scans.rows, trackEvents: events.rows, batches: [...scans.batches, ...events.batches] });
-  } catch (error) {
-    res.status(500).json({ ok: false, error: error.message || '轨迹查询失败。' });
+    const scans=await manualBatchQuery(shipmentCodes,codes=>client.confirmQuery(codes),'confirm-query');
+    const events=await manualBatchQuery(shipmentCodes,codes=>client.trackQuery(codes),'tms-shipment-event/query');
+    const merged=[...events.rows,...localEvents];const seen=new Set();
+    const trackEvents=merged.filter(row=>{const key=JSON.stringify([row.shipmentCode||row.waybill||'',row.eventTime||row.time||'',row.eventCode||row.trackingEventCode||'',row.trackingEventDesc||row.description||row.rawJson||'']);if(seen.has(key))return false;seen.add(key);return true});
+    return res.json({ok:true,businessType:requestedBusinessType,reportDate,shipmentCodes,scanRows:scans.rows,trackEvents,localEvidence:localEvents.length>0,ledger:local.ledger,batches:[...scans.batches,...events.batches]});
+  }catch(error){
+    if(localEvents.length)return res.json({ok:true,businessType:requestedBusinessType,reportDate,shipmentCodes,trackEvents:localEvents,localEvidence:true,remoteError:error.message||'远程轨迹查询失败',ledger:local.ledger});
+    res.status(500).json({ok:false,error:error.message||'轨迹查询失败。'});
   }
 });
 
