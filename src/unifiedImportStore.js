@@ -81,7 +81,7 @@ function hydrateBatch(row, duplicateFile, { includeCarryover = true } = {}) {
   const summary = JSON.parse(row.summaryJson || '{}');
   const sourceReconciliation = buildSourceReconciliation(classificationCounts, summary.validUniqueWaybills);
   return {
-    batchId: row.batchId, snapshotId: row.snapshotId, reportDate: row.reportDate, fileHash: row.fileHash,
+    batchId: row.batchId, snapshotId: row.snapshotId, reportDate: row.reportDate, sourceName: row.sourceName || '', fileHash: row.fileHash,
     classificationCounts,
     sourceReconciliation,
     dateDetectionSource: row.dateDetectionSource || '', dateCandidates: JSON.parse(row.dateCandidatesJson || '[]'), dateConflict: JSON.parse(row.dateCandidatesJson || '[]').length > 1, dateWasManuallyCorrected: Boolean(row.dateWasManuallyCorrected),
