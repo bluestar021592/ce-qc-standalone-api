@@ -321,11 +321,14 @@ async function refreshOpenPodNow(){
 async function loadHome(options={}){
   const requestedDate=selectedReportDate();
   const summaryUrl='/api/home-quality-summary'+(requestedDate?'?reportDate='+encodeURIComponent(requestedDate):'');
-  const [summaryR,historyR]=await Promise.allSettled([
+  const integrityUrl='/api/data-integrity'+(requestedDate?'?reportDate='+encodeURIComponent(requestedDate):'');
+  const [summaryR,historyR,integrityR]=await Promise.allSettled([
     json(summaryUrl,20000),
-    json('/api/unified-history?limit=7',7000)
+    json('/api/unified-history?limit=7',7000),
+    json(integrityUrl,20000)
   ]);
   const summary=summaryR.status==='fulfilled'?summaryR.value:null;
+  const integrity=integrityR.status==='fulfilled'?integrityR.value:null;
   if(summary?.reportDate&&!selectedReportDate())applyDashboardDate(summary.reportDate);
   const classification=summary?.classification||{};
   const counts=classification.counts||{};
@@ -338,6 +341,10 @@ async function loadHome(options={}){
   const totalCard=q('[data-card="TOTAL"]');
   if(totalCard)totalCard.classList.toggle('v632-total-mismatch',grand!==sevenBusinessTotal);
   if(summary?.snapshotId||summary?.reportDate)v626LatestImport={...(v626LatestImport||{}),snapshotId:summary.snapshotId,reportDate:summary.reportDate};
+  if(integrity){
+    setText('v637HomeIntegrity','源票 '+fmt(integrity.source?.classifiedTotal||0)+' · 已进入处理 '+fmt(integrity.processing?.stateMemberTotal||0)+' · 已扫描 '+fmt(integrity.processing?.scanCount||0)+' · 待扫描 '+fmt(integrity.processing?.waitingScan||0)+' · 已归类 '+fmt(integrity.accounting?.accountedTotal||0)+' · 差异 '+fmt(integrity.accounting?.difference||0));
+    const bar=byId('v637HomeIntegrityBar');if(bar){bar.classList.toggle('error',!integrity.safeForDashboard);bar.classList.toggle('ok',Boolean(integrity.safeForDashboard))}
+  }
 
   for(const type of types){
     const card=q('[data-card="'+type+'"]');if(!card)continue;
