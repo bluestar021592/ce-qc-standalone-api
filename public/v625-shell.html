@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="ce-qc-shell" content="V625_FULL_SYSTEM_UI">
   <title>__V625_PAGE_TITLE__ - CE EXPRESS 质量控制管理系统</title>
-  <link rel="stylesheet" href="/v625-shell.css?v=20261004-v630-1">
+  <link rel="stylesheet" href="/v625-shell.css?v=20261005-v631-1">
 </head>
 <body data-page="__V625_PAGE_KEY__" data-business="__V625_BUSINESS_TYPE__">
   <div class="v625-app">
@@ -232,6 +232,7 @@
             <article id="kpiReturnRateCard" class="kpi red" hidden><span>退回率</span><b id="kpiReturnRate">—</b><small>退回件 ÷ 总票数</small></article>
             <article id="kpiOtherCard" class="kpi gray v628-kpi-click" data-kpi-detail="otherNormal" role="button" tabindex="0" hidden><span>其他正常状态</span><b id="kpiOtherNormal">—</b><small>取消 / 正常分流 / 门店状态 · 点击查看</small></article>
           </div>
+          <div class="v631-accounting-bar"><b>状态守恒</b><span id="v631AccountingMeta">正在核对总票与状态明细…</span></div>
           <section id="v628KpiDetailPanel" class="v625-panel v628-kpi-detail" hidden>
             <div class="v625-section-head">
               <h2 id="v628KpiDetailTitle">指标明细</h2>
@@ -331,7 +332,7 @@
           <section class="v625-panel">
             <div class="v625-filter-row">
               <label><span>运单号</span><input id="v625TrackCode" placeholder="请输入运单号"></label>
-              <label><span>业务类型</span><select id="v625TrackBusiness"><option value="CCSL">CCSL</option><option value="SHOPEE">SHOPEE</option></select></label>
+              <label><span>业务类型</span><select id="v625TrackBusiness"><option value="CE">CE</option><option value="CEAF">CEAF空运</option><option value="TBKH">TBKH</option><option value="ALI1688">ALI1688</option><option value="WHPP">WHPP本土</option><option value="SHOPEECN">SHOPEE CN</option><option value="SHOPEEVN">SHOPEE VN</option></select></label>
               <label><span>日期</span><input id="v625TrackDate" type="date"></label>
               <button id="v625TrackSearch" class="v625-btn primary"><svg><use href="/assets/ui-icons-v625.svg#icon-search"/></svg>查询</button>
               <button id="v625TrackReset" class="v625-btn outline">重置</button>
@@ -628,6 +629,6 @@
       </main>
     </div>
   </div>
-  <script src="/v625-shell.js?v=20261004-v630-1" defer></script>
+  <script src="/v625-shell.js?v=20261005-v631-1" defer></script>
 </body>
 </html>
