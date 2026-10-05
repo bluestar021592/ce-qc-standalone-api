@@ -33,8 +33,9 @@ import { createDashboardSnapshot, getMatchingSnapshot, getSnapshotById, listSnap
 import { appendHistorySummary, buildLongBackupV2 } from './src/longBackup.js';
 import { mergeBackupModule } from './src/backupRecovery.js';
 import { buildShopeeDashboard } from './src/shopeeReporting.js';
-import { loadWhppState } from './src/whppStore.js';
+import { loadWhppState, saveWhppDailyImport } from './src/whppStore.js';
 import { buildWhppDashboard } from './src/whppReporting.js';
+import { loadWhppCanonicalTruth } from './src/whppCanonicalTruth.js';
 import { analyzeShopeeShipment, SHOPEE_ANALYSIS_RULE_VERSION } from './src/shopeeAnalyzer.js';
 import { queryBatchWithFallback, splitTrackBatches } from './src/trackBatching.js';
 import {
@@ -767,22 +768,28 @@ app.get('/api/business-state/:businessType', (req, res) => {
     const requestedType = String(req.params.businessType || '').toUpperCase();
     if (requestedType === 'WHPP') {
       const source = loadWhppState();
-      const dashboard = buildWhppDashboard(source);
-      const accounting=buildCanonicalBusinessAccounting({
+      const reportDate = String(source.reportDate || req.query.reportDate || '').trim();
+      const truth = loadWhppCanonicalTruth(reportDate, requestedSnapshotId || source.sourceSnapshotId || source.snapshotId || '');
+      const truthSource = {
         ...source,
-        finalRows:dashboard?.detailTabs?.all?.rows||source.finalRows||[],
-        pnhBills:source.pnhBills||[]
-      },'WHPP');
+        reportDate: truth.reportDate || reportDate,
+        pnhBills: truth.rows.map(row=>row.shipmentCode),
+        dailyParseRows: truth.rows,
+        finalRows: truth.rows
+      };
+      const dashboard = buildWhppDashboard(truthSource);
+      const accounting=buildCanonicalBusinessAccounting(truthSource,'WHPP');
       const state = {
-        ...source,
+        ...truthSource,
         viewBusinessType:'WHPP',
-        total:source.pnhBills?.length || source.dailyParseRows?.length || dashboard.metrics?.total || 0,
+        total:truth.total || dashboard.metrics?.total || 0,
         dashboard,
         detailTabs:dashboard.detailTabs || {},
-        accounting
+        accounting,
+        canonicalTruthEvidence:truth.evidence
       };
       return res.json({
-        ok:true,businessType:'WHPP',reportDate:source.reportDate||'',snapshotId:source.snapshotId||'',
+        ok:true,businessType:'WHPP',reportDate:truth.reportDate||reportDate,snapshotId:truth.snapshotId||source.snapshotId||'',
         snapshotStatus:source.snapshotStatus||'',state:req.query.compact==='1'?compactDashboardState(state):state
       });
     }
