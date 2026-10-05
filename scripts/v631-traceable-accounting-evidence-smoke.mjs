@@ -31,8 +31,8 @@ assert.match(js,/data-timing-missing/,'missing-timing controls must bind');
 for(const value of ['CE','CEAF','TBKH','ALI1688','WHPP','SHOPEECN','SHOPEEVN'])assert.ok(html.includes(`<option value="${value}"`),`tracking selector missing ${value}`);
 assert.match(html,/id="v631AccountingMeta"/,'accounting audit UI missing');
 assert.match(html,/id="v631TimingMissingPanel"/,'timing missing evidence panel missing');
-assert.match(html,/v625-shell\.js\?v=20261005-v(?:63[123567]|640|641|642)-1/,'V631 JS cache bust missing');
-assert.match(html,/v625-shell\.css\?v=20261005-v(?:63[123567]|640|641|642)-1/,'V631 CSS cache bust missing');
+assert.match(html,/v625-shell\.js\?v=20261005-v(?:63[123567]|640|641|642|643)-1/,'V631 JS cache bust missing');
+assert.match(html,/v625-shell\.css\?v=20261005-v(?:63[123567]|640|641|642|643)-1/,'V631 CSS cache bust missing');
 
 const ids=[...html.matchAll(/\bid="([^"]+)"/g)].map(m=>m[1]);
 const dupes=[...new Set(ids.filter((id,i)=>ids.indexOf(id)!==i))];
