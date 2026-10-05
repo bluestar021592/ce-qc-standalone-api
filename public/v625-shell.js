@@ -370,8 +370,10 @@ async function loadHome(options={}){
   ]);
   const summary=summaryR.status==='fulfilled'?summaryR.value:null;
   const integrity=integrityR.status==='fulfilled'?integrityR.value:null;
-  if(summary?.historicalEvidenceRecovery?.state==='RUNNING')scheduleHistoricalEvidenceRefresh('home');
-  else if(summary?.historicalEvidenceRecovery?.state==='COMPLETED')stopHistoricalEvidenceRefresh();
+  const historicalRunning=summary?.historicalEvidenceRecovery?.state==='RUNNING';
+  const timingRepairRunning=Boolean(summary?.timingEvidenceRepair?.active);
+  if(historicalRunning||timingRepairRunning)scheduleHistoricalEvidenceRefresh('home');
+  else if(summary?.historicalEvidenceRecovery?.state==='COMPLETED'||summary?.timingEvidenceRepair)stopHistoricalEvidenceRefresh();
   if(summary?.reportDate&&!selectedReportDate())applyDashboardDate(summary.reportDate);
   const classification=summary?.classification||{};
   const counts=classification.counts||{};
