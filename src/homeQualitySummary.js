@@ -9,6 +9,7 @@ import { ensureHistoricalEvidenceJob } from './historicalEvidenceWorkerManager.j
 import { requestV328EvidenceRepair, inspectV328EvidenceRepair } from './v328EvidenceRepairCoordinator.js';
 import { requestWhppSigningEvidenceRepair, inspectWhppSigningEvidenceRepair } from './whppSigningEvidenceRepair.js';
 import { readV329ThreeBusinessDailyCache } from './v329ThreeBusinessDailyCache.js';
+import { requestSelectedDateTimingRepair, inspectSelectedDateTimingRepair } from './selectedDateTimingEvidenceRepair.js';
 
 const TYPES = Object.freeze(['CE','CEAF','TBKH','ALI1688','WHPP','SHOPEECN','SHOPEEVN']);
 const TIMING_TYPES = Object.freeze(['TBKH','WHPP','SHOPEECN','SHOPEEVN']);
@@ -482,19 +483,15 @@ export async function buildHomeQualitySummaryWithArchive(options={}){
   if(!batch)return base;
 
   const repairStates={};
-  for(const type of ['TBKH','SHOPEECN','SHOPEEVN']){
+  for(const type of TIMING_TYPES){
     const current=base.timing?.[type]||{};
     const count=n(base.classification?.counts?.[type],0);
     const needs=count>0&&(current.overall?.avgDays==null||n(current.evidence?.missing,0)>0||n(current.overall?.podCount,0)===0);
     repairStates[type]=needs
-      ? requestV328EvidenceRepair(type,batch.reportDate,{networkRepairDate:batch.reportDate})
-      : inspectV328EvidenceRepair(type);
+      ? requestSelectedDateTimingRepair(type,batch.reportDate,batch.snapshotId)
+      : inspectSelectedDateTimingRepair(type,batch.reportDate);
   }
-  {
-    const current=base.timing?.WHPP||{},count=n(base.classification?.counts?.WHPP,0);
-    const needs=count>0&&(current.overall?.avgDays==null||n(current.evidence?.missing,0)>0||n(current.overall?.podCount,0)===0);
-    repairStates.WHPP=needs?requestWhppSigningEvidenceRepair(batch.reportDate):inspectWhppSigningEvidenceRepair(batch.reportDate);
-  }
+
 
   const rowGroups=Object.fromEntries(TIMING_TYPES.map(type=>{
     const rows=timingRows(batch.snapshotId,batch.reportDate,type);
