@@ -23,22 +23,31 @@ const DETAIL_SHEETS = [
   ['17_580滞留单号', row => row.specialState === 'CCSL580_RETENTION']
 ];
 
-export async function exportPeriodReports({ periodType = 'daily', date, fromDate = '', toDate = '', businessType = 'ALL' }) {
+export async function exportPeriodReports({ periodType = 'daily', date, fromDate = '', toDate = '', businessType = 'ALL', onProgress = null }) {
+  const reportProgress=(progress,phase,message='')=>{try{onProgress?.({progress,phase,message})}catch{}};
+  reportProgress(5,'PREPARING','正在确定报表日期范围与业务范围');
   const range = periodType === 'custom' ? customPeriodRange(fromDate, toDate) : periodRange(periodType, date);
   const types = businessType === 'ALL' ? BUSINESSES : [normalizeBusiness(businessType)];
+  reportProgress(12,'VALIDATING','正在校验可导出的已完成数据快照');
   const snapshots = listLightweightCompletedUnifiedSnapshots(range.from, range.to, types);
   if (!snapshots.length) throw new Error(`${range.from} 至 ${range.to} 没有当前有效且已完成的日报数据，不能导出。`);
   const outputDir = getRuntimeConfig().exportsDir;
   await fs.mkdir(outputDir, { recursive: true });
   const files = [];
-  for (const type of types) {
+  for (let index=0; index<types.length; index+=1) {
+    const type=types[index];
+    const startProgress=20+Math.round(index/Math.max(1,types.length)*65);
+    reportProgress(startProgress,'GENERATING',`正在生成 ${type} Excel报表（${index+1}/${types.length}）`);
     const file = await createBusinessWorkbook({ type, periodType, range, snapshots, outputDir });
     files.push(file);
+    reportProgress(20+Math.round((index+1)/Math.max(1,types.length)*65),'GENERATING',`${type} Excel报表生成完成`);
   }
-  if (types.length === 1) return { file: files[0], files, range, snapshots: snapshots.map(item => item.snapshotId) };
+  if (types.length === 1) { reportProgress(100,'COMPLETED','报表文件已生成'); return { file: files[0], files, range, snapshots: snapshots.map(item => item.snapshotId) }; }
+  reportProgress(88,'PACKAGING','正在生成综合管理报表');
   const managementFile = await createManagementWorkbook({ periodType, range, snapshots, outputDir });
   files.unshift(managementFile);
   const zipFile = path.join(outputDir, `CE_QC_${periodType}_${range.key}_七业务_${stamp()}.zip`);
+  reportProgress(94,'PACKAGING','正在打包全部业务报表');
   await zipFiles(files, zipFile);
   const snapshotIds = snapshots.map(item => item.snapshotId);
   for (const file of [...files, zipFile]) {
@@ -52,6 +61,7 @@ export async function exportPeriodReports({ periodType = 'daily', date, fromDate
       consistency: { status: 'PASSED', validationStatus: 'VALID', reconciliationStatus: 'COMPLETED' }
     });
   }
+  reportProgress(100,'COMPLETED','报表文件已生成');
   return { file: zipFile, files, range, snapshots: snapshots.map(item => item.snapshotId) };
 }
 
