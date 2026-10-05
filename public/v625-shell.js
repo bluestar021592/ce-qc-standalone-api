@@ -146,6 +146,7 @@ async function loadSession(){
 }
 
 let v626LatestImport=null;
+let v631TimingMissing={};
 let v626OpenRows=[];
 let v626OpenFilter='all';
 let v626ProgressTimer=null;
@@ -376,6 +377,7 @@ async function loadHome(options={}){
   }
 
   const timing=summary?.timing||{},timingTrend=summary?.timingTrend||{};
+  v631TimingMissing=Object.fromEntries(Object.entries(timing).map(([type,data])=>[type,data?.evidence?.missingBills||[]]));
   const timingMeta=[
     ['TBKH','v625TimingTBKH','#f4931b'],
     ['WHPP','v625TimingWHPP','#ef5757'],
@@ -402,6 +404,24 @@ async function loadHome(options={}){
   if(!options.skipAux){void refreshLiveProgress();void loadOpenPod()}
 }
 
+function timingMissingReason(code=''){
+  return {POD_TRACK_TIME_MISSING:'缺少80/POD轨迹时间',DELIVERY_START_MISSING:'缺少60/70派送起点',INVALID_TRACK_TIME_RANGE:'轨迹时间顺序异常',TRACK_EVIDENCE_MISSING:'缺少完整轨迹证据'}[code]||code||'缺少完整轨迹证据';
+}
+function renderTimingMissing(type){
+  const rows=v631TimingMissing?.[type]||[],panel=byId('v631TimingMissingPanel'),tbody=byId('v631TimingMissingRows');if(!panel||!tbody)return;
+  setText('v631TimingMissingTitle',(type==='SHOPEECN'?'SHOPEE CN':type==='SHOPEEVN'?'SHOPEE VN':type)+' 待补轨迹');
+  setText('v631TimingMissingMeta',(selectedReportDate()||byId('v625ToDate')?.value||'')+' · '+rows.length+' 票');
+  tbody.replaceChildren();
+  if(!rows.length)tbody.innerHTML='<tr><td colspan="4">当前没有待补轨迹运单</td></tr>';
+  else for(const row of rows){
+    const tr=document.createElement('tr');
+    for(const value of [row.shipmentCode,type,timingMissingReason(row.reason)]){const td=document.createElement('td');td.textContent=value||'—';tr.appendChild(td)}
+    const td=document.createElement('td'),a=document.createElement('a');
+    a.href='/tracking?auth=v625&code='+encodeURIComponent(row.shipmentCode||'')+'&reportDate='+encodeURIComponent(selectedReportDate()||byId('v625ToDate')?.value||'')+'&businessType='+encodeURIComponent(type);
+    a.textContent='查看轨迹';td.appendChild(a);tr.appendChild(td);tbody.appendChild(tr);
+  }
+  panel.hidden=false;panel.scrollIntoView({behavior:'smooth',block:'start'});
+}
 let v628BusinessWorkspaceRows=[];
 let v630BusinessDetailTabs={};
 let v631BusinessAccounting={rowsByKind:{},total:0,accounted:0,difference:0};
@@ -913,6 +933,7 @@ function bind(){
     p.delete('snapshotId');
     location.search=p.toString();
   });
+  qa('[data-timing-missing]').forEach(btn=>btn.addEventListener('click',()=>renderTimingMissing(btn.dataset.timingMissing)));
   qa('[data-kpi-detail]').forEach(card=>{
     const open=()=>renderKpiDetail(card.dataset.kpiDetail||'total');
     card.addEventListener('click',open);
