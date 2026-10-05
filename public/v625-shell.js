@@ -470,16 +470,17 @@ function buildBusinessAccounting(state={},fallback={}){
   const source=uniqueDetailRows(authoritativeRows||[]);
   const total=Number(fallback.total||source.length||0);
   if(!source.length)return{total,accounted:0,difference:total,rowsByKind:{total:[],pod:[],returned:[],pending:[],abnormal:[],otherNormal:[],delivery:[]}};
-  const rowsByKind={total:source,pod:[],returned:[],pending:[],abnormal:[],otherNormal:[],delivery:[]};
+  const rowsByKind={total:source,pod:[],returned:[],pending:[],abnormal:[],otherNormal:[],delivery:[],unprocessed:[]};
   for(const row of source){
-    if(rowIsPod(row))rowsByKind.pod.push(row);
+    if(row.finalRowAvailable===false)rowsByKind.unprocessed.push(row);
+    else if(rowIsPod(row))rowsByKind.pod.push(row);
     else if(rowIsReturned(row))rowsByKind.returned.push(row);
     else if(rowIsPending(row))rowsByKind.pending.push(row);
     else if(rowIsAbnormal(row))rowsByKind.abnormal.push(row);
     else if(rowIsOtherNormal(row))rowsByKind.otherNormal.push(row);
     else rowsByKind.delivery.push(row);
   }
-  const accounted=['pod','returned','pending','abnormal','otherNormal','delivery'].reduce((n,key)=>n+rowsByKind[key].length,0);
+  const accounted=['pod','returned','pending','abnormal','otherNormal','delivery','unprocessed'].reduce((n,key)=>n+rowsByKind[key].length,0);
   return{total:total||source.length,accounted,difference:(total||source.length)-accounted,rowsByKind};
 }
 function v628MetricRows(kind){
@@ -490,7 +491,7 @@ function v628MetricRows(kind){
 }
 function renderKpiDetail(kind){
   const panel=byId('v628KpiDetailPanel'),tbody=byId('v628KpiDetailRows');if(!panel||!tbody)return;
-  const labels={total:'总票数',delivery:'派送中',pod:'已签收(POD)',pending:'Pending',abnormal:'异常',returned:'退回件',otherNormal:'其他正常状态'};
+  const labels={total:'总票数',delivery:'派送中',pod:'已签收(POD)',pending:'Pending',abnormal:'异常',returned:'退回件',otherNormal:'其他正常状态',unprocessed:'待处理'};
   const rows=v628MetricRows(kind);
   qa('[data-kpi-detail]').forEach(el=>el.classList.toggle('active',el.dataset.kpiDetail===kind));
   setText('v628KpiDetailTitle',(labels[kind]||'指标')+'明细');
@@ -545,6 +546,7 @@ async function loadBusiness(){
     if(byId('kpiReturnedCard'))byId('kpiReturnedCard').hidden=!returnCapable;if(byId('kpiReturnRateCard'))byId('kpiReturnRateCard').hidden=!returnCapable;
     if(returnCapable){setText('kpiReturned',fmt((counts.returned??m.returned)||0));setText('kpiReturnRate',pct((a.total||m.total)?Number((counts.returned??m.returned)||0)*100/Number(a.total||m.total):0))}
     if(byId('kpiOtherCard')){byId('kpiOtherCard').hidden=false;setText('kpiOtherNormal',fmt(counts.otherNormal||0))}
+    if(byId('kpiUnprocessedCard')){byId('kpiUnprocessedCard').hidden=!(counts.unprocessed>0);setText('kpiUnprocessed',fmt(counts.unprocessed||0))}
     const hist=state.historySummary||[];renderTrend('v625BusinessTrend',hist.map(x=>({label:x.reportDate||'',value:first(x,['summary.today','summary.total','today','total'])||0})));renderDonut(m);
     const qs=new URLSearchParams({scope:'all'});if(snapshotId)qs.set('snapshotId',snapshotId);if(reportDate)qs.set('reportDate',reportDate);
     const wr=await json('/api/tracking-workspace?'+qs.toString(),10000).catch(()=>({rows:[]}));
