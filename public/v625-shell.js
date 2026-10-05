@@ -199,12 +199,15 @@ async function latestImportContext(){
   }catch{return v626LatestImport}
 }
 function progressPercent(done,total){return total>0?Math.max(0,Math.min(100,Math.round(done*100/total))):0}
+function familyComplete(value={}){
+  return Boolean(value.complete)||/COMPLETED|完成/i.test(String(value.runStatus||value.outcome||value.phase||''));
+}
 function familyProgressLabel(value={}){
   const scanTotal=Number(value.scanTotal||0),scanDone=Number(value.scanDone||0),trackTotal=Number(value.trackTotal||0),trackDone=Number(value.trackDone||0);
-  if(value.complete||/COMPLETED|完成/i.test(String(value.runStatus||value.outcome||value.phase||'')))return '完成';
+  if(familyComplete(value))return '完成';
   if(value.running||value.active){
-    if(/轨迹|track/i.test(String(value.phase||'')))return '轨迹 '+trackDone+'/'+trackTotal;
-    return '扫描 '+scanDone+'/'+scanTotal;
+    if(/轨迹|track/i.test(String(value.phase||'')))return trackTotal?'轨迹 '+trackDone+'/'+trackTotal:'轨迹查询中';
+    return scanTotal?'扫描 '+scanDone+'/'+scanTotal:'订单扫描中';
   }
   if(scanTotal||trackTotal)return '扫描 '+scanDone+'/'+scanTotal+' · 轨迹 '+trackDone+'/'+trackTotal;
   return String(value.phase||'待处理');
@@ -233,17 +236,20 @@ function renderLiveProgress(bundle={}){
   const trackTotal=Number(ccsl.trackTotal||0)+Number(shopee.trackTotal||0);
   const whppBatch=Number(whpp.batchIndex||0),whppBatches=Number(whpp.totalBatches||0);
   const allRunning=Boolean(ccsl.running||shopee.running||whpp.active);
-  const completeFamilies=[ccsl,shopee].filter(x=>/COMPLETED|completed/i.test(String(x.runStatus||''))).length+( /COMPLETED|完成/i.test(String(whpp.outcome||whpp.phase||''))?1:0);
-  const scanPct=progressPercent(scanDone,scanTotal),trackPct=progressPercent(trackDone,trackTotal);
-  const whppPct=progressPercent(whppBatch,whppBatches);
-  const overall=Math.round((scanPct+trackPct+(whppBatches?whppPct:(completeFamilies>=3?100:0)))/3);
+  const completeFamilies=[ccsl,shopee,whpp].filter(familyComplete).length;
+  const allComplete=completeFamilies===3;
+  const scanPct=allComplete?100:progressPercent(scanDone,scanTotal),trackPct=allComplete?100:progressPercent(trackDone,trackTotal);
+  const whppPct=allComplete?100:progressPercent(whppBatch,whppBatches);
+  const overall=allComplete?100:Math.round((scanPct+trackPct+(whppBatches?whppPct:(completeFamilies/3*100)))/3);
   for(const id of ['v626ProcessBar','v626ImportBar']){const el=byId(id);if(el)el.style.width=Math.max(0,Math.min(100,overall))+'%'}
-  const phase=whpp.active?String(whpp.phase||'WHPP处理中'):shopee.running?String(shopee.phase||'SHOPEE处理中'):ccsl.running?String(ccsl.phase||'CCSL处理中'):completeFamilies>=3?'全部处理完成':'等待/可继续处理';
+  const activePhase=whpp.active?String(whpp.phase||'WHPP处理中'):shopee.running?String(shopee.phase||'SHOPEE处理中'):ccsl.running?String(ccsl.phase||'CCSL处理中'):'';
+  const phase=allComplete?'全部处理完成':activePhase||(completeFamilies?('已完成 '+completeFamilies+'/3 业务，等待下一环节'):'等待开始处理');
   setText('v626ProcessText',phase);setText('v626ImportProgressText',phase);
-  setText('v626ProcessCount',(scanDone+trackDone)+' / '+(scanTotal+trackTotal));setText('v626ImportProgressCount',(scanDone+trackDone)+' / '+(scanTotal+trackTotal));
-  const scanStage=completeFamilies>=3?'完成':scanTotal?scanDone+'/'+scanTotal:allRunning?'处理中':'等待';
-  const trackStage=completeFamilies>=3?'完成':trackTotal?trackDone+'/'+trackTotal:allRunning?'处理中':'等待';
-  const doneStage=completeFamilies>=3?'完成':allRunning?'处理中':'等待';
+  const progressCount=(scanTotal+trackTotal)>0?((scanDone+trackDone)+' / '+(scanTotal+trackTotal)):(completeFamilies+'/3 业务完成');
+  setText('v626ProcessCount',progressCount);setText('v626ImportProgressCount',progressCount);
+  const scanStage=allComplete?'完成':(/轨迹|track/i.test(activePhase)?'完成':allRunning?'处理中':completeFamilies?('已完成 '+completeFamilies+'/3业务'):'等待');
+  const trackStage=allComplete?'完成':(/轨迹|track/i.test(activePhase)?'处理中':allRunning?'等待扫描完成':completeFamilies?('已完成 '+completeFamilies+'/3业务'):'等待');
+  const doneStage=allComplete?'完成':allRunning?'处理中':completeFamilies?('已完成 '+completeFamilies+'/3业务'):'等待';
   setText('v626StageScan',scanStage);setText('v626StageTrack',trackStage);setText('v626StageDone',doneStage);
   setText('v626ImportScan',scanStage);setText('v626ImportTrack',trackStage);setText('v626ImportDone',doneStage);
   const badge=byId('v626ProcessState');if(badge){badge.textContent=completeFamilies>=3?'已完成':allRunning?'处理中':'待处理';badge.className='v625-badge '+(completeFamilies>=3?'success':allRunning?'warning':'warning')}
@@ -687,6 +693,21 @@ async function loadBusiness(){
 function rowTr(values){const tr=document.createElement('tr');for(const v of values){const td=document.createElement('td');td.textContent=v??'—';tr.appendChild(td)}return tr}
 
 let runBusy=false;
+async function refreshImportCanonicalClassification(reportDate=''){
+  const date=reportDate||v626LatestImport?.reportDate||'';
+  if(!date)return null;
+  try{
+    const summary=await json('/api/home-quality-summary?reportDate='+encodeURIComponent(date),20000);
+    const counts=summary?.classification?.counts||{};
+    let changed=false;
+    for(const type of ['CE','CEAF','TBKH','ALI1688','WHPP','SHOPEECN','SHOPEEVN']){
+      const el=q('[data-classification="'+type+'"]');
+      if(el&&counts[type]!==undefined){el.textContent=fmt(counts[type]);changed=true;}
+    }
+    if(changed&&v626LatestImport)v626LatestImport={...v626LatestImport,classificationCounts:{...(v626LatestImport.classificationCounts||{}),...counts}};
+    return summary;
+  }catch{return null}
+}
 async function loadImport(){
   try{
     const [latest,history]=await Promise.all([json('/api/import/unified-latest',7000),json('/api/unified-history?limit=15',7000)]);
@@ -700,7 +721,7 @@ async function loadImport(){
       }
       if(!(history.rows||[]).length)tbody.innerHTML='<tr><td colspan="6">暂无导入记录</td></tr>';
     }
-    await Promise.all([refreshLiveProgress(),loadOpenPod()]);
+    await Promise.all([refreshLiveProgress(),loadOpenPod(),refreshImportCanonicalClassification(v626LatestImport?.reportDate||'')]);
   }catch(error){note('v625ImportMessage','读取导入状态失败：'+error.message,'error')}
 }
 function dateSourceText(data={}){
@@ -773,7 +794,7 @@ async function runTask(mode){
       appendLiveLog('继续WHPP未完成批次');await safeWhppRun('resume',reportDate);
     }
     appendLiveLog('7业务处理完成，正在刷新首页与未完成POD账本');note('v625RunMessage','7业务处理完成，未完成POD可继续批量更新。','success');
-    await Promise.all([refreshLiveProgress(),loadOpenPod()]);
+    await Promise.all([refreshLiveProgress(),loadOpenPod(),refreshImportCanonicalClassification(reportDate)]);
   }catch(e){appendLiveLog('处理未完成：'+e.message);note('v625RunMessage','任务未完成：'+e.message,'error')}
   finally{runBusy=false;stopProgressPolling();void refreshLiveProgress()}
 }
