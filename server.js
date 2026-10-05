@@ -1047,29 +1047,48 @@ async function handleUnifiedDailyImport(req, res) {
   try {
     if (!req.file) throw new Error('没有收到综合日报Excel文件');
     const parsed = parseUnifiedDailyExcel(req.file.path, { reportDate: req.body.reportDate || '', originalName: req.file.originalname });
-    const saved = saveUnifiedImport(parsed, req.file.originalname);
+
+    // Capture the already-verified runtime truth before the unified batch row is
+    // updated. Same-day re-import must never erase scan/POD/track/final evidence.
+    const priorCcsl = await loadState();
+    const priorShopee = loadBusinessState(SHOPEE);
+
+    const saved = saveUnifiedImport(parsed, req.file.originalname, { reuseExactDuplicate: true });
     const processingQueue = getUnifiedProcessingQueue(saved.batchId);
     const ccslRows = parsed.rows.filter(row => ['CE', 'CEAF', 'TBKH', 'ALI1688'].includes(row.businessType));
     const shopeeRows = parsed.rows.filter(row => ['SHOPEECN', 'SHOPEEVN'].includes(row.businessType));
+    const whppRows = parsed.rows.filter(row => row.businessType === 'WHPP');
     const historicalCcsl = processingQueue.rows.filter(row => row.sourceType === 'HISTORICAL_CARRY' && ['CE', 'CEAF', 'TBKH', 'ALI1688'].includes(row.businessType));
     const historicalShopee = processingQueue.rows.filter(row => row.sourceType === 'HISTORICAL_CARRY' && ['SHOPEECN', 'SHOPEEVN'].includes(row.businessType));
-    const ccslState = await loadState();
+
+    const ccslBills=ccslRows.map(row=>row.shipmentCode);
+    const shopeeBills=shopeeRows.map(row=>row.shipmentCode);
+    const ccslSameDate=String(priorCcsl.reportDate||'')===String(parsed.reportDate||'');
+    const shopeeSameDate=String(priorShopee.reportDate||'')===String(parsed.reportDate||'');
+    const ccslExact=ccslSameDate&&sameMembership(priorCcsl.pnhBills,ccslBills);
+    const shopeeExact=shopeeSameDate&&sameMembership(priorShopee.pnhBills,shopeeBills);
+
+    const ccslState = priorCcsl;
     ccslState.reportDate = parsed.reportDate;
     ccslState.sourceName = req.file.originalname;
     ccslState.dailyReportReady = true;
     ccslState.dailyParseRows = ccslRows.map(row => ({ ...row, result: 'PNH', reason: row.classificationReason }));
     ccslState.dailyParseSummary = { totalRecognized: ccslRows.length, pnh: ccslRows.length, nonPnh: 0, excluded: 0, duplicate: parsed.summary.duplicateRows };
-    ccslState.pnhBills = ccslRows.map(row => row.shipmentCode);
+    ccslState.pnhBills = ccslBills;
     ccslState.nonPnhBills = [];
     ccslState.excludedBills = [];
     ccslState.duplicateBills = [];
-    clearRunResults(ccslState);
+    if(ccslSameDate) retainSameDayEvidence(ccslState,[...ccslBills,...historicalCcsl.map(row=>row.shipmentCode)]);
+    else clearRunResults(ccslState);
     ccslState.carryBills = historicalCcsl.map(row => row.shipmentCode);
-    ccslState.priorCarryRows = historicalCcsl.map(row => safeJsonRow(row));
-    resetRunForReport(parsed.reportDate);
+    ccslState.priorCarryRows = [
+      ...(ccslState.priorCarryRows||[]),
+      ...historicalCcsl.map(row => safeJsonRow(row))
+    ].filter((row,index,all)=>all.findIndex(item=>evidenceBill(item)===evidenceBill(row))===index);
+    if(!ccslExact) resetRunForReport(parsed.reportDate);
     await saveState(ccslState);
 
-    const shopeeState = loadBusinessState(SHOPEE);
+    const shopeeState = priorShopee;
     shopeeState.businessType = SHOPEE;
     shopeeState.reportDate = parsed.reportDate;
     shopeeState.sourceName = req.file.originalname;
@@ -1087,15 +1106,35 @@ async function handleUnifiedDailyImport(req, res) {
       groupCounts: { CN: saved.classificationCounts.SHOPEECN, VN: saved.classificationCounts.SHOPEEVN },
       conflictCount: parsed.summary.classificationConflicts
     };
-    shopeeState.pnhBills = shopeeRows.map(row => row.shipmentCode);
-    clearRunResults(shopeeState);
+    shopeeState.pnhBills = shopeeBills;
+    if(shopeeSameDate) retainSameDayEvidence(shopeeState,[...shopeeBills,...historicalShopee.map(row=>row.shipmentCode)]);
+    else clearRunResults(shopeeState);
     shopeeState.carryBills = historicalShopee.map(row => row.shipmentCode);
-    shopeeState.priorCarryRows = historicalShopee.map(row => safeJsonRow(row));
-    resetBusinessRunForReport(SHOPEE, parsed.reportDate);
+    shopeeState.priorCarryRows = [
+      ...(shopeeState.priorCarryRows||[]),
+      ...historicalShopee.map(row => safeJsonRow(row))
+    ].filter((row,index,all)=>all.findIndex(item=>evidenceBill(item)===evidenceBill(row))===index);
+    if(!shopeeExact) resetBusinessRunForReport(SHOPEE, parsed.reportDate);
     saveBusinessState(shopeeState, SHOPEE);
+
+    // WHPP is a first-class branch of the unified daily import. Its own store has
+    // finalized-snapshot protection and now receives the exact unified membership.
+    const whppState = saveWhppDailyImport({
+      reportDate: parsed.reportDate,
+      sourceName: req.file.originalname,
+      rows: whppRows,
+      batchId: saved.batchId,
+      snapshotId: saved.snapshotId,
+      preserveFinalizedLifecycle: true
+    });
+
     launchDashboardCacheWorker({ reportDate: parsed.reportDate, reason: 'UNIFIED_IMPORT' });
     await fs.unlink(req.file.path).catch(() => {});
-    res.json({ ok: true, ...saved, carryover: processingQueue.summary, state: summarizeState(ccslState), shopeeState: summarizeShopeeState(shopeeState) });
+    res.json({
+      ok: true, ...saved, carryover: processingQueue.summary,
+      sameDayEvidencePreserved:{CCSL:ccslSameDate,SHOPEE:shopeeSameDate,WHPP:Boolean(whppState?.finalizedLifecyclePreserved||String(whppState?.reportDate||'')===String(parsed.reportDate||''))},
+      state: summarizeState(ccslState), shopeeState: summarizeShopeeState(shopeeState)
+    });
   } catch (error) {
     if (req.file?.path) await fs.unlink(req.file.path).catch(() => {});
     res.status(400).json({ ok: false, error: error.message, sheetDiagnostics: error.sheetDiagnostics || [] });
@@ -2009,6 +2048,25 @@ function setSnapshotHeaders(res, snapshot = {}) {
   res.setHeader('X-CE-API-Calls-During-Export', '0');
 }
 
+function evidenceBill(value={}) {
+  return String(typeof value==='string'?value:(value.shipmentCode||value.运单号||value.waybill||'')).trim().toUpperCase();
+}
+function sameMembership(left=[],right=[]) {
+  const a=[...new Set((left||[]).map(evidenceBill).filter(Boolean))].sort();
+  const b=[...new Set((right||[]).map(evidenceBill).filter(Boolean))].sort();
+  return a.length===b.length&&a.every((value,index)=>value===b[index]);
+}
+function retainSameDayEvidence(state={},allowedBills=[]) {
+  const allowed=new Set((allowedBills||[]).map(evidenceBill).filter(Boolean));
+  const filterRows=key=>{if(Array.isArray(state[key]))state[key]=state[key].filter(row=>allowed.has(evidenceBill(row)));};
+  const filterBills=key=>{if(Array.isArray(state[key]))state[key]=state[key].map(evidenceBill).filter(code=>allowed.has(code));};
+  for(const key of ['scanResults','shipmentTrackResults','trackResults','trackEvents','exceptionItems','finalRows','finalDiversionRows','priorCarryRows'])filterRows(key);
+  for(const key of ['scanPool','scanRetryBills','needTrackBills','carryBills','nextCarryBills'])filterBills(key);
+  // Batch/query checkpoints can refer to removed members. Rebuild them on the next run
+  // while preserving the actual per-shipment scan/track/final evidence above.
+  for(const key of ['scanQueryStatus','shipmentQueryStatus','eventQueryStatus','exceptionQueryStatus','apiBatchStatus'])state[key]=[];
+  return state;
+}
 function clearRunResults(state) {
   const activeCarry = new Set(state.nextCarryBills?.length ? state.nextCarryBills : (state.carryBills || []));
   const carryMetadata = new Map([...(state.priorCarryRows || []), ...(state.finalRows || [])]
