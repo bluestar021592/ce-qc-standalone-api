@@ -68,6 +68,7 @@ const TASKS=[
   ['node',['scripts/v650-import-progress-export-template-smoke.mjs']],
   ['node',['scripts/v652-progress-and-export-job-smoke.mjs']],
   ['node',['scripts/v653-nested-track-signing-evidence-smoke.mjs']],
+  ['node',['scripts/v656-canonical-pod-postrun-timing-smoke.mjs']],
   ['node',['--test',
     'test/unified-import-v7.test.js',
     'test/unified-import-ceaf.test.js',
