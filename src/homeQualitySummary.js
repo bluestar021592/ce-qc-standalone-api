@@ -254,9 +254,24 @@ function positivePodMembership(row={},ledgerRow={}){
   if(status==='85'||status==='POD'||status==='DELIVERED'||status==='SIGNED')return true;
   return Boolean(text&&!NEGATIVE_POD_RE.test(text)&&POSITIVE_POD_RE.test(text));
 }
+function dedicatedWhppTimingRows(reportDate=''){
+  try{
+    const state=loadWhppState();
+    if(!state||String(state.reportDate||'')!==String(reportDate||''))return[];
+    const dashboard=buildWhppDashboard(state);
+    return (dashboard?.detailTabs?.all?.rows||[]).map(row=>({
+      ...row,
+      shipmentCode:String(row.shipmentCode||row.运单号||'').trim().toUpperCase(),
+      regionCode:String(row.regionCode||row.区域||'').toUpperCase(),
+      isPod:(row.是否POD==='是'||row.POD状态==='POD'||String(row.currentState||'').toUpperCase()==='POD')?1:0,
+      primaryCategory:row.primaryCategory||row.主分类||row.异常分类||'',
+      rawJson:JSON.stringify(row)
+    }));
+  }catch{return[]}
+}
 function timingRows(snapshotId,reportDate,businessType) {
-  if(!snapshotId||!reportDate||!TIMING_TYPES.includes(businessType))return[];
-  const rows=membershipFinalRows(snapshotId,reportDate,businessType);
+  if(!reportDate||!TIMING_TYPES.includes(businessType))return[];
+  const rows=businessType==='WHPP'?dedicatedWhppTimingRows(reportDate):membershipFinalRows(snapshotId,reportDate,businessType);
   const bills=rows.map(row=>row.shipmentCode);
   const events=eventsForBills(reportDate,businessType,bills);
   const ledger=ledgerEvidenceForBills(bills);
@@ -286,6 +301,16 @@ function timingForBatch(batch,businessType) {
   return {businessType,reportDate:batch.reportDate,...summarizeTimingRows(timingRows(batch.snapshotId,batch.reportDate,businessType))};
 }
 function returnSummaryForBatch(batch,businessType) {
+  if(businessType==='WHPP'&&batch?.reportDate){
+    try{
+      const state=loadWhppState();
+      if(String(state?.reportDate||'')===String(batch.reportDate||'')){
+        const dashboard=buildWhppDashboard(state);
+        const total=n(dashboard?.metrics?.total,0),count=n(dashboard?.metrics?.returned,0);
+        return{count,rate:total?Number((count*100/total).toFixed(2)):0,total};
+      }
+    }catch{}
+  }
   const total=n(batch?.classificationCounts?.[businessType],0);
   if(!RETURN_TYPES.has(businessType)||!batch?.snapshotId||!batch?.reportDate)return{count:0,rate:0,total};
   const rows=membershipFinalRows(batch.snapshotId,batch.reportDate,businessType);
