@@ -6,6 +6,8 @@ import { buildWhppDashboard } from './whppReporting.js';
 import { loadWhppCanonicalTruth } from './whppCanonicalTruth.js';
 import { recoverHistoricalMemberEvidence } from './historicalMemberEvidence.js';
 import { ensureHistoricalEvidenceJob } from './historicalEvidenceWorkerManager.js';
+import { requestV328EvidenceRepair, inspectV328EvidenceRepair } from './v328EvidenceRepairCoordinator.js';
+import { requestWhppSigningEvidenceRepair, inspectWhppSigningEvidenceRepair } from './whppSigningEvidenceRepair.js';
 
 const TYPES = Object.freeze(['CE','CEAF','TBKH','ALI1688','WHPP','SHOPEECN','SHOPEEVN']);
 const TIMING_TYPES = Object.freeze(['TBKH','WHPP','SHOPEECN','SHOPEEVN']);
@@ -457,19 +459,39 @@ export async function buildHomeQualitySummaryWithArchive(options={}){
   const base=buildHomeQualitySummary(options);
   const batch=selectUnifiedBatch(options);
   if(!batch)return base;
+
+  const repairStates={};
+  for(const type of ['TBKH','SHOPEECN','SHOPEEVN']){
+    const current=base.timing?.[type]||{};
+    const count=n(base.classification?.counts?.[type],0);
+    const needs=count>0&&(current.overall?.avgDays==null||n(current.evidence?.missing,0)>0||n(current.overall?.podCount,0)===0);
+    repairStates[type]=needs
+      ? requestV328EvidenceRepair(type,batch.reportDate,{networkRepairDate:batch.reportDate})
+      : inspectV328EvidenceRepair(type);
+  }
+  {
+    const current=base.timing?.WHPP||{},count=n(base.classification?.counts?.WHPP,0);
+    const needs=count>0&&(current.overall?.avgDays==null||n(current.evidence?.missing,0)>0||n(current.overall?.podCount,0)===0);
+    repairStates.WHPP=needs?requestWhppSigningEvidenceRepair(batch.reportDate):inspectWhppSigningEvidenceRepair(batch.reportDate);
+  }
+
   const rowGroups=Object.fromEntries(TIMING_TYPES.map(type=>{
     const rows=timingRows(batch.snapshotId,batch.reportDate,type);
     return[type,rows.map(row=>row.shipmentCode).filter(Boolean)];
   }));
   const job=ensureHistoricalEvidenceJob({reportDate:batch.reportDate,groups:rowGroups});
+  const repairActive=Object.values(repairStates).some(item=>['QUEUED','STARTING','RUNNING'].includes(String(item?.status||'').toUpperCase()));
+  const repairFailed=Object.values(repairStates).some(item=>String(item?.status||'').toUpperCase()==='FAILED');
+  const repairSummary={active:repairActive,failed:repairFailed,types:repairStates};
+
   if(job.state!=='COMPLETED'||!job.result){
-    return{...base,historicalEvidenceRecovery:{state:job.state,error:job.error||'',readOnly:true}};
+    return{...base,historicalEvidenceRecovery:{state:job.state,error:job.error||'',readOnly:true},timingEvidenceRepair:repairSummary};
   }
   const timingEntries=await Promise.all(TIMING_TYPES.map(async type=>[
     type,
     await timingForBatchWithArchive(batch,type,job.result[type]||null)
   ]));
-  return{...base,timing:Object.fromEntries(timingEntries),historicalEvidenceRecovery:{state:'COMPLETED',readOnly:true}};
+  return{...base,timing:Object.fromEntries(timingEntries),historicalEvidenceRecovery:{state:'COMPLETED',readOnly:true},timingEvidenceRepair:repairSummary};
 }
 export function buildHomeQualitySummary(options={}) {
   const latest=selectUnifiedBatch(options);
