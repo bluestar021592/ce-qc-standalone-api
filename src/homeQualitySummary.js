@@ -4,7 +4,8 @@ import { analyzeV246ShopeeAttemptCycle } from './shopeeAttemptCycleV246.js';
 import { loadWhppState } from './whppStore.js';
 import { buildWhppDashboard } from './whppReporting.js';
 import { loadWhppCanonicalTruth } from './whppCanonicalTruth.js';
-import { recoverHistoricalMemberEvidence, recoverHistoricalGroupedEvidence } from './historicalMemberEvidence.js';
+import { recoverHistoricalMemberEvidence } from './historicalMemberEvidence.js';
+import { ensureHistoricalEvidenceJob } from './historicalEvidenceWorkerManager.js';
 
 const TYPES = Object.freeze(['CE','CEAF','TBKH','ALI1688','WHPP','SHOPEECN','SHOPEEVN']);
 const TIMING_TYPES = Object.freeze(['TBKH','WHPP','SHOPEECN','SHOPEEVN']);
@@ -460,12 +461,15 @@ export async function buildHomeQualitySummaryWithArchive(options={}){
     const rows=timingRows(batch.snapshotId,batch.reportDate,type);
     return[type,rows.map(row=>row.shipmentCode).filter(Boolean)];
   }));
-  const recoveredByType=await recoverHistoricalGroupedEvidence({reportDate:batch.reportDate,groups:rowGroups});
+  const job=ensureHistoricalEvidenceJob({reportDate:batch.reportDate,groups:rowGroups});
+  if(job.state!=='COMPLETED'||!job.result){
+    return{...base,historicalEvidenceRecovery:{state:job.state,error:job.error||'',readOnly:true}};
+  }
   const timingEntries=await Promise.all(TIMING_TYPES.map(async type=>[
     type,
-    await timingForBatchWithArchive(batch,type,recoveredByType[type]||null)
+    await timingForBatchWithArchive(batch,type,job.result[type]||null)
   ]));
-  return{...base,timing:Object.fromEntries(timingEntries)};
+  return{...base,timing:Object.fromEntries(timingEntries),historicalEvidenceRecovery:{state:'COMPLETED',readOnly:true}};
 }
 export function buildHomeQualitySummary(options={}) {
   const latest=selectUnifiedBatch(options);
