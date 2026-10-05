@@ -13,7 +13,7 @@ import { fileHash, recordExport } from './backup.js';
 import { createShopeeTemplateWorkbook } from './shopeeTemplateExporter.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const BUSINESSES = ['CE', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN'];
+const BUSINESSES = ['CE', 'CEAF', 'TBKH', 'ALI1688', 'WHPP', 'SHOPEECN', 'SHOPEEVN'];
 const TEMPLATE_DIR = path.resolve(__dirname, '../_codex_v9_20260805/QC监管APP开发4_CODEX执行包_v9_真实日报_自动日期_跨日复核_周月报_580最终总包/07_固定Excel导出模板');
 const DETAIL_SHEETS = [
   ['07_Pending1+单号', row => pending(row) >= 1], ['08_Pending2+单号', row => pending(row) >= 2], ['09_Pending3+单号', row => pending(row) >= 3],
@@ -38,7 +38,7 @@ export async function exportPeriodReports({ periodType = 'daily', date, fromDate
   if (types.length === 1) return { file: files[0], files, range, snapshots: snapshots.map(item => item.snapshotId) };
   const managementFile = await createManagementWorkbook({ periodType, range, snapshots, outputDir });
   files.unshift(managementFile);
-  const zipFile = path.join(outputDir, `CE_QC_${periodType}_${range.key}_五业务_${stamp()}.zip`);
+  const zipFile = path.join(outputDir, `CE_QC_${periodType}_${range.key}_七业务_${stamp()}.zip`);
   await zipFiles(files, zipFile);
   const snapshotIds = snapshots.map(item => item.snapshotId);
   for (const file of [...files, zipFile]) {
@@ -99,8 +99,8 @@ function addManagementDashboard(sheet, rows, snapshots, range) {
     { header: '状态', key: 'status', width: 14 }, { header: '说明', key: 'note', width: 42 }
   ];
   const specs = [
-    ['全部业务', '总单量', rows.length, '五业务汇总'],
-    ...BUSINESSES.map(type => [type, '当期单量', rows.filter(row => row.businessType === type).length, '五业务汇总']),
+    ['全部业务', '总单量', rows.length, '七业务汇总'],
+    ...BUSINESSES.map(type => [type, '当期单量', rows.filter(row => row.businessType === type).length, '七业务汇总']),
     ['区域', 'PP单量', rows.filter(row => region(row) === 'PP').length, 'PP_PV汇总'],
     ['区域', 'PV单量', rows.filter(row => region(row) === 'PV').length, 'PP_PV汇总'],
     ['特殊节点', '仓库自提', rows.filter(row => row.specialState === 'SELF_PICKUP').length, '仓库自提'],
