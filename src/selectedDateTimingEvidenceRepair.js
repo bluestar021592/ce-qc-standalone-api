@@ -61,7 +61,7 @@ function tbkhPodBills(date,snapshotId=''){
 function shopeePodBills(type,date,snapshotId=''){
   const db=getDb(),params=[storageType(type),storageType(type),storageType(type)];
   let snapshot='';
-  if(snapshotId){snapshot=' AND u.snapshotId=?';params.push(snapshotId);}
+  if(snapshotId){snapshot=' AND u.snapshotId=?';}
   try{
     const rows=db.prepare(`SELECT UPPER(TRIM(u.shipmentCode)) shipmentCode
       FROM unified_import_rows u
