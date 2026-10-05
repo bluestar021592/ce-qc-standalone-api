@@ -7,7 +7,8 @@ import { compactSqliteStorage, STORAGE_COMPACTION_PATCH } from '../src/storageCo
 
 const PATCH_ID='2026-09-26-v588-no-backup-storage-cleanup-v1';
 const DAY_MS=24*60*60*1000;
-const EVIDENCE_RETENTION_MS=60*DAY_MS;
+const EVIDENCE_RETENTION_DAYS=366;
+const EVIDENCE_RETENTION_MS=EVIDENCE_RETENTION_DAYS*DAY_MS;
 const LOG_RETENTION_MS=45*DAY_MS;
 const TEMP_STALE_MS=0;
 
@@ -147,7 +148,7 @@ if(!samePath(cfg.dataDir,fallbackDataRoot)){
 }
 
 const retained=[
-  {kind:'EVIDENCE_ARCHIVE_60D',...removeChildren(cfg.evidenceArchiveDir,{olderThanMs:EVIDENCE_RETENTION_MS})},
+  {kind:'EVIDENCE_ARCHIVE_366D',...removeChildren(cfg.evidenceArchiveDir,{olderThanMs:EVIDENCE_RETENTION_MS})},
   {kind:'D_LOGS_45D',...removeChildren(cfg.logsDir,{olderThanMs:LOG_RETENTION_MS})},
   {kind:'C_CRASH_LOGS_45D',...removeChildren(path.join(launcherLogsRoot,'crashes'),{olderThanMs:LOG_RETENTION_MS})},
   {kind:'C_APP_LOGS_45D',...removeChildren(launcherLogsRoot,{
@@ -201,7 +202,7 @@ console.log(JSON.stringify({
   ok:true,
   patchId:PATCH_ID,
   noBackupPolicy:true,
-  retentionDays:{evidence:60,logs:45},
+  retentionDays:{evidence:EVIDENCE_RETENTION_DAYS,logs:45},
   rolePolicy:{
     C:'launcher/code/node_modules/current logs only; legacy CE_QC_RUNTIME backups and other CE-QC temp/old fallback data are disposable',
     D:'live SQLite/business data + runtime scratch; generated files are cleaned/aged'
