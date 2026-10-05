@@ -3,6 +3,7 @@ import { getLatestUnifiedImport, listUnifiedImportHistory } from './unifiedImpor
 import { analyzeV246ShopeeAttemptCycle } from './shopeeAttemptCycleV246.js';
 import { loadWhppState } from './whppStore.js';
 import { buildWhppDashboard } from './whppReporting.js';
+import { loadWhppCanonicalTruth } from './whppCanonicalTruth.js';
 
 const TYPES = Object.freeze(['CE','CEAF','TBKH','ALI1688','WHPP','SHOPEECN','SHOPEEVN']);
 const TIMING_TYPES = Object.freeze(['TBKH','WHPP','SHOPEECN','SHOPEEVN']);
@@ -154,11 +155,18 @@ function membershipFinalRows(snapshotId, reportDate, businessType) {
   if (businessType==='TBKH') {
     return db.prepare(`
       SELECT u.shipmentCode,u.regionCode,u.reportDate,
-             COALESCE(f.isPod,0) AS isPod,
-             COALESCE(f.primaryCategory,'') AS primaryCategory,
-             COALESCE(f.rawJson,'{}') AS rawJson
+             CASE
+               WHEN COALESCE(f.isPod,0)=1 THEN 1
+               WHEN UPPER(COALESCE(c.state,'')) IN ('POD','DELIVERED','SIGNED') THEN 1
+               WHEN COALESCE(s.isPod,0)=1 OR TRIM(COALESCE(s.orderStatus,''))='85' THEN 1
+               ELSE 0
+             END AS isPod,
+             COALESCE(NULLIF(f.primaryCategory,''),CASE WHEN UPPER(COALESCE(c.state,''))='POD' THEN 'POD' ELSE '' END,'') AS primaryCategory,
+             COALESCE(NULLIF(f.rawJson,''),NULLIF(c.stateJson,''),NULLIF(s.rawJson,''),'{}') AS rawJson
       FROM unified_import_rows u
       LEFT JOIN final_rows f ON f.shipmentCode=u.shipmentCode AND f.reportDate=u.reportDate
+      LEFT JOIN shipment_current_state c ON c.shipmentCode=u.shipmentCode AND c.reportDate=u.reportDate AND UPPER(TRIM(c.businessType))='TBKH'
+      LEFT JOIN scan_results s ON s.shipmentCode=u.shipmentCode AND s.reportDate=u.reportDate
       WHERE u.snapshotId=? AND u.reportDate=? AND UPPER(TRIM(u.businessType))='TBKH'
       ORDER BY u.rowNumber,u.shipmentCode
     `).all(snapshotId,reportDate);
@@ -166,15 +174,24 @@ function membershipFinalRows(snapshotId, reportDate, businessType) {
   const storageType=businessStorageType(businessType);
   return db.prepare(`
     SELECT u.businessType,u.shipmentCode,u.regionCode,u.reportDate,
-           COALESCE(f.isPod,0) AS isPod,
-           COALESCE(f.primaryCategory,'') AS primaryCategory,
-           COALESCE(f.rawJson,'{}') AS rawJson
+           CASE
+             WHEN COALESCE(f.isPod,0)=1 THEN 1
+             WHEN UPPER(COALESCE(c.state,'')) IN ('POD','DELIVERED','SIGNED') THEN 1
+             WHEN COALESCE(s.isPod,0)=1 OR TRIM(COALESCE(s.orderStatus,''))='85' THEN 1
+             ELSE 0
+           END AS isPod,
+           COALESCE(NULLIF(f.primaryCategory,''),CASE WHEN UPPER(COALESCE(c.state,''))='POD' THEN 'POD' ELSE '' END,'') AS primaryCategory,
+           COALESCE(NULLIF(f.rawJson,''),NULLIF(c.stateJson,''),NULLIF(s.rawJson,''),'{}') AS rawJson
     FROM unified_import_rows u
     LEFT JOIN business_final_rows f
       ON f.businessType=? AND f.shipmentCode=u.shipmentCode AND f.reportDate=u.reportDate
+    LEFT JOIN shipment_current_state c
+      ON c.shipmentCode=u.shipmentCode AND c.reportDate=u.reportDate AND UPPER(TRIM(c.businessType))=UPPER(TRIM(u.businessType))
+    LEFT JOIN business_scan_results s
+      ON s.businessType=? AND s.shipmentCode=u.shipmentCode AND s.reportDate=u.reportDate
     WHERE u.snapshotId=? AND u.reportDate=? AND UPPER(TRIM(u.businessType))=?
     ORDER BY u.rowNumber,u.shipmentCode
-  `).all(storageType,snapshotId,reportDate,businessType);
+  `).all(storageType,storageType,snapshotId,reportDate,businessType);
 }
 function pushEvidenceRows(result, rows=[], source='') {
   for(const row of rows||[]){
@@ -256,14 +273,12 @@ function positivePodMembership(row={},ledgerRow={}){
 }
 function dedicatedWhppTimingRows(reportDate=''){
   try{
-    const state=loadWhppState();
-    if(!state||String(state.reportDate||'')!==String(reportDate||''))return[];
-    const dashboard=buildWhppDashboard(state);
-    return (dashboard?.detailTabs?.all?.rows||[]).map(row=>({
+    const truth=loadWhppCanonicalTruth(reportDate);
+    return (truth.rows||[]).map(row=>({
       ...row,
       shipmentCode:String(row.shipmentCode||row.运单号||'').trim().toUpperCase(),
       regionCode:String(row.regionCode||row.区域||'').toUpperCase(),
-      isPod:(row.是否POD==='是'||row.POD状态==='POD'||String(row.currentState||'').toUpperCase()==='POD')?1:0,
+      isPod:row.truthEvidence?.pod?1:(row.是否POD==='是'||row.POD状态==='POD'||String(row.currentState||'').toUpperCase()==='POD'?1:0),
       primaryCategory:row.primaryCategory||row.主分类||row.异常分类||'',
       rawJson:JSON.stringify(row)
     }));
@@ -303,12 +318,9 @@ function timingForBatch(batch,businessType) {
 function returnSummaryForBatch(batch,businessType) {
   if(businessType==='WHPP'&&batch?.reportDate){
     try{
-      const state=loadWhppState();
-      if(String(state?.reportDate||'')===String(batch.reportDate||'')){
-        const dashboard=buildWhppDashboard(state);
-        const total=n(dashboard?.metrics?.total,0),count=n(dashboard?.metrics?.returned,0);
-        return{count,rate:total?Number((count*100/total).toFixed(2)):0,total};
-      }
+      const truth=loadWhppCanonicalTruth(batch.reportDate,batch.snapshotId||'');
+      const total=n(truth.total,0),count=(truth.rows||[]).filter(row=>row.truthEvidence?.returned||isReturned({...row,rawJson:JSON.stringify(row)})).length;
+      return{count,rate:total?Number((count*100/total).toFixed(2)):0,total};
     }catch{}
   }
   const total=n(batch?.classificationCounts?.[businessType],0);
@@ -318,12 +330,8 @@ function returnSummaryForBatch(batch,businessType) {
   return{count,rate:total?Number((count*100/total).toFixed(2)):0,total};
 }
 function dedicatedWhppCount(reportDate='') {
-  try{
-    const state=loadWhppState();
-    if(!state||String(state.reportDate||'')!==String(reportDate||''))return 0;
-    const dashboard=buildWhppDashboard(state);
-    return n(dashboard?.metrics?.total,0);
-  }catch{return 0}
+  try{return n(loadWhppCanonicalTruth(reportDate)?.total,0)}
+  catch{return 0}
 }
 function classificationForBatch(batch) {
   if (!batch) {
