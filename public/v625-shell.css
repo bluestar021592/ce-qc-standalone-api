@@ -329,3 +329,7 @@ svg{width:1em;height:1em;display:inline-block;vertical-align:middle}
 .v631-accounting-bar{display:flex;align-items:center;gap:10px;margin:-4px 0 16px;padding:9px 12px;border:1px solid #dbe7f3;border-radius:8px;background:#f8fbff;color:#597087;font-size:11px}
 .v631-accounting-bar b{color:#153957;font-size:12px}
 .v625-timeline-item small{display:block;margin-top:4px;color:#8a9caf;font-size:10px}
+
+.v631-evidence-link{border:0;background:transparent;padding:0;color:#697f95;font:inherit;cursor:pointer}
+.v631-evidence-link:hover{color:#1477ee;text-decoration:underline}
+.v631-timing-missing{margin-top:16px;scroll-margin-top:18px}
