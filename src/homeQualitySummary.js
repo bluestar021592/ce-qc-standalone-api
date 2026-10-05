@@ -191,13 +191,13 @@ function eventsForBills(reportDate,businessType,bills=[]) {
   for(const chunk of chunks){
     const marks=chunk.map(()=>'?').join(',');
     try{
-      const core=db.prepare(`SELECT shipmentCode,eventCode,trackingEventCode,trackingEventDesc,trackingEventDescZh,trackingEventDescKm,eventTime,place,rawJson
-        FROM track_events WHERE reportDate=? AND shipmentCode IN (${marks}) ORDER BY eventTime,id`).all(reportDate,...chunk);
+      const core=db.prepare(`SELECT shipmentCode,eventCode,trackingEventCode,trackingEventDesc,trackingEventDescZh,trackingEventDescKm,eventTime,place,rawJson,reportDate
+        FROM track_events WHERE shipmentCode IN (${marks}) ORDER BY eventTime,id`).all(...chunk);
       pushEvidenceRows(result,core,'track_events');
     }catch{}
     try{
-      const business=db.prepare(`SELECT shipmentCode,eventTime,eventCode,rawJson
-        FROM business_track_events WHERE businessType=? AND reportDate=? AND shipmentCode IN (${marks}) ORDER BY eventTime,id`).all(businessStorageType(businessType),reportDate,...chunk);
+      const business=db.prepare(`SELECT shipmentCode,eventTime,eventCode,rawJson,reportDate
+        FROM business_track_events WHERE businessType=? AND shipmentCode IN (${marks}) ORDER BY eventTime,id`).all(businessStorageType(businessType),...chunk);
       pushEvidenceRows(result,business,'business_track_events');
     }catch{}
   }
@@ -243,6 +243,15 @@ function isReturned(row={}) {
   const positive=/^(已退回|退回|退回完成|RETURN|RETURNED|RETURN_COMPLETED)$/;
   return rawValues.some(value=>!negative.test(value)&&positive.test(value));
 }
+function positivePodMembership(row={},ledgerRow={}){
+  if(Number(row.isPod||0)===1)return true;
+  if(String(ledgerRow.terminalReason||'').toUpperCase()==='POD'&&String(ledgerRow.podDate||ledgerRow.terminalAt||'').trim())return true;
+  const raw=safeJson(row.rawJson);
+  const status=String(raw.orderStatus||raw.shipmentStatus||raw.scanNormalizedState||raw.currentState||'').toUpperCase();
+  const text=[row.primaryCategory,raw.primaryCategory,raw.主分类,raw.最新状态,raw.currentState,raw.scanNormalizedState,raw.statusText].map(v=>String(v||'')).join(' ');
+  if(status==='85'||status==='POD'||status==='DELIVERED'||status==='SIGNED')return true;
+  return Boolean(text&&!NEGATIVE_POD_RE.test(text)&&POSITIVE_POD_RE.test(text));
+}
 function timingRows(snapshotId,reportDate,businessType) {
   if(!snapshotId||!reportDate||!TIMING_TYPES.includes(businessType))return[];
   const rows=membershipFinalRows(snapshotId,reportDate,businessType);
@@ -253,10 +262,12 @@ function timingRows(snapshotId,reportDate,businessType) {
     const shipmentCode=String(row.shipmentCode||'').trim().toUpperCase();
     const direct=timingEvidence(events.get(shipmentCode)||[]);
     const strictLedger=!direct.ok?strictLedgerTiming(ledger.get(shipmentCode)||{}):null;
+    const ledgerRow=ledger.get(shipmentCode)||{};
     return {
       shipmentCode,region:String(row.regionCode||'').toUpperCase(),
-      isPod:Number(row.isPod||0)===1,isReturned:isReturned(row),
-      evidence:direct.ok?{...direct,evidenceSource:(events.get(shipmentCode)||[]).some(x=>x.evidenceSource==='track_events')?'track_events':'business_track_events'}:(strictLedger||direct)
+      isPod:positivePodMembership(row,ledgerRow),isReturned:isReturned(row),
+      evidence:direct.ok?{...direct,evidenceSource:(events.get(shipmentCode)||[]).some(x=>x.evidenceSource==='track_events')?'track_events':'business_track_events'}:(strictLedger||direct),
+      membershipSource:Number(row.isPod||0)===1?'final_rows':(String(ledgerRow.terminalReason||'').toUpperCase()==='POD'?'qc_tracking_ledger':'raw_terminal_proof')
     };
   });
 }
