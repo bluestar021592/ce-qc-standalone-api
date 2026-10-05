@@ -185,7 +185,7 @@ assert.doesNotMatch(v625Shell,/id="v625Aux"/,'V625 must not merge users roles pr
 assert.match(server,/\['\/users', \{ key:'users', title:'用户管理', business:'' \}\]/,'V625 user-management route must be first-class');
 assert.match(server,/\['\/profile', \{ key:'profile', title:'个人中心', business:'' \}\]/,'V625 personal-center route must be first-class');
 assert.match(v625Runtime,/\/api\/tracking-workspace/,'V625 tracking and exception pages must use the canonical workspace API');
-assert.match(v625Runtime,/\/api\/export-period\/prepare/,'V625 report page must use the canonical export owner');
+assert.ok(/\/api\/export-period\/(?:prepare|job)/.test(v625Runtime),'V625 report page must use the canonical export owner (legacy prepare or async job)');
 assert.match(v625Runtime,/\/api\/backups/,'V625 data-management page must use the canonical backup owner');
 
 assert.match(v625Shell,/data-data-tab="clear"/,'V626 data management must expose a real direct-clear tab');
