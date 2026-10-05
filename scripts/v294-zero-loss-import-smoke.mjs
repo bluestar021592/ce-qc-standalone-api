@@ -130,7 +130,7 @@ try {
   const serverSource = fs.readFileSync(new URL('../server.js', import.meta.url), 'utf8');
   assert.match(serverSource, /\['CE',\s*'CEAF',\s*'TBKH',\s*'ALI1688'\]\.includes\(row\.businessType\)/, 'CCSL import state must remain limited to its four execution businesses');
   assert.doesNotMatch(serverSource, /\['CE',\s*'CEAF',\s*'TBKH',\s*'ALI1688',\s*'WHPP'\]/, 'WHPP must never be silently folded into the CCSL run');
-  assert.match(serverSource, /saveUnifiedImport\(parsed,\s*req\.file\.originalname\)/, 'normal UI daily upload must use default overwrite mode without opting into duplicate reuse');
+  assert.match(serverSource, /saveUnifiedImport\(parsed,\s*req\.file\.originalname,\s*\{\s*reuseExactDuplicate:\s*true\s*\}\)/, 'normal UI daily upload must reuse an exact duplicate batch so verified same-day evidence is not destroyed');
 
   const runnerSource = fs.readFileSync(new URL('../public/v67-resilient-run-guard.js', import.meta.url), 'utf8');
   assert.match(runnerSource, /async function runStage\(stage, preferResume, target\)/, 'seven-business runner must use the current generic stage executor');
@@ -149,7 +149,7 @@ try {
   assert.equal((orderedStages.match(/\/api\/whpp\/run\/start/g) || []).length, 1, 'WHPP start endpoint must appear exactly once in the canonical browser stage array');
   assert.match(runnerSource, /if \(result\.ok === false\) break;/, 'a failed earlier stage must stop the ordered runner before later stages can start');
 
-  console.log(`[V346/V294] zero-loss import smoke passed · same-date/same-file reupload overwrites by default · old same-date completed snapshots retire · inflated UsedRange clamped · duplicate parse reused · seven-business truth counts WHPP while execution keeps dedicated WHPP stage · parse=${parseElapsedMs}ms reuse=${reuseElapsedMs}ms`);
+  console.log(`[V346/V294] zero-loss import smoke passed · exact duplicate UI reupload reuses prior batch · changed same-date input still supersedes prior visible batch · inflated UsedRange clamped · duplicate parse reused · seven-business truth counts WHPP while execution keeps dedicated WHPP stage · parse=${parseElapsedMs}ms reuse=${reuseElapsedMs}ms`);
 } finally {
   try { fs.rmSync(file, { force: true }); } catch {}
   try { fs.rmSync(bloatedFile, { force: true }); } catch {}
