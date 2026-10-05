@@ -25,7 +25,7 @@ assert.match(server,/\['CE', 'CEAF', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN'\]
 assert.match(server,/const whppState = loadWhppState\(\)/,'POD workspace must add WHPP through dedicated state');
 assert.doesNotMatch(server,/\['CE', 'CEAF', 'TBKH', 'ALI1688', 'WHPP', 'SHOPEECN', 'SHOPEEVN'\]\.map\(type => loadLightweightUnifiedBusinessState/,'WHPP must never enter unsupported lightweight reader');
 
-assert.match(html,/v625-shell\.js\?v=202610(?:04-v6(?:29|30)-1|05-v(?:63[123567]|640|641|642)-1)/,'V629 JS cache bust missing');
-assert.match(html,/v625-shell\.css\?v=202610(?:04-v6(?:29|30)-1|05-v(?:63[123567]|640|641|642)-1)/,'V629 CSS cache bust missing');
+assert.match(html,/v625-shell\.js\?v=202610(?:04-v6(?:29|30)-1|05-v(?:63[123567]|640|641|642|643)-1)/,'V629 JS cache bust missing');
+assert.match(html,/v625-shell\.css\?v=202610(?:04-v6(?:29|30)-1|05-v(?:63[123567]|640|641|642|643)-1)/,'V629 CSS cache bust missing');
 
 console.log('[V629] resilient home + null-safe KPI detail + dedicated WHPP POD workspace smoke passed');
