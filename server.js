@@ -1409,15 +1409,15 @@ function localTrackEvidence(shipmentCodes=[], requestedBusinessType='', reportDa
   for(let i=0;i<codes.length;i+=300){
     const chunk=codes.slice(i,i+300),marks=chunk.map(()=>'?').join(',');
     try{
-      const rows=db.prepare(`SELECT shipmentCode,eventCode,trackingEventCode,trackingEventDesc,trackingEventDescZh,trackingEventDescKm,eventTime,place,rawJson
-        FROM track_events WHERE shipmentCode IN (${marks}) ${reportDate?'AND reportDate=?':''} ORDER BY eventTime,id`).all(...chunk,...(reportDate?[reportDate]:[]));
+      const rows=db.prepare(`SELECT shipmentCode,eventCode,trackingEventCode,trackingEventDesc,trackingEventDescZh,trackingEventDescKm,eventTime,place,rawJson,reportDate
+        FROM track_events WHERE shipmentCode IN (${marks}) ORDER BY eventTime,id`).all(...chunk);
       events.push(...rows.map(row=>({...row,evidenceSource:'track_events'})));
     }catch{}
     try{
-      const params=storageType?[storageType,...chunk,...(reportDate?[reportDate]:[])]:[...chunk,...(reportDate?[reportDate]:[])];
+      const params=storageType?[storageType,...chunk]:[...chunk];
       const rows=storageType
-        ? db.prepare(`SELECT shipmentCode,eventTime,eventCode,rawJson FROM business_track_events WHERE businessType=? AND shipmentCode IN (${marks}) ${reportDate?'AND reportDate=?':''} ORDER BY eventTime,id`).all(...params)
-        : db.prepare(`SELECT shipmentCode,eventTime,eventCode,rawJson FROM business_track_events WHERE shipmentCode IN (${marks}) ${reportDate?'AND reportDate=?':''} ORDER BY eventTime,id`).all(...params);
+        ? db.prepare(`SELECT shipmentCode,eventTime,eventCode,rawJson,reportDate FROM business_track_events WHERE businessType=? AND shipmentCode IN (${marks}) ORDER BY eventTime,id`).all(...params)
+        : db.prepare(`SELECT shipmentCode,eventTime,eventCode,rawJson,reportDate FROM business_track_events WHERE shipmentCode IN (${marks}) ORDER BY eventTime,id`).all(...params);
       events.push(...rows.map(row=>({...row,evidenceSource:'business_track_events'})));
     }catch{}
     try{
