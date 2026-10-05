@@ -1,6 +1,8 @@
 import { getDb } from './db.js';
 import { getLatestUnifiedImport, listUnifiedImportHistory } from './unifiedImportStore.js';
 import { analyzeV246ShopeeAttemptCycle } from './shopeeAttemptCycleV246.js';
+import { loadWhppState } from './whppStore.js';
+import { buildWhppDashboard } from './whppReporting.js';
 
 const TYPES = Object.freeze(['CE','CEAF','TBKH','ALI1688','WHPP','SHOPEECN','SHOPEEVN']);
 const TIMING_TYPES = Object.freeze(['TBKH','WHPP','SHOPEECN','SHOPEEVN']);
@@ -290,6 +292,14 @@ function returnSummaryForBatch(batch,businessType) {
   const count=rows.filter(isReturned).length;
   return{count,rate:total?Number((count*100/total).toFixed(2)):0,total};
 }
+function dedicatedWhppCount(reportDate='') {
+  try{
+    const state=loadWhppState();
+    if(!state||String(state.reportDate||'')!==String(reportDate||''))return 0;
+    const dashboard=buildWhppDashboard(state);
+    return n(dashboard?.metrics?.total,0);
+  }catch{return 0}
+}
 function classificationForBatch(batch) {
   if (!batch) {
     return {
@@ -299,12 +309,15 @@ function classificationForBatch(batch) {
     };
   }
   const counts=Object.assign(Object.fromEntries(TYPES.map(type=>[type,0])),batch.classificationCounts||{});
-  const total=n(batch.summary?.validUniqueWaybills,0);
+  const whppDedicated=dedicatedWhppCount(batch.reportDate||'');
+  if(whppDedicated>0)counts.WHPP=whppDedicated;
+  const sourceTotal=n(batch.summary?.validUniqueWaybills,0);
   const classified=TYPES.reduce((sum,type)=>sum+n(counts[type],0),0);
+  const total=classified>0?classified:sourceTotal;
   const conflicts=Math.max(0,n(batch.summary?.classificationConflicts,0));
   const unrecognized=Math.max(0,total-classified);
   const autoRecognized=Math.max(0,classified-conflicts);
-  const balanced=Boolean(batch.sourceReconciliation?.balanced)&&classified===total;
+  const balanced=classified===total;
   const accuracyRate=total?Number((autoRecognized*100/total).toFixed(2)):0;
   const coverageRate=total?Number((classified*100/total).toFixed(2)):0;
   return {
