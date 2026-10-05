@@ -19,7 +19,7 @@ assert.match(js,/async function scanWhppPending\(/,'WHPP pending scan handler mi
 assert.match(js,/safeWhppRun\('resume',reportDate\)/,'WHPP pending scan must use the dedicated WHPP resume path');
 assert.match(js,/扫描WHPP待处理 '\+fmt\(waiting\)\+' 票'/,'WHPP button must show the actual waiting count');
 
-assert.match(html,/v625-shell\.js\?v=20261005-v641-1/,'V641 shell cache bust missing');
-assert.match(html,/v625-shell\.css\?v=20261005-v641-1/,'V641 css cache bust missing');
+assert.match(html,/v625-shell\.js\?v=20261005-v(?:641|642)-1/,'V641 shell cache bust missing');
+assert.match(html,/v625-shell\.css\?v=20261005-v(?:641|642)-1/,'V641 css cache bust missing');
 
 console.log('[V641] single-day targeted tracking + explicit WHPP waiting-scan action smoke passed');
