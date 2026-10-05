@@ -213,7 +213,7 @@ async function fetchLiveProgress(reportDate=''){
   const date=reportDate||v626LatestImport?.reportDate||'';
   const [ccslR,shopeeR,whppR]=await Promise.allSettled([
     json('/api/v33/run-progress?businessType=CCSL'+(date?'&reportDate='+encodeURIComponent(date):''),7000),
-    json('/api/v33/run-progress?businessType=SHOPEE',7000),
+    json('/api/v33/run-progress?businessType=SHOPEE'+(date?'&reportDate='+encodeURIComponent(date):''),7000),
     json('/api/whpp/progress'+(date?'?reportDate='+encodeURIComponent(date):''),7000)
   ]);
   const ccsl=ccslR.status==='fulfilled'?ccslR.value:{};
@@ -255,7 +255,7 @@ function renderLiveProgress(bundle={}){
   for(const log of whpp.log||[])appendLiveLog(log.message||'',log.at||new Date().toISOString());
 }
 async function refreshLiveProgress(){
-  const bundle=await fetchLiveProgress(v626LatestImport?.reportDate||'');
+  const bundle=await fetchLiveProgress(selectedReportDate()||v626LatestImport?.reportDate||'');
   renderLiveProgress(bundle);return bundle;
 }
 function startProgressPolling(){
@@ -369,7 +369,15 @@ async function loadHome(options={}){
     json(integrityUrl,20000)
   ]);
   const summary=summaryR.status==='fulfilled'?summaryR.value:null;
+  const historyRows=(historyR.status==='fulfilled'?historyR.value?.rows:[])||[];
   const integrity=integrityR.status==='fulfilled'?integrityR.value:null;
+  const activeReportDate=summary?.reportDate||requestedDate||'';
+  const selectedBatch=historyRows.find(row=>String(row.reportDate||'').slice(0,10)===String(activeReportDate||'').slice(0,10))||null;
+  if(selectedBatch){
+    v626LatestImport={...(v626LatestImport||{}),...selectedBatch};
+  }else if(summary?.snapshotId||summary?.reportDate){
+    v626LatestImport={...(v626LatestImport||{}),snapshotId:summary.snapshotId,reportDate:summary.reportDate};
+  }
   const historicalRunning=summary?.historicalEvidenceRecovery?.state==='RUNNING';
   const timingRepairRunning=Boolean(summary?.timingEvidenceRepair?.active);
   if(historicalRunning||timingRepairRunning)scheduleHistoricalEvidenceRefresh('home');
@@ -385,7 +393,6 @@ async function loadHome(options={}){
   setText('v632GrandTotalCheck',fmt(sevenBusinessTotal));
   const totalCard=q('[data-card="TOTAL"]');
   if(totalCard)totalCard.classList.toggle('v632-total-mismatch',grand!==sevenBusinessTotal);
-  if(summary?.snapshotId||summary?.reportDate)v626LatestImport={...(v626LatestImport||{}),snapshotId:summary.snapshotId,reportDate:summary.reportDate};
   if(integrity){
     setText('v637HomeIntegrity','源票 '+fmt(integrity.source?.classifiedTotal||0)+' · 已进入处理 '+fmt(integrity.processing?.stateMemberTotal||0)+' · 已扫描 '+fmt(integrity.processing?.scanCount||0)+' · 待扫描 '+fmt(integrity.processing?.waitingScan||0)+' · 已归类 '+fmt(integrity.accounting?.accountedTotal||0)+' · 差异 '+fmt(integrity.accounting?.difference||0));
     const bar=byId('v637HomeIntegrityBar');if(bar){bar.classList.toggle('error',!integrity.safeForDashboard);bar.classList.toggle('ok',Boolean(integrity.safeForDashboard))}
@@ -410,9 +417,11 @@ async function loadHome(options={}){
   }
 
   setText('v625HomeDateMeta',summary?.reportDate?'今日数据统计（'+summary.reportDate+'）':'今日数据统计');
-  setText('v626ProcessReportDate',summary?.reportDate||'等待日报');
-  setText('v626ProcessFile',v626LatestImport?.sourceName||'综合日报 '+(summary?.reportDate||''));
-  setText('v626ProcessDateSource',summary?.reportDate?'系统识别日报日期：'+summary.reportDate:'日报日期将由系统自动识别');
+  setText('v626ProcessReportDate',summary?.reportDate||requestedDate||'等待日报');
+  const processDate=summary?.reportDate||requestedDate||'';
+  const processExists=Boolean(processDate&&(selectedBatch||summary?.snapshotId||Number(classification.total||0)>0));
+  setText('v626ProcessFile',processExists?(v626LatestImport?.sourceName||('综合日报 '+processDate)):'尚未上传综合日报');
+  setText('v626ProcessDateSource',processExists?('当前查看日报：'+processDate+(selectedBatch?.snapshotStatus?' · '+selectedBatch.snapshotStatus:'')):'日报日期将由系统自动识别');
   setText('v626StageParse',summary?.reportDate?'完成':'等待');setText('v626StageClassify',classification.balanced?'完成':'待核验');
   const integritySafe=integrity?Boolean(integrity.safeForDashboard):true;
   const processingComplete=integrity?Boolean(integrity.processingComplete):true;
@@ -461,7 +470,7 @@ async function loadHome(options={}){
   }
   setText('v625TimingPeriod',summary?.reportDate?'统计日报 '+summary.reportDate+' · 仅真实60/70→80轨迹POD':'统计当前日报POD');
 
-  const history=(historyR.status==='fulfilled'?historyR.value?.rows:[])||[];
+  const history=historyRows;
   renderTrend('v625HomeTrend',history.slice().reverse().map(r=>({label:r.reportDate,value:Object.values(r.classificationCounts||{}).reduce((a,b)=>a+Number(b||0),0)})));
   if(!options.skipAux){void refreshLiveProgress();void loadOpenPod()}
 }
