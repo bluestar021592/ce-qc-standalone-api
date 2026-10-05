@@ -619,7 +619,7 @@ async function loadBusiness(){
   // V644 business-only controls fail closed before any async state read.
   // A failed/slow integrity request must never expose a WHPP operation on another board.
   const whppOnlyAction=byId('v641WhppScanPending');
-  if(whppOnlyAction)whppOnlyAction.hidden=true;
+  if(whppOnlyAction){whppOnlyAction.hidden=true;whppOnlyAction.style.setProperty('display','none','important');}
   try{
     const params=new URLSearchParams(location.search);
     const latest=v626LatestImport||await latestImportContext();
@@ -656,7 +656,9 @@ async function loadBusiness(){
       const whppScanBtn=byId('v641WhppScanPending');
       if(whppScanBtn){
         const waiting=Number(bi.waitingScan||0);
-        whppScanBtn.hidden=!(business==='WHPP'&&waiting>0);
+        const showWhppScan=business==='WHPP'&&waiting>0;
+        whppScanBtn.hidden=!showWhppScan;
+        whppScanBtn.style.setProperty('display',showWhppScan?'inline-flex':'none','important');
         whppScanBtn.textContent=waiting>0?'扫描WHPP待处理 '+fmt(waiting)+' 票':'扫描WHPP待处理票';
       }
     }
@@ -676,7 +678,7 @@ async function loadBusiness(){
     const tbody=byId('v625BusinessRows');tbody.replaceChildren();
     if(!rows.length){tbody.innerHTML='<tr><td colspan="7">当前日报暂无异常记录</td></tr>'}
     else for(const row of rows){tbody.appendChild(rowTr([row.shipmentCode,row.businessType,row.category||row.queryStatus||'异常',row.pendingDays||row.ocDays||'—',row.currentState||row.queryStatus||'—',row.latestTime||row.lastEventTime||'—','查看']))}
-  }catch(e){const whppOnlyAction=byId('v641WhppScanPending');if(whppOnlyAction)whppOnlyAction.hidden=true;byId('v625BusinessRows').innerHTML='<tr><td colspan="7">业务快照暂未读取：'+esc(e.message)+'</td></tr>'}
+  }catch(e){const whppOnlyAction=byId('v641WhppScanPending');if(whppOnlyAction){whppOnlyAction.hidden=true;whppOnlyAction.style.setProperty('display','none','important');}byId('v625BusinessRows').innerHTML='<tr><td colspan="7">业务快照暂未读取：'+esc(e.message)+'</td></tr>'}
 }
 
 function rowTr(values){const tr=document.createElement('tr');for(const v of values){const td=document.createElement('td');td.textContent=v??'—';tr.appendChild(td)}return tr}
