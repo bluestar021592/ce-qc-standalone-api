@@ -4,7 +4,7 @@ import { analyzeV246ShopeeAttemptCycle } from './shopeeAttemptCycleV246.js';
 import { loadWhppState } from './whppStore.js';
 import { buildWhppDashboard } from './whppReporting.js';
 import { loadWhppCanonicalTruth } from './whppCanonicalTruth.js';
-import { recoverHistoricalMemberEvidence } from './historicalMemberEvidence.js';
+import { recoverHistoricalMemberEvidence, recoverHistoricalGroupedEvidence } from './historicalMemberEvidence.js';
 
 const TYPES = Object.freeze(['CE','CEAF','TBKH','ALI1688','WHPP','SHOPEECN','SHOPEEVN']);
 const TIMING_TYPES = Object.freeze(['TBKH','WHPP','SHOPEECN','SHOPEEVN']);
@@ -319,14 +319,14 @@ function timingRows(snapshotId,reportDate,businessType) {
   });
 }
 
-async function timingForBatchWithArchive(batch,businessType){
+async function timingForBatchWithArchive(batch,businessType,recoveredOverride=null){
   if(!batch?.snapshotId||!batch?.reportDate){
     return timingForBatch(batch,businessType);
   }
   const baseRows=timingRows(batch.snapshotId,batch.reportDate,businessType);
   const bills=baseRows.map(row=>row.shipmentCode).filter(Boolean);
   if(!bills.length)return {businessType,reportDate:batch.reportDate,...summarizeTimingRows(baseRows)};
-  const recovered=await recoverHistoricalMemberEvidence({
+  const recovered=recoveredOverride||await recoverHistoricalMemberEvidence({
     reportDate:batch.reportDate,businessType,targetBills:bills
   });
   const events=eventsForBills(batch.reportDate,businessType,bills);
@@ -456,7 +456,15 @@ export async function buildHomeQualitySummaryWithArchive(options={}){
   const base=buildHomeQualitySummary(options);
   const batch=selectUnifiedBatch(options);
   if(!batch)return base;
-  const timingEntries=await Promise.all(TIMING_TYPES.map(async type=>[type,await timingForBatchWithArchive(batch,type)]));
+  const rowGroups=Object.fromEntries(TIMING_TYPES.map(type=>{
+    const rows=timingRows(batch.snapshotId,batch.reportDate,type);
+    return[type,rows.map(row=>row.shipmentCode).filter(Boolean)];
+  }));
+  const recoveredByType=await recoverHistoricalGroupedEvidence({reportDate:batch.reportDate,groups:rowGroups});
+  const timingEntries=await Promise.all(TIMING_TYPES.map(async type=>[
+    type,
+    await timingForBatchWithArchive(batch,type,recoveredByType[type]||null)
+  ]));
   return{...base,timing:Object.fromEntries(timingEntries)};
 }
 export function buildHomeQualitySummary(options={}) {
