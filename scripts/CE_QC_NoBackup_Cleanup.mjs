@@ -91,6 +91,23 @@ function driveSnapshot(root){
     return {root,totalBytes,freeBytes,usedBytes:Math.max(0,totalBytes-freeBytes)};
   }catch(error){return {root,error:String(error?.message||error)};}
 }
+function evidenceArchiveCoverage(root){
+  const ceApi=path.join(root,'ce_api');
+  if(!fs.existsSync(ceApi))return{root:ceApi,present:false,dateCount:0,oldestDate:'',newestDate:'',has20260701:false};
+  let dates=[];
+  try{
+    dates=fs.readdirSync(ceApi,{withFileTypes:true})
+      .filter(entry=>entry.isDirectory()&&/^\d{4}-\d{2}-\d{2}$/.test(entry.name))
+      .map(entry=>entry.name).sort();
+  }catch(error){
+    return{root:ceApi,present:true,dateCount:0,oldestDate:'',newestDate:'',has20260701:false,error:String(error?.message||error)};
+  }
+  return{
+    root:ceApi,present:true,dateCount:dates.length,
+    oldestDate:dates[0]||'',newestDate:dates.at(-1)||'',
+    has20260701:dates.includes('2026-07-01')
+  };
+}
 function tableExists(db,name){
   return Boolean(db.prepare("SELECT 1 ok FROM sqlite_master WHERE type='table' AND name=? LIMIT 1").get(name)?.ok);
 }
@@ -162,6 +179,7 @@ const tempCleanup=[
   ...(process.env.LOCALAPPDATA?[cleanupNamedTempRoots(path.join(process.env.LOCALAPPDATA,'Temp'))]:[])
 ];
 
+const archiveCoverage=evidenceArchiveCoverage(cfg.evidenceArchiveDir);
 const backupRecordCleanup=retireBackupRecords(cfg.dbFile);
 const compact=compactSqliteStorage(cfg.dbFile,{
   minReclaimBytes:256*1024*1024,
@@ -197,12 +215,14 @@ if(compact?.compacted){
   console.log(`[CE-QC][V576][STORAGE] SQLite storage analysis could not compact: ${compact?.reason||'UNKNOWN'} ${compact?.detail||''}`);
 }
 console.log(`[CE-QC][V577][STORAGE] compaction engine=${STORAGE_COMPACTION_PATCH}; backup-record rows retired=${backupRecordCleanup.updated||0}.`);
+console.log(`[CE-QC][V640][EVIDENCE] CE API archive coverage: dates=${archiveCoverage.dateCount}, oldest=${archiveCoverage.oldestDate||'NONE'}, newest=${archiveCoverage.newestDate||'NONE'}, has2026-07-01=${archiveCoverage.has20260701?'YES':'NO'}.`);
 
 console.log(JSON.stringify({
   ok:true,
   patchId:PATCH_ID,
   noBackupPolicy:true,
   retentionDays:{evidence:EVIDENCE_RETENTION_DAYS,logs:45},
+  archiveCoverage,
   rolePolicy:{
     C:'launcher/code/node_modules/current logs only; legacy CE_QC_RUNTIME backups and other CE-QC temp/old fallback data are disposable',
     D:'live SQLite/business data + runtime scratch; generated files are cleaned/aged'
