@@ -489,7 +489,7 @@ export async function buildHomeQualitySummaryWithArchive(options={}){
     const needs=count>0&&(current.overall?.avgDays==null||n(current.evidence?.missing,0)>0||n(current.overall?.podCount,0)===0);
     repairStates[type]=needs
       ? requestSelectedDateTimingRepair(type,batch.reportDate,batch.snapshotId)
-      : inspectSelectedDateTimingRepair(type,batch.reportDate);
+      : inspectSelectedDateTimingRepair(type,batch.reportDate,batch.snapshotId);
   }
 
 
