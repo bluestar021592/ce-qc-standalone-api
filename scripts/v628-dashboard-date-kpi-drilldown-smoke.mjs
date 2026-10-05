@@ -30,8 +30,8 @@ for(const kind of ['total','delivery','pod','pending','abnormal']){
 for(const id of ['v628KpiDetailPanel','v628KpiDetailTitle','v628KpiDetailMeta','v628KpiDetailRows']){
   assert.ok(html.includes(`id="${id}"`),`missing KPI detail UI ${id}`);
 }
-assert.match(html,/v625-shell\.js\?v=20261004-v6(?:28|29|30)-1/,'V628+ JS cache bust missing');
-assert.match(html,/v625-shell\.css\?v=20261004-v6(?:28|29|30)-1/,'V628+ CSS cache bust missing');
+assert.match(html,/v625-shell\.js\?v=202610(?:04-v6(?:28|29|30)-1|05-v631-1)/,'V628+ JS cache bust missing');
+assert.match(html,/v625-shell\.css\?v=202610(?:04-v6(?:28|29|30)-1|05-v631-1)/,'V628+ CSS cache bust missing');
 
 const ids=[...html.matchAll(/\bid="([^"]+)"/g)].map(m=>m[1]);
 const dupes=[...new Set(ids.filter((id,i)=>ids.indexOf(id)!==i))];
