@@ -178,9 +178,10 @@ function membershipFinalRows(snapshotId, reportDate, businessType) {
              WHEN COALESCE(f.isPod,0)=1 THEN 1
              WHEN UPPER(COALESCE(c.state,'')) IN ('POD','DELIVERED','SIGNED') THEN 1
              WHEN COALESCE(s.isPod,0)=1 OR TRIM(COALESCE(s.orderStatus,''))='85' THEN 1
+             WHEN p.shipmentCode IS NOT NULL THEN 1
              ELSE 0
            END AS isPod,
-           COALESCE(NULLIF(f.primaryCategory,''),CASE WHEN UPPER(COALESCE(c.state,''))='POD' THEN 'POD' ELSE '' END,'') AS primaryCategory,
+           COALESCE(NULLIF(f.primaryCategory,''),CASE WHEN UPPER(COALESCE(c.state,'')) IN ('POD','DELIVERED','SIGNED') OR p.shipmentCode IS NOT NULL THEN 'POD' ELSE '' END,'') AS primaryCategory,
            COALESCE(NULLIF(f.rawJson,''),NULLIF(c.stateJson,''),NULLIF(s.rawJson,''),'{}') AS rawJson
     FROM unified_import_rows u
     LEFT JOIN business_final_rows f
@@ -189,9 +190,11 @@ function membershipFinalRows(snapshotId, reportDate, businessType) {
       ON c.shipmentCode=u.shipmentCode AND c.reportDate=u.reportDate AND UPPER(TRIM(c.businessType))=UPPER(TRIM(u.businessType))
     LEFT JOIN business_scan_results s
       ON s.businessType=? AND s.shipmentCode=u.shipmentCode AND s.reportDate=u.reportDate
+    LEFT JOIN business_pod_locks p
+      ON p.businessType=? AND p.shipmentCode=u.shipmentCode
     WHERE u.snapshotId=? AND u.reportDate=? AND UPPER(TRIM(u.businessType))=?
     ORDER BY u.rowNumber,u.shipmentCode
-  `).all(storageType,storageType,snapshotId,reportDate,businessType);
+  `).all(storageType,storageType,storageType,snapshotId,reportDate,businessType);
 }
 function pushEvidenceRows(result, rows=[], source='') {
   for(const row of rows||[]){
@@ -286,9 +289,20 @@ function dedicatedWhppTimingRows(reportDate=''){
 }
 function timingRows(snapshotId,reportDate,businessType) {
   if(!reportDate||!TIMING_TYPES.includes(businessType))return[];
-  const rows=businessType==='WHPP'?dedicatedWhppTimingRows(reportDate):membershipFinalRows(snapshotId,reportDate,businessType);
+  const whppTruth=businessType==='WHPP'?loadWhppCanonicalTruth(reportDate,snapshotId||''):null;
+  const rows=whppTruth
+    ? (whppTruth.rows||[]).map(row=>({
+        ...row,
+        shipmentCode:String(row.shipmentCode||row.运单号||'').trim().toUpperCase(),
+        regionCode:String(row.regionCode||row.区域||'').toUpperCase(),
+        isPod:row.truthEvidence?.pod?1:(row.是否POD==='是'||row.POD状态==='POD'||String(row.currentState||'').toUpperCase()==='POD'?1:0),
+        primaryCategory:row.primaryCategory||row.主分类||row.异常分类||'',
+        rawJson:JSON.stringify(row)
+      }))
+    : membershipFinalRows(snapshotId,reportDate,businessType);
   const bills=rows.map(row=>row.shipmentCode);
   const events=eventsForBills(reportDate,businessType,bills);
+  if(whppTruth?.recoveredTrackEvents?.length)pushEvidenceRows(events,whppTruth.recoveredTrackEvents,'whpp_recovered_snapshot');
   const ledger=ledgerEvidenceForBills(bills);
   return rows.map(row=>{
     const shipmentCode=String(row.shipmentCode||'').trim().toUpperCase();
