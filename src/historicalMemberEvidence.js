@@ -28,6 +28,59 @@ function archiveEventPod(row={}){
   return !/未签收|未妥投|签收失败|NOT[\s_-]*DELIVERED|UNDELIVERED/i.test(t)&&/\bPOD\b|Successfully\s+delivered|\bdelivered\b|已签收|签收成功|已妥投|妥投成功/i.test(t);
 }
 
+
+export async function recoverHistoricalGroupedEvidence({reportDate='',groups={}}={}){
+  const date=text(reportDate).slice(0,10);
+  const normalized=Object.fromEntries(Object.entries(groups||{}).map(([type,values])=>[text(type).toUpperCase(),uniq(values)]));
+  const allBills=uniq(Object.values(normalized).flat());
+  if(!date||!allBills.length)return Object.fromEntries(Object.keys(normalized).map(type=>[type,empty(date,type,normalized[type].length)]));
+  const key='GROUP|'+fingerprint(date,allBills,'ALL');
+  let raw=cache.get(key);
+  if(!(raw&&Date.now()-raw.at<TTL_MS)){
+    const range={from:date,to:addDays(date,30)};
+    const [track,confirm]=await Promise.all([
+      recoverV485ArchivedTrackEvents({range,targetBills:allBills,mode:'history'}),
+      recoverV497ArchivedConfirmPodDates({range,targetBills:allBills,mode:'history'})
+    ]);
+    raw={at:Date.now(),value:{track,confirm}};
+    cache.set(key,raw);
+  }
+  const {track,confirm}=raw.value;
+  const shopeeBills=uniq([...(normalized.SHOPEECN||[]),...(normalized.SHOPEEVN||[])]);
+  let saved={evidenceByBill:new Map(),matchedBills:0};
+  if(shopeeBills.length){try{saved=recoverV498SavedShopeePodDates({targetBills:shopeeBills});}catch{}}
+  const results={};
+  for(const [type,bills] of Object.entries(normalized)){
+    const allowed=new Set(bills),eventsByBill=new Map(),podBills=new Set(),podEvidenceByBill=new Map();
+    for(const code of bills)eventsByBill.set(code,[]);
+    for(const [code,rows] of track.eventsByBill||[]){
+      if(!allowed.has(code))continue;
+      eventsByBill.set(code,rows||[]);
+      if((rows||[]).some(archiveEventPod)){podBills.add(code);podEvidenceByBill.set(code,{source:'v485_track_archive',shipmentCode:code});}
+    }
+    for(const [code,evidence] of confirm.evidenceByBill||[]){
+      if(!allowed.has(code))continue;
+      podBills.add(code);podEvidenceByBill.set(code,{source:'v497_confirm_archive',...evidence});
+    }
+    if(/^SHOPEE/.test(type))for(const [code,evidence] of saved.evidenceByBill||[]){
+      if(!allowed.has(code))continue;
+      podBills.add(code);if(!podEvidenceByBill.has(code))podEvidenceByBill.set(code,{source:'v498_saved_sqlite',...evidence});
+    }
+    results[type]={
+      ok:true,readOnly:true,reportDate:date,businessType:type,targetCount:bills.length,podBills,podEvidenceByBill,eventsByBill,
+      stats:{
+        trackFiles:Number(track.filesConsidered||0),trackMatchedFiles:Number(track.matchedFiles||0),trackEventBills:[...eventsByBill.values()].filter(rows=>rows?.length).length,
+        trackReadErrors:Number(track.readErrors||0),trackTruncated:Boolean(track.truncated),
+        confirmFiles:Number(confirm.filesConsidered||0),confirmMatchedFiles:Number(confirm.matchedFiles||0),
+        confirmPodBills:[...confirm.evidenceByBill?.keys?.()||[]].filter(code=>allowed.has(code)).length,
+        confirmReadErrors:Number(confirm.readErrors||0),confirmTruncated:Boolean(confirm.truncated),
+        savedPodBills:/^SHOPEE/.test(type)?[...saved.evidenceByBill?.keys?.()||[]].filter(code=>allowed.has(code)).length:0,
+        podBills:podBills.size
+      }
+    };
+  }
+  return results;
+}
 export async function recoverHistoricalMemberEvidence({reportDate='',businessType='',targetBills=[]}={}){
   const date=text(reportDate).slice(0,10),type=text(businessType).toUpperCase(),bills=uniq(targetBills);
   if(!date||!bills.length)return empty(date,type,bills.length);
