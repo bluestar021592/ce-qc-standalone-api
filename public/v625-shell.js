@@ -331,7 +331,12 @@ async function loadHome(options={}){
   const counts=classification.counts||{};
   const returns=summary?.returns||{};
   const types=['CE','CEAF','TBKH','ALI1688','WHPP','SHOPEECN','SHOPEEVN'];
-  const grand=Number(classification.total||0);
+  const sevenBusinessTotal=types.reduce((sum,type)=>sum+Number(counts[type]||0),0);
+  const grand=Number(classification.total||sevenBusinessTotal||0);
+  setText('v632GrandTotal',fmt(grand));
+  setText('v632GrandTotalCheck',fmt(sevenBusinessTotal));
+  const totalCard=q('[data-card="TOTAL"]');
+  if(totalCard)totalCard.classList.toggle('v632-total-mismatch',grand!==sevenBusinessTotal);
   if(summary?.snapshotId||summary?.reportDate)v626LatestImport={...(v626LatestImport||{}),snapshotId:summary.snapshotId,reportDate:summary.reportDate};
 
   for(const type of types){
