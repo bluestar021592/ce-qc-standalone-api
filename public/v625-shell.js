@@ -472,9 +472,9 @@ async function loadHome(options={}){
   for(const [type,prefix,tone] of timingMeta){
     const data=timing[type]||{};
     setText(prefix+'Overall',showDays(data.overall?.avgDays));
-    setText(prefix+'Pod','基于 '+fmt(data.overall?.podCount||0)+' 票有效轨迹POD');
-    setText(prefix+'PP',showDays(data.pp?.avgDays));setText(prefix+'PPPod',fmt(data.pp?.podCount||0)+'票有效POD');
-    setText(prefix+'PV',showDays(data.pv?.avgDays));setText(prefix+'PVPod',fmt(data.pv?.podCount||0)+'票有效POD');
+    setText(prefix+'Pod','有效轨迹 '+fmt(data.overall?.podCount||0)+' / POD总数 '+fmt(data.overall?.totalPodCount||0)+' 票');
+    setText(prefix+'PP',showDays(data.pp?.avgDays));setText(prefix+'PPPod',fmt(data.pp?.podCount||0)+' / '+fmt(data.pp?.totalPodCount||0)+'票');
+    setText(prefix+'PV',showDays(data.pv?.avgDays));setText(prefix+'PVPod',fmt(data.pv?.podCount||0)+' / '+fmt(data.pv?.totalPodCount||0)+'票');
     setText(prefix+'A1',showDays(data.attempt1?.avgDays));setText(prefix+'A2',showDays(data.attempt2?.avgDays));setText(prefix+'A3',showDays(data.attempt3?.avgDays));
     renderMiniTrend('v625TimingTrend'+type,timingTrend[type]||[],tone);
     setText('v626Timing'+type+'Missing',fmt(data.evidence?.missing||data.overall?.missingEvidenceCount||0));
