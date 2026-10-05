@@ -48,6 +48,8 @@ import {
 import { createPurgeChallenge, executePurge } from './src/dataPurge.js';
 import { queueDirectDataPurge, getDirectDataPurgeStatus, DIRECT_PURGE_ID } from './src/directDataPurge.js';
 import { buildHomeQualitySummary } from './src/homeQualitySummary.js';
+import { buildCanonicalBusinessAccounting } from './src/businessAccounting.js';
+import { buildDataIntegrityReport } from './src/dataIntegrity.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -643,6 +645,16 @@ app.get('/api/home-quality-summary', (req, res) => {
     res.status(500).json({ ok:false, error:error?.message || String(error) });
   }
 });
+app.get('/api/data-integrity', (req,res)=>{
+  try{
+    res.json(buildDataIntegrityReport({
+      reportDate:String(req.query.reportDate||''),
+      snapshotId:String(req.query.snapshotId||'')
+    }));
+  }catch(error){
+    res.status(500).json({ok:false,error:error?.message||String(error)});
+  }
+});
 
 // V26: one lightweight startup payload. The browser used to wait for nine API
 // requests serially before first paint. All dashboard data below is served from
@@ -756,12 +768,18 @@ app.get('/api/business-state/:businessType', (req, res) => {
     if (requestedType === 'WHPP') {
       const source = loadWhppState();
       const dashboard = buildWhppDashboard(source);
+      const accounting=buildCanonicalBusinessAccounting({
+        ...source,
+        finalRows:dashboard?.detailTabs?.all?.rows||source.finalRows||[],
+        pnhBills:source.pnhBills||[]
+      },'WHPP');
       const state = {
         ...source,
         viewBusinessType:'WHPP',
         total:source.pnhBills?.length || source.dailyParseRows?.length || dashboard.metrics?.total || 0,
         dashboard,
-        detailTabs:dashboard.detailTabs || {}
+        detailTabs:dashboard.detailTabs || {},
+        accounting
       };
       return res.json({
         ok:true,businessType:'WHPP',reportDate:source.reportDate||'',snapshotId:source.snapshotId||'',
@@ -787,6 +805,7 @@ app.get('/api/business-state/:businessType', (req, res) => {
         }
       : { ...source, viewBusinessType: source.businessType, dashboard: buildDashboardData(source), detailTabs: buildDetailTabs(source) };
     if (!shopee) state.detailTabs.dashboard = { label: `${source.businessType}总看板`, rows: buildDashboardRows(source), total: buildDashboardRows(source).length };
+    state.accounting=buildCanonicalBusinessAccounting(source,source.businessType);
     res.json({ ok: true, businessType: source.businessType, reportDate: source.reportDate, snapshotId: source.snapshotId, snapshotStatus: source.snapshotStatus, state: req.query.compact === '1' ? compactDashboardState(state) : state });
   } catch (error) { res.status(400).json({ ok: false, error: error.message }); }
 });
