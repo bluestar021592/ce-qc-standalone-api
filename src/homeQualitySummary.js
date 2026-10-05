@@ -138,7 +138,8 @@ function summarizeTimingRows(rows = []) {
     evidence:{
       valid:usable.length,
       missing:missing.length,
-      missingBills:missing.slice(0,200).map(row=>({shipmentCode:row.shipmentCode,reason:row.evidence?.reason||'TRACK_EVIDENCE_MISSING'}))
+      missingBills:missing.slice(0,500).map(row=>({shipmentCode:row.shipmentCode,reason:row.evidence?.reason||'TRACK_EVIDENCE_MISSING'})),
+      sourceCounts:usable.reduce((acc,row)=>{const key=row.evidence?.evidenceSource||'unknown';acc[key]=(acc[key]||0)+1;return acc},{})
     }
   };
 }
@@ -173,27 +174,66 @@ function membershipFinalRows(snapshotId, reportDate, businessType) {
     ORDER BY u.rowNumber,u.shipmentCode
   `).all(storageType,snapshotId,reportDate,businessType);
 }
+function pushEvidenceRows(result, rows=[], source='') {
+  for(const row of rows||[]){
+    const bill=String(row.shipmentCode||'').trim().toUpperCase();
+    if(!bill||!result.has(bill))continue;
+    result.get(bill).push({...row,evidenceSource:source});
+  }
+}
 function eventsForBills(reportDate,businessType,bills=[]) {
   if (!bills.length) return new Map();
   const db=getDb();
   const set=new Set(bills.map(value=>String(value||'').trim().toUpperCase()).filter(Boolean));
   const result=new Map([...set].map(code=>[code,[]]));
   const chunks=[];const values=[...set];
-  for(let i=0;i<values.length;i+=400)chunks.push(values.slice(i,i+400));
+  for(let i=0;i<values.length;i+=350)chunks.push(values.slice(i,i+350));
   for(const chunk of chunks){
     const marks=chunk.map(()=>'?').join(',');
-    const rows=businessType==='TBKH'
-      ? db.prepare(`SELECT shipmentCode,eventCode,trackingEventCode,trackingEventDesc,trackingEventDescZh,trackingEventDescKm,eventTime,place,rawJson
-          FROM track_events WHERE reportDate=? AND shipmentCode IN (${marks}) ORDER BY eventTime,id`).all(reportDate,...chunk)
-      : db.prepare(`SELECT shipmentCode,eventTime,eventCode,rawJson
-          FROM business_track_events WHERE businessType=? AND reportDate=? AND shipmentCode IN (${marks}) ORDER BY eventTime,id`).all(businessStorageType(businessType),reportDate,...chunk);
-    for(const row of rows){
-      const bill=String(row.shipmentCode||'').trim().toUpperCase();
-      if(!result.has(bill))result.set(bill,[]);
-      result.get(bill).push(row);
-    }
+    try{
+      const core=db.prepare(`SELECT shipmentCode,eventCode,trackingEventCode,trackingEventDesc,trackingEventDescZh,trackingEventDescKm,eventTime,place,rawJson
+        FROM track_events WHERE reportDate=? AND shipmentCode IN (${marks}) ORDER BY eventTime,id`).all(reportDate,...chunk);
+      pushEvidenceRows(result,core,'track_events');
+    }catch{}
+    try{
+      const business=db.prepare(`SELECT shipmentCode,eventTime,eventCode,rawJson
+        FROM business_track_events WHERE businessType=? AND reportDate=? AND shipmentCode IN (${marks}) ORDER BY eventTime,id`).all(businessStorageType(businessType),reportDate,...chunk);
+      pushEvidenceRows(result,business,'business_track_events');
+    }catch{}
+  }
+  for(const [bill,rows] of result){
+    const seen=new Set();
+    result.set(bill,rows.filter(row=>{
+      const key=[eventTime(row),eventCode(row),eventText(row)].join('|');
+      if(seen.has(key))return false;seen.add(key);return true;
+    }));
   }
   return result;
+}
+function ledgerEvidenceForBills(bills=[]){
+  const db=getDb();const result=new Map();if(!bills.length)return result;
+  const values=[...new Set(bills.map(value=>String(value||'').trim().toUpperCase()).filter(Boolean))];
+  for(let i=0;i<values.length;i+=350){
+    const chunk=values.slice(i,i+350),marks=chunk.map(()=>'?').join(',');
+    try{
+      for(const row of db.prepare(`SELECT shipmentCode,businessType,terminalReason,podDate,attemptNo,attemptSource,signingDays,evidenceJson,currentStateJson,lastEventTime,lastCheckedAt
+        FROM qc_tracking_ledger WHERE shipmentCode IN (${marks})`).all(...chunk)){
+        result.set(String(row.shipmentCode||'').trim().toUpperCase(),row);
+      }
+    }catch{}
+  }
+  return result;
+}
+function strictLedgerTiming(row={}){
+  const source=String(row.attemptSource||'');
+  const days=Number(row.signingDays||0),attempt=Number(row.attemptNo||0);
+  if(row.terminalReason!=='POD'||!/^V246_STRICT_TRACK/i.test(source)||!Number.isFinite(days)||days<=0||attempt<=0)return null;
+  const evidence=safeJson(row.evidenceJson);
+  return {
+    ok:true,reason:'',startTime:evidence.strictStartDate||evidence.starts?.[0]?.time||'',
+    podTime:row.podDate||'',days,attempt:Math.max(1,Math.min(3,attempt)),
+    startMode:evidence.startMode||'V246_STRICT_TRACK',attemptSource:source,evidenceSource:'qc_tracking_ledger'
+  };
 }
 function isReturned(row={}) {
   const raw=safeJson(row.rawJson);
@@ -206,14 +246,19 @@ function isReturned(row={}) {
 function timingRows(snapshotId,reportDate,businessType) {
   if(!snapshotId||!reportDate||!TIMING_TYPES.includes(businessType))return[];
   const rows=membershipFinalRows(snapshotId,reportDate,businessType);
-  const events=eventsForBills(reportDate,businessType,rows.map(row=>row.shipmentCode));
-  return rows.map(row=>({
-    shipmentCode:String(row.shipmentCode||'').trim().toUpperCase(),
-    region:String(row.regionCode||'').toUpperCase(),
-    isPod:Number(row.isPod||0)===1,
-    isReturned:isReturned(row),
-    evidence:timingEvidence(events.get(String(row.shipmentCode||'').trim().toUpperCase())||[])
-  }));
+  const bills=rows.map(row=>row.shipmentCode);
+  const events=eventsForBills(reportDate,businessType,bills);
+  const ledger=ledgerEvidenceForBills(bills);
+  return rows.map(row=>{
+    const shipmentCode=String(row.shipmentCode||'').trim().toUpperCase();
+    const direct=timingEvidence(events.get(shipmentCode)||[]);
+    const strictLedger=!direct.ok?strictLedgerTiming(ledger.get(shipmentCode)||{}):null;
+    return {
+      shipmentCode,region:String(row.regionCode||'').toUpperCase(),
+      isPod:Number(row.isPod||0)===1,isReturned:isReturned(row),
+      evidence:direct.ok?{...direct,evidenceSource:(events.get(shipmentCode)||[]).some(x=>x.evidenceSource==='track_events')?'track_events':'business_track_events'}:(strictLedger||direct)
+    };
+  });
 }
 function timingForBatch(batch,businessType) {
   if(!batch?.snapshotId||!batch?.reportDate){
