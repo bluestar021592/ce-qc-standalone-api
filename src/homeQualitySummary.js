@@ -503,7 +503,11 @@ export async function buildHomeQualitySummaryWithArchive(options={}){
   const repairSummary={active:repairActive,failed:repairFailed,types:repairStates};
 
   if(job.state!=='COMPLETED'||!job.result){
-    return{...base,historicalEvidenceRecovery:{state:job.state,error:job.error||'',readOnly:true},timingEvidenceRepair:repairSummary};
+    const localTiming=Object.fromEntries(TIMING_TYPES.map(type=>[
+      type,
+      timingWithSavedCacheFallback(batch,type,safeTimingForBatch(batch,type))
+    ]));
+    return{...base,timing:localTiming,historicalEvidenceRecovery:{state:job.state,error:job.error||'',readOnly:true,blocking:false},timingEvidenceRepair:repairSummary};
   }
   const timingEntries=await Promise.all(TIMING_TYPES.map(async type=>[
     type,
