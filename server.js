@@ -36,7 +36,7 @@ import { buildShopeeDashboard } from './src/shopeeReporting.js';
 import { loadWhppState, saveWhppDailyImport } from './src/whppStore.js';
 import { buildWhppDashboard } from './src/whppReporting.js';
 import { loadWhppCanonicalTruth } from './src/whppCanonicalTruth.js';
-import { recoverHistoricalMemberEvidence } from './src/historicalMemberEvidence.js';
+import { ensureHistoricalEvidenceJob } from './src/historicalEvidenceWorkerManager.js';
 import { analyzeShopeeShipment, SHOPEE_ANALYSIS_RULE_VERSION } from './src/shopeeAnalyzer.js';
 import { queryBatchWithFallback, splitTrackBatches } from './src/trackBatching.js';
 import {
@@ -779,9 +779,10 @@ app.get('/api/business-state/:businessType', async (req, res) => {
       const source = loadWhppState();
       const reportDate = String(source.reportDate || req.query.reportDate || '').trim();
       const truth = loadWhppCanonicalTruth(reportDate, requestedSnapshotId || source.sourceSnapshotId || source.snapshotId || '');
-      const archiveEvidence = truth.total>0
-        ? await recoverHistoricalMemberEvidence({reportDate:truth.reportDate||reportDate,businessType:'WHPP',targetBills:(truth.rows||[]).map(row=>row.shipmentCode)})
-        : null;
+      const recoveryJob = truth.total>0
+        ? ensureHistoricalEvidenceJob({reportDate:truth.reportDate||reportDate,groups:{WHPP:(truth.rows||[]).map(row=>row.shipmentCode)}})
+        : {state:'NOT_REQUIRED',result:null,readOnly:true};
+      const archiveEvidence = recoveryJob.state==='COMPLETED' ? (recoveryJob.result?.WHPP||null) : null;
       const enrichedRows=(truth.rows||[]).map(row=>{
         const code=String(row.shipmentCode||row.运单号||'').trim().toUpperCase();
         const archivePod=Boolean(archiveEvidence?.podBills?.has?.(code));
@@ -808,7 +809,8 @@ app.get('/api/business-state/:businessType', async (req, res) => {
         dashboard,
         detailTabs:dashboard.detailTabs || {},
         accounting,
-        canonicalTruthEvidence:{...(truth.evidence||{}),archiveRecovery:archiveEvidence?.stats||null}
+        canonicalTruthEvidence:{...(truth.evidence||{}),archiveRecovery:archiveEvidence?.stats||null},
+        historicalEvidenceRecovery:{state:recoveryJob.state,error:recoveryJob.error||'',readOnly:true}
       };
       return res.json({
         ok:true,businessType:'WHPP',reportDate:truth.reportDate||reportDate,snapshotId:truth.snapshotId||source.snapshotId||'',
