@@ -37,10 +37,21 @@ function publicJob(job){
     result:job.state==='COMPLETED'?job.result:null
   };
 }
+function covers(job,date,requested){
+  if(String(job?.reportDate||'')!==String(date||''))return false;
+  for(const [type,bills] of Object.entries(requested||{})){
+    const have=new Set(job?.groups?.[type]||[]);
+    if((bills||[]).some(code=>!have.has(code)))return false;
+  }
+  return true;
+}
 export function ensureHistoricalEvidenceJob({reportDate='',groups={}}={}){
   const date=text(reportDate).slice(0,10),normalized=normalizeGroups(groups),key=fingerprint(date,normalized);
   const existing=jobs.get(key);
   if(existing&&['RUNNING','COMPLETED'].includes(existing.state))return publicJob(existing);
+  for(const job of jobs.values()){
+    if(['RUNNING','COMPLETED'].includes(job.state)&&covers(job,date,normalized))return publicJob(job);
+  }
   const job={state:'RUNNING',reportDate:date,groups:normalized,startedAt:new Date().toISOString(),finishedAt:'',error:'',result:null,child:null,timer:null};
   jobs.set(key,job);
   const child=fork(WORKER_FILE,[],{cwd:process.cwd(),env:process.env,windowsHide:true,stdio:['ignore','ignore','ignore','ipc']});
