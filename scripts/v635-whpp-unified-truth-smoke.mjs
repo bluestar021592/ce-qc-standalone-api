@@ -11,8 +11,8 @@ const html=fs.readFileSync(path.join(root,'public','v625-shell.html'),'utf8');
 assert.match(home,/function dedicatedWhppCount\(reportDate=''/,'dedicated WHPP home count resolver missing');
 assert.match(home,/if\(whppDedicated>0\)counts\.WHPP=whppDedicated/,'home WHPP must use dedicated WHPP membership when available');
 assert.match(home,/const total=classified>0\?classified:sourceTotal/,'home grand total must reconcile all seven displayed businesses');
-assert.match(home,/function dedicatedWhppTimingRows\(reportDate=''/,'WHPP timing must use dedicated WHPP members');
-assert.match(home,/businessType==='WHPP'\?dedicatedWhppTimingRows\(reportDate\):membershipFinalRows/,'WHPP timing membership source mismatch');
+assert.match(home,/loadWhppCanonicalTruth\(reportDate,snapshotId\|\|''\)/,'WHPP timing must use canonical WHPP truth');
+assert.match(home,/whpp_recovered_snapshot/,'WHPP timing must accept exact-member recovered snapshot track evidence');
 assert.match(home,/if\(businessType==='WHPP'&&batch\?\.reportDate\)/,'WHPP return summary must use dedicated WHPP dashboard');
 
 assert.match(js,/state\?\.detailTabs\?\.all\?\.rows/,'business accounting must prefer complete authoritative daily members');
