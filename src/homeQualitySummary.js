@@ -4,6 +4,7 @@ import { analyzeV246ShopeeAttemptCycle } from './shopeeAttemptCycleV246.js';
 import { loadWhppState } from './whppStore.js';
 import { buildWhppDashboard } from './whppReporting.js';
 import { loadWhppCanonicalTruth } from './whppCanonicalTruth.js';
+import { recoverHistoricalMemberEvidence } from './historicalMemberEvidence.js';
 
 const TYPES = Object.freeze(['CE','CEAF','TBKH','ALI1688','WHPP','SHOPEECN','SHOPEEVN']);
 const TIMING_TYPES = Object.freeze(['TBKH','WHPP','SHOPEECN','SHOPEEVN']);
@@ -317,6 +318,41 @@ function timingRows(snapshotId,reportDate,businessType) {
     };
   });
 }
+
+async function timingForBatchWithArchive(batch,businessType){
+  if(!batch?.snapshotId||!batch?.reportDate){
+    return timingForBatch(batch,businessType);
+  }
+  const baseRows=timingRows(batch.snapshotId,batch.reportDate,businessType);
+  const bills=baseRows.map(row=>row.shipmentCode).filter(Boolean);
+  if(!bills.length)return {businessType,reportDate:batch.reportDate,...summarizeTimingRows(baseRows)};
+  const recovered=await recoverHistoricalMemberEvidence({
+    reportDate:batch.reportDate,businessType,targetBills:bills
+  });
+  const events=eventsForBills(batch.reportDate,businessType,bills);
+  for(const [code,rows] of recovered.eventsByBill||[]){
+    pushEvidenceRows(events,rows,'historical_archive');
+  }
+  const ledger=ledgerEvidenceForBills(bills);
+  const rows=baseRows.map(row=>{
+    const shipmentCode=String(row.shipmentCode||'').trim().toUpperCase();
+    const archivePod=Boolean(recovered.podBills?.has?.(shipmentCode));
+    const direct=timingEvidence(events.get(shipmentCode)||[]);
+    const ledgerRow=ledger.get(shipmentCode)||{};
+    const strictLedger=!direct.ok?strictLedgerTiming(ledgerRow):null;
+    return{
+      ...row,
+      isPod:Boolean(row.isPod||archivePod||positivePodMembership(row,ledgerRow)),
+      evidence:direct.ok?{...direct,evidenceSource:(events.get(shipmentCode)||[]).some(x=>x.evidenceSource==='historical_archive')?'historical_archive':(events.get(shipmentCode)||[]).some(x=>x.evidenceSource==='track_events')?'track_events':'business_track_events'}:(strictLedger||direct),
+      membershipSource:archivePod?(recovered.podEvidenceByBill?.get?.(shipmentCode)?.source||'historical_archive'):(row.membershipSource||'current_truth')
+    };
+  });
+  return{
+    businessType,reportDate:batch.reportDate,
+    ...summarizeTimingRows(rows),
+    archiveRecovery:{readOnly:true,...(recovered.stats||{})}
+  };
+}
 function timingForBatch(batch,businessType) {
   if(!batch?.snapshotId||!batch?.reportDate){
     return {
@@ -415,6 +451,14 @@ function safeReturnSummaryForBatch(batch,type){
   }
 }
 
+
+export async function buildHomeQualitySummaryWithArchive(options={}){
+  const base=buildHomeQualitySummary(options);
+  const batch=selectUnifiedBatch(options);
+  if(!batch)return base;
+  const timingEntries=await Promise.all(TIMING_TYPES.map(async type=>[type,await timingForBatchWithArchive(batch,type)]));
+  return{...base,timing:Object.fromEntries(timingEntries)};
+}
 export function buildHomeQualitySummary(options={}) {
   const latest=selectUnifiedBatch(options);
   const history=listUnifiedImportHistory(30);
