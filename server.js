@@ -185,7 +185,7 @@ app.get([...V625_UI_PAGES.keys()], async (req, res, next) => {
       .replaceAll('__V625_PAGE_KEY__', page.key)
       .replaceAll('__V625_BUSINESS_TYPE__', page.business);
     if(page.business!=='WHPP'){
-      html=html.replace(/<button id="v641WhppScanPending"[\\s\\S]*?<\\/button>/,'');
+      html=html.replace(/<button id="v641WhppScanPending"[^>]*>.*?<\/button>/s,'');
     }
     res.type('html').send(html);
   } catch (error) {
