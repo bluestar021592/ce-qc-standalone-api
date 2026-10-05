@@ -248,7 +248,7 @@ function renderLiveProgress(bundle={}){
   const overall=allComplete?100:Math.round((scanPct+trackPct+(whppBatches?whppPct:(completeFamilies/3*100)))/3);
   for(const id of ['v626ProcessBar','v626ImportBar']){const el=byId(id);if(el)el.style.width=Math.max(0,Math.min(100,overall))+'%'}
   const activePhase=whpp.active?String(whpp.phase||'WHPP处理中'):shopee.running?String(shopee.phase||'SHOPEE处理中'):ccsl.running?String(ccsl.phase||'CCSL处理中'):'';
-  const phase=allComplete?'全部处理完成':activePhase||(completeFamilies?('已完成 '+completeFamilies+'/3 业务，等待下一环节'):'等待开始处理');
+  const phase=allComplete?'全部处理完成':activePhase||(completeFamilies===2&&familyLabels.whpp!=='完成'?'已完成 2/3 业务 · WHPP待处理，请点击“继续未完成处理”':completeFamilies?('已完成 '+completeFamilies+'/3 业务，等待下一业务处理'):'等待开始处理');
   setText('v626ProcessText',phase);setText('v626ImportProgressText',phase);
   const progressCount=(scanTotal+trackTotal)>0?((scanDone+trackDone)+' / '+(scanTotal+trackTotal)):(completeFamilies+'/3 业务完成');
   setText('v626ProcessCount',progressCount);setText('v626ImportProgressCount',progressCount);
@@ -798,8 +798,10 @@ async function runTask(mode){
       appendLiveLog('继续SHOPEE未完成批次');await post('/api/shopee/run/resume',{},360000).catch(async e=>{if(e.status===409)return;throw e});
       appendLiveLog('继续WHPP未完成批次');await safeWhppRun('resume',reportDate);
     }
-    appendLiveLog('7业务处理完成，正在刷新首页与未完成POD账本');note('v625RunMessage','7业务处理完成，未完成POD可继续批量更新。','success');
-    await Promise.all([refreshLiveProgress(),loadOpenPod(),refreshImportCanonicalClassification(reportDate)]);
+    appendLiveLog('7业务处理完成，开始补齐签收时效60/70→80证据');
+    await post('/api/timing-repair/start',{reportDate},15000).catch(error=>appendLiveLog('签收时效补证启动失败：'+error.message));
+    appendLiveLog('7业务处理完成，正在刷新首页与未完成POD账本');note('v625RunMessage','7业务处理完成，签收时效补证已启动。','success');
+    await Promise.all([refreshLiveProgress(),loadOpenPod(),refreshImportCanonicalClassification(reportDate),page==='home'?loadHome({skipAux:true}):Promise.resolve()]);
   }catch(e){appendLiveLog('处理未完成：'+e.message);note('v625RunMessage','任务未完成：'+e.message,'error')}
   finally{runBusy=false;stopProgressPolling();void refreshLiveProgress()}
 }
