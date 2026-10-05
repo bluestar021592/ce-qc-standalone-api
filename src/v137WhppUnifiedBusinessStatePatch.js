@@ -1,7 +1,7 @@
 import express from 'express';
 import { getDb } from './db.js';
 
-const PATCH_ID='2026-08-21-v201-whpp-summary-cache-v1';
+const PATCH_ID='2026-10-05-v642-retire-whpp-business-state-interceptor-v1';
 const LEGACY_ROUTE='/api/v132/whpp-fast-summary';
 const BUSINESS_ROUTE='/api/business-state/:businessType';
 const CACHE_MS=Math.max(10_000,Number(process.env.V201_WHPP_DASHBOARD_CACHE_MS||60_000));
@@ -145,13 +145,10 @@ express.application.get=function v137WhppUnifiedGet(...args){
   const route=args[0];
   if(route===LEGACY_ROUTE)return previousGet.call(this,route,sendLegacy);
   if(route===BUSINESS_ROUTE){
-    const handlers=args.slice(1);
-    const original=handlers[0];
-    const wrapped=function v137WhppBusinessStateHandler(req,res,next){
-      if(String(req.params?.businessType||'').toUpperCase()==='WHPP')return sendBusinessState(req,res);
-      return original(req,res,next);
-    };
-    return previousGet.call(this,route,wrapped,...handlers.slice(1));
+    // V642: retire the legacy WHPP interception. The current server owner
+    // must serve /api/business-state/WHPP so finalRows/detailTabs/accounting
+    // come from the canonical member/current/final truth chain.
+    return previousGet.apply(this,args);
   }
   return previousGet.apply(this,args);
 };
