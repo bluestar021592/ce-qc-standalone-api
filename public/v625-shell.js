@@ -369,9 +369,14 @@ async function loadHome(options={}){
   setText('v626ProcessFile',v626LatestImport?.sourceName||'综合日报 '+(summary?.reportDate||''));
   setText('v626ProcessDateSource',summary?.reportDate?'系统识别日报日期：'+summary.reportDate:'日报日期将由系统自动识别');
   setText('v626StageParse',summary?.reportDate?'完成':'等待');setText('v626StageClassify',classification.balanced?'完成':'待核验');
-  setText('v625HomeStatusTitle',classification.balanced?'已完成 7 / 7 个业务分类':'分类结果待核验');
-  setText('v625HomeStatus',classification.balanced?'七业务分类合计与综合日报有效唯一运单完全一致。':'当前分类总量与综合日报未完全守恒，请先检查分类结果。');
-  setText('v625DataStatus',classification.balanced?'正常':'待核验');
+  const integritySafe=integrity?Boolean(integrity.safeForDashboard):true;
+  const processingComplete=integrity?Boolean(integrity.processingComplete):true;
+  const dataHealthy=Boolean(classification.balanced)&&integritySafe&&processingComplete;
+  setText('v625HomeStatusTitle',dataHealthy?'数据完整性校验通过':'数据完整性待核验');
+  setText('v625HomeStatus',dataHealthy
+    ?'七业务源票、处理成员、扫描与看板状态账已完成守恒核对。'
+    :(integrity?'源票 '+fmt(integrity.source?.classifiedTotal||0)+'，待扫描 '+fmt(integrity.processing?.waitingScan||0)+'，状态缺票 '+fmt(integrity.processing?.missingFromState||0)+'，看板差异 '+fmt(integrity.accounting?.difference||0)+'。':'当前分类总量与综合日报未完全守恒，请先检查分类结果。'));
+  setText('v625DataStatus',dataHealthy?'正常':'待核验');
   setText('v625UpdatedAt',summary?.generatedAt?dateTime(summary.generatedAt):new Date().toLocaleString('zh-CN',{hour12:false}));
 
   setText('v625ClassTotal',fmt(classification.total||0));setText('v625ClassAuto',fmt(classification.autoRecognized||0));
