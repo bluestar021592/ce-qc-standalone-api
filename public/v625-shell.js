@@ -241,8 +241,11 @@ function renderLiveProgress(bundle={}){
   const phase=whpp.active?String(whpp.phase||'WHPP处理中'):shopee.running?String(shopee.phase||'SHOPEE处理中'):ccsl.running?String(ccsl.phase||'CCSL处理中'):completeFamilies>=3?'全部处理完成':'等待/可继续处理';
   setText('v626ProcessText',phase);setText('v626ImportProgressText',phase);
   setText('v626ProcessCount',(scanDone+trackDone)+' / '+(scanTotal+trackTotal));setText('v626ImportProgressCount',(scanDone+trackDone)+' / '+(scanTotal+trackTotal));
-  setText('v626StageScan',scanTotal?scanDone+'/'+scanTotal:'等待');setText('v626StageTrack',trackTotal?trackDone+'/'+trackTotal:'等待');setText('v626StageDone',completeFamilies>=3?'完成':allRunning?'处理中':'等待');
-  setText('v626ImportScan',scanTotal?scanDone+'/'+scanTotal:'等待');setText('v626ImportTrack',trackTotal?trackDone+'/'+trackTotal:'等待');setText('v626ImportDone',completeFamilies>=3?'完成':allRunning?'处理中':'等待');
+  const scanStage=completeFamilies>=3?'完成':scanTotal?scanDone+'/'+scanTotal:allRunning?'处理中':'等待';
+  const trackStage=completeFamilies>=3?'完成':trackTotal?trackDone+'/'+trackTotal:allRunning?'处理中':'等待';
+  const doneStage=completeFamilies>=3?'完成':allRunning?'处理中':'等待';
+  setText('v626StageScan',scanStage);setText('v626StageTrack',trackStage);setText('v626StageDone',doneStage);
+  setText('v626ImportScan',scanStage);setText('v626ImportTrack',trackStage);setText('v626ImportDone',doneStage);
   const badge=byId('v626ProcessState');if(badge){badge.textContent=completeFamilies>=3?'已完成':allRunning?'处理中':'待处理';badge.className='v625-badge '+(completeFamilies>=3?'success':allRunning?'warning':'warning')}
   for(const item of [
     [ccsl.generatedAt||new Date().toISOString(),ccsl.phase||ccsl.lastMessage],
@@ -346,7 +349,14 @@ async function scanWhppPending(){
     const meta=byId('v637BusinessIntegrity');if(meta)meta.textContent=(meta.textContent||'')+' · WHPP处理失败：'+error.message;
   }finally{
     runBusy=false;stopProgressPolling();
-    if(btn){btn.disabled=false;btn.textContent='扫描WHPP待处理票'}
+    if(btn){
+      btn.disabled=false;
+      const currentText=String(byId('v637BusinessIntegrity')?.textContent||'');
+      const match=currentText.match(/待扫描\s*([\d,]+)/);
+      const waiting=Number(String(match?.[1]||'0').replace(/,/g,''));
+      btn.hidden=!(business==='WHPP'&&waiting>0);
+      btn.textContent=waiting>0?'扫描WHPP待处理 '+fmt(waiting)+' 票':'扫描WHPP待处理票';
+    }
   }
 }
 async function loadHome(options={}){
