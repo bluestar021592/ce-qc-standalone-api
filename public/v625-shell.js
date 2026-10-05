@@ -461,6 +461,39 @@ function rowIsOtherNormal(row={}){
     row.matchedRule==='NORMAL_FINAL_HUB'||/正常分流|自提|CECN|CEZT|580/.test(text)||
     /^SHOP_/.test(shop)||/门店途中|到达门店|门店入库/.test(text)||/订单取消|已取消|CANCELLED|CANCELED/.test(text);
 }
+function buildWhppCanonicalAccounting(state={},fallback={}){
+  const tabs=state?.detailTabs||state?.dashboard?.detailTabs||{};
+  const metrics=state?.dashboard?.metrics||{};
+  const all=uniqueDetailRows(tabs?.all?.rows||[]);
+  const pod=uniqueDetailRows(tabs?.pod?.rows||[]);
+  const returned=uniqueDetailRows(tabs?.returned?.rows||[]);
+  const cancelled=uniqueDetailRows(tabs?.cancelled?.rows||[]);
+  const normalDiversion=uniqueDetailRows(tabs?.normalDiversion?.rows||[]);
+  const shops=uniqueDetailRows([
+    ...(tabs?.phnomPenhShop?.rows||[]),
+    ...(tabs?.provinceShop?.rows||[]),
+    ...(tabs?.unknownShop?.rows||[])
+  ]);
+  const unresolved=uniqueDetailRows(tabs?.unresolved?.rows||[]);
+  const assigned=new Set([...pod,...returned,...cancelled,...normalDiversion,...shops].map(detailCode));
+  const pending=[],abnormal=[],delivery=[],unprocessed=[];
+  for(const row of unresolved){
+    if(rowIsPending(row))pending.push(row);
+    else if(rowIsAbnormal(row))abnormal.push(row);
+    else if(Number(row.派送中停留天数||row.派送中天数||0)>0||/派送中/.test(rowText(row)))delivery.push(row);
+    else unprocessed.push(row);
+    assigned.add(detailCode(row));
+  }
+  for(const row of all){
+    const code=detailCode(row);
+    if(code&&!assigned.has(code)){unprocessed.push(row);assigned.add(code)}
+  }
+  const otherNormal=uniqueDetailRows([...cancelled,...normalDiversion,...shops]);
+  const rowsByKind={total:all,pod,returned,pending,abnormal,otherNormal,delivery,unprocessed};
+  const total=Number(metrics.total||fallback.total||all.length||0);
+  const accounted=['pod','returned','pending','abnormal','otherNormal','delivery','unprocessed'].reduce((n,key)=>n+rowsByKind[key].length,0);
+  return{total,accounted,difference:total-accounted,rowsByKind,canonical:true};
+}
 function buildBusinessAccounting(state={},fallback={}){
   const authoritativeRows=
     state?.detailTabs?.all?.rows||
@@ -530,8 +563,8 @@ async function loadBusiness(){
     const stateUrl='/api/business-state/'+business+(snapshotId?'?snapshotId='+encodeURIComponent(snapshotId):'');
     const r=await json(stateUrl,15000);
     const state=r.state||{},m=metricState(state);
-    v630BusinessDetailTabs=state.detailTabs||{};
-    v631BusinessAccounting=buildBusinessAccounting(state,m);
+    v630BusinessDetailTabs=state.detailTabs||state?.dashboard?.detailTabs||{};
+    v631BusinessAccounting=business==='WHPP'?buildWhppCanonicalAccounting(state,m):buildBusinessAccounting(state,m);
     v628BusinessMetricState=m;v628BusinessReportDate=reportDate;
     if(reportDate&&!selectedReportDate())applyDashboardDate(reportDate);
     if(reportDate){byId('v625FromDate')&&(byId('v625FromDate').value=reportDate);byId('v625ToDate')&&(byId('v625ToDate').value=reportDate)}
@@ -547,7 +580,10 @@ async function loadBusiness(){
     if(returnCapable){setText('kpiReturned',fmt((counts.returned??m.returned)||0));setText('kpiReturnRate',pct((a.total||m.total)?Number((counts.returned??m.returned)||0)*100/Number(a.total||m.total):0))}
     if(byId('kpiOtherCard')){byId('kpiOtherCard').hidden=false;setText('kpiOtherNormal',fmt(counts.otherNormal||0))}
     if(byId('kpiUnprocessedCard')){byId('kpiUnprocessedCard').hidden=!(counts.unprocessed>0);setText('kpiUnprocessed',fmt(counts.unprocessed||0))}
-    const hist=state.historySummary||[];renderTrend('v625BusinessTrend',hist.map(x=>({label:x.reportDate||'',value:first(x,['summary.today','summary.total','today','total'])||0})));renderDonut(m);
+    const hist=state.historySummary||[];renderTrend('v625BusinessTrend',hist.map(x=>({label:x.reportDate||'',value:first(x,['summary.today','summary.total','today','total'])||0})));
+    if(business==='WHPP'){
+      renderDonut({total:a.total,delivery:counts.delivery||0,pod:counts.pod||0,pending:counts.pending||0,unresolved:(counts.abnormal||0)+(counts.unprocessed||0)});
+    }else renderDonut(m);
     const qs=new URLSearchParams({scope:'all'});if(snapshotId)qs.set('snapshotId',snapshotId);if(reportDate)qs.set('reportDate',reportDate);
     const wr=await json('/api/tracking-workspace?'+qs.toString(),10000).catch(()=>({rows:[]}));
     v628BusinessWorkspaceRows=(wr.rows||[]).filter(businessTypeMatches);
