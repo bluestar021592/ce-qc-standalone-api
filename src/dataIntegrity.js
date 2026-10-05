@@ -3,6 +3,7 @@ import { loadLightweightUnifiedBusinessState } from './lightweightDashboardStore
 import { loadWhppState } from './whppStore.js';
 import { buildWhppDashboard } from './whppReporting.js';
 import { buildCanonicalBusinessAccounting } from './businessAccounting.js';
+import { loadWhppCanonicalTruth } from './whppCanonicalTruth.js';
 
 const TYPES=['CE','CEAF','TBKH','ALI1688','WHPP','SHOPEECN','SHOPEEVN'];
 
@@ -73,31 +74,33 @@ function standardIntegrity(type,sourceSet,snapshotId){
 }
 
 function whppIntegrity(sourceSet,state,reportDate){
-  const sourceCount=sourceSet.size;
-  if(!state||String(state.reportDate||'')!==String(reportDate||'')){
-    return {businessType:'WHPP',sourceCount,stateMemberCount:0,scanCount:0,waitingScan:sourceCount,finalizedCount:0,unprocessedCount:sourceCount,accounted:0,difference:sourceCount,balanced:sourceCount===0,scanComplete:sourceCount===0,missingFromState:sourceCount,extraInState:0,counts:{}};
-  }
-  const dashboard=buildWhppDashboard(state);
-  const allRows=dashboard?.detailTabs?.all?.rows||[];
-  const stateSet=new Set(allRows.map(row=>norm(row.shipmentCode||row.运单号)).filter(Boolean));
-  const scanSet=new Set((state.scanResults||[]).map(row=>norm(row.shipmentCode||row.运单号)).filter(Boolean));
-  const finalizedCount=allRows.filter(row=>row.finalRowAvailable!==false).length;
-  const accounted=Number(dashboard?.accounting?.accounted||0);
-  const unresolved=Number(dashboard?.accounting?.unresolved||0);
+  const truth=loadWhppCanonicalTruth(reportDate);
+  const sourceCount=sourceSet.size||Number(truth.total||0);
+  const accounting=buildCanonicalBusinessAccounting({
+    businessType:'WHPP',
+    reportDate,
+    pnhBills:(truth.rows||[]).map(row=>row.shipmentCode),
+    finalRows:truth.rows||[]
+  },'WHPP');
+  const stateMemberCount=Number(truth.total||0);
+  const scanCount=Number(truth.evidence?.scanRows||0);
+  const terminalEvidence=(truth.rows||[]).filter(row=>row.truthEvidence?.pod||row.truthEvidence?.returned||row.truthEvidence?.final).length;
+  const accounted=Number(accounting.accounted||0);
   return {
     businessType:'WHPP',sourceCount,
-    stateMemberCount:stateSet.size,
-    scanCount:scanSet.size,
-    waitingScan:Math.max(0,sourceCount-scanSet.size),
-    finalizedCount,
-    unprocessedCount:Math.max(0,sourceCount-accounted+unresolved),
+    stateMemberCount,
+    scanCount,
+    waitingScan:Math.max(0,sourceCount-scanCount),
+    finalizedCount:terminalEvidence,
+    unprocessedCount:Number(accounting.counts?.unprocessed||0),
     accounted,
     difference:sourceCount-accounted,
-    balanced:sourceCount===stateSet.size&&sourceCount===accounted,
-    scanComplete:scanSet.size>=sourceCount,
-    missingFromState:Math.max(0,sourceCount-stateSet.size),
-    extraInState:Math.max(0,stateSet.size-sourceCount),
-    counts:{total:Number(dashboard?.metrics?.total||0),pod:Number(dashboard?.metrics?.pod||0),returned:Number(dashboard?.metrics?.returned||0),unresolved:Number(dashboard?.metrics?.unresolved||0)}
+    balanced:sourceCount===stateMemberCount&&sourceCount===accounted,
+    scanComplete:scanCount>=sourceCount,
+    missingFromState:Math.max(0,sourceCount-stateMemberCount),
+    extraInState:Math.max(0,stateMemberCount-sourceCount),
+    counts:accounting.counts||{},
+    canonicalEvidence:truth.evidence||{}
   };
 }
 
