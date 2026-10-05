@@ -51,6 +51,7 @@ import {
 import { createPurgeChallenge, executePurge } from './src/dataPurge.js';
 import { queueDirectDataPurge, getDirectDataPurgeStatus, DIRECT_PURGE_ID } from './src/directDataPurge.js';
 import { buildHomeQualitySummary, buildHomeQualitySummaryWithArchive } from './src/homeQualitySummary.js';
+import { requestSelectedDateTimingRepair, inspectSelectedDateTimingRepair } from './src/selectedDateTimingEvidenceRepair.js';
 import { buildCanonicalBusinessAccounting } from './src/businessAccounting.js';
 import { buildDataIntegrityReport } from './src/dataIntegrity.js';
 
@@ -1744,6 +1745,25 @@ app.get('/api/export-period', async (req, res) => {
   } catch (error) {
     res.status(400).json({ ok: false, error: error.message });
   }
+});
+
+app.post('/api/timing-repair/start', (req,res)=>{
+  const reportDate=String(req.body?.reportDate||'').slice(0,10);
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(reportDate))return res.status(400).json({ok:false,error:'缺少有效日报日期。'});
+  const latest=getLatestUnifiedImport();
+  const history=listUnifiedImportHistory(1000);
+  const batch=(latest?.reportDate===reportDate?latest:history.find(item=>String(item.reportDate||'')===reportDate))||null;
+  if(!batch?.snapshotId)return res.status(404).json({ok:false,error:'未找到该日报的有效快照。'});
+  const types=['TBKH','WHPP','SHOPEECN','SHOPEEVN'];
+  const states=Object.fromEntries(types.map(type=>[type,requestSelectedDateTimingRepair(type,reportDate,batch.snapshotId)]));
+  res.json({ok:true,reportDate,snapshotId:batch.snapshotId,states});
+});
+
+app.get('/api/timing-repair/status', (req,res)=>{
+  const reportDate=String(req.query?.reportDate||'').slice(0,10);
+  const snapshotId=String(req.query?.snapshotId||'');
+  const types=['TBKH','WHPP','SHOPEECN','SHOPEEVN'];
+  res.json({ok:true,reportDate,states:Object.fromEntries(types.map(type=>[type,inspectSelectedDateTimingRepair(type,reportDate,snapshotId)]))});
 });
 
 app.post('/api/export-period/job', (req, res) => {
