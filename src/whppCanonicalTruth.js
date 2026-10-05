@@ -39,6 +39,8 @@ export function loadWhppCanonicalTruth(reportDate='', snapshotId=''){
   const bills=[...memberMap.keys()];
   if(!bills.length)return { ...empty(date), snapshotId:batch?.snapshotId||'', batchId:batch?.batchId||'' };
 
+  const snapshotEvidence=loadRecoverableWhppSnapshot(db,date,bills);
+
   const finalMap=queryRows(db,bills,`
     SELECT shipmentCode,isPod,primaryCategory,apiStatus,carryStatus,latestEventTime,latestEventDesc,latestNode,rawJson
     FROM business_final_rows
@@ -56,6 +58,15 @@ export function loadWhppCanonicalTruth(reportDate='', snapshotId=''){
     FROM business_scan_results
     WHERE businessType='WHPP' AND reportDate=? AND shipmentCode IN (__MARKS__)
   `,[date],row=>normalizeScan(row,date));
+
+  // Current normalized tables remain authoritative. A member-attested historical
+  // snapshot only fills evidence that a destructive same-day reimport removed.
+  for(const row of snapshotEvidence.finalRows||[]){
+    const code=billOf(row);if(code&&!finalMap.has(code))finalMap.set(code,normalizeSnapshotFinal(row,date));
+  }
+  for(const row of snapshotEvidence.scanResults||[]){
+    const code=billOf(row);if(code&&!scanMap.has(code))scanMap.set(code,normalizeSnapshotScan(row,date));
+  }
 
   const rows=bills.map(code=>{
     const member=memberMap.get(code)||{};
@@ -91,11 +102,58 @@ export function loadWhppCanonicalTruth(reportDate='', snapshotId=''){
       currentRows:rows.filter(row=>row.truthEvidence.current).length,
       scanRows:rows.filter(row=>row.truthEvidence.scan).length,
       podRows:rows.filter(row=>row.truthEvidence.pod).length,
-      returnedRows:rows.filter(row=>row.truthEvidence.returned).length
-    }
+      returnedRows:rows.filter(row=>row.truthEvidence.returned).length,
+      snapshotRecoveredFinalRows:Number(snapshotEvidence.finalRows?.length||0),
+      snapshotRecoveredScanRows:Number(snapshotEvidence.scanResults?.length||0),
+      snapshotId:snapshotEvidence.snapshotId||''
+    },
+    recoveredTrackEvents:snapshotEvidence.trackEvents||[]
   };
 }
 
+function loadRecoverableWhppSnapshot(db,reportDate,bills=[]){
+  const current=[...new Set((bills||[]).map(value=>String(value||'').trim().toUpperCase()).filter(Boolean))].sort();
+  let rows=[];
+  try{
+    rows=db.prepare(`SELECT snapshotId,status,reconciliationStatus,invalidReason,payloadJson
+      FROM business_export_snapshots
+      WHERE businessType='WHPP' AND reportDate=?
+      ORDER BY id DESC LIMIT 20`).all(reportDate);
+  }catch{
+    try{rows=db.prepare(`SELECT snapshotId,payloadJson FROM business_export_snapshots WHERE businessType='WHPP' AND reportDate=? ORDER BY id DESC LIMIT 20`).all(reportDate)}catch{}
+  }
+  for(const row of rows){
+    const payload=safeJson(row.payloadJson),state=payload?.state&&typeof payload.state==='object'?payload.state:null;
+    if(!state)continue;
+    const snapshotBills=immutableSnapshotBills(state);
+    if(snapshotBills.length!==current.length||!snapshotBills.every((bill,index)=>bill===current[index]))continue;
+    const status=String(row.status||payload.status||'VALID').toUpperCase();
+    const recon=String(row.reconciliationStatus||payload.reconciliationStatus||'COMPLETED').toUpperCase();
+    const reason=safeJson(row.invalidReason);
+    const invalidatedOnlyByReimport=status==='INVALID'&&String(reason.code||'')==='WHPP_DAILY_REIMPORT_NEW_LIFECYCLE';
+    const valid=status!=='INVALID'&&recon!=='FAILED';
+    if(!valid&&!invalidatedOnlyByReimport)continue;
+    return {
+      snapshotId:String(row.snapshotId||payload.snapshotId||''),
+      finalRows:Array.isArray(state.finalRows)?state.finalRows:[],
+      scanResults:Array.isArray(state.scanResults)?state.scanResults:[],
+      trackEvents:Array.isArray(state.trackEvents)?state.trackEvents:[],
+      recoveryReason:valid?'VALID_EXACT_MEMBER_SNAPSHOT':'REIMPORT_INVALIDATED_EXACT_MEMBER_SNAPSHOT'
+    };
+  }
+  return{snapshotId:'',finalRows:[],scanResults:[],trackEvents:[],recoveryReason:''};
+}
+function immutableSnapshotBills(state={}){
+  const values=(state.pnhBills?.length?state.pnhBills:(state.dailyParseRows?.length?state.dailyParseRows:state.finalRows||[]))
+    .map(value=>typeof value==='string'?value:billOf(value)).map(value=>String(value||'').trim().toUpperCase()).filter(Boolean);
+  return [...new Set(values)].sort();
+}
+function normalizeSnapshotFinal(row,date){
+  return {...row,shipmentCode:billOf(row),运单号:billOf(row),businessType:'WHPP',reportDate:date,isPod:(row.是否POD==='是'||row.POD状态==='POD'||String(row.currentState||'').toUpperCase()==='POD')?1:Number(row.isPod||0)};
+}
+function normalizeSnapshotScan(row,date){
+  return {...row,shipmentCode:billOf(row),运单号:billOf(row),businessType:'WHPP',reportDate:date,scanIsPod:(row.是否POD==='是'||String(row.orderStatus||'')==='85')?1:Number(row.isPod||0),orderStatus:String(row.orderStatus||'')};
+}
 function queryRows(db,bills,sql,params,normalize){
   const out=new Map();
   for(let i=0;i<bills.length;i+=350){
