@@ -66,6 +66,7 @@ const TASKS=[
   ['node',['scripts/v647-local-timing-publication-smoke.mjs']],
   ['node',['scripts/v648-clean-reupload-timing-smoke.mjs']],
   ['node',['scripts/v650-import-progress-export-template-smoke.mjs']],
+  ['node',['scripts/v652-progress-and-export-job-smoke.mjs']],
   ['node',['--test',
     'test/unified-import-v7.test.js',
     'test/unified-import-ceaf.test.js',
