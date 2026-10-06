@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
-import { persistentSelectedDatePodBills, persistentWhppCompletionTruth } from '../src/selectedDatePersistentTruth.js';
+import { persistentSelectedDatePodBills, persistentSelectedDatePodTruth, persistentWhppCompletionTruth } from '../src/selectedDatePersistentTruth.js';
 
 const db=new DatabaseSync(':memory:');
 db.exec(`
@@ -37,6 +37,11 @@ assert.equal(completion.completionSource,'FINAL_ROWS_HISTORY');
 assert.equal(persistentSelectedDatePodBills(db,'WHPP',date).length,166);
 assert.equal(persistentSelectedDatePodBills(db,'SHOPEEVN',date).length,545);
 assert.equal(persistentSelectedDatePodBills(db,'SHOPEECN',date).length,0);
+insertSource.run(date,'SHOPEECN','ZERO-CN');
+insertFinal.run('SHOPEE','ZERO-CN',date,0,'CN',JSON.stringify({recipient_group:'CN',currentState:'RETURN_COMPLETED'}));
+const zeroCn=persistentSelectedDatePodTruth(db,'SHOPEECN',date);
+assert.equal(zeroCn.authoritative,true);
+assert.equal(zeroCn.bills.length,0);
 
 // Restart simulation: no in-memory business state and no export snapshot are needed.
 assert.equal(persistentWhppCompletionTruth(db,date).locked,true);
