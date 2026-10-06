@@ -147,6 +147,7 @@ async function loadSession(){
 
 let v626LatestImport=null;
 let v631TimingMissing={};
+let v700TimingAvailability={};
 let v626OpenRows=[];
 let v626OpenFilter='all';
 let v626ProgressTimer=null;
@@ -465,6 +466,8 @@ async function loadHome(options={}){
   }
 
   const timing=summary?.timing||{},timingTrend=summary?.timingTrend||{};
+  const timingRepairTypes=summary?.timingEvidenceRepair?.types||{};
+  v700TimingAvailability=Object.fromEntries(Object.entries(timingRepairTypes).map(([type,state])=>[type,String(state?.status||'').toUpperCase()]));
   v631TimingMissing=Object.fromEntries(Object.entries(timing).map(([type,data])=>[type,data?.evidence?.missingBills||[]]));
   const timingMeta=[
     ['TBKH','v625TimingTBKH','#f4931b'],
@@ -475,14 +478,25 @@ async function loadHome(options={}){
   const showDays=value=>value===null||value===undefined?'—':Number(value).toFixed(2).replace(/\.00$/,'')+'天';
   for(const [type,prefix,tone] of timingMeta){
     const data=timing[type]||{};
+    const historicalUnavailable=v700TimingAvailability[type]==='HISTORICAL_EVIDENCE_UNAVAILABLE';
     setText(prefix+'Overall',showDays(data.overall?.avgDays));
-    setText(prefix+'Pod','有效轨迹 '+fmt(data.overall?.podCount||0)+' / POD总数 '+fmt(data.overall?.totalPodCount||0)+' 票');
+    setText(prefix+'Pod',historicalUnavailable
+      ?('POD总数 '+fmt(data.overall?.totalPodCount||0)+' 票 · 历史轨迹证据缺失')
+      :('有效轨迹 '+fmt(data.overall?.podCount||0)+' / POD总数 '+fmt(data.overall?.totalPodCount||0)+' 票'));
     setText(prefix+'PP',showDays(data.pp?.avgDays));setText(prefix+'PPPod',fmt(data.pp?.podCount||0)+' / '+fmt(data.pp?.totalPodCount||0)+'票');
     setText(prefix+'PV',showDays(data.pv?.avgDays));setText(prefix+'PVPod',fmt(data.pv?.podCount||0)+' / '+fmt(data.pv?.totalPodCount||0)+'票');
     setText(prefix+'A1',showDays(data.attempt1?.avgDays));setText(prefix+'A2',showDays(data.attempt2?.avgDays));setText(prefix+'A3',showDays(data.attempt3?.avgDays));
     renderMiniTrend('v625TimingTrend'+type,timingTrend[type]||[],tone);
-    setText('v626Timing'+type+'Missing',fmt(data.evidence?.missing||data.overall?.missingEvidenceCount||0));
+    const missingCount=Number(data.evidence?.missing||data.overall?.missingEvidenceCount||0);
+    setText('v626Timing'+type+'Missing',fmt(missingCount));
     setText('v626Timing'+type+'Valid',fmt(data.evidence?.valid||data.overall?.podCount||0));
+    const missingButton=q('[data-timing-missing="'+type+'"]');
+    if(missingButton){
+      const counter=byId('v626Timing'+type+'Missing');
+      for(const node of [...missingButton.childNodes])if(node!==counter)node.remove();
+      missingButton.insertBefore(document.createTextNode(historicalUnavailable?'历史证据缺失 ':'待补轨迹 '),counter||null);
+      missingButton.title=historicalUnavailable?'历史日报缺少真实60/70→80轨迹，系统已停止自动重复补查。':'查看缺失轨迹明细';
+    }
     if(['WHPP','SHOPEECN','SHOPEEVN'].includes(type)){setText('v626Timing'+type+'Return',fmt(returns[type]?.count||0));setText('v626Timing'+type+'ReturnRate',pct(returns[type]?.rate||0))}
   }
   setText('v625TimingPeriod',summary?.reportDate?'统计日报 '+summary.reportDate+' · 仅真实60/70→80轨迹POD':'统计当前日报POD');
@@ -497,13 +511,14 @@ function timingMissingReason(code=''){
 }
 function renderTimingMissing(type){
   const rows=v631TimingMissing?.[type]||[],panel=byId('v631TimingMissingPanel'),tbody=byId('v631TimingMissingRows');if(!panel||!tbody)return;
-  setText('v631TimingMissingTitle',(type==='SHOPEECN'?'SHOPEE CN':type==='SHOPEEVN'?'SHOPEE VN':type)+' 待补轨迹');
-  setText('v631TimingMissingMeta',(selectedReportDate()||byId('v625ToDate')?.value||'')+' · '+rows.length+' 票');
+  const historicalUnavailable=v700TimingAvailability?.[type]==='HISTORICAL_EVIDENCE_UNAVAILABLE';
+  setText('v631TimingMissingTitle',(type==='SHOPEECN'?'SHOPEE CN':type==='SHOPEEVN'?'SHOPEE VN':type)+(historicalUnavailable?' 历史轨迹证据缺失':' 待补轨迹'));
+  setText('v631TimingMissingMeta',(selectedReportDate()||byId('v625ToDate')?.value||'')+' · '+rows.length+' 票'+(historicalUnavailable?' · 时效不可计算':''));
   tbody.replaceChildren();
   if(!rows.length)tbody.innerHTML='<tr><td colspan="4">当前没有待补轨迹运单</td></tr>';
   else for(const row of rows){
     const tr=document.createElement('tr');
-    for(const value of [row.shipmentCode,type,timingMissingReason(row.reason)]){const td=document.createElement('td');td.textContent=value||'—';tr.appendChild(td)}
+    for(const value of [row.shipmentCode,type,historicalUnavailable?'历史60/70→80轨迹未保存，签收时效不可计算':timingMissingReason(row.reason)]){const td=document.createElement('td');td.textContent=value||'—';tr.appendChild(td)}
     const td=document.createElement('td'),a=document.createElement('a');
     a.href='/tracking?auth=v625&code='+encodeURIComponent(row.shipmentCode||'')+'&reportDate='+encodeURIComponent(selectedReportDate()||byId('v625ToDate')?.value||'')+'&businessType='+encodeURIComponent(type);
     a.textContent='查看轨迹';td.appendChild(a);tr.appendChild(td);tbody.appendChild(tr);
