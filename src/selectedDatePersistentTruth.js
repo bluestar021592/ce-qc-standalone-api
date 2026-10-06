@@ -11,16 +11,21 @@ function persistedGroup(row={}){
   const raw=safeJson(row.rawJson,{});
   return String(row.recipient_group||raw.recipient_group||raw.recipientGroup||'').trim().toUpperCase();
 }
+function sourceBills(db,businessType,date){
+  try{return new Set(db.prepare("SELECT UPPER(TRIM(shipmentCode)) shipmentCode FROM unified_import_rows WHERE reportDate=? AND UPPER(TRIM(businessType))=? GROUP BY UPPER(TRIM(shipmentCode))").all(date,businessType).map(row=>String(row.shipmentCode||'').trim().toUpperCase()).filter(Boolean))}
+  catch{return new Set()}
+}
 
 export function persistentSelectedDatePodBills(db,businessType='',reportDate=''){
   const type=String(businessType||'').trim().toUpperCase(),date=dateKey(reportDate);
   if(!date)return[];
-  let owner='',group='';
-  if(type==='WHPP')owner='WHPP';
-  else if(type==='SHOPEECN'){owner='SHOPEE';group='CN';}
-  else if(type==='SHOPEEVN'){owner='SHOPEE';group='VN';}
+  let owner='',group='',sourceType='';
+  if(type==='WHPP'){owner='WHPP';sourceType='WHPP';}
+  else if(type==='SHOPEECN'){owner='SHOPEE';group='CN';sourceType='SHOPEECN';}
+  else if(type==='SHOPEEVN'){owner='SHOPEE';group='VN';sourceType='SHOPEEVN';}
   else return[];
   try{
+    const source=sourceBills(db,sourceType,date);
     const rows=db.prepare(`SELECT shipmentCode,isPod,recipient_group,rawJson
       FROM business_final_rows
       WHERE businessType=? AND reportDate=?
@@ -29,6 +34,7 @@ export function persistentSelectedDatePodBills(db,businessType='',reportDate='')
     for(const row of rows){
       const bill=String(row.shipmentCode||'').trim().toUpperCase();
       if(!bill||seen.has(bill))continue;
+      if(source.size&&!source.has(bill))continue;
       if(group&&persistedGroup(row)!==group)continue;
       if(!persistedPod(row))continue;
       seen.add(bill);out.push(bill);
