@@ -52,6 +52,7 @@ import { createPurgeChallenge, executePurge } from './src/dataPurge.js';
 import { queueDirectDataPurge, getDirectDataPurgeStatus, DIRECT_PURGE_ID } from './src/directDataPurge.js';
 import { buildHomeQualitySummary, buildHomeQualitySummaryWithArchive, diagnoseSelectedDateTiming } from './src/homeQualitySummary.js';
 import { requestSelectedDateTimingRepair, inspectSelectedDateTimingRepair } from './src/selectedDateTimingEvidenceRepair.js';
+import { persistentSelectedDatePodTruth, persistentWhppCompletionTruth } from './src/selectedDatePersistentTruth.js';
 import { buildCanonicalBusinessAccounting } from './src/businessAccounting.js';
 import { buildDataIntegrityReport } from './src/dataIntegrity.js';
 
@@ -1762,6 +1763,31 @@ app.get('/api/timing-diagnostics', (req,res)=>{
   const batch=selectUnifiedImportForDiagnostics(reportDate);
   if(!batch)return res.status(404).json({ok:false,error:'未找到该日报快照。'});
   res.json({ok:true,...diagnoseSelectedDateTiming(reportDate,batch.snapshotId)});
+});
+app.get('/api/selected-date-truth', (req,res)=>{
+  const reportDate=String(req.query?.reportDate||'').slice(0,10);
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(reportDate))return res.status(400).json({ok:false,error:'缺少有效日报日期。'});
+  const batch=selectUnifiedImportForDiagnostics(reportDate);
+  if(!batch)return res.status(404).json({ok:false,error:'未找到该日报快照。'});
+  let unifiedSnapshot=null;
+  try{unifiedSnapshot=getDb().prepare("SELECT status,payloadJson,createdAt FROM unified_snapshots WHERE snapshotId=? LIMIT 1").get(batch.snapshotId)||null}catch{}
+  const whppCompletion=persistentWhppCompletionTruth(getDb(),reportDate);
+  const whppPod=persistentSelectedDatePodTruth(getDb(),'WHPP',reportDate);
+  const cnPod=persistentSelectedDatePodTruth(getDb(),'SHOPEECN',reportDate);
+  const vnPod=persistentSelectedDatePodTruth(getDb(),'SHOPEEVN',reportDate);
+  const timing=diagnoseSelectedDateTiming(reportDate,batch.snapshotId);
+  res.setHeader('Cache-Control','no-store');
+  res.json({
+    ok:true,build:'V681_SELECTED_DATE_TRUTH',reportDate,snapshotId:batch.snapshotId,
+    unified:{status:String(unifiedSnapshot?.status||''),createdAt:String(unifiedSnapshot?.createdAt||'')},
+    whppCompletion,
+    podTruth:{
+      WHPP:{source:whppPod.source,sourceCount:whppPod.sourceCount,resolvedCount:whppPod.resolvedCount,podCount:whppPod.bills.length,authoritative:whppPod.authoritative},
+      SHOPEECN:{source:cnPod.source,sourceCount:cnPod.sourceCount,resolvedCount:cnPod.resolvedCount,podCount:cnPod.bills.length,authoritative:cnPod.authoritative},
+      SHOPEEVN:{source:vnPod.source,sourceCount:vnPod.sourceCount,resolvedCount:vnPod.resolvedCount,podCount:vnPod.bills.length,authoritative:vnPod.authoritative}
+    },
+    timing
+  });
 });
 app.post('/api/timing-repair/start', (req,res)=>{
   const reportDate=String(req.body?.reportDate||'').slice(0,10);
