@@ -3,6 +3,7 @@ import { CEClient } from './ceClient.js';
 import { getDb } from './db.js';
 import { runWhppPipeline } from './whppPipeline.js';
 import { WHPP, loadWhppState, saveWhppState, finalizeWhppState } from './whppStore.js';
+import { persistentWhppCompletionTruth } from './selectedDatePersistentTruth.js';
 
 const PATCH_ID='2026-08-14-v134-whpp-run-supervisor-v1';
 const BACKEND_CONTINUITY_REVISION='2026-08-29-v357-whpp-backend-final-stage-continuity-v1';
@@ -52,15 +53,17 @@ export function inspectV378WhppCompletionLock(reportDate='',state=null,db=getDb(
       ORDER BY createdAt DESC LIMIT 1`).get(date)||null;
   }catch{}
   const snapshotFinalized=Boolean(snapshotRow?.snapshotId);
-  const locked=summaryFinalized||snapshotFinalized;
+  const persistent=persistentWhppCompletionTruth(db,date);
+  const locked=summaryFinalized||snapshotFinalized||persistent.locked;
   return{
-    locked,finalized:locked,sourceMatches,reportDate:date,total:Number(daily?.totalCount||0),
+    locked,finalized:locked,sourceMatches,reportDate:date,total:Number(daily?.totalCount||persistent.sourceCount||0),
     sourceSnapshotId,stateSourceSnapshotId,
-    finalizedSnapshotId:finalizedSnapshotId||String(snapshotRow?.snapshotId||''),
+    finalizedSnapshotId:finalizedSnapshotId||String(snapshotRow?.snapshotId||persistent.snapshotId||''),
     snapshotStatus:locked?'COMPLETED':status,
-    finalizedAt:String(summary.finalizedAt||snapshotRow?.generatedAt||snapshotRow?.createdAt||''),
-    completionSource:summaryFinalized?'DAILY_SUMMARY':'IMMUTABLE_EXPORT_SNAPSHOT',
-    reason:locked?'CURRENT_DAILY_ALREADY_FINALIZED':daily?'CURRENT_DAILY_NOT_FINALIZED':'NO_NORMALIZED_DAILY',
+    finalizedAt:String(summary.finalizedAt||snapshotRow?.generatedAt||snapshotRow?.createdAt||persistent.finalizedAt||''),
+    completionSource:summaryFinalized?'DAILY_SUMMARY':snapshotFinalized?'IMMUTABLE_EXPORT_SNAPSHOT':persistent.completionSource,
+    persistentTruth:persistent,
+    reason:locked?'CURRENT_DAILY_ALREADY_FINALIZED':persistent.reason||(daily?'CURRENT_DAILY_NOT_FINALIZED':'NO_NORMALIZED_DAILY'),
     revision:V378_WHPP_COMPLETION_LOCK_REVISION
   };
 }
