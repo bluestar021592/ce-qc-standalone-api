@@ -4,7 +4,7 @@ import { persistentSelectedDatePodBills, persistentWhppCompletionTruth } from '.
 
 const db=new DatabaseSync(':memory:');
 db.exec(`
-CREATE TABLE business_final_rows(businessType TEXT,shipmentCode TEXT,reportDate TEXT,isPod INTEGER,recipient_group TEXT);
+CREATE TABLE business_final_rows(businessType TEXT,shipmentCode TEXT,reportDate TEXT,isPod INTEGER,recipient_group TEXT,rawJson TEXT);
 CREATE TABLE business_daily_reports(businessType TEXT,reportDate TEXT,totalCount INTEGER,summaryJson TEXT,updatedAt TEXT);
 CREATE TABLE business_history_summary(businessType TEXT,reportDate TEXT,summaryJson TEXT,updatedAt TEXT);
 CREATE TABLE business_export_snapshots(businessType TEXT,reportDate TEXT,snapshotId TEXT,status TEXT,reconciliationStatus TEXT,generatedAt TEXT,createdAt TEXT);
@@ -13,16 +13,16 @@ CREATE TABLE unified_import_rows(reportDate TEXT,businessType TEXT,shipmentCode 
 
 const date='2026-07-01';
 const insertSource=db.prepare('INSERT INTO unified_import_rows VALUES(?,?,?)');
-const insertFinal=db.prepare('INSERT INTO business_final_rows VALUES(?,?,?,?,?)');
+const insertFinal=db.prepare('INSERT INTO business_final_rows VALUES(?,?,?,?,?,?)');
 
 for(let i=1;i<=190;i++){
   const bill='W'+String(i).padStart(3,'0');
   insertSource.run(date,'WHPP',bill);
-  insertFinal.run('WHPP',bill,date,i<=166?1:0,'WHPP');
+  insertFinal.run('WHPP',bill,date,i<=166?1:0,'WHPP',JSON.stringify({currentState:i<=166?'POD':'RETURN_COMPLETED'}));
 }
 for(let i=1;i<=588;i++){
   const bill='V'+String(i).padStart(3,'0');
-  insertFinal.run('SHOPEE',bill,date,i<=545?1:0,'VN');
+  insertFinal.run('SHOPEE',bill,date,0,'VN',JSON.stringify({recipient_group:'VN',orderStatus:i<=545?'85':'',currentState:i<=545?'POD':'RETURN_COMPLETED'}));
 }
 db.prepare('INSERT INTO business_history_summary VALUES(?,?,?,?)')
   .run('WHPP',date,JSON.stringify({total:190,accounting:{total:190,balanced:true}}),'2026-07-01T02:21:00Z');
@@ -43,4 +43,4 @@ assert.equal(persistentWhppCompletionTruth(db,date).locked,true);
 insertSource.run(date,'WHPP','W191');
 assert.equal(persistentWhppCompletionTruth(db,date).locked,false);
 
-console.log('[V670] SQLite restart fixture passed · WHPP 190/166 · VN 588/545 · stale same-date reimport fails closed');
+console.log('[V671] SQLite restart fixture passed · WHPP 190/166 · VN 588/545 from dashboard-equivalent raw POD semantics · stale same-date reimport fails closed');
