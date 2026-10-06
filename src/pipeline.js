@@ -5,7 +5,7 @@ import { getShopCodeMap } from './shopCodes.js';
 import { analyzeShopeeShipment, classifyShopeeScanStatus, SHOPEE_ANALYSIS_RULE_VERSION } from './shopeeAnalyzer.js';
 import { queryBatchWithFallback, queryTrackBatchWithFallback, splitTrackBatches, TRACK_QUERY_BATCH_SIZE } from './trackBatching.js';
 import { classifyScanTerminal } from './scanTerminal.js';
-import { classifyShipmentStatus } from './shipmentStatusTruth.js';
+import { classifyShipmentStatus, shipmentStatusTime } from './shipmentStatusTruth.js';
 import { isSpecialCategory } from './specialNode.js';
 
 const ORDER_BATCH_SIZE = Number(process.env.ORDER_BATCH_SIZE || 350);
@@ -173,18 +173,19 @@ export async function runQcPipeline({
     const shipmentTrackRow=shipmentStatusByBill.get(bill)?.at(-1)||{};
     const truth=classifyShipmentStatus(shipmentTrackRow);
     if(!truth.recognized)continue;
+    const statusTime=shipmentStatusTime(shipmentTrackRow);
     row.shipmentStatus=truth.code;
     row.shipmentStatusSource=truth.source;
     if(truth.pod){
-      Object.assign(row,{currentState:'POD',scanNormalizedState:row.scanNormalizedState||'',是否POD:'是',POD状态:'POD',退回状态:'未退回',
+      Object.assign(row,{currentState:'POD',scanNormalizedState:row.scanNormalizedState||'',是否POD:'是',POD状态:'POD',POD时间:statusTime||row.POD时间||'',退回状态:'未退回',
         trackRequired:false,trackSkippedReason:'POD_COMPLETED',扫描分类:'已签收(POD)',carry状态:'closed_pod',跨日状态:'已闭环'});
       podLocks.add(bill);
     }else if(truth.returned){
-      Object.assign(row,{currentState:'RETURN_COMPLETED',是否POD:'否',POD状态:'未POD',退回状态:'已退回',
+      Object.assign(row,{currentState:'RETURN_COMPLETED',是否POD:'否',POD状态:'未POD',退回状态:'已退回',退回完成时间:statusTime||row.退回完成时间||'',
         trackRequired:false,trackSkippedReason:'RETURN_COMPLETED',扫描分类:'已退回(终态)',carry状态:'closed_return',跨日状态:'已闭环'});
       returnedCompleted.add(bill);
     }else if(truth.returnInProgress){
-      Object.assign(row,{currentState:'RETURN_IN_PROGRESS',是否POD:'否',POD状态:'未POD',退回状态:'退回处理中',
+      Object.assign(row,{currentState:'RETURN_IN_PROGRESS',是否POD:'否',POD状态:'未POD',退回状态:'退回处理中',退回开始时间:statusTime||row.退回开始时间||'',
         trackRequired:true,trackSkippedReason:'',扫描分类:'退回处理中',carry状态:'active_return',跨日状态:'未闭环'});
     }
   }
@@ -193,7 +194,15 @@ export async function runQcPipeline({
   await checkpoint(state,onCheckpoint);
 
   const scanByBill = new Map(scanResults.map(item => [item.运单号, item]));
-  const needTrack = scanPool.filter(wb => scanByBill.get(wb)?.trackRequired === true && !podLocks.has(wb) && !returnedCompleted.has(wb) && !refreshFailed.has(wb) && !excluded(wb));
+  const podTimingTrackBills = new Set(scanPool.filter(wb => {
+    const shipmentRow=shipmentStatusByBill.get(wb)?.at(-1)||{};
+    const truth=classifyShipmentStatus(shipmentRow);
+    return truth.pod && !shipmentStatusTime(shipmentRow);
+  }));
+  const needTrack = scanPool.filter(wb => (
+    podTimingTrackBills.has(wb)
+    || (scanByBill.get(wb)?.trackRequired === true && !podLocks.has(wb) && !returnedCompleted.has(wb))
+  ) && !refreshFailed.has(wb) && !excluded(wb));
   state.needTrackBills = needTrack;
   state.processing = { ...state.processing, phase: '轨迹查询', batchIndex: 0, totalBatches: Math.ceil(needTrack.length / TRACK_QUERY_BATCH_SIZE) };
   await onProgress(`订单扫描完成：POD ${scanResults.filter(x => x.是否POD === '是').length}票，进入轨迹 ${needTrack.length}票`);
@@ -267,7 +276,7 @@ export async function runQcPipeline({
       for (const wb of batch) {
         const scanRow = scanResults.find(x => x.运单号 === wb) || { 运单号: wb, 来源类型: sourceType(wb, today, carry) };
         const trackError = failedByBill.get(wb) || null;
-        const result = trackError
+        const result = trackError && !podTimingTrackBills.has(wb)
           ? {
               ...scanRow,
               运单号: wb,
@@ -505,27 +514,32 @@ async function runShopeePipeline({ state, client, onProgress, onCheckpoint, isPa
 
     const truth=shipmentTruthByBill.get(bill);
     if(truth?.recognized){
+      const shipmentRow=shipmentStatusByBill.get(bill)?.at(-1)||{};
+      const statusTime=shipmentStatusTime(shipmentRow);
       row.shipmentStatus=truth.code;
       row.shipmentStatusSource=truth.source;
-      if(truth.pod)Object.assign(row,{currentState:'POD',是否POD:'是',POD状态:'POD',退回状态:'未退回',trackRequired:false,trackSkippedReason:'POD_COMPLETED'});
-      else if(truth.returned)Object.assign(row,{currentState:'RETURN_COMPLETED',是否POD:'否',POD状态:'未POD',退回状态:'已退回',trackRequired:false,trackSkippedReason:'RETURN_COMPLETED'});
-      else if(truth.returnInProgress)Object.assign(row,{currentState:'RETURN_IN_PROGRESS',是否POD:'否',POD状态:'未POD',退回状态:'退回处理中',trackRequired:true,trackSkippedReason:''});
+      if(truth.pod)Object.assign(row,{currentState:'POD',是否POD:'是',POD状态:'POD',POD时间:statusTime||row.POD时间||'',退回状态:'未退回',trackRequired:false,trackSkippedReason:'POD_COMPLETED'});
+      else if(truth.returned)Object.assign(row,{currentState:'RETURN_COMPLETED',是否POD:'否',POD状态:'未POD',退回状态:'已退回',退回完成时间:statusTime||row.退回完成时间||'',trackRequired:false,trackSkippedReason:'RETURN_COMPLETED'});
+      else if(truth.returnInProgress)Object.assign(row,{currentState:'RETURN_IN_PROGRESS',是否POD:'否',POD状态:'未POD',退回状态:'退回处理中',退回开始时间:statusTime||row.退回开始时间||'',trackRequired:true,trackSkippedReason:''});
     }
   }
   state.scanResults=uniqueRows([...lockedPodRows,...scanResults]);
   const effectiveRouteByBill=new Map(scanPool.map(bill=>{
     const truth=shipmentTruthByBill.get(bill);
-    if(truth?.pod)return [bill,'CLOSE_POD_NO_TRACK'];
+    const shipmentRow=shipmentStatusByBill.get(bill)?.at(-1)||{};
+    if(truth?.pod)return [bill,shipmentStatusTime(shipmentRow)?'CLOSE_POD_NO_TRACK':'POD_TIMING_TRACK'];
     if(truth?.returned)return [bill,'CLOSE_RETURN_NO_TRACK'];
     if(truth?.returnInProgress)return [bill,'TRACK'];
     return [bill,scanRouteByBill.get(bill)];
   }));
-  const preliminaryPodBills = new Set(scanPool.filter(bill => effectiveRouteByBill.get(bill) === 'CLOSE_POD_NO_TRACK'));
+  const preliminaryPodBills = new Set(scanPool.filter(bill => ['CLOSE_POD_NO_TRACK','POD_TIMING_TRACK'].includes(effectiveRouteByBill.get(bill))));
   const preliminaryReturnBills = new Set(scanPool.filter(bill => effectiveRouteByBill.get(bill) === 'CLOSE_RETURN_NO_TRACK'));
   for (const bill of preliminaryPodBills) podLocks.add(bill);
   const scanRetryBills = scanPool.filter(bill => effectiveRouteByBill.get(bill) === 'SCAN_RETRY');
   state.scanRetryBills = scanRetryBills;
-  const needTrack = scanPool.filter(bill => effectiveRouteByBill.get(bill) === 'TRACK');
+  const businessTrackBills = scanPool.filter(bill => effectiveRouteByBill.get(bill) === 'TRACK');
+  const podTimingTrackBills = scanPool.filter(bill => effectiveRouteByBill.get(bill) === 'POD_TIMING_TRACK');
+  const needTrack = [...new Set([...businessTrackBills,...podTimingTrackBills])];
   state.needTrackBills = needTrack;
   state.podLocks = [...podLocks].sort();
   await checkpoint(state, onCheckpoint);
@@ -537,7 +551,7 @@ async function runShopeePipeline({ state, client, onProgress, onCheckpoint, isPa
     normalizeRow: row => ({ ...normalizeEvent(row), reportDate })
   });
   const exceptionResult = await queryShopeeApi({
-    state, apiName: 'exception-item-query', bills: needTrack,
+    state, apiName: 'exception-item-query', bills: businessTrackBills,
     rowsKey: 'exceptionItems', statusKey: 'exceptionQueryStatus',
     query: codes => client.exceptionQuery(codes), onProgress, onCheckpoint, isPaused,
     normalizeRow: row => ({ ...row, shipmentCode: billOf(row), reportDate })
@@ -551,19 +565,20 @@ async function runShopeePipeline({ state, client, onProgress, onCheckpoint, isPa
   for (const bill of scanPool) {
     const scanRow = scanResults.find(row => billOf(row) === bill) || { 运单号: bill, shipmentCode: bill, 来源类型: sourceType(bill, today, carry) };
     const alreadyPod = preliminaryPodBills.has(bill);
+    const podTimingTrack = effectiveRouteByBill.get(bill) === 'POD_TIMING_TRACK';
     const scanRetry = scanRouteByBill.get(bill) === 'SCAN_RETRY';
     const result = analyzeShopeeShipment({
       waybill: bill,
       scanRow,
       shipmentTrackRow: shipmentStatusByBill.get(bill)?.at(-1) || {},
-      events: (alreadyPod || preliminaryReturnBills.has(bill)) ? [] : (eventsByBill.get(bill) || []),
+      events: ((alreadyPod && !podTimingTrack) || preliminaryReturnBills.has(bill)) ? [] : (eventsByBill.get(bill) || []),
       exceptions: (alreadyPod || preliminaryReturnBills.has(bill)) ? [] : (exceptionsByBill.get(bill) || []),
       reportDate,
       dailyRow: dailyByBill.get(bill) || {},
       priorRow: priorByBill.get(bill) || {},
       apiStatus: {
         shipment: scanRetry ? 'scan_retry' : (scanStatusByBill.get(bill) || 'failed'),
-        event: alreadyPod ? 'skipped_pod' : (preliminaryReturnBills.has(bill) ? 'skipped_return' : (scanRetry ? 'skipped_scan_retry' : (eventStatusByBill.get(bill) || 'failed'))),
+        event: alreadyPod && !podTimingTrack ? 'skipped_pod' : (preliminaryReturnBills.has(bill) ? 'skipped_return' : (scanRetry ? 'skipped_scan_retry' : (eventStatusByBill.get(bill) || 'failed'))),
         exception: alreadyPod ? 'skipped_pod' : (preliminaryReturnBills.has(bill) ? 'skipped_return' : (scanRetry ? 'skipped_scan_retry' : (exceptionStatusByBill.get(bill) || 'failed')))
       }
     });
