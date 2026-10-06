@@ -9,6 +9,7 @@ import {
   SHOPEE_PENDING_1203_RETURN_RULE_VERSION
 } from './shopeeReturnTruth.js';
 import { analyzeV246ShopeeAttemptCycle } from './shopeeAttemptCycleV246.js';
+import { classifyShipmentStatus, shipmentStatusTime } from './shipmentStatusTruth.js';
 
 export const SHOPEE_ANALYSIS_RULE_VERSION = '2026-08-23-v246-shopee-strict-attempt-cycle-v34';
 
@@ -47,9 +48,29 @@ function withStrictAttempt(result = {}, events = []) {
  *   repeated START alone never increments; code 60 is fallback only if no 70 exists.
  */
 export function analyzeShopeeShipment(args = {}) {
-  const base = analyzeShopeeShipmentV32(args);
+  let base = analyzeShopeeShipmentV32(args);
   const events = Array.isArray(args.events) ? args.events : [];
-  const returnEvent = findShopeePending1203ReturnEvent(events);
+  const shipmentTruth=classifyShipmentStatus(args.shipmentTrackRow||{});
+  if(shipmentTruth.recognized){
+    const evidenceTime=shipmentStatusTime(args.shipmentTrackRow||{});
+    if(shipmentTruth.pod){
+      base={...base,currentState:'POD',primaryCategory:'POD',主分类:'POD',异常分类:'POD',是否POD:'是',POD状态:'POD',
+        POD时间:evidenceTime||base.POD时间||'',退回状态:'未退回',trackRequired:false,trackSkippedReason:'POD_COMPLETED',
+        carry状态:'closed_pod',跨日状态:'已闭环',shipmentStatus:'60',shipmentStatusSource:shipmentTruth.source,
+        QC判断:'shipmentStatus=60，确认POD/已签收闭环'};
+    }else if(shipmentTruth.returned){
+      base={...base,currentState:'RETURN_COMPLETED',primaryCategory:'退回',主分类:'退回',异常分类:'退回',是否POD:'否',
+        POD状态:'未POD',POD时间:'',退回状态:'已退回',退回完成时间:evidenceTime||base.退回完成时间||'',
+        trackRequired:false,trackSkippedReason:'RETURN_COMPLETED',carry状态:'closed_return',跨日状态:'已闭环',
+        shipmentStatus:'81',shipmentStatusSource:shipmentTruth.source,QC判断:'shipmentStatus=81，确认已退回闭环'};
+    }else if(shipmentTruth.returnInProgress){
+      base={...base,currentState:'RETURN_IN_PROGRESS',primaryCategory:'退回处理中',主分类:'退回处理中',异常分类:'退回处理中',
+        是否POD:'否',POD状态:'未POD',POD时间:'',退回状态:'退回处理中',退回开始时间:evidenceTime||base.退回开始时间||'',
+        trackRequired:true,trackSkippedReason:'',carry状态:'active_return',跨日状态:'未闭环',
+        shipmentStatus:'80',shipmentStatusSource:shipmentTruth.source,QC判断:'shipmentStatus=80，退回处理中；继续追踪至81完成退回'};
+    }
+  }
+  const returnEvent = shipmentTruth.recognized ? null : findShopeePending1203ReturnEvent(events);
   if (!returnEvent) {
     return withStrictAttempt({ ...base, analysisRuleVersion: SHOPEE_ANALYSIS_RULE_VERSION }, events);
   }
