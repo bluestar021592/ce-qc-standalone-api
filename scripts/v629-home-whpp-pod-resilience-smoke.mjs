@@ -25,10 +25,10 @@ assert.match(server,/\['CE', 'CEAF', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN'\]
 assert.match(server,/const whppState = loadWhppState\(\)/,'POD workspace must add WHPP through dedicated state');
 assert.doesNotMatch(server,/\['CE', 'CEAF', 'TBKH', 'ALI1688', 'WHPP', 'SHOPEECN', 'SHOPEEVN'\]\.map\(type => loadLightweightUnifiedBusinessState/,'WHPP must never enter unsupported lightweight reader');
 
-assert.match(html,/v625-shell\.js\?v=\d{8}-v6\d{2}-1/,'V629+ JS cache bust missing');
-assert.match(html,/v625-shell\.css\?v=\d{8}-v6\d{2}-1/,'V629+ CSS cache bust missing');
+assert.match(html,/v625-shell\.js\?v=\d{8}-v\d{3,}-1/,'V629+ JS cache bust missing');
+assert.match(html,/v625-shell\.css\?v=\d{8}-v\d{3,}-1/,'V629+ CSS cache bust missing');
 
 
-const assetBuild=Number((html.match(/v625-shell\.js\?v=\d{8}-v(6\d{2})-1/)||[])[1]||0);
+const assetBuild=Number((html.match(/v625-shell\.js\?v=\d{8}-v(\d{3,})-1/)||[])[1]||0);
 assert.ok(assetBuild>=629,'asset cache build must not predate V629');
 console.log('[V629] resilient home + null-safe KPI detail + dedicated WHPP POD workspace smoke passed');
