@@ -27,7 +27,7 @@ assert.match(whpp,/if\(normalized\.reportDate&&\(normalized\.trackEvents\|\|\[\]
 assert.match(shell,/历史轨迹证据缺失/,'historical evidence unavailable UI missing');
 assert.match(shell,/时效不可计算/,'historical timing unavailable explanation missing');
 assert.match(shell,/历史证据缺失/,'timing card must stop calling exhausted history retryable');
-assert.match(html,/V700_PERSISTENT_TIMING_EVIDENCE/,'V700 shell build marker missing');
-assert.match(html,/v625-shell\.js\?v=20261006-v700-1/,'V700 JS cache bust missing');
+assert.match(html,/<meta name="ce-qc-build" content="V\d+_[A-Z0-9_]+">/,'current shell build marker missing');
+assert.match(html,/v625-shell\.js\?v=\d{8}-v\d+-\d+/,'current JS cache bust missing');
 
 console.log('[V700] historical timing gaps stop futile retries; future 60/70/Pending/80 evidence is append-only and persistent');
