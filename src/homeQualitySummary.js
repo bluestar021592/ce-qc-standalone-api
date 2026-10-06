@@ -481,8 +481,10 @@ function timingWithSavedCacheFallback(batch,type,current){
     const cache=readV329ThreeBusinessDailyCache(type,batch.reportDate,getDb(),batch.reportDate);
     const row=(cache.daily||[]).find(item=>String(item.reportDate||'')===String(batch.reportDate||''))||null;
     if(!row||row.avgSigningDays===null||row.avgSigningDays===undefined)return current;
-    const podCount=n(row.signingSampleCount||row.signingDaysCount,0);
-    const totalPod=n(row.pod,0);
+    const cachedPodCount=n(row.signingSampleCount||row.signingDaysCount,0);
+    const currentTotal=n(current?.overall?.totalPodCount,0);
+    const totalPod=currentTotal>0?currentTotal:n(row.pod,0);
+    const podCount=Math.min(totalPod,Math.max(n(current?.overall?.podCount,0),cachedPodCount));
     return{
       ...current,
       overall:{...(current?.overall||{}),avgDays:row.avgSigningDays,podCount,totalPodCount:totalPod,missingEvidenceCount:Math.max(0,totalPod-podCount)},
