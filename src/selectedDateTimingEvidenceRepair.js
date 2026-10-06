@@ -40,6 +40,14 @@ function unique(values=[]){return [...new Set(values.map(v=>String(v||'').trim()
 
 function whppPodBills(date){
   try{
+    const hit=listWhppHistory(500).find(item=>String(item?.reportDate||'').slice(0,10)===date);
+    if(hit?.snapshotId){
+      const snapshot=loadWhppSnapshot(hit.snapshotId);
+      const rows=snapshot?.dashboard?.detailTabs?.pod?.rows||[];
+      if(rows.length)return unique(rows.map(billOf));
+    }
+  }catch{}
+  try{
     const state=loadWhppState();
     if(String(state?.reportDate||'').slice(0,10)!==date)return[];
     const dashboard=buildWhppDashboard(state);
@@ -64,6 +72,13 @@ function tbkhPodBills(date,snapshotId=''){
 }
 function shopeePodBills(type,date){
   const wantedGroup=type==='SHOPEECN'?'CN':'VN';
+  try{
+    const snapshot=getBusinessSnapshot('SHOPEE',date);
+    const rows=snapshot?.view?.detailTabs?.[wantedGroup+'_pod']?.rows
+      || snapshot?.view?.detailTabs?.byRecipientGroup?.[wantedGroup]?.pod?.rows
+      || [];
+    if(rows.length)return unique(rows.map(billOf));
+  }catch{}
   try{
     const state=loadBusinessState('SHOPEE');
     if(String(state?.reportDate||'').slice(0,10)!==date)return[];
