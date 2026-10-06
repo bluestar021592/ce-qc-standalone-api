@@ -512,7 +512,7 @@ function mirrorBusinessTables(db, state, type, now) {
     if (bill && active.has(bill)) persistStoreFields(db, 'business_carry_bills', type, bill, date || '__active__', row);
   }
   if (!date) return;
-  mirrorRows(db, 'business_scan_results', type, date, state.scanResults, now, row => [Number(row.是否POD === '是'), String(row.orderStatus || ''), JSON.stringify(row)]);
+  mirrorRows(db, 'business_scan_results', type, date, state.scanResults, now, row => [persistedBusinessPodFlag(row), String(row.orderStatus || ''), JSON.stringify(row)]);
   db.prepare('DELETE FROM business_shipment_tracks WHERE businessType=? AND reportDate=?').run(type, date);
   const shipmentStmt = db.prepare(`INSERT INTO business_shipment_tracks(businessType,shipmentCode,reportDate,shipmentStatus,statusText,apiStatus,rawJson,createdAt,updatedAt)
     VALUES(?,?,?,?,?,?,?,?,?)`);
@@ -562,7 +562,7 @@ function mirrorBusinessTables(db, state, type, now) {
   }
   db.prepare('DELETE FROM business_final_rows WHERE businessType=? AND reportDate=?').run(type, date);
   const finalStmt = db.prepare(`INSERT INTO business_final_rows(businessType,shipmentCode,reportDate,isPod,primaryCategory,apiStatus,carryStatus,latestEventTime,latestEventDesc,latestNode,recipient_raw,recipient_normalized,recipient_group,recipient_group_reason,source_row_number,rawJson,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
-  for (const row of state.finalRows) finalStmt.run(type, billOf(row), date, Number(row.是否POD === '是'), row.primaryCategory || row.异常分类 || '', row.API状态 || row.查询状态 || '', row.carry状态 || '', row.latestEventTime || row.最后节点时间 || '', row.latestEventDesc || row.最后节点 || '', row.latestNode || '', row.recipient_raw || '', row.recipient_normalized || '', recipientGroup(row), row.recipient_group_reason || '', Number(row.source_row_number || row.rowNumber || 0), JSON.stringify(row), now, now);
+  for (const row of state.finalRows) finalStmt.run(type, billOf(row), date, persistedBusinessPodFlag(row), row.primaryCategory || row.异常分类 || '', row.API状态 || row.查询状态 || '', row.carry状态 || '', row.latestEventTime || row.最后节点时间 || '', row.latestEventDesc || row.最后节点 || '', row.latestNode || '', row.recipient_raw || '', row.recipient_normalized || '', recipientGroup(row), row.recipient_group_reason || '', Number(row.source_row_number || row.rowNumber || 0), JSON.stringify(row), now, now);
   for (const row of state.finalRows) persistStoreFields(db, 'business_final_rows', type, billOf(row), date, row);
   const historyStmt = db.prepare(`INSERT INTO business_history_summary(businessType,reportDate,summaryJson,createdAt,updatedAt) VALUES(?,?,?,?,?) ON CONFLICT(businessType,reportDate) DO UPDATE SET summaryJson=excluded.summaryJson,updatedAt=excluded.updatedAt`);
   for (const item of state.historySummary) {
@@ -608,6 +608,7 @@ function persistStoreFields(db, table, type, shipmentCode, reportDate, row = {})
 function emptyState(type) { return normalizeBusinessState({ businessType: type }, type); }
 function normalizeType(value) { return String(value || '').toUpperCase() === 'SHOPEE' ? 'SHOPEE' : 'CCSL'; }
 function billOf(row = {}) { return String(row.shipmentCode || row.运单号 || '').trim().toUpperCase(); }
+function persistedBusinessPodFlag(row = {}) { const state=String(row.currentState || row.scanNormalizedState || row.POD状态 || '').trim().toUpperCase(); return Number(state==='POD' || String(row.orderStatus || '').trim()==='85' || row.是否POD==='是'); }
 function recipientGroup(row = {}) { const value = String(row.recipient_group || row.recipientGroup || '').toUpperCase(); return ['CN', 'VN', 'OTHER'].includes(value) ? value : 'OTHER'; }
 
 function sanitizeShopeeDailySummary(summary = null) {
