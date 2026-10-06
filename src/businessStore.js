@@ -468,6 +468,49 @@ function mirrorBusinessRuntimeCheckpoint(db, state, type, now) {
     .run(type, run.runId, date, state.processing.phase || '', Number(state.processing.batchIndex || 0), Number(state.processing.totalBatches || 0), state.processing.running ? 'running' : (state.processing.paused ? 'paused' : 'saved'), JSON.stringify({ scanDone: state.scanResults.length, trackDone: state.trackResults.length, eventsDone: state.trackEvents.length, exceptionsDone: state.exceptionItems.length, revision: BUSINESS_RUNTIME_CHECKPOINT_REVISION }), state.processing.error || '', now, now);
 }
 
+function permanentEventTime(row={}) {
+  return String(row.eventTime||row.trackingEventTime||row.creationDate||row.lastUpdateDate||row.eventDate||row.occurTime||row.scanTime||'').trim();
+}
+function permanentEventCode(row={}) {
+  return String(row.eventCode??row.trackingEventCode??row.statusCode??row.eventStatusCode??row.nodeCode??row.scanCode??row.trackCode??'').trim();
+}
+function strictPodEventTime(row={}) {
+  const code=permanentEventCode(row).replace(/^0+/,'')||'0';
+  if(code==='80')return permanentEventTime(row);
+  const text=[row.trackingEventDesc,row.trackingEventDescZh,row.statusText,row.eventName,row.remark,row.message].map(v=>String(v||'')).join(' ');
+  if(!/未签收|未妥投|签收失败|妥投失败|NOT[ _-]*DELIVERED|UNDELIVERED/i.test(text)&&/\bPOD\b|Successfully\s+delivered|已签收|签收成功|已妥投|妥投成功/i.test(text))return permanentEventTime(row);
+  return '';
+}
+function appendPermanentBusinessTrackEvents(db,type,date,rows=[],now='') {
+  const existing=new Set();
+  try{
+    for(const row of db.prepare('SELECT shipmentCode,eventTime,eventCode FROM business_track_events WHERE businessType=? AND reportDate=?').all(type,date)){
+      existing.add([String(row.shipmentCode||'').toUpperCase(),String(row.eventTime||''),String(row.eventCode||'')].join('|'));
+    }
+  }catch{}
+  const insert=db.prepare('INSERT INTO business_track_events(businessType,shipmentCode,reportDate,eventTime,eventCode,rawJson,createdAt) VALUES(?,?,?,?,?,?,?)');
+  const podTimes=new Map();
+  let added=0;
+  for(const row of rows||[]){
+    const bill=billOf(row),eventTime=permanentEventTime(row),eventCode=permanentEventCode(row);
+    if(!bill||(!eventTime&&!eventCode))continue;
+    const key=[bill,eventTime,eventCode].join('|');
+    if(!existing.has(key)){existing.add(key);insert.run(type,bill,date,eventTime,eventCode,JSON.stringify(row),now);added++;}
+    const podTime=strictPodEventTime(row);
+    if(podTime&&(!podTimes.has(bill)||String(podTime)>String(podTimes.get(bill))))podTimes.set(bill,podTime);
+  }
+  if(podTimes.size){
+    const podStmt=db.prepare(`INSERT INTO business_pod_locks(businessType,shipmentCode,podTime,source,createdAt,updatedAt)
+      VALUES(?,?,?,'strict_track_event',?,?)
+      ON CONFLICT(businessType,shipmentCode) DO UPDATE SET
+        podTime=CASE WHEN excluded.podTime<>'' THEN excluded.podTime ELSE business_pod_locks.podTime END,
+        source=CASE WHEN excluded.podTime<>'' THEN excluded.source ELSE business_pod_locks.source END,
+        updatedAt=excluded.updatedAt`);
+    for(const [bill,podTime] of podTimes)podStmt.run(type,bill,podTime,now,now);
+  }
+  return{added,podTimes};
+}
+
 function mirrorBusinessTables(db, state, type, now) {
   const date = state.reportDate;
   if (date && state.dailyReportReady) {
@@ -490,7 +533,9 @@ function mirrorBusinessTables(db, state, type, now) {
     for (const conflict of state.recipientConflicts || []) conflictStmt.run(type, date, billOf(conflict), JSON.stringify(conflict.groups || []), JSON.stringify(conflict.rows || []), now, now);
   }
   const podStmt = db.prepare(`INSERT INTO business_pod_locks(businessType,shipmentCode,podTime,source,createdAt,updatedAt) VALUES(?,?,?,'state',?,?)
-    ON CONFLICT(businessType,shipmentCode) DO UPDATE SET podTime=excluded.podTime,updatedAt=excluded.updatedAt`);
+    ON CONFLICT(businessType,shipmentCode) DO UPDATE SET
+      podTime=CASE WHEN excluded.podTime<>'' THEN excluded.podTime ELSE business_pod_locks.podTime END,
+      updatedAt=excluded.updatedAt`);
   for (const bill of state.podLocks) podStmt.run(type, bill, '', now, now);
 
   const active = new Set(state.nextCarryBills.length ? state.nextCarryBills : state.carryBills);
@@ -517,10 +562,13 @@ function mirrorBusinessTables(db, state, type, now) {
   const shipmentStmt = db.prepare(`INSERT INTO business_shipment_tracks(businessType,shipmentCode,reportDate,shipmentStatus,statusText,apiStatus,rawJson,createdAt,updatedAt)
     VALUES(?,?,?,?,?,?,?,?,?)`);
   for (const row of state.shipmentTrackResults) shipmentStmt.run(type, billOf(row), date, String(row.shipmentStatus ?? row.statusCode ?? ''), row.statusText || row.shipmentStatusDesc || '', row.apiStatus || row.API状态 || 'success', JSON.stringify(row), now, now);
-  db.prepare('DELETE FROM business_track_events WHERE businessType=? AND reportDate=?').run(type, date);
-  const eventStmt = db.prepare('INSERT INTO business_track_events(businessType,shipmentCode,reportDate,eventTime,eventCode,rawJson,createdAt) VALUES(?,?,?,?,?,?,?)');
-  for (const row of state.trackEvents) eventStmt.run(type, billOf(row), date, row.eventTime || '', row.eventCode || '', JSON.stringify(row), now);
-  persistPendingDailyMembers(db, { businessType: type, reportDate: date, snapshotId: state.snapshotId || '', events: state.trackEvents, createdAt: now });
+  // V700 timing evidence is append-only: later checkpoints/finalization may add
+  // events but must never erase an earlier 60/70/Pending/80 lifecycle.
+  appendPermanentBusinessTrackEvents(db,type,date,state.trackEvents||[],now);
+  const persistedTrackEvents=rowsFromJson(db,
+    'SELECT rawJson FROM business_track_events WHERE businessType=? AND reportDate=? ORDER BY eventTime,id',
+    [type,date]);
+  persistPendingDailyMembers(db, { businessType: type, reportDate: date, snapshotId: state.snapshotId || '', events: persistedTrackEvents, createdAt: now });
   db.prepare('DELETE FROM business_exception_items WHERE businessType=? AND reportDate=?').run(type, date);
   const exceptionStmt = db.prepare(`INSERT INTO business_exception_items(businessType,shipmentCode,reportDate,exceptionType,exceptionDesc,reportTime,statusCode,fileId,rawJson,createdAt)
     VALUES(?,?,?,?,?,?,?,?,?,?)`);
