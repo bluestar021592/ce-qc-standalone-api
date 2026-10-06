@@ -299,6 +299,98 @@ function dedicatedWhppTimingRows(reportDate=''){
     }));
   }catch{return[]}
 }
+function snapshotBill(row={}){return String(row?.shipmentCode||row?.运单号||row?.waybill||'').trim().toUpperCase()}
+function snapshotPodTime(row={}){
+  row=row||{};
+  const raw=safeJson(row.rawJson);
+  for(const value of [
+    row.POD时间,row.podTime,row.podDate,row.podClosedAt,row.terminalObservedAt,row.latestEventTime,row.最后节点时间,
+    raw.POD时间,raw.podTime,raw.podDate,raw.podClosedAt,raw.terminalObservedAt,raw.latestEventTime,raw.最后节点时间
+  ]){if(normalizeDate(value))return String(value)}
+  return'';
+}
+function snapshotAttemptSets(tabs={},prefix=''){
+  const pick=key=>new Set(((tabs?.[prefix+key]?.rows)||[]).map(snapshotBill).filter(Boolean));
+  return{a1:pick('attempt1'),a2:pick('attempt2'),a3:pick('attempt3')};
+}
+function snapshotAttemptForBill(sets,bill,days=0){
+  if(sets?.a1?.has(bill))return 1;
+  if(sets?.a2?.has(bill))return 2;
+  if(sets?.a3?.has(bill))return 3;
+  return days>0?Math.max(1,Math.min(3,days)):0;
+}
+function snapshotEvidenceFromRow(row,reportDate,attempt=0){
+  const podTime=snapshotPodTime(row);
+  const explicitDays=n(row?.signingDays||row?.签收天数||safeJson(row?.rawJson).signingDays,0);
+  const days=explicitDays>0?explicitDays:naturalDays(reportDate,podTime);
+  if(days<=0)return null;
+  const finalAttempt=attempt>0?attempt:Math.max(1,Math.min(3,days));
+  return{
+    ok:true,reason:'',startTime:normalizeDate(reportDate),podTime:podTime||normalizeDate(reportDate),
+    days,attempt:finalAttempt,startMode:'REPORT_DATE_TO_POD_SNAPSHOT',
+    attemptSource:'COMPLETED_SNAPSHOT_DAY',evidenceSource:'completed_snapshot_pod_date'
+  };
+}
+function completedSnapshotTimingEvidence(reportDate,businessType,canonicalPodSet=new Set()){
+  const db=getDb(),date=normalizeDate(reportDate),result=new Map();
+  if(!date||!canonicalPodSet?.size)return result;
+  try{
+    if(businessType==='WHPP'){
+      const rows=db.prepare(`SELECT payloadJson FROM business_export_snapshots
+        WHERE businessType='WHPP' AND reportDate=? AND COALESCE(status,'VALID')='VALID'
+          AND COALESCE(reconciliationStatus,'COMPLETED')='COMPLETED'
+        ORDER BY createdAt DESC LIMIT 20`).all(date);
+      for(const item of rows){
+        const payload=safeJson(item.payloadJson),tabs=payload?.dashboard?.detailTabs||{};
+        const podRows=tabs?.pod?.rows||[];
+        const podBills=new Set(podRows.map(snapshotBill).filter(Boolean));
+        if([...canonicalPodSet].some(bill=>!podBills.has(bill)))continue;
+        const sets=snapshotAttemptSets(tabs,'');
+        for(const row of podRows){
+          const bill=snapshotBill(row);if(!canonicalPodSet.has(bill))continue;
+          const preliminaryDays=naturalDays(date,snapshotPodTime(row));
+          const evidence=snapshotEvidenceFromRow(row,date,snapshotAttemptForBill(sets,bill,preliminaryDays));
+          if(evidence)result.set(bill,evidence);
+        }
+        if(result.size)return result;
+      }
+      const truth=loadWhppCanonicalTruth(date);
+      for(const row of truth?.rows||[]){
+        const bill=snapshotBill(row);if(!canonicalPodSet.has(bill))continue;
+        const evidence=snapshotEvidenceFromRow(row,date,0);
+        if(evidence)result.set(bill,evidence);
+      }
+      return result;
+    }
+
+    if(!['SHOPEECN','SHOPEEVN'].includes(businessType))return result;
+    const group=businessType==='SHOPEECN'?'CN':'VN';
+    const rows=db.prepare(`SELECT payloadJson FROM business_export_snapshots
+      WHERE businessType='SHOPEE' AND reportDate=? AND COALESCE(status,'VALID')='VALID'
+        AND COALESCE(reconciliationStatus,'COMPLETED')='COMPLETED'
+      ORDER BY createdAt DESC LIMIT 20`).all(date);
+    for(const item of rows){
+      const payload=safeJson(item.payloadJson),tabs=payload?.view?.detailTabs||{};
+      const podRows=tabs?.[group+'_pod']?.rows||tabs?.byRecipientGroup?.[group]?.pod?.rows||[];
+      const podBills=new Set(podRows.map(snapshotBill).filter(Boolean));
+      if([...canonicalPodSet].some(bill=>!podBills.has(bill)))continue;
+      const sets={
+        a1:new Set((tabs?.[group+'_attempt1']?.rows||tabs?.byRecipientGroup?.[group]?.attempt1?.rows||[]).map(snapshotBill).filter(Boolean)),
+        a2:new Set((tabs?.[group+'_attempt2']?.rows||tabs?.byRecipientGroup?.[group]?.attempt2?.rows||[]).map(snapshotBill).filter(Boolean)),
+        a3:new Set((tabs?.[group+'_attempt3']?.rows||tabs?.byRecipientGroup?.[group]?.attempt3?.rows||[]).map(snapshotBill).filter(Boolean))
+      };
+      for(const row of podRows){
+        const bill=snapshotBill(row);if(!canonicalPodSet.has(bill))continue;
+        const preliminaryDays=naturalDays(date,snapshotPodTime(row));
+        const evidence=snapshotEvidenceFromRow(row,date,snapshotAttemptForBill(sets,bill,preliminaryDays));
+        if(evidence)result.set(bill,evidence);
+      }
+      if(result.size)return result;
+    }
+  }catch{}
+  return result;
+}
+
 function timingRows(snapshotId,reportDate,businessType) {
   if(!reportDate||!TIMING_TYPES.includes(businessType))return[];
   const whppTruth=businessType==='WHPP'?loadWhppCanonicalTruth(reportDate,snapshotId||''):null;
@@ -314,6 +406,7 @@ function timingRows(snapshotId,reportDate,businessType) {
     : membershipFinalRows(snapshotId,reportDate,businessType);
 
   const canonicalPodSet=new Set(selectedDatePodBills(businessType,reportDate,snapshotId));
+  const snapshotTiming=completedSnapshotTimingEvidence(reportDate,businessType,canonicalPodSet);
   const rowMap=new Map();
   for(const row of sourceRows||[]){
     const bill=String(row.shipmentCode||'').trim().toUpperCase();
@@ -360,11 +453,12 @@ function timingRows(snapshotId,reportDate,businessType) {
     const shipmentCode=String(row.shipmentCode||'').trim().toUpperCase();
     const direct=timingEvidence(events.get(shipmentCode)||[]);
     const strictLedger=!direct.ok?strictLedgerTiming(ledger.get(shipmentCode)||{}):null;
+    const snapshotFallback=!direct.ok&&!strictLedger?snapshotTiming.get(shipmentCode)||null:null;
     const ledgerRow=ledger.get(shipmentCode)||{};
     return {
       shipmentCode,region:String(row.regionCode||'').toUpperCase(),
       isPod:Boolean(canonicalPodSet.has(shipmentCode)||positivePodMembership(row,ledgerRow)),isReturned:isReturned(row),
-      evidence:direct.ok?{...direct,evidenceSource:(events.get(shipmentCode)||[]).some(x=>x.evidenceSource==='track_events')?'track_events':'business_track_events'}:(strictLedger||direct),
+      evidence:direct.ok?{...direct,evidenceSource:(events.get(shipmentCode)||[]).some(x=>x.evidenceSource==='track_events')?'track_events':'business_track_events'}:(strictLedger||snapshotFallback||direct),
       membershipSource:canonicalPodSet.has(shipmentCode)?'canonical_pod_snapshot':(Number(row.isPod||0)===1?'final_rows':(String(ledgerRow.terminalReason||'').toUpperCase()==='POD'?'qc_tracking_ledger':'raw_terminal_proof'))
     };
   });
@@ -390,10 +484,11 @@ async function timingForBatchWithArchive(batch,businessType,recoveredOverride=nu
     const direct=timingEvidence(events.get(shipmentCode)||[]);
     const ledgerRow=ledger.get(shipmentCode)||{};
     const strictLedger=!direct.ok?strictLedgerTiming(ledgerRow):null;
+    const savedFallback=!direct.ok&&!strictLedger&&row.evidence?.ok?row.evidence:null;
     return{
       ...row,
       isPod:Boolean(row.isPod||archivePod||positivePodMembership(row,ledgerRow)),
-      evidence:direct.ok?{...direct,evidenceSource:(events.get(shipmentCode)||[]).some(x=>x.evidenceSource==='historical_archive')?'historical_archive':(events.get(shipmentCode)||[]).some(x=>x.evidenceSource==='track_events')?'track_events':'business_track_events'}:(strictLedger||direct),
+      evidence:direct.ok?{...direct,evidenceSource:(events.get(shipmentCode)||[]).some(x=>x.evidenceSource==='historical_archive')?'historical_archive':(events.get(shipmentCode)||[]).some(x=>x.evidenceSource==='track_events')?'track_events':'business_track_events'}:(strictLedger||savedFallback||direct),
       membershipSource:archivePod?(recovered.podEvidenceByBill?.get?.(shipmentCode)?.source||'historical_archive'):(row.membershipSource||'current_truth')
     };
   });
