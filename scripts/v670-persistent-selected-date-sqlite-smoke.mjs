@@ -22,8 +22,10 @@ for(let i=1;i<=190;i++){
 }
 for(let i=1;i<=588;i++){
   const bill='V'+String(i).padStart(3,'0');
+  insertSource.run(date,'SHOPEEVN',bill);
   insertFinal.run('SHOPEE',bill,date,0,'VN',JSON.stringify({recipient_group:'VN',orderStatus:i<=545?'85':'',currentState:i<=545?'POD':'RETURN_COMPLETED'}));
 }
+insertFinal.run('SHOPEE','OLD-CARRY-POD',date,0,'VN',JSON.stringify({recipient_group:'VN',orderStatus:'85',currentState:'POD'}));
 db.prepare('INSERT INTO business_history_summary VALUES(?,?,?,?)')
   .run('WHPP',date,JSON.stringify({total:190,accounting:{total:190,balanced:true}}),'2026-07-01T02:21:00Z');
 
@@ -43,4 +45,4 @@ assert.equal(persistentWhppCompletionTruth(db,date).locked,true);
 insertSource.run(date,'WHPP','W191');
 assert.equal(persistentWhppCompletionTruth(db,date).locked,false);
 
-console.log('[V671] SQLite restart fixture passed · WHPP 190/166 · VN 588/545 from dashboard-equivalent raw POD semantics · stale same-date reimport fails closed');
+console.log('[V672] SQLite restart fixture passed · WHPP 190/166 · VN 588/545 · raw POD semantics · old carry POD excluded · stale same-date reimport fails closed');
