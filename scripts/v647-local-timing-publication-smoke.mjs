@@ -10,7 +10,7 @@ assert.match(summary,/const localTiming=Object\.fromEntries/);
 assert.match(summary,/blocking:false/);
 assert.match(js,/showWhppScan=business==='WHPP'&&waiting>0/);
 assert.match(js,/setProperty\('display',showWhppScan\?'inline-flex':'none','important'\)/);
-assert.match(html,/v625-shell\.js\?v=20261005-v6(?:4[7-9]|[5-9]\d)-1/);
-assert.match(html,/v625-shell\.css\?v=20261005-v6(?:4[7-9]|[5-9]\d)-1/);
+assert.match(html,/v625-shell\.js\?v=\d{8}-v6(?:4[7-9]|[5-9]\d)-1/);
+assert.match(html,/v625-shell\.css\?v=\d{8}-v6(?:4[7-9]|[5-9]\d)-1/);
 
 console.log('[V647] local timing publication bypasses archive gate + zero-wait WHPP control hidden');
