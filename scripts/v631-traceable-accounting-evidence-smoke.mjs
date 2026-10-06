@@ -31,14 +31,14 @@ assert.match(js,/data-timing-missing/,'missing-timing controls must bind');
 for(const value of ['CE','CEAF','TBKH','ALI1688','WHPP','SHOPEECN','SHOPEEVN'])assert.ok(html.includes(`<option value="${value}"`),`tracking selector missing ${value}`);
 assert.match(html,/id="v631AccountingMeta"/,'accounting audit UI missing');
 assert.match(html,/id="v631TimingMissingPanel"/,'timing missing evidence panel missing');
-assert.match(html,/v625-shell\\.js\\?v=\\d{8}-v6\\d{2}-1/,'V631+ JS cache bust missing');
-assert.match(html,/v625-shell\\.css\\?v=\\d{8}-v6\\d{2}-1/,'V631+ CSS cache bust missing');
+assert.match(html,/v625-shell\.js\?v=\d{8}-v6\d{2}-1/,'V631+ JS cache bust missing');
+assert.match(html,/v625-shell\.css\?v=\d{8}-v6\d{2}-1/,'V631+ CSS cache bust missing');
 
 const ids=[...html.matchAll(/\bid="([^"]+)"/g)].map(m=>m[1]);
 const dupes=[...new Set(ids.filter((id,i)=>ids.indexOf(id)!==i))];
 assert.deepEqual(dupes,[],'duplicate DOM ids: '+dupes.join(', '));
 
 
-const assetBuild=Number((html.match(/v625-shell\\.js\\?v=\\d{8}-v(6\\d{2})-1/)||[])[1]||0);
+const assetBuild=Number((html.match(/v625-shell\.js\?v=\d{8}-v(6\d{2})-1/)||[])[1]||0);
 assert.ok(assetBuild>=631,'asset cache build must not predate V631');
 console.log('[V631] traceable status accounting + local track evidence + strict timing provenance smoke passed');
