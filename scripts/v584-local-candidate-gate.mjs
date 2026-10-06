@@ -96,6 +96,7 @@ const TASKS=[
   ['node',['scripts/v691-v689-v690-gate-alignment-smoke.mjs']],
   ['node',['scripts/v700-persistent-timing-evidence-smoke.mjs']],
   ['node',['scripts/v711-shipment-status-60-80-81-smoke.mjs']],
+  ['node',['scripts/v712-live-shipment-status-pipeline-smoke.mjs']],
   ['node',['--test',
     'test/unified-import-v7.test.js',
     'test/unified-import-ceaf.test.js',
