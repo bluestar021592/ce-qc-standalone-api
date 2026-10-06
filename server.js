@@ -647,10 +647,14 @@ app.get('/api/unified-history', (req, res) => {
 
 app.get('/api/home-quality-summary', async (req, res) => {
   try {
-    res.json(await buildHomeQualitySummaryWithArchive({
-      reportDate:String(req.query.reportDate||''),
-      snapshotId:String(req.query.snapshotId||'')
-    }));
+    const reportDate=String(req.query.reportDate||'');
+    const snapshotId=String(req.query.snapshotId||'');
+    const payload=await buildHomeQualitySummaryWithArchive({reportDate,snapshotId});
+    try{
+      const diag=diagnoseSelectedDateTiming(payload?.reportDate||reportDate,snapshotId);
+      console.log('[CE-QC][V663_TIMING_DIAG]',JSON.stringify(diag));
+    }catch{}
+    res.json(payload);
   } catch (error) {
     console.warn('[CE-QC][HOME_SUMMARY_ARCHIVE_FALLBACK]',error?.message||String(error));
     try{
