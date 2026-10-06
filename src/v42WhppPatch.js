@@ -11,6 +11,7 @@ import { runWhppPipeline } from './whppPipeline.js';
 import { buildWhppDashboard } from './whppReporting.js';
 import { WHPP, loadWhppState, saveWhppState, saveWhppDailyImport, finalizeWhppState, listWhppHistory, loadWhppSnapshot } from './whppStore.js';
 import { getDb, nowIso } from './db.js';
+import { persistentWhppCompletionTruth } from './selectedDatePersistentTruth.js';
 
 const PATCH_ID = '2026-09-01-v399-identical-finalized-whpp-reupload-v1';
 const IMPORT_RULESET_VERSION = '2026-08-13-v77-ceaf-whpp-source-authority';
@@ -639,7 +640,25 @@ express.application.listen = function v42WhppListen(...args) {
     this.get('/api/whpp/history', (req, res) => res.json({ ok: true, businessType: WHPP, rows: listWhppHistory(req.query.limit) }));
     this.get('/api/whpp/snapshot/:id', (req, res) => { const payload = loadWhppSnapshot(req.params.id); return payload ? res.json({ ok: true, ...payload }) : res.status(404).json({ ok: false, error: 'WHPP快照不存在' }); });
     this.get('/api/whpp/metric-detail', whppDetail);
-    this.get('/api/whpp/progress', (req, res) => { const state = loadWhppState(); res.json({ ok: true, reportDate: state.reportDate, processing: state.processing, summary: state.lastRunSummary, log: (state.progressLog || []).slice(-50) }); });
+    this.get('/api/whpp/progress', (req, res) => {
+      const state=loadWhppState();
+      const requestedDate=normalizeDate(req.query?.reportDate||state.reportDate||'');
+      const currentDate=normalizeDate(state.reportDate||'');
+      const truth=persistentWhppCompletionTruth(getDb(),requestedDate);
+      const locked=Boolean(truth.locked);
+      const current=requestedDate&&requestedDate===currentDate;
+      const processing=locked
+        ? {...(current?state.processing:{}),running:false,paused:false,phase:'完成',error:''}
+        : current?(state.processing||{}):{running:false,paused:false,phase:'待处理',error:''};
+      const runtime=locked
+        ? {active:false,reportDate:requestedDate,phase:'完成',lastMessage:'WHPP已完成（持久化SQLite终态）',outcome:'COMPLETED',finishedAt:truth.finalizedAt||''}
+        : {active:Boolean(current&&state.processing?.running),reportDate:requestedDate,phase:processing.phase||'',lastMessage:processing.phase||'',outcome:'',finishedAt:''};
+      res.json({
+        ok:true,patchId:PATCH_ID,reportDate:requestedDate||currentDate,processing,
+        runtime,completionLock:{...truth,locked,finalized:locked,reportDate:requestedDate||currentDate},
+        summary:current?state.lastRunSummary:null,log:current?(state.progressLog||[]).slice(-50):[]
+      });
+    });
     this.post('/api/whpp/run/start', runWhpp);
     this.post('/api/whpp/run/resume', runWhpp);
     this.post('/api/whpp/run/pause', (req, res) => { const state = loadWhppState(); state.processing = { ...(state.processing || {}), paused: true }; saveWhppState(state); res.json({ ok: true, reportDate: state.reportDate, processing: state.processing }); });
