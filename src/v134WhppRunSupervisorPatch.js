@@ -55,7 +55,7 @@ export function inspectV378WhppCompletionLock(reportDate='',state=null,db=getDb(
   const snapshotFinalized=Boolean(snapshotRow?.snapshotId);
   const persistent=persistentWhppCompletionTruth(db,date);
   const membershipSafe=!persistent.sourceCount||persistent.membershipMatches;
-  const locked=membershipSafe&&(summaryFinalized||snapshotFinalized||persistent.locked);
+  const locked=Boolean(persistent.unifiedWhppCompleted)||membershipSafe&&(summaryFinalized||snapshotFinalized||persistent.locked);
   return{
     locked,finalized:locked,sourceMatches,reportDate:date,total:Number(daily?.totalCount||persistent.sourceCount||0),
     sourceSnapshotId,stateSourceSnapshotId,
