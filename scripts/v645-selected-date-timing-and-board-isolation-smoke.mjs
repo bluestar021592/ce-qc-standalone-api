@@ -18,7 +18,7 @@ assert.match(repair,/queryTrackBatchWithFallback/,'repair must use bounded CE tr
 assert.match(repair,/splitTrackBatches/,'repair must batch track requests');
 assert.match(repair,/business_track_events/,'repaired track evidence must persist locally');
 assert.match(summary,/requestSelectedDateTimingRepair\(type,batch\.reportDate,batch\.snapshotId\)/,'home selected date must queue exact-date timing repair');
-assert.match(html,/v625-shell\\.js\\?v=\\d{8}-v6(?:4[5-9]|[5-9]\\d)-1/,'V645+ JS revision missing');
-assert.match(html,/v625-shell\\.css\\?v=\\d{8}-v6(?:4[5-9]|[5-9]\\d)-1/,'V645+ CSS revision missing');
+assert.match(html,/v625-shell\.js\?v=\d{8}-v6(?:4[5-9]|[5-9]\d)-1/,'V645+ JS revision missing');
+assert.match(html,/v625-shell\.css\?v=\d{8}-v6(?:4[5-9]|[5-9]\d)-1/,'V645+ CSS revision missing');
 
 console.log('[V645] server-side WHPP isolation + selected-date POD timing repair smoke passed');
