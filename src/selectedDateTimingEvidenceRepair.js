@@ -39,6 +39,15 @@ function patch(type,date,snapshotId='',value={}){
 function unique(values=[]){return [...new Set(values.map(v=>String(v||'').trim().toUpperCase()).filter(Boolean))].sort();}
 
 function whppPodBills(date){
+  const db=getDb();
+  try{
+    const rows=db.prepare(`SELECT UPPER(TRIM(shipmentCode)) shipmentCode
+      FROM business_final_rows
+      WHERE businessType='WHPP' AND reportDate=? AND COALESCE(isPod,0)=1
+      GROUP BY UPPER(TRIM(shipmentCode)) ORDER BY shipmentCode`).all(date);
+    const bills=unique(rows.map(row=>row.shipmentCode));
+    if(bills.length)return bills;
+  }catch{}
   const out=[];
   try{
     const state=loadWhppState();
@@ -75,6 +84,16 @@ function tbkhPodBills(date,snapshotId=''){
 }
 function shopeePodBills(type,date,snapshotId=''){
   const wantedGroup=type==='SHOPEECN'?'CN':type==='SHOPEEVN'?'VN':'';
+  const db=getDb();
+  try{
+    const rows=db.prepare(`SELECT UPPER(TRIM(shipmentCode)) shipmentCode
+      FROM business_final_rows
+      WHERE businessType='SHOPEE' AND reportDate=? AND COALESCE(isPod,0)=1
+        AND UPPER(TRIM(COALESCE(recipient_group,'')))=?
+      GROUP BY UPPER(TRIM(shipmentCode)) ORDER BY shipmentCode`).all(date,wantedGroup);
+    const bills=unique(rows.map(row=>row.shipmentCode));
+    if(bills.length)return bills;
+  }catch{}
   try{
     const state=loadBusinessState('SHOPEE');
     if(String(state?.reportDate||'').slice(0,10)===date){
@@ -84,7 +103,7 @@ function shopeePodBills(type,date,snapshotId=''){
       if(bills.length)return unique(bills);
     }
   }catch{}
-  const db=getDb(),params=[storageType(type),storageType(type),storageType(type)];
+  const params=[storageType(type),storageType(type),storageType(type)];
   let snapshot='';
   if(snapshotId){snapshot=' AND u.snapshotId=?';}
   try{
@@ -93,7 +112,7 @@ function shopeePodBills(type,date,snapshotId=''){
       LEFT JOIN business_final_rows f ON f.businessType=? AND f.shipmentCode=u.shipmentCode AND f.reportDate=u.reportDate
       LEFT JOIN business_scan_results s ON s.businessType=? AND s.shipmentCode=u.shipmentCode AND s.reportDate=u.reportDate
       LEFT JOIN business_pod_locks p ON p.businessType=? AND p.shipmentCode=u.shipmentCode
-      LEFT JOIN shipment_current_state c ON c.shipmentCode=u.shipmentCode AND c.reportDate=u.reportDate AND UPPER(TRIM(c.businessType)) IN (UPPER(TRIM(u.businessType)),'SHOPEE')
+      LEFT JOIN shipment_current_state c ON c.shipmentCode=u.shipmentCode AND c.reportDate=u.reportDate
       WHERE u.reportDate=? AND UPPER(TRIM(u.businessType))=?${snapshot}
         AND (COALESCE(f.isPod,0)=1 OR UPPER(COALESCE(c.state,'')) IN ('POD','DELIVERED','SIGNED') OR COALESCE(s.isPod,0)=1 OR TRIM(COALESCE(s.orderStatus,''))='85' OR p.shipmentCode IS NOT NULL)
       GROUP BY UPPER(TRIM(u.shipmentCode)) ORDER BY shipmentCode`).all(...params,date,type,...(snapshotId?[snapshotId]:[]));
