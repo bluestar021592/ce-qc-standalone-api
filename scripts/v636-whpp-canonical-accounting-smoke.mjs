@@ -15,10 +15,10 @@ assert.match(js,/else unprocessed\.push\(row\)/,'unclassified WHPP remainder mus
 assert.match(js,/business==='WHPP'\?buildWhppCanonicalAccounting\(state,m\):buildBusinessAccounting\(state,m\)/,'WHPP must bypass generic frontend reclassification');
 assert.match(js,/renderDonut\(\{total:a\.total,delivery:counts\.delivery\|\|0,pod:counts\.pod\|\|0/,'WHPP donut must use same canonical accounting');
 assert.match(html,/id="kpiUnprocessedCard"/,'WHPP explicit remainder card missing');
-assert.match(html,/v625-shell\\.js\\?v=\\d{8}-v6\\d{2}-1/,'V636+ JS cache bust missing');
-assert.match(html,/v625-shell\\.css\\?v=\\d{8}-v6\\d{2}-1/,'V636+ CSS cache bust missing');
+assert.match(html,/v625-shell\.js\?v=\d{8}-v6\d{2}-1/,'V636+ JS cache bust missing');
+assert.match(html,/v625-shell\.css\?v=\d{8}-v6\d{2}-1/,'V636+ CSS cache bust missing');
 
 
-const assetBuild=Number((html.match(/v625-shell\\.js\\?v=\\d{8}-v(6\\d{2})-1/)||[])[1]||0);
+const assetBuild=Number((html.match(/v625-shell\.js\?v=\d{8}-v(6\d{2})-1/)||[])[1]||0);
 assert.ok(assetBuild>=636,'asset cache build must not predate V636');
 console.log('[V636] WHPP backend canonical buckets drive KPI, drilldown, donut, and conservation');
