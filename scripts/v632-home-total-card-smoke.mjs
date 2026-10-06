@@ -25,14 +25,14 @@ assert.match(js,/grand!==sevenBusinessTotal/,'total card must visibly flag conse
 assert.match(css,/grid-template-columns:repeat\(8,minmax\(128px,1fr\)\)/,'desktop home overview must support total + seven business cards');
 assert.match(css,/\.tone-total/,'total card visual tone missing');
 assert.match(css,/\.v632-total-mismatch/,'total-card mismatch visual guard missing');
-assert.match(html,/v625-shell\\.js\\?v=\\d{8}-v6\\d{2}-1/,'V632+ JS cache bust missing');
-assert.match(html,/v625-shell\\.css\\?v=\\d{8}-v6\\d{2}-1/,'V632+ CSS cache bust missing');
+assert.match(html,/v625-shell\.js\?v=\d{8}-v6\d{2}-1/,'V632+ JS cache bust missing');
+assert.match(html,/v625-shell\.css\?v=\d{8}-v6\d{2}-1/,'V632+ CSS cache bust missing');
 
 const ids=[...html.matchAll(/\bid="([^"]+)"/g)].map(m=>m[1]);
 const dupes=[...new Set(ids.filter((id,i)=>ids.indexOf(id)!==i))];
 assert.deepEqual(dupes,[],'duplicate DOM ids: '+dupes.join(', '));
 
 
-const assetBuild=Number((html.match(/v625-shell\\.js\\?v=\\d{8}-v(6\\d{2})-1/)||[])[1]||0);
+const assetBuild=Number((html.match(/v625-shell\.js\?v=\d{8}-v(6\d{2})-1/)||[])[1]||0);
 assert.ok(assetBuild>=632,'asset cache build must not predate V632');
 console.log('[V632] home total-card UI + seven-business conservation gate passed');
