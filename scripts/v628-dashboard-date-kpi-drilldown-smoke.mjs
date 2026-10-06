@@ -31,14 +31,14 @@ for(const kind of ['total','delivery','pod','pending','abnormal']){
 for(const id of ['v628KpiDetailPanel','v628KpiDetailTitle','v628KpiDetailMeta','v628KpiDetailRows']){
   assert.ok(html.includes(`id="${id}"`),`missing KPI detail UI ${id}`);
 }
-assert.match(html,/v625-shell\\.js\\?v=\\d{8}-v6\\d{2}-1/,'V628+ JS cache bust missing');
-assert.match(html,/v625-shell\\.css\\?v=\\d{8}-v6\\d{2}-1/,'V628+ CSS cache bust missing');
+assert.match(html,/v625-shell\.js\?v=\d{8}-v6\d{2}-1/,'V628+ JS cache bust missing');
+assert.match(html,/v625-shell\.css\?v=\d{8}-v6\d{2}-1/,'V628+ CSS cache bust missing');
 
 const ids=[...html.matchAll(/\bid="([^"]+)"/g)].map(m=>m[1]);
 const dupes=[...new Set(ids.filter((id,i)=>ids.indexOf(id)!==i))];
 assert.deepEqual(dupes,[],'duplicate DOM ids: '+dupes.join(', '));
 
 
-const assetBuild=Number((html.match(/v625-shell\\.js\\?v=\\d{8}-v(6\\d{2})-1/)||[])[1]||0);
+const assetBuild=Number((html.match(/v625-shell\.js\?v=\d{8}-v(6\d{2})-1/)||[])[1]||0);
 assert.ok(assetBuild>=628,'asset cache build must not predate V628');
 console.log('[V628] dashboard date authority + latest non-empty fallback + business KPI drilldown smoke passed');
