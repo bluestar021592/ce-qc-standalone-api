@@ -40,39 +40,11 @@ function unique(values=[]){return [...new Set(values.map(v=>String(v||'').trim()
 
 function whppPodBills(date){
   try{
-    const history=listWhppHistory(500);
-    const hit=history.find(item=>String(item.reportDate||'').slice(0,10)===date);
-    const snapshot=hit?.snapshotId?loadWhppSnapshot(hit.snapshotId):null;
-    const rows=snapshot?.dashboard?.detailTabs?.pod?.rows||[];
-    const bills=unique(rows.map(billOf));
-    if(bills.length)return bills;
-  }catch{}
-  const db=getDb();
-  try{
-    const rows=db.prepare(`SELECT UPPER(TRIM(shipmentCode)) shipmentCode
-      FROM business_final_rows
-      WHERE businessType='WHPP' AND reportDate=? AND COALESCE(isPod,0)=1
-      GROUP BY UPPER(TRIM(shipmentCode)) ORDER BY shipmentCode`).all(date);
-    const bills=unique(rows.map(row=>row.shipmentCode));
-    if(bills.length)return bills;
-  }catch{}
-  const out=[];
-  try{
     const state=loadWhppState();
-    if(String(state?.reportDate||'').slice(0,10)===date){
-      const dashboard=buildWhppDashboard(state);
-      for(const row of dashboard?.detailTabs?.pod?.rows||[]) out.push(billOf(row));
-      if(out.length)return unique(out);
-    }
-  }catch{}
-  try{
-    const truth=loadWhppCanonicalTruth(date);
-    for(const row of truth.rows||[]){
-      const pod=Boolean(row?.truthEvidence?.pod||Number(row?.isPod||0)===1||row?.是否POD==='是'||row?.POD状态==='POD'||['POD','DELIVERED','SIGNED'].includes(String(row?.currentState||'').toUpperCase()));
-      if(pod)out.push(billOf(row));
-    }
-  }catch{}
-  return unique(out);
+    if(String(state?.reportDate||'').slice(0,10)!==date)return[];
+    const dashboard=buildWhppDashboard(state);
+    return unique((dashboard?.detailTabs?.pod?.rows||[]).map(billOf));
+  }catch{return[]}
 }
 function tbkhPodBills(date,snapshotId=''){
   const db=getDb(),params=[];
@@ -90,55 +62,24 @@ function tbkhPodBills(date,snapshotId=''){
     return unique(rows.map(r=>r.shipmentCode));
   }catch{return[]}
 }
-function shopeePodBills(type,date,snapshotId=''){
-  const wantedGroup=type==='SHOPEECN'?'CN':type==='SHOPEEVN'?'VN':'';
-  try{
-    const snapshot=getBusinessSnapshot('SHOPEE',date);
-    const rows=snapshot?.view?.detailTabs?.[wantedGroup+'_pod']?.rows
-      || snapshot?.view?.detailTabs?.byRecipientGroup?.[wantedGroup]?.pod?.rows
-      || [];
-    const bills=unique(rows.map(billOf));
-    if(bills.length)return bills;
-  }catch{}
-  const db=getDb();
-  try{
-    const rows=db.prepare(`SELECT UPPER(TRIM(shipmentCode)) shipmentCode
-      FROM business_final_rows
-      WHERE businessType='SHOPEE' AND reportDate=? AND COALESCE(isPod,0)=1
-        AND UPPER(TRIM(COALESCE(recipient_group,'')))=?
-      GROUP BY UPPER(TRIM(shipmentCode)) ORDER BY shipmentCode`).all(date,wantedGroup);
-    const bills=unique(rows.map(row=>row.shipmentCode));
-    if(bills.length)return bills;
-  }catch{}
+function shopeePodBills(type,date){
+  const wantedGroup=type==='SHOPEECN'?'CN':'VN';
   try{
     const state=loadBusinessState('SHOPEE');
-    if(String(state?.reportDate||'').slice(0,10)===date){
-      const dashboard=buildShopeeDashboard(state);
-      const rows=dashboard?.detailTabs?.pod?.rows||[];
-      const bills=rows.filter(row=>!wantedGroup||recipientGroupOf(row)===wantedGroup).map(billOf);
-      if(bills.length)return unique(bills);
-    }
-  }catch{}
-  const params=[storageType(type),storageType(type),storageType(type)];
-  let snapshotClause='';
-  if(snapshotId){snapshotClause=' AND u.snapshotId=?';}
-  try{
-    const rows=db.prepare(`SELECT UPPER(TRIM(u.shipmentCode)) shipmentCode
-      FROM unified_import_rows u
-      LEFT JOIN business_final_rows f ON f.businessType=? AND f.shipmentCode=u.shipmentCode AND f.reportDate=u.reportDate
-      LEFT JOIN business_scan_results s ON s.businessType=? AND s.shipmentCode=u.shipmentCode AND s.reportDate=u.reportDate
-      LEFT JOIN business_pod_locks p ON p.businessType=? AND p.shipmentCode=u.shipmentCode
-      LEFT JOIN shipment_current_state c ON c.shipmentCode=u.shipmentCode AND c.reportDate=u.reportDate
-      WHERE u.reportDate=? AND UPPER(TRIM(u.businessType))=?${snapshotClause}
-        AND (COALESCE(f.isPod,0)=1 OR UPPER(COALESCE(c.state,'')) IN ('POD','DELIVERED','SIGNED') OR COALESCE(s.isPod,0)=1 OR TRIM(COALESCE(s.orderStatus,''))='85' OR p.shipmentCode IS NOT NULL)
-      GROUP BY UPPER(TRIM(u.shipmentCode)) ORDER BY shipmentCode`).all(...params,date,type,...(snapshotId?[snapshotId]:[]));
-    return unique(rows.map(r=>r.shipmentCode));
+    if(String(state?.reportDate||'').slice(0,10)!==date)return[];
+    const dashboard=buildShopeeDashboard(state);
+    const rows=dashboard?.detailTabs?.[wantedGroup+'_pod']?.rows
+      || dashboard?.detailTabs?.byRecipientGroup?.[wantedGroup]?.pod?.rows
+      || [];
+    return unique(rows.map(billOf));
   }catch{return[]}
 }
 export function selectedDatePodBills(type,date,snapshotId=''){
-  if(type==='WHPP')return whppPodBills(date);
-  if(type==='TBKH')return tbkhPodBills(date,snapshotId);
-  return shopeePodBills(type,date,snapshotId);
+  const t=typeKey(type),d=dateKey(date);
+  if(!TYPES.has(t)||!d)return[];
+  if(t==='WHPP')return whppPodBills(d);
+  if(t==='TBKH')return tbkhPodBills(d,snapshotId);
+  return shopeePodBills(t,d);
 }
 function groupRows(rows=[],fallbackBills=[]){
   const map=new Map();
