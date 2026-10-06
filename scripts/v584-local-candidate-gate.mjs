@@ -77,6 +77,7 @@ const TASKS=[
   ['node',['scripts/v663-whpp-completion-projection-timing-diag-smoke.mjs']],
   ['node',['scripts/v664-v645-gate-alignment-smoke.mjs']],
   ['node',['scripts/v668-selected-date-truth-smoke.mjs']],
+  ['node',['scripts/v670-persistent-selected-date-sqlite-smoke.mjs']],
   ['node',['--test',
     'test/unified-import-v7.test.js',
     'test/unified-import-ceaf.test.js',
