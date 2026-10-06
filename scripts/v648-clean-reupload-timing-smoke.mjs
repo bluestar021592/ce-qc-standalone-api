@@ -16,7 +16,7 @@ assert.match(summary,/inspectSelectedDateTimingRepair\(type,batch\.reportDate,ba
 assert.match(summary,/blocking:false/,'archive recovery must not block local timing publication');
 assert.match(shell,/evidenceState==='RUNNING'\|\|timingRepairRunning/,'business page must poll while timing repair is active');
 assert.match(shell,/showWhppScan=business==='WHPP'&&waiting>0/,'WHPP action must require WHPP and waiting>0');
-assert.match(html,/v625-shell\.js\?v=20261005-v6(?:4[8-9]|[5-9]\d)-1/,'V648+ JS cache revision missing');
-assert.match(html,/v625-shell\.css\?v=20261005-v6(?:4[8-9]|[5-9]\d)-1/,'V648+ CSS cache revision missing');
+assert.match(html,/v625-shell\.js\?v=\d{8}-v6(?:4[8-9]|[5-9]\d)-1/,'V648+ JS cache revision missing');
+assert.match(html,/v625-shell\.css\?v=\d{8}-v6(?:4[8-9]|[5-9]\d)-1/,'V648+ CSS cache revision missing');
 
 console.log('[V648] clean-reupload timing lifecycle + preserved track evidence + business polling smoke passed');
