@@ -72,6 +72,7 @@ const TASKS=[
   ['node',['scripts/v658-dashboard-pod-membership-smoke.mjs']],
   ['node',['scripts/v659-restart-proof-completion-pod-smoke.mjs']],
   ['node',['scripts/v660-immutable-snapshot-truth-smoke.mjs']],
+  ['node',['scripts/v661-canonical-pod-firstclass-timing-smoke.mjs']],
   ['node',['--test',
     'test/unified-import-v7.test.js',
     'test/unified-import-ceaf.test.js',
