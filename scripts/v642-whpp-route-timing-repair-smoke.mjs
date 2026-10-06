@@ -15,9 +15,11 @@ assert.doesNotMatch(v137,/if\(String\(req\.params\?\.businessType\|\|''\)\.toUpp
 assert.match(server,/requestedType === 'WHPP'[\s\S]*loadWhppCanonicalTruth/,'current server owner must serve WHPP canonical truth');
 assert.match(server,/canonicalTruthEvidence/,'WHPP current state must expose canonical evidence');
 
-assert.match(js,/const scanStage=completeFamilies>=3\?'完成'/,'completed families must close scan stage');
-assert.match(js,/const trackStage=completeFamilies>=3\?'完成'/,'completed families must close track stage');
-assert.match(js,/btn\.hidden=!\(business==='WHPP'&&waiting>0\)/,'finished WHPP scan action must hide');
+assert.match(js,/const allComplete=completeFamilies===3/,'completed-family owner must derive one exact allComplete flag');
+assert.match(js,/const scanStage=allComplete\?'完成'/,'completed families must close scan stage');
+assert.match(js,/const trackStage=allComplete\?'完成'/,'completed families must close track stage');
+assert.match(js,/const showWhppScan=business==='WHPP'&&waiting>0/,'WHPP pending scan visibility must depend on actual waiting members');
+assert.match(js,/btn\.hidden=!showWhppScan/,'finished WHPP scan action must hide');
 
 assert.match(repair,/queryTrackBatchWithFallback/,'WHPP signing repair must use bounded track query');
 assert.match(repair,/splitTrackBatches/,'WHPP signing repair must use 50-ticket track batches');
@@ -29,7 +31,7 @@ assert.match(home,/requestV328EvidenceRepair/,'TBKH and Shopee signing evidence 
 assert.match(home,/requestWhppSigningEvidenceRepair/,'WHPP signing evidence repair must be queued');
 assert.match(js,/timingRepairRunning/,'browser must keep polling while timing repair runs');
 
-assert.match(html,/v625-shell\.js\?v=20261005-v(?:642|643)-1/,'V642 JS cache bust missing');
-assert.match(html,/v625-shell\.css\?v=20261005-v(?:642|643)-1/,'V642 CSS cache bust missing');
+assert.match(html,/v625-shell\.js\?v=\d{8}-v6(?:4[2-9]|[5-9]\d)-1/,'V642+ JS cache bust missing');
+assert.match(html,/v625-shell\.css\?v=\d{8}-v6(?:4[2-9]|[5-9]\d)-1/,'V642+ CSS cache bust missing');
 
 console.log('[V642] canonical WHPP route + complete live stages + POD signing evidence repair smoke passed');
