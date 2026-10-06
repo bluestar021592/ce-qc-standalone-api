@@ -83,6 +83,7 @@ const TASKS=[
   ['node',['scripts/v677-whpp-dual-route-convergence-smoke.mjs']],
   ['node',['scripts/v678-timing-cache-denominator-guard-smoke.mjs']],
   ['node',['scripts/v679-july1-acceptance-contract-smoke.mjs']],
+  ['node',['scripts/v681-selected-date-final-acceptance-smoke.mjs']],
   ['node',['--test',
     'test/unified-import-v7.test.js',
     'test/unified-import-ceaf.test.js',
