@@ -11,9 +11,16 @@ function persistedGroup(row={}){
   const raw=safeJson(row.rawJson,{});
   return String(row.recipient_group||raw.recipient_group||raw.recipientGroup||'').trim().toUpperCase();
 }
+function latestValidBatchId(db,date){
+  try{return String(db.prepare("SELECT batchId FROM unified_import_batches WHERE reportDate=? AND status='VALID' ORDER BY createdAt DESC,rowid DESC LIMIT 1").get(date)?.batchId||'')}
+  catch{return''}
+}
 function sourceBills(db,businessType,date){
-  try{return new Set(db.prepare("SELECT UPPER(TRIM(shipmentCode)) shipmentCode FROM unified_import_rows WHERE reportDate=? AND UPPER(TRIM(businessType))=? GROUP BY UPPER(TRIM(shipmentCode))").all(date,businessType).map(row=>String(row.shipmentCode||'').trim().toUpperCase()).filter(Boolean))}
-  catch{return new Set()}
+  try{
+    const batchId=latestValidBatchId(db,date);
+    if(!batchId)return new Set();
+    return new Set(db.prepare("SELECT UPPER(TRIM(shipmentCode)) shipmentCode FROM unified_import_rows WHERE batchId=? AND reportDate=? AND UPPER(TRIM(businessType))=? GROUP BY UPPER(TRIM(shipmentCode))").all(batchId,date,businessType).map(row=>String(row.shipmentCode||'').trim().toUpperCase()).filter(Boolean));
+  }catch{return new Set()}
 }
 
 export function persistentSelectedDatePodTruth(db,businessType='',reportDate=''){
@@ -58,7 +65,7 @@ export function persistentWhppCompletionTruth(db,reportDate=''){
         AND COALESCE(reconciliationStatus,'COMPLETED')='COMPLETED'
       ORDER BY createdAt DESC LIMIT 1`).get(date)||null}catch{}
   try{finalCount=Number(db.prepare("SELECT COUNT(DISTINCT UPPER(TRIM(shipmentCode))) count FROM business_final_rows WHERE businessType='WHPP' AND reportDate=?").get(date)?.count||0)}catch{}
-  try{sourceCount=Number(db.prepare("SELECT COUNT(DISTINCT UPPER(TRIM(shipmentCode))) count FROM unified_import_rows WHERE reportDate=? AND UPPER(TRIM(businessType))='WHPP'").get(date)?.count||0)}catch{}
+  try{const batchId=latestValidBatchId(db,date);sourceCount=batchId?Number(db.prepare("SELECT COUNT(DISTINCT UPPER(TRIM(shipmentCode))) count FROM unified_import_rows WHERE batchId=? AND reportDate=? AND UPPER(TRIM(businessType))='WHPP'").get(batchId,date)?.count||0):0}catch{}
 
   const dailySummary=safeJson(daily?.summaryJson,{});
   const historySummary=safeJson(history?.summaryJson,{});
