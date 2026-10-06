@@ -214,15 +214,19 @@ function familyProgressLabel(value={}){
 }
 async function fetchLiveProgress(reportDate=''){
   const date=reportDate||v626LatestImport?.reportDate||'';
-  const [ccslR,shopeeR,whppR]=await Promise.allSettled([
+  const [ccslR,shopeeR,whppR,truthR]=await Promise.allSettled([
     json('/api/v33/run-progress?businessType=CCSL'+(date?'&reportDate='+encodeURIComponent(date):''),7000),
     json('/api/v33/run-progress?businessType=SHOPEE'+(date?'&reportDate='+encodeURIComponent(date):''),7000),
-    json('/api/whpp/progress'+(date?'?reportDate='+encodeURIComponent(date):''),7000)
+    json('/api/whpp/progress'+(date?'?reportDate='+encodeURIComponent(date):''),7000),
+    date?json('/api/selected-date-truth?reportDate='+encodeURIComponent(date),7000):Promise.resolve({})
   ]);
   const ccsl=ccslR.status==='fulfilled'?ccslR.value:{};
   const shopee=shopeeR.status==='fulfilled'?shopeeR.value:{};
   const whppPayload=whppR.status==='fulfilled'?whppR.value:{};
-  const whpp={...(whppPayload.runtime||{}),summary:whppPayload.summary||{},log:whppPayload.log||[],completionLock:whppPayload.completionLock||{},active:Boolean(whppPayload.runtime?.active),complete:Boolean(whppPayload.completionLock?.locked)||familyComplete(whppPayload.runtime||{}),outcome:whppPayload.completionLock?.locked?'COMPLETED':String(whppPayload.runtime?.outcome||'')};
+  const truth=truthR.status==='fulfilled'?truthR.value:{};
+  const truthLocked=Boolean(truth?.whppCompletion?.locked);
+  const whppLock=truthLocked?truth.whppCompletion:(whppPayload.completionLock||{});
+  const whpp={...(whppPayload.runtime||{}),summary:whppPayload.summary||{},log:whppPayload.log||[],completionLock:whppLock,active:Boolean(whppPayload.runtime?.active)&&!truthLocked,complete:truthLocked||Boolean(whppPayload.completionLock?.locked)||familyComplete(whppPayload.runtime||{}),outcome:(truthLocked||whppPayload.completionLock?.locked)?'COMPLETED':String(whppPayload.runtime?.outcome||''),phase:truthLocked?'完成':String(whppPayload.runtime?.phase||'')};
   return{ccsl,shopee,whpp,reportDate:date};
 }
 function renderLiveProgress(bundle={}){
