@@ -1,6 +1,17 @@
 const dateKey=v=>{const s=String(v||'').trim().slice(0,10);return /^\d{4}-\d{2}-\d{2}$/.test(s)?s:'';};
 const safeJson=(v,fallback={})=>{try{return v&&typeof v==='object'?v:(JSON.parse(String(v||''))||fallback)}catch{return fallback}};
 
+function persistedPod(row={}){
+  if(Number(row.isPod||0)===1)return true;
+  const raw=safeJson(row.rawJson,{});
+  const state=String(raw.currentState||raw.scanNormalizedState||raw.POD状态||'').trim().toUpperCase();
+  return state==='POD'||String(raw.orderStatus||'').trim()==='85'||raw.是否POD==='是';
+}
+function persistedGroup(row={}){
+  const raw=safeJson(row.rawJson,{});
+  return String(row.recipient_group||raw.recipient_group||raw.recipientGroup||'').trim().toUpperCase();
+}
+
 export function persistentSelectedDatePodBills(db,businessType='',reportDate=''){
   const type=String(businessType||'').trim().toUpperCase(),date=dateKey(reportDate);
   if(!date)return[];
@@ -10,14 +21,19 @@ export function persistentSelectedDatePodBills(db,businessType='',reportDate='')
   else if(type==='SHOPEEVN'){owner='SHOPEE';group='VN';}
   else return[];
   try{
-    const sql=`SELECT UPPER(TRIM(shipmentCode)) shipmentCode
+    const rows=db.prepare(`SELECT shipmentCode,isPod,recipient_group,rawJson
       FROM business_final_rows
-      WHERE businessType=? AND reportDate=? AND COALESCE(isPod,0)=1
-      ${group?"AND UPPER(TRIM(COALESCE(recipient_group,'')))=?":''}
-      GROUP BY UPPER(TRIM(shipmentCode))
-      ORDER BY shipmentCode`;
-    const rows=group?db.prepare(sql).all(owner,date,group):db.prepare(sql).all(owner,date);
-    return rows.map(row=>String(row.shipmentCode||'').trim().toUpperCase()).filter(Boolean);
+      WHERE businessType=? AND reportDate=?
+      ORDER BY shipmentCode`).all(owner,date);
+    const seen=new Set(),out=[];
+    for(const row of rows){
+      const bill=String(row.shipmentCode||'').trim().toUpperCase();
+      if(!bill||seen.has(bill))continue;
+      if(group&&persistedGroup(row)!==group)continue;
+      if(!persistedPod(row))continue;
+      seen.add(bill);out.push(bill);
+    }
+    return out;
   }catch{return[]}
 }
 
