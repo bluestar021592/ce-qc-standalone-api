@@ -8,21 +8,25 @@ CREATE TABLE business_final_rows(businessType TEXT,shipmentCode TEXT,reportDate 
 CREATE TABLE business_daily_reports(businessType TEXT,reportDate TEXT,totalCount INTEGER,summaryJson TEXT,updatedAt TEXT);
 CREATE TABLE business_history_summary(businessType TEXT,reportDate TEXT,summaryJson TEXT,updatedAt TEXT);
 CREATE TABLE business_export_snapshots(businessType TEXT,reportDate TEXT,snapshotId TEXT,status TEXT,reconciliationStatus TEXT,generatedAt TEXT,createdAt TEXT);
-CREATE TABLE unified_import_rows(reportDate TEXT,businessType TEXT,shipmentCode TEXT);
+CREATE TABLE unified_import_batches(batchId TEXT,reportDate TEXT,status TEXT,createdAt TEXT);
+CREATE TABLE unified_import_rows(batchId TEXT,reportDate TEXT,businessType TEXT,shipmentCode TEXT);
 `);
 
 const date='2026-07-01';
-const insertSource=db.prepare('INSERT INTO unified_import_rows VALUES(?,?,?)');
+db.prepare('INSERT INTO unified_import_batches VALUES(?,?,?,?)').run('BATCH-NEW',date,'VALID','2026-07-01T01:00:00Z');
+const insertSource=db.prepare('INSERT INTO unified_import_rows VALUES(?,?,?,?)');
 const insertFinal=db.prepare('INSERT INTO business_final_rows VALUES(?,?,?,?,?,?)');
+db.prepare('INSERT INTO unified_import_batches VALUES(?,?,?,?)').run('BATCH-OLD',date,'SUPERSEDED','2026-07-01T00:00:00Z');
+db.prepare('INSERT INTO unified_import_rows VALUES(?,?,?,?)').run('BATCH-OLD',date,'WHPP','OLD-BATCH-ONLY');
 
 for(let i=1;i<=190;i++){
   const bill='W'+String(i).padStart(3,'0');
-  insertSource.run(date,'WHPP',bill);
+  insertSource.run('BATCH-NEW',date,'WHPP',bill);
   insertFinal.run('WHPP',bill,date,i<=166?1:0,'WHPP',JSON.stringify({currentState:i<=166?'POD':'RETURN_COMPLETED'}));
 }
 for(let i=1;i<=588;i++){
   const bill='V'+String(i).padStart(3,'0');
-  insertSource.run(date,'SHOPEEVN',bill);
+  insertSource.run('BATCH-NEW',date,'SHOPEEVN',bill);
   insertFinal.run('SHOPEE',bill,date,0,'VN',JSON.stringify({recipient_group:'VN',orderStatus:i<=545?'85':'',currentState:i<=545?'POD':'RETURN_COMPLETED'}));
 }
 insertFinal.run('SHOPEE','OLD-CARRY-POD',date,0,'VN',JSON.stringify({recipient_group:'VN',orderStatus:'85',currentState:'POD'}));
@@ -37,7 +41,7 @@ assert.equal(completion.completionSource,'FINAL_ROWS_HISTORY');
 assert.equal(persistentSelectedDatePodBills(db,'WHPP',date).length,166);
 assert.equal(persistentSelectedDatePodBills(db,'SHOPEEVN',date).length,545);
 assert.equal(persistentSelectedDatePodBills(db,'SHOPEECN',date).length,0);
-insertSource.run(date,'SHOPEECN','ZERO-CN');
+insertSource.run('BATCH-NEW',date,'SHOPEECN','ZERO-CN');
 insertFinal.run('SHOPEE','ZERO-CN',date,0,'CN',JSON.stringify({recipient_group:'CN',currentState:'RETURN_COMPLETED'}));
 const zeroCn=persistentSelectedDatePodTruth(db,'SHOPEECN',date);
 assert.equal(zeroCn.authoritative,true);
@@ -47,7 +51,7 @@ assert.equal(zeroCn.bills.length,0);
 assert.equal(persistentWhppCompletionTruth(db,date).locked,true);
 
 // Same-date re-import changed source membership: stale completion must fail closed.
-insertSource.run(date,'WHPP','W191');
+insertSource.run('BATCH-NEW',date,'WHPP','W191');
 assert.equal(persistentWhppCompletionTruth(db,date).locked,false);
 
-console.log('[V672] SQLite restart fixture passed · WHPP 190/166 · VN 588/545 · raw POD semantics · old carry POD excluded · stale same-date reimport fails closed');
+console.log('[V676] SQLite restart fixture passed · latest VALID batch only · WHPP 190/166 · VN 588/545 · carry/old batch excluded · stale same-date reimport fails closed');
