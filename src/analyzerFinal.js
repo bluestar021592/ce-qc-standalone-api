@@ -1,4 +1,5 @@
 import { analyzeShipment as analyzeShipmentV30, normalizeEvent } from './analyzerV30.js';
+import { classifyShipmentStatus, shipmentStatusTime } from './shipmentStatusTruth.js';
 
 export { normalizeEvent };
 
@@ -9,9 +10,32 @@ export { normalizeEvent };
  * return event even after a newer effective trajectory event reopened the parcel.
  */
 export function analyzeShipment(args = {}) {
-  const result = analyzeShipmentV30(args);
+  let result = analyzeShipmentV30(args);
+  const shipmentTruth=classifyShipmentStatus(args.shipmentTrackRow||{});
+  if(shipmentTruth.recognized){
+    const evidenceTime=shipmentStatusTime(args.shipmentTrackRow||{});
+    if(shipmentTruth.pod){
+      result={...result,currentState:'POD',primaryCategory:'POD闭环',主分类:'POD闭环',异常分类:'POD闭环',
+        是否POD:'是',POD状态:'POD',POD时间:evidenceTime||result.POD时间||'',退回状态:'未退回',
+        trackRequired:false,trackSkippedReason:'POD_COMPLETED',carry状态:'closed_pod',跨日状态:'已闭环',
+        shipmentStatus:'60',shipmentStatusSource:shipmentTruth.source,
+        QC判断:'shipmentStatus=60，确认POD/已签收闭环'};
+    }else if(shipmentTruth.returned){
+      result={...result,currentState:'RETURN_COMPLETED',primaryCategory:'退回',主分类:'退回',异常分类:'退回',
+        是否POD:'否',POD状态:'未POD',POD时间:'',退回状态:'已退回',退回完成时间:evidenceTime||result.退回完成时间||'',
+        trackRequired:false,trackSkippedReason:'RETURN_COMPLETED',carry状态:'closed_return',跨日状态:'已闭环',
+        shipmentStatus:'81',shipmentStatusSource:shipmentTruth.source,
+        QC判断:'shipmentStatus=81，确认已退回闭环'};
+    }else if(shipmentTruth.returnInProgress){
+      result={...result,currentState:'RETURN_IN_PROGRESS',primaryCategory:'退回处理中',主分类:'退回处理中',异常分类:'退回处理中',
+        是否POD:'否',POD状态:'未POD',POD时间:'',退回状态:'退回处理中',退回开始时间:evidenceTime||result.退回开始时间||'',
+        trackRequired:true,trackSkippedReason:'',carry状态:'active_return',跨日状态:'未闭环',
+        shipmentStatus:'80',shipmentStatusSource:shipmentTruth.source,
+        QC判断:'shipmentStatus=80，退回处理中；继续追踪至81完成退回'};
+    }
+  }
   const hold = scanStatusHold(args.events || []);
-  if (hold) return scanHoldResult(result, args.scanRow || {}, hold);
+  if (hold && !shipmentTruth.recognized) return scanHoldResult(result, args.scanRow || {}, hold);
 
   const state = String(result.currentState || '').toUpperCase();
   const isPod = result.是否POD === '是' || state === 'POD';
