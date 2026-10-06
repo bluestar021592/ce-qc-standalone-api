@@ -704,7 +704,8 @@ export async function buildHomeQualitySummaryWithArchive(options={}){
   for(const type of TIMING_TYPES){
     const current=base.timing?.[type]||{};
     const count=n(base.classification?.counts?.[type],0);
-    const needs=count>0&&(current.overall?.avgDays==null||n(current.evidence?.missing,0)>0||n(current.overall?.podCount,0)===0);
+    const usableLocalTiming=n(current.overall?.podCount,0)>0&&current.overall?.avgDays!=null;
+    const needs=count>0&&!usableLocalTiming&&(current.overall?.avgDays==null||n(current.evidence?.missing,0)>0||n(current.overall?.podCount,0)===0);
     repairStates[type]=needs
       ? requestSelectedDateTimingRepair(type,batch.reportDate,batch.snapshotId)
       : inspectSelectedDateTimingRepair(type,batch.reportDate,batch.snapshotId);
