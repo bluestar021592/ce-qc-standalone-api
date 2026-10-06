@@ -461,6 +461,7 @@ function mirrorBusinessRuntimeCheckpoint(db, state, type, now) {
   const podStmt = db.prepare(`INSERT INTO business_pod_locks(businessType,shipmentCode,podTime,source,createdAt,updatedAt) VALUES(?,?,?,'runtime_checkpoint',?,?)
     ON CONFLICT(businessType,shipmentCode) DO UPDATE SET updatedAt=excluded.updatedAt`);
   for (const bill of state.podLocks || []) podStmt.run(type, bill, '', now, now);
+  if(date&&(state.trackEvents||[]).length)appendPermanentBusinessTrackEvents(db,type,date,state.trackEvents,now);
   if (!date || !run?.runId) return;
   db.prepare(`UPDATE business_run_locks SET currentStage=?,batchIndex=?,totalBatches=?,errorMessage=?,updatedAt=? WHERE businessType=? AND reportDate=? AND runId=?`)
     .run(state.processing.phase || '', Number(state.processing.batchIndex || 0), Number(state.processing.totalBatches || 0), state.processing.error || '', now, type, date, run.runId);
