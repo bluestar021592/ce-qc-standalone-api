@@ -20,7 +20,8 @@ const first=(obj,paths)=>{
 };
 async function request(url,options={},timeout=12000){
   const controller=new AbortController();
-  const timer=setTimeout(()=>controller.abort(),timeout);
+  const bounded=Number(timeout)>0;
+  const timer=bounded?setTimeout(()=>controller.abort(new Error('REQUEST_TIMEOUT_'+timeout)),timeout):null;
   try{
     const res=await fetch(url,{cache:'no-store',credentials:'same-origin',...options,signal:controller.signal});
     const type=String(res.headers.get('content-type')||'');
@@ -29,7 +30,13 @@ async function request(url,options={},timeout=12000){
       const e=new Error(data?.error||('HTTP '+res.status));e.payload=data;e.status=res.status;throw e;
     }
     return data;
-  }finally{clearTimeout(timer);}
+  }catch(error){
+    if(error?.name==='AbortError'||/^REQUEST_TIMEOUT_/.test(String(error?.message||error?.cause?.message||''))){
+      const e=new Error('前端等待超时，但后台任务可能仍在继续；系统将以实时进度为准，不会把超时误报为业务失败。');
+      e.code='CLIENT_WAIT_TIMEOUT';e.cause=error;throw e;
+    }
+    throw error;
+  }finally{if(timer)clearTimeout(timer);}
 }
 const json=(url,timeout=12000)=>request(url,{},timeout);
 const post=(url,body={},timeout=120000)=>request(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)},timeout);
@@ -778,7 +785,7 @@ async function doImport(){
     await loadImport();
   }catch(e){appendLiveLog('日报导入失败：'+e.message);note('v625ImportMessage','导入失败：'+e.message,'error')}
 }
-async function waitWhppTerminal(reportDate,timeoutMs=300000){
+async function waitWhppTerminal(reportDate,timeoutMs=1800000){
   const started=Date.now();
   while(Date.now()-started<timeoutMs){
     const r=await json('/api/whpp/progress'+(reportDate?'?reportDate='+encodeURIComponent(reportDate):''),10000);
@@ -810,12 +817,12 @@ async function runTask(mode){
   startProgressPolling();
   try{
     if(mode==='start'){
-      appendLiveLog('开始CCSL订单扫描/轨迹处理');await post('/api/run',{},360000);
-      appendLiveLog('CCSL处理完成，开始SHOPEE CN/VN');await post('/api/shopee/run/start',{},360000);
+      appendLiveLog('开始CCSL订单扫描/轨迹处理');await post('/api/run',{},0);
+      appendLiveLog('CCSL处理完成，开始SHOPEE CN/VN');await post('/api/shopee/run/start',{},0);
       appendLiveLog('SHOPEE处理完成，开始WHPP本土');await safeWhppRun('start',reportDate);
     }else{
-      appendLiveLog('继续CCSL未完成批次');await post('/api/resume',{},360000).catch(async e=>{if(e.status===409)return;throw e});
-      appendLiveLog('继续SHOPEE未完成批次');await post('/api/shopee/run/resume',{},360000).catch(async e=>{if(e.status===409)return;throw e});
+      appendLiveLog('继续CCSL未完成批次');await post('/api/resume',{},0).catch(async e=>{if(e.status===409)return;throw e});
+      appendLiveLog('继续SHOPEE未完成批次');await post('/api/shopee/run/resume',{},0).catch(async e=>{if(e.status===409)return;throw e});
       appendLiveLog('继续WHPP未完成批次');await safeWhppRun('resume',reportDate);
     }
     appendLiveLog('7业务处理完成，开始补齐签收时效60/70→80证据');
