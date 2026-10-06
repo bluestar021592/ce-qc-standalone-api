@@ -8,7 +8,9 @@ const legacy=fs.readFileSync('src/v42WhppPatch.js','utf8');
 const home=fs.readFileSync('src/homeQualitySummary.js','utf8');
 const canonical=fs.readFileSync('src/whppCanonicalTruth.js','utf8');
 
-assert.match(helper,/FORMAL_DASHBOARD_MEMBERSHIP_SQL/,'Shopee selected-date POD truth must explicitly use formal dashboard membership SQL');
+assert.match(helper,/IMMUTABLE_SHOPEE_COMPLETED_SNAPSHOT/,'Shopee selected-date POD truth must prefer an exact completed business snapshot');
+assert.match(helper,/FORMAL_DASHBOARD_MEMBERSHIP_SQL/,'Shopee selected-date POD truth must retain formal dashboard SQL fallback');
+assert.match(helper,/completedShopeeSnapshotPodTruth/,'Shopee selected-date truth must validate exact snapshot membership before fallback');
 assert.match(helper,/LEFT JOIN business_final_rows/,'formal Shopee POD truth must include final rows');
 assert.match(helper,/LEFT JOIN shipment_current_state/,'formal Shopee POD truth must include current state');
 assert.match(helper,/LEFT JOIN business_scan_results/,'formal Shopee POD truth must include scan results');
