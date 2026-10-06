@@ -14,5 +14,6 @@ assert.match(repair,/persistentSelectedDatePodTruth\(getDb\(\),'WHPP',date\)/,'W
 assert.match(repair,/persistentSelectedDatePodTruth\(getDb\(\),type,date\)/,'Shopee timing must use persisted POD truth first');
 assert.match(repair,/persisted\.authoritative\|\|persisted\.bills\.length/,'authoritative zero-POD must not fall back to stale snapshots');
 assert.match(whpp,/persistentWhppCompletionTruth\(db,date\)/,'WHPP completion must use persisted final-row receipt');
+assert.match(whpp,/membershipSafe=!persistent\.sourceCount\|\|persistent\.membershipMatches/,'stale same-date completion must fail closed when source/final membership changed');
 assert.match(home,/requestSelectedDateTimingRepair\(type,batch\.reportDate,batch\.snapshotId\)/,'selected-date home load must automatically retry missing timing evidence');
 console.log('[V672] persisted selected-date truth is wired into WHPP progress + timing + automatic evidence repair');
