@@ -222,7 +222,7 @@ async function fetchLiveProgress(reportDate=''){
   const ccsl=ccslR.status==='fulfilled'?ccslR.value:{};
   const shopee=shopeeR.status==='fulfilled'?shopeeR.value:{};
   const whppPayload=whppR.status==='fulfilled'?whppR.value:{};
-  const whpp={...(whppPayload.runtime||{}),summary:whppPayload.summary||{},log:whppPayload.log||[],active:Boolean(whppPayload.runtime?.active)};
+  const whpp={...(whppPayload.runtime||{}),summary:whppPayload.summary||{},log:whppPayload.log||[],completionLock:whppPayload.completionLock||{},active:Boolean(whppPayload.runtime?.active),complete:Boolean(whppPayload.completionLock?.locked)||familyComplete(whppPayload.runtime||{}),outcome:whppPayload.completionLock?.locked?'COMPLETED':String(whppPayload.runtime?.outcome||'')};
   return{ccsl,shopee,whpp,reportDate:date};
 }
 function renderLiveProgress(bundle={}){
