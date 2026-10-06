@@ -313,13 +313,20 @@ export async function runQcPipeline({
   await Promise.all(Array.from({ length: Math.max(1, TRACK_CONCURRENCY) }, () => worker()));
 
   const podSet = new Set(cleanBills([...podLocks, ...scanResults.filter(x => x.是否POD === '是').map(x => x.运单号)]));
+  const trackResultByBill = new Map(trackResults.map(row => [billOf(row), row]));
   const podRows = scanResults
     .filter(row => podSet.has(row.运单号))
-    .map(row => ({
-      ...row,
-      异常分类: 'POD闭环',
-      QC判断: row.orderStatus === '85' ? '订单扫描已签收' : 'POD锁已闭环'
-    }));
+    .map(row => {
+      const tracked=trackResultByBill.get(billOf(row))||{};
+      const merged={...row,...tracked,运单号:row.运单号||tracked.运单号,shipmentCode:row.shipmentCode||tracked.shipmentCode};
+      return {
+        ...merged,
+        异常分类: 'POD闭环',
+        QC判断: merged.POD时间
+          ? 'POD已闭环，签收时间已由轨迹补齐'
+          : (merged.orderStatus === '85' ? '订单扫描已签收' : 'POD锁已闭环')
+      };
+    });
   const lockedTodayRows = lockedToday.map(wb => ({
     ...(dailyByBill.get(wb) || {}),
     businessType,
