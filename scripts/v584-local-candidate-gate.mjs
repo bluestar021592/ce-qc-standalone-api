@@ -90,6 +90,7 @@ const TASKS=[
   ['node',['scripts/v687-per-bill-timing-fallback-smoke.mjs']],
   ['node',['scripts/v689-completed-snapshot-timing-fallback-smoke.mjs']],
   ['node',['scripts/v690-saved-terminal-pod-timing-smoke.mjs']],
+  ['node',['scripts/v691-v689-v690-gate-alignment-smoke.mjs']],
   ['node',['--test',
     'test/unified-import-v7.test.js',
     'test/unified-import-ceaf.test.js',
