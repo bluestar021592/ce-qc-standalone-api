@@ -3,9 +3,9 @@ import { getDb } from './db.js';
 import { normalizeEvent } from './analyzer.js';
 import { queryTrackBatchWithFallback, splitTrackBatches } from './trackBatching.js';
 import { loadWhppCanonicalTruth } from './whppCanonicalTruth.js';
-import { loadWhppState } from './whppStore.js';
+import { loadWhppState, listWhppHistory, loadWhppSnapshot } from './whppStore.js';
 import { buildWhppDashboard } from './whppReporting.js';
-import { loadBusinessState } from './businessStore.js';
+import { loadBusinessState, getBusinessSnapshot } from './businessStore.js';
 import { buildShopeeDashboard } from './shopeeReporting.js';
 import { recipientGroupOf } from './recipientGroup.js';
 import { normalizeV485TrackRows, archiveV485TrackQueryResponse } from './v485StrictTrackEvidence.js';
@@ -39,6 +39,14 @@ function patch(type,date,snapshotId='',value={}){
 function unique(values=[]){return [...new Set(values.map(v=>String(v||'').trim().toUpperCase()).filter(Boolean))].sort();}
 
 function whppPodBills(date){
+  try{
+    const history=listWhppHistory(500);
+    const hit=history.find(item=>String(item.reportDate||'').slice(0,10)===date);
+    const snapshot=hit?.snapshotId?loadWhppSnapshot(hit.snapshotId):null;
+    const rows=snapshot?.dashboard?.detailTabs?.pod?.rows||[];
+    const bills=unique(rows.map(billOf));
+    if(bills.length)return bills;
+  }catch{}
   const db=getDb();
   try{
     const rows=db.prepare(`SELECT UPPER(TRIM(shipmentCode)) shipmentCode
@@ -84,6 +92,14 @@ function tbkhPodBills(date,snapshotId=''){
 }
 function shopeePodBills(type,date,snapshotId=''){
   const wantedGroup=type==='SHOPEECN'?'CN':type==='SHOPEEVN'?'VN':'';
+  try{
+    const snapshot=getBusinessSnapshot('SHOPEE',date);
+    const rows=snapshot?.view?.detailTabs?.[wantedGroup+'_pod']?.rows
+      || snapshot?.view?.detailTabs?.byRecipientGroup?.[wantedGroup]?.pod?.rows
+      || [];
+    const bills=unique(rows.map(billOf));
+    if(bills.length)return bills;
+  }catch{}
   const db=getDb();
   try{
     const rows=db.prepare(`SELECT UPPER(TRIM(shipmentCode)) shipmentCode
@@ -104,8 +120,8 @@ function shopeePodBills(type,date,snapshotId=''){
     }
   }catch{}
   const params=[storageType(type),storageType(type),storageType(type)];
-  let snapshot='';
-  if(snapshotId){snapshot=' AND u.snapshotId=?';}
+  let snapshotClause='';
+  if(snapshotId){snapshotClause=' AND u.snapshotId=?';}
   try{
     const rows=db.prepare(`SELECT UPPER(TRIM(u.shipmentCode)) shipmentCode
       FROM unified_import_rows u
@@ -113,7 +129,7 @@ function shopeePodBills(type,date,snapshotId=''){
       LEFT JOIN business_scan_results s ON s.businessType=? AND s.shipmentCode=u.shipmentCode AND s.reportDate=u.reportDate
       LEFT JOIN business_pod_locks p ON p.businessType=? AND p.shipmentCode=u.shipmentCode
       LEFT JOIN shipment_current_state c ON c.shipmentCode=u.shipmentCode AND c.reportDate=u.reportDate
-      WHERE u.reportDate=? AND UPPER(TRIM(u.businessType))=?${snapshot}
+      WHERE u.reportDate=? AND UPPER(TRIM(u.businessType))=?${snapshotClause}
         AND (COALESCE(f.isPod,0)=1 OR UPPER(COALESCE(c.state,'')) IN ('POD','DELIVERED','SIGNED') OR COALESCE(s.isPod,0)=1 OR TRIM(COALESCE(s.orderStatus,''))='85' OR p.shipmentCode IS NOT NULL)
       GROUP BY UPPER(TRIM(u.shipmentCode)) ORDER BY shipmentCode`).all(...params,date,type,...(snapshotId?[snapshotId]:[]));
     return unique(rows.map(r=>r.shipmentCode));
