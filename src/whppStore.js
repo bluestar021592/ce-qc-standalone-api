@@ -18,10 +18,11 @@ export function loadWhppState() {
 
 export function saveWhppState(state = {}) {
   const normalized = { ...emptyWhppState(), ...state, businessType: WHPP };
-  const now = nowIso();
-  getDb().prepare(`INSERT INTO business_states(businessType,valueJson,updatedAt) VALUES(?,?,?)
+  const now = nowIso(),db=getDb();
+  db.prepare(`INSERT INTO business_states(businessType,valueJson,updatedAt) VALUES(?,?,?)
     ON CONFLICT(businessType) DO UPDATE SET valueJson=excluded.valueJson,updatedAt=excluded.updatedAt`)
     .run(WHPP, JSON.stringify(normalized), now);
+  if(normalized.reportDate&&(normalized.trackEvents||[]).length)appendPermanentWhppTrackEvents(db,normalized.reportDate,normalized.trackEvents,now);
   return normalized;
 }
 
