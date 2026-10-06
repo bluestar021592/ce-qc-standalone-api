@@ -1,7 +1,7 @@
 import { getDb } from './db.js';
 
-export function loadWhppCanonicalTruth(reportDate='', snapshotId=''){
-  const db=getDb();
+export function loadWhppCanonicalTruth(reportDate='', snapshotId='', dbOverride=null){
+  const db=dbOverride||getDb();
   const date=String(reportDate||'').trim().slice(0,10);
   if(!date)return empty(date);
 
