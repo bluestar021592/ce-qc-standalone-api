@@ -121,12 +121,18 @@ globalThis.__CE_QC_IDLE_WHPP_BACKEND_CONTINUITY__=idleBackendContinuity;
 function scheduleBackendContinuity(server){[1200,3500,8000].forEach(ms=>{const timer=setTimeout(()=>{void maybeAutoResumeWhpp(`server-ready-${ms}`);},ms);timer.unref?.();});ensureBackendContinuityLoop();server?.once?.('close',()=>{stopBackendContinuityLoop();});}
 function startHandler(mode){return(req,res)=>{try{if(runtimePromise&&runtime.active)return res.status(409).json({ok:false,code:'WHPP_RUN_ALREADY_ACTIVE',error:'WHPP当前任务正在后台运行，请勿重复启动。',runtime:publicRuntime(runtime)});const started=launchWhpp(mode);return res.status(202).json({ok:true,accepted:true,patchId:PATCH_ID,backendContinuityRevision:BACKEND_CONTINUITY_REVISION,selectedDateContinuityRevision:SELECTED_DATE_CONTINUITY_REVISION,v414Revision:V414_EXPLICIT_UNIFIED_WHPP_REVISION,completionLockRevision:V378_WHPP_COMPLETION_LOCK_REVISION,finalMaterializationRevision:V134_FINAL_MATERIALIZATION_EVENT_REVISION,continuityIdleRevision:V134_CONTINUITY_IDLE_REVISION,reportDate:started.reportDate,processing:{running:true,phase:started.phase},runtime:started,message:'WHPP任务已进入后台执行；页面可继续响应，进度由 /api/whpp/progress 查询。'});}catch(error){if(error?.code==='WHPP_ALREADY_FINALIZED')return res.status(200).json({ok:true,accepted:false,completed:true,code:'WHPP_ALREADY_FINALIZED',patchId:PATCH_ID,v414Revision:V414_EXPLICIT_UNIFIED_WHPP_REVISION,completionLockRevision:V378_WHPP_COMPLETION_LOCK_REVISION,continuityIdleRevision:V134_CONTINUITY_IDLE_REVISION,reportDate:error.completionLock?.reportDate||'',snapshotStatus:error.completionLock?.snapshotStatus||'COMPLETED',finalizedSnapshotId:error.completionLock?.finalizedSnapshotId||'',message:'WHPP本土当前日报已经正式完成，本次重复启动已安全忽略。'});const status=error?.code==='WHPP_REPORT_MISSING'?400:500;return res.status(status).json({ok:false,code:error?.code||'WHPP_RUN_START_FAILED',error:error?.message||String(error)});}};}
 function progressHandler(req,res){
-  const state=loadWhppState(),completionLock=inspectV378WhppCompletionLock(state.reportDate,state);
-  const runtimeActive=Boolean(runtimePromise&&runtime.active&&runtime.reportDate===state.reportDate),persisted={...(state.processing||{})},stale=Boolean(persisted.running&&!runtimeActive);
+  const state=loadWhppState();
+  const requestedDate=dateOnly(req.query?.reportDate||state.reportDate||'');
+  const currentDate=dateOnly(state.reportDate||'');
+  const dateState=requestedDate&&requestedDate===currentDate?state:null;
+  const completionLock=inspectV378WhppCompletionLock(requestedDate,dateState);
+  const runtimeActive=Boolean(runtimePromise&&runtime.active&&runtime.reportDate===requestedDate);
+  const persisted=dateState?{...(state.processing||{})}:{};
+  const stale=Boolean(dateState&&persisted.running&&!runtimeActive);
   let processing,runtimeView;
   if(completionLock.locked){
     processing={...persisted,running:false,paused:false,phase:'完成',batchIndex:Number(persisted.totalBatches||persisted.batchIndex||0),totalBatches:Number(persisted.totalBatches||persisted.batchIndex||0),error:''};
-    runtimeView={...idleRuntime(),active:false,reportDate:completionLock.reportDate,phase:'完成',lastMessage:'WHPP已完成（持久化完成快照）',finishedAt:completionLock.finalizedAt||'',outcome:'COMPLETED'};
+    runtimeView={...idleRuntime(),active:false,reportDate:completionLock.reportDate,phase:'完成',lastMessage:'WHPP已完成（选定日报持久化完成快照）',finishedAt:completionLock.finalizedAt||'',outcome:'COMPLETED'};
   }else if(runtimeActive){
     processing={...persisted,running:true,paused:Boolean(persisted.paused),phase:runtime.lastMessage||runtime.phase||persisted.phase||'WHPP处理中',batchIndex:Number(runtime.batchIndex||persisted.batchIndex||0),totalBatches:Number(runtime.totalBatches||persisted.totalBatches||0),heartbeatAt:runtime.heartbeatAt||persisted.lastCheckpointAt||''};
     runtimeView=publicRuntime(runtime);
@@ -134,9 +140,10 @@ function progressHandler(req,res){
     processing={...persisted,running:false,paused:false,phase:'WHPP等待断点恢复',error:'PROCESS_RESTART_INTERRUPTED'};
     runtimeView=publicRuntime(lastRuntime);
   }else{
-    processing=persisted;runtimeView=publicRuntime(lastRuntime);
+    processing={...persisted,running:false,paused:false,phase:requestedDate&&requestedDate!==currentDate?'待处理':(persisted.phase||'待处理')};
+    runtimeView={...idleRuntime(),active:false,reportDate:requestedDate||currentDate,phase:processing.phase,outcome:''};
   }
-  res.json({ok:true,patchId:PATCH_ID,backendContinuityRevision:BACKEND_CONTINUITY_REVISION,selectedDateContinuityRevision:SELECTED_DATE_CONTINUITY_REVISION,v414Revision:V414_EXPLICIT_UNIFIED_WHPP_REVISION,completionLockRevision:V378_WHPP_COMPLETION_LOCK_REVISION,finalMaterializationRevision:V134_FINAL_MATERIALIZATION_EVENT_REVISION,continuityIdleRevision:V134_CONTINUITY_IDLE_REVISION,reportDate:state.reportDate,processing,restartRecovery:state.restartRecovery||null,runtimeActive,stale:completionLock.locked?false:stale,runtime:runtimeView,requestTimeoutMs:WHPP_REQUEST_TIMEOUT_MS,backendContinuity:{enabled:true,restartOnly:true,explicitRunOnly:true,pollMs:AUTO_RESUME_POLL_MS,pollingActive:Boolean(autoResumeTimer),cooldownMs:AUTO_RESUME_COOLDOWN_MS,busy:autoResumeBusy,lastAttemptAt:lastAutoResumeAt,lastKey:lastAutoResumeKey,completedDateLatch:continuityCompletedDate},completionLock,summary:state.lastRunSummary,log:(state.progressLog||[]).slice(-50)});
+  res.json({ok:true,patchId:PATCH_ID,backendContinuityRevision:BACKEND_CONTINUITY_REVISION,selectedDateContinuityRevision:SELECTED_DATE_CONTINUITY_REVISION,v414Revision:V414_EXPLICIT_UNIFIED_WHPP_REVISION,completionLockRevision:V378_WHPP_COMPLETION_LOCK_REVISION,finalMaterializationRevision:V134_FINAL_MATERIALIZATION_EVENT_REVISION,continuityIdleRevision:V134_CONTINUITY_IDLE_REVISION,reportDate:requestedDate||currentDate,processing,restartRecovery:dateState?(state.restartRecovery||null):null,runtimeActive,stale:completionLock.locked?false:stale,runtime:runtimeView,requestTimeoutMs:WHPP_REQUEST_TIMEOUT_MS,backendContinuity:{enabled:true,restartOnly:true,explicitRunOnly:true,pollMs:AUTO_RESUME_POLL_MS,pollingActive:Boolean(autoResumeTimer),cooldownMs:AUTO_RESUME_COOLDOWN_MS,busy:autoResumeBusy,lastAttemptAt:lastAutoResumeAt,lastKey:lastAutoResumeKey,completedDateLatch:continuityCompletedDate},completionLock,summary:dateState?state.lastRunSummary:null,log:dateState?(state.progressLog||[]).slice(-50):[]});
 }
 
 const previousListen=express.application.listen;let installed=false;express.application.listen=function v134WhppRunSupervisorListen(...args){if(!installed){installed=true;this.get(PROGRESS_PATH,progressHandler);this.post('/api/whpp/run/start',startHandler('start'));this.post('/api/whpp/run/resume',startHandler('resume'));}const server=previousListen.apply(this,args);scheduleBackendContinuity(server);return server;};
