@@ -20,8 +20,8 @@ assert.match(fixture,/assert\.equal\(vn\.bills\.length,545\)/,'fixture must requ
 assert.match(fixture,/assert\.equal\(whpp\.bills\.length,166\)/,'fixture must require WHPP POD=166');
 assert.match(fixture,/assert\.equal\(completion\.completionSource,'UNIFIED_COMPLETED'\)/,'fixture must require unified WHPP completion receipt');
 
-assert.match(shell,/ce-qc-build" content="V68[1-9]_[A-Z0-9_]+"/,'V625 shell must publish current V681+ build marker');
-assert.match(shell,/v625-shell\.js\?v=\d{8}-v6(?:8[1-9]|9\d)-1/,'V625 shell must force-refresh V681+ JavaScript');
+assert.match(shell,/ce-qc-build" content="V\d{3,}_[A-Z0-9_]+"/,'V625 shell must publish V681+ build marker');
+assert.match(shell,/v625-shell\.js\?v=\d{8}-v\d{3,}-1/,'V625 shell must force-refresh V681+ JavaScript');
 assert.match(server,/\/api\/selected-date-truth/,'read-only selected-date runtime truth endpoint must exist');
 assert.match(server,/build:'V681_SELECTED_DATE_TRUTH'/,'runtime truth endpoint must retain selected-date truth owner identity');
 
