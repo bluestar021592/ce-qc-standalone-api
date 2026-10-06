@@ -1,4 +1,5 @@
 import { getDb } from './db.js';
+import { classifyShipmentStatus, shipmentStatusTime } from './shipmentStatusTruth.js';
 
 export const V191_SHOPEE_TRUTH_VERSION = '2026-08-17-v191-shopee-cross-day-attempt-truth-v1';
 const SHOPEE_TYPES = new Set(['SHOPEECN', 'SHOPEEVN']);
@@ -97,12 +98,39 @@ function scanEvidence(row = {}) {
     updatedAt: String(row.updatedAt || ''), reportDate: String(row.reportDate || ''), apiStatus: 'SUCCESS'
   };
 }
-function chooseState(current, final, scan, track) {
-  const evidences = [current, final, scan, track].filter(Boolean);
-  const pod = evidences.some(item => item.pod);
-  const returned = !pod && evidences.some(item => item.returned);
-  const cancelled = !pod && !returned && evidences.some(item => item.cancelled);
-  const base = pod
+function shipmentEvidence(row = {}) {
+  if (!row || !billOf(row.shipmentCode)) return null;
+  const raw = safeJson(row.rawJson, {});
+  const truth=classifyShipmentStatus({ ...raw, shipmentStatus: row.shipmentStatus ?? raw.shipmentStatus });
+  if(!truth.recognized)return null;
+  return {
+    source:'BUSINESS_SHIPMENT_TRACKS',
+    pod:truth.pod,
+    returned:truth.returned,
+    returnInProgress:truth.returnInProgress,
+    cancelled:false,
+    pending:false,
+    delivering:false,
+    attemptNo:0,
+    pendingCount:0,
+    eventTime:shipmentStatusTime({ ...raw, shipmentStatus: row.shipmentStatus ?? raw.shipmentStatus }),
+    eventDesc:`shipmentStatus=${truth.code}`,
+    eventNode:'',
+    category:truth.pod?'POD':truth.returned?'退回':'退回处理中',
+    updatedAt:String(row.updatedAt||''),
+    reportDate:String(row.reportDate||''),
+    apiStatus:String(row.apiStatus||'SUCCESS'),
+    shipmentStatusSource:truth.source
+  };
+}
+function chooseState(current, final, scan, shipment, track) {
+  const evidences = [shipment, current, final, scan, track].filter(Boolean);
+  const shipmentRecognized=Boolean(shipment);
+  const pod = shipmentRecognized ? Boolean(shipment.pod) : evidences.some(item => item.pod);
+  const returned = shipmentRecognized ? Boolean(shipment.returned) : (!pod && evidences.some(item => item.returned));
+  const returnInProgress = shipmentRecognized ? Boolean(shipment.returnInProgress) : false;
+  const cancelled = !pod && !returned && !returnInProgress && evidences.some(item => item.cancelled);
+  const base = shipmentRecognized ? shipment : pod
     ? evidences.find(item => item.pod && item.source === 'SHIPMENT_CURRENT_STATE') || evidences.find(item => item.pod) || current || final || scan || track
     : returned
       ? evidences.find(item => item.returned && item.source === 'SHIPMENT_CURRENT_STATE') || evidences.find(item => item.returned) || current || final || scan || track
@@ -117,9 +145,9 @@ function chooseState(current, final, scan, track) {
     : trackAttempt ? 'TRACK_DELIVERY_DATES' : '';
   return {
     ...base,
-    pod, returned, cancelled,
-    pending: !pod && !returned && !cancelled && Boolean(base?.pending),
-    delivering: !pod && !returned && !cancelled && !base?.pending && Boolean(base?.delivering),
+    pod, returned, returnInProgress, cancelled,
+    pending: !pod && !returned && !returnInProgress && !cancelled && Boolean(base?.pending),
+    delivering: !pod && !returned && !returnInProgress && !cancelled && !base?.pending && Boolean(base?.delivering),
     attemptNo,
     attemptSource,
     attemptUnknown: pod && !attemptNo,
@@ -160,6 +188,23 @@ function queryFinal(db, bills) {
       const bill = billOf(row.shipmentCode);
       if (!bill || out.has(bill)) continue;
       out.set(bill, finalEvidence(row));
+    }
+  }
+  return out;
+}
+function queryShipment(db,bills){
+  const out=new Map();
+  for(const chunk of chunks(bills,350)){
+    if(!chunk.length)continue;
+    const marks=chunk.map(()=>'?').join(',');
+    const rows=db.prepare(`SELECT shipmentCode,reportDate,shipmentStatus,statusText,apiStatus,rawJson,updatedAt
+      FROM business_shipment_tracks WHERE businessType='SHOPEE' AND shipmentCode IN (${marks})
+      ORDER BY shipmentCode ASC, updatedAt DESC, id DESC`).all(...chunk);
+    for(const row of rows){
+      const bill=billOf(row.shipmentCode);
+      if(!bill||out.has(bill))continue;
+      const evidence=shipmentEvidence(row);
+      if(evidence)out.set(bill,evidence);
     }
   }
   return out;
@@ -240,14 +285,16 @@ export function collectShopeeShipmentTruth({ db = getDb(), businessType, bills =
   const current = queryCurrent(db, type, normalized);
   const finals = queryFinal(db, normalized);
   const scans = queryScan(db, normalized);
+  const shipments = queryShipment(db, normalized);
   const trackNeeded = normalized.filter(bill => {
-    const c = current.get(bill), f = finals.get(bill), s = scans.get(bill);
-    const pod = Boolean(c?.pod || f?.pod || s?.pod);
+    const c = current.get(bill), f = finals.get(bill), s = scans.get(bill), sh=shipments.get(bill);
+    if(sh?.returned || sh?.returnInProgress)return false;
+    const pod = sh?.pod || Boolean(c?.pod || f?.pod || s?.pod);
     return !pod || !positiveInt(c?.attemptNo, f?.attemptNo);
   });
   const tracks = queryTrack(db, trackNeeded);
   const result = new Map();
-  for (const bill of normalized) result.set(bill, chooseState(current.get(bill), finals.get(bill), scans.get(bill), tracks.get(bill)));
+  for (const bill of normalized) result.set(bill, chooseState(current.get(bill), finals.get(bill), scans.get(bill), shipments.get(bill), tracks.get(bill)));
   return result;
 }
 
