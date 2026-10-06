@@ -10,7 +10,8 @@ assert.match(server,/if\(page\.business!=='WHPP'\)/,'non-WHPP routes must branch
 assert.match(server,/v641WhppScanPending/,'server route must remove WHPP-only control');
 assert.match(repair,/requestSelectedDateTimingRepair/,'selected-date timing repair export missing');
 assert.match(repair,/unified_import_rows/,'repair must start from imported date membership');
-assert.match(repair,/business_final_rows/,'Shopee POD truth must include persisted final rows');
+assert.match(repair,/buildShopeeDashboard\(state\)/,'Shopee POD truth must use the formal Shopee dashboard owner');
+assert.match(repair,/wantedGroup\+'_pod'/,'Shopee CN/VN POD truth must use exact recipient-group POD detail tabs');
 assert.match(repair,/final_rows/,'TBKH POD truth must include persisted final rows');
 assert.match(repair,/loadWhppCanonicalTruth/,'WHPP POD truth must use canonical truth');
 assert.match(repair,/queryTrackBatchWithFallback/,'repair must use bounded CE track query');
