@@ -11,5 +11,5 @@ assert.match(legacy,/persistentWhppCompletionTruth\(getDb\(\),requestedDate\)/,'
 assert.match(legacy,/completionLock:\{\.\.\.truth,locked,finalized:locked/,'legacy route must publish completionLock to the shell');
 assert.match(legacy,/outcome:'COMPLETED'/,'legacy route must publish completed runtime outcome');
 assert.match(modern,/persistentWhppCompletionTruth\(db,date\)/,'modern WHPP route must use the persisted completion truth too');
-assert.match(shell,/complete:Boolean\(whppPayload\.completionLock\?\.locked\)/,'shell must render either route from completionLock');
+assert.match(shell,/complete:truthLocked\|\|Boolean\(whppPayload\.completionLock\?\.locked\)/,'shell must render selected-date truth or either progress-route completion lock');
 console.log('[V677] both legacy and modern WHPP progress owners converge on selected-date persistent completion truth');
