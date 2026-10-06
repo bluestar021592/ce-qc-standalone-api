@@ -44,6 +44,7 @@ function naturalDays(fromValue, toValue) {
   return Math.floor((endMs - startMs) / 86400000) + 1;
 }
 function eventCode(event = {}) {
+  event=event||{};
   const raw = safeJson(event.rawJson);
   const values = [
     event.eventCode,event.trackingEventCode,event.statusCode,event.eventStatusCode,event.nodeCode,event.scanCode,event.trackCode,
@@ -58,6 +59,7 @@ function eventCode(event = {}) {
   return '';
 }
 function eventTime(event = {}) {
+  event=event||{};
   const raw = safeJson(event.rawJson);
   for (const value of [
     event.eventTime,event.creationDate,event.lastUpdateDate,event.createdAt,event.eventDate,event.occurTime,event.trackingTime,event.scanTime,
@@ -68,6 +70,7 @@ function eventTime(event = {}) {
   return '';
 }
 function eventText(event = {}) {
+  event=event||{};
   const raw = safeJson(event.rawJson);
   return [
     event.trackingEventDescZh,event.trackingEventDesc,event.trackingEventDescKm,event.statusText,event.statusName,event.eventName,
@@ -92,7 +95,7 @@ function isPodEvent(event = {}) {
   return Boolean(text && !NEGATIVE_POD_RE.test(text) && POSITIVE_POD_RE.test(text));
 }
 function sortEvents(events = []) {
-  return [...events].map((event,index)=>({event,index,time:eventTime(event)}))
+  return [...events].filter(Boolean).map((event,index)=>({event,index,time:eventTime(event)}))
     .filter(row=>row.time)
     .sort((a,b)=>String(a.time).localeCompare(String(b.time))||a.index-b.index)
     .map(row=>row.event);
@@ -253,6 +256,7 @@ function ledgerEvidenceForBills(bills=[]){
   return result;
 }
 function strictLedgerTiming(row={}){
+  row=row||{};
   const source=String(row.attemptSource||'');
   const days=Number(row.signingDays||0),attempt=Number(row.attemptNo||0);
   if(row.terminalReason!=='POD'||!/^V246_STRICT_TRACK/i.test(source)||!Number.isFinite(days)||days<=0||attempt<=0)return null;
@@ -264,6 +268,7 @@ function strictLedgerTiming(row={}){
   };
 }
 function isReturned(row={}) {
+  row=row||{};
   const raw=safeJson(row.rawJson);
   const rawValues=[row.primaryCategory,raw.primaryCategory,raw.主分类,raw.异常分类,raw.退回状态,raw.currentState,raw.scanNormalizedState]
     .map(value=>String(value||'').trim().toUpperCase()).filter(Boolean);
@@ -272,6 +277,7 @@ function isReturned(row={}) {
   return rawValues.some(value=>!negative.test(value)&&positive.test(value));
 }
 function positivePodMembership(row={},ledgerRow={}){
+  row=row||{};ledgerRow=ledgerRow||{};
   if(Number(row.isPod||0)===1)return true;
   if(String(ledgerRow.terminalReason||'').toUpperCase()==='POD'&&String(ledgerRow.podDate||ledgerRow.terminalAt||'').trim())return true;
   const raw=safeJson(row.rawJson);
