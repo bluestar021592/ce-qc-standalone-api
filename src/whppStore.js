@@ -126,7 +126,7 @@ function invalidatePriorWhppLifecycle(db, reportDate, context = {}, now = nowIso
       WHERE businessType='WHPP' AND reportDate=? AND UPPER(COALESCE(status,''))<>'INVALID'`).run(reason, reportDate)?.changes || 0);
   } catch {}
   try { db.prepare("DELETE FROM business_history_summary WHERE businessType='WHPP' AND reportDate=?").run(reportDate); } catch {}
-  for (const table of ['business_scan_results','business_track_events','business_exception_items','business_final_rows']) {
+  for (const table of ['business_scan_results','business_exception_items','business_final_rows']) {
     try { db.prepare(`DELETE FROM ${table} WHERE businessType='WHPP' AND reportDate=?`).run(reportDate); } catch {}
   }
   return { invalidatedSnapshots, reason };
