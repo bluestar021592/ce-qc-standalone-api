@@ -296,7 +296,7 @@ function dedicatedWhppTimingRows(reportDate=''){
 function timingRows(snapshotId,reportDate,businessType) {
   if(!reportDate||!TIMING_TYPES.includes(businessType))return[];
   const whppTruth=businessType==='WHPP'?loadWhppCanonicalTruth(reportDate,snapshotId||''):null;
-  const rows=whppTruth
+  const sourceRows=whppTruth
     ? (whppTruth.rows||[]).map(row=>({
         ...row,
         shipmentCode:String(row.shipmentCode||row.运单号||'').trim().toUpperCase(),
@@ -306,7 +306,46 @@ function timingRows(snapshotId,reportDate,businessType) {
         rawJson:JSON.stringify(row)
       }))
     : membershipFinalRows(snapshotId,reportDate,businessType);
+
   const canonicalPodSet=new Set(selectedDatePodBills(businessType,reportDate,snapshotId));
+  const rowMap=new Map();
+  for(const row of sourceRows||[]){
+    const bill=String(row.shipmentCode||'').trim().toUpperCase();
+    if(bill&&!rowMap.has(bill))rowMap.set(bill,{...row,shipmentCode:bill});
+  }
+
+  // V661: formal POD membership is itself authoritative timing membership.
+  // If an immutable business snapshot says a bill is POD but an intermediate
+  // membership view omitted that bill, add it back instead of silently
+  // shrinking the timing denominator to zero.
+  if(canonicalPodSet.size){
+    const db=getDb();
+    const missing=[...canonicalPodSet].filter(bill=>!rowMap.has(bill));
+    for(let i=0;i<missing.length;i+=350){
+      const chunk=missing.slice(i,i+350),marks=chunk.map(()=>'?').join(',');
+      let meta=new Map();
+      try{
+        const rows=db.prepare(`SELECT UPPER(TRIM(shipmentCode)) shipmentCode,UPPER(TRIM(COALESCE(regionCode,''))) regionCode,businessType
+          FROM unified_import_rows
+          WHERE reportDate=? AND UPPER(TRIM(shipmentCode)) IN (${marks})`).all(reportDate,...chunk);
+        meta=new Map(rows.map(row=>[String(row.shipmentCode||'').trim().toUpperCase(),row]));
+      }catch{}
+      for(const bill of chunk){
+        const row=meta.get(bill)||{};
+        rowMap.set(bill,{
+          shipmentCode:bill,
+          regionCode:String(row.regionCode||'').toUpperCase(),
+          reportDate,
+          businessType:row.businessType||businessType,
+          isPod:1,
+          primaryCategory:'POD',
+          rawJson:JSON.stringify({shipmentCode:bill,reportDate,businessType,regionCode:row.regionCode||'',membershipSource:'canonical_pod_snapshot'})
+        });
+      }
+    }
+  }
+
+  const rows=[...rowMap.values()];
   const bills=rows.map(row=>row.shipmentCode);
   const events=eventsForBills(reportDate,businessType,bills);
   if(whppTruth?.recoveredTrackEvents?.length)pushEvidenceRows(events,whppTruth.recoveredTrackEvents,'whpp_recovered_snapshot');
@@ -320,11 +359,10 @@ function timingRows(snapshotId,reportDate,businessType) {
       shipmentCode,region:String(row.regionCode||'').toUpperCase(),
       isPod:Boolean(canonicalPodSet.has(shipmentCode)||positivePodMembership(row,ledgerRow)),isReturned:isReturned(row),
       evidence:direct.ok?{...direct,evidenceSource:(events.get(shipmentCode)||[]).some(x=>x.evidenceSource==='track_events')?'track_events':'business_track_events'}:(strictLedger||direct),
-      membershipSource:Number(row.isPod||0)===1?'final_rows':(String(ledgerRow.terminalReason||'').toUpperCase()==='POD'?'qc_tracking_ledger':'raw_terminal_proof')
+      membershipSource:canonicalPodSet.has(shipmentCode)?'canonical_pod_snapshot':(Number(row.isPod||0)===1?'final_rows':(String(ledgerRow.terminalReason||'').toUpperCase()==='POD'?'qc_tracking_ledger':'raw_terminal_proof'))
     };
   });
 }
-
 async function timingForBatchWithArchive(batch,businessType,recoveredOverride=null){
   if(!batch?.snapshotId||!batch?.reportDate){
     return timingForBatch(batch,businessType);
