@@ -478,7 +478,8 @@ async function loadHome(options={}){
   const showDays=value=>value===null||value===undefined?'—':Number(value).toFixed(2).replace(/\.00$/,'')+'天';
   for(const [type,prefix,tone] of timingMeta){
     const data=timing[type]||{};
-    const historicalUnavailable=v700TimingAvailability[type]==='HISTORICAL_EVIDENCE_UNAVAILABLE';
+    const historicalUnavailable=v700TimingAvailability[type]==='HISTORICAL_EVIDENCE_UNAVAILABLE'&&Number(data.overall?.podCount||0)===0;
+    if(!historicalUnavailable&&Number(data.overall?.podCount||0)>0)v700TimingAvailability[type]='AVAILABLE';
     setText(prefix+'Overall',showDays(data.overall?.avgDays));
     setText(prefix+'Pod',historicalUnavailable
       ?('POD总数 '+fmt(data.overall?.totalPodCount||0)+' 票 · 历史轨迹证据缺失')
