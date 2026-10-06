@@ -32,10 +32,37 @@ function latchContinuityComplete(reportDate=''){const date=dateOnly(reportDate);
 function idleBackendContinuity(reportDate=''){const date=latchContinuityComplete(reportDate);return{ok:Boolean(date),reportDate:date,pollingActive:Boolean(autoResumeTimer),restartOnly:true,explicitRunOnly:true,revision:V134_CONTINUITY_IDLE_REVISION,v414Revision:V414_EXPLICIT_UNIFIED_WHPP_REVISION};}
 
 export function inspectV378WhppCompletionLock(reportDate='',state=null,db=getDb()){
-  const date=dateOnly(reportDate||state?.reportDate||'');if(!date)return{locked:false,reportDate:'',reason:'REPORT_DATE_MISSING',revision:V378_WHPP_COMPLETION_LOCK_REVISION};
-  const daily=db.prepare("SELECT totalCount,summaryJson FROM business_daily_reports WHERE businessType='WHPP' AND reportDate=? LIMIT 1").get(date);if(!daily)return{locked:false,reportDate:date,reason:'NO_NORMALIZED_DAILY',revision:V378_WHPP_COMPLETION_LOCK_REVISION};
-  const summary=safeJson(daily.summaryJson,{}),status=String(summary.snapshotStatus||summary.reconciliationStatus||'').toUpperCase(),finalizedSnapshotId=String(summary.finalizedSnapshotId||'').trim(),sourceSnapshotId=String(summary.snapshotId||summary.batchId||'').trim(),stateSourceSnapshotId=String(state?.sourceSnapshotId||state?.batchId||'').trim(),sourceMatches=!stateSourceSnapshotId||!sourceSnapshotId||stateSourceSnapshotId===sourceSnapshotId,finalized=Boolean(summary.completed===true&&COMPLETE_SNAPSHOT.has(status)&&finalizedSnapshotId);
-  return{locked:finalized,finalized,sourceMatches,reportDate:date,total:Number(daily.totalCount||0),sourceSnapshotId,stateSourceSnapshotId,finalizedSnapshotId,snapshotStatus:status,finalizedAt:String(summary.finalizedAt||''),reason:finalized?'CURRENT_DAILY_ALREADY_FINALIZED':'CURRENT_DAILY_NOT_FINALIZED',revision:V378_WHPP_COMPLETION_LOCK_REVISION};
+  const date=dateOnly(reportDate||state?.reportDate||'');
+  if(!date)return{locked:false,reportDate:'',reason:'REPORT_DATE_MISSING',revision:V378_WHPP_COMPLETION_LOCK_REVISION};
+  const daily=db.prepare("SELECT totalCount,summaryJson FROM business_daily_reports WHERE businessType='WHPP' AND reportDate=? LIMIT 1").get(date);
+  const summary=safeJson(daily?.summaryJson,{});
+  const status=String(summary.snapshotStatus||summary.reconciliationStatus||'').toUpperCase();
+  const finalizedSnapshotId=String(summary.finalizedSnapshotId||'').trim();
+  const sourceSnapshotId=String(summary.snapshotId||summary.batchId||'').trim();
+  const stateSourceSnapshotId=String(state?.sourceSnapshotId||state?.batchId||'').trim();
+  const sourceMatches=!stateSourceSnapshotId||!sourceSnapshotId||stateSourceSnapshotId===sourceSnapshotId;
+  const summaryFinalized=Boolean(summary.completed===true&&COMPLETE_SNAPSHOT.has(status)&&finalizedSnapshotId);
+  let snapshotRow=null;
+  try{
+    snapshotRow=db.prepare(`SELECT snapshotId,reportDate,status,reconciliationStatus,generatedAt,createdAt
+      FROM business_export_snapshots
+      WHERE businessType='WHPP' AND reportDate=?
+        AND COALESCE(status,'VALID')='VALID'
+        AND COALESCE(reconciliationStatus,'COMPLETED')='COMPLETED'
+      ORDER BY createdAt DESC LIMIT 1`).get(date)||null;
+  }catch{}
+  const snapshotFinalized=Boolean(snapshotRow?.snapshotId);
+  const locked=summaryFinalized||snapshotFinalized;
+  return{
+    locked,finalized:locked,sourceMatches,reportDate:date,total:Number(daily?.totalCount||0),
+    sourceSnapshotId,stateSourceSnapshotId,
+    finalizedSnapshotId:finalizedSnapshotId||String(snapshotRow?.snapshotId||''),
+    snapshotStatus:locked?'COMPLETED':status,
+    finalizedAt:String(summary.finalizedAt||snapshotRow?.generatedAt||snapshotRow?.createdAt||''),
+    completionSource:summaryFinalized?'DAILY_SUMMARY':'IMMUTABLE_EXPORT_SNAPSHOT',
+    reason:locked?'CURRENT_DAILY_ALREADY_FINALIZED':daily?'CURRENT_DAILY_NOT_FINALIZED':'NO_NORMALIZED_DAILY',
+    revision:V378_WHPP_COMPLETION_LOCK_REVISION
+  };
 }
 async function emitFinalMaterialization(reportDate=''){
   const date=dateOnly(reportDate);if(!date)return;
