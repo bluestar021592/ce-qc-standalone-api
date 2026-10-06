@@ -75,6 +75,7 @@ const TASKS=[
   ['node',['scripts/v661-canonical-pod-firstclass-timing-smoke.mjs']],
   ['node',['scripts/v662-single-dashboard-pod-truth-smoke.mjs']],
   ['node',['scripts/v663-whpp-completion-projection-timing-diag-smoke.mjs']],
+  ['node',['scripts/v664-v645-gate-alignment-smoke.mjs']],
   ['node',['--test',
     'test/unified-import-v7.test.js',
     'test/unified-import-ceaf.test.js',
