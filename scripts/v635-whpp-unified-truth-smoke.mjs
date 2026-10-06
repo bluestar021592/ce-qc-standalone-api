@@ -20,10 +20,10 @@ assert.match(js,/row\.finalRowAvailable===false\)rowsByKind\.unprocessed\.push\(
 assert.match(js,/v631AccountingMeta/,'status conservation display must remain active');
 assert.match(html,/id="kpiUnprocessedCard"/,'explicit unprocessed card missing');
 assert.match(html,/data-kpi-detail="unprocessed"/,'unprocessed detail drilldown missing');
-assert.match(html,/v625-shell\\.js\\?v=\\d{8}-v6\\d{2}-1/,'V635+ JS cache bust missing');
-assert.match(html,/v625-shell\\.css\\?v=\\d{8}-v6\\d{2}-1/,'V635+ CSS cache bust missing');
+assert.match(html,/v625-shell\.js\?v=\d{8}-v6\d{2}-1/,'V635+ JS cache bust missing');
+assert.match(html,/v625-shell\.css\?v=\d{8}-v6\d{2}-1/,'V635+ CSS cache bust missing');
 
 
-const assetBuild=Number((html.match(/v625-shell\\.js\\?v=\\d{8}-v(6\\d{2})-1/)||[])[1]||0);
+const assetBuild=Number((html.match(/v625-shell\.js\?v=\d{8}-v(6\d{2})-1/)||[])[1]||0);
 assert.ok(assetBuild>=635,'asset cache build must not predate V635');
 console.log('[V635] dedicated WHPP home/timing/returns + complete status accounting smoke passed');
