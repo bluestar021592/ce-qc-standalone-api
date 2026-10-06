@@ -50,7 +50,7 @@ import {
 } from './src/businessStore.js';
 import { createPurgeChallenge, executePurge } from './src/dataPurge.js';
 import { queueDirectDataPurge, getDirectDataPurgeStatus, DIRECT_PURGE_ID } from './src/directDataPurge.js';
-import { buildHomeQualitySummary, buildHomeQualitySummaryWithArchive } from './src/homeQualitySummary.js';
+import { buildHomeQualitySummary, buildHomeQualitySummaryWithArchive, diagnoseSelectedDateTiming } from './src/homeQualitySummary.js';
 import { requestSelectedDateTimingRepair, inspectSelectedDateTimingRepair } from './src/selectedDateTimingEvidenceRepair.js';
 import { buildCanonicalBusinessAccounting } from './src/businessAccounting.js';
 import { buildDataIntegrityReport } from './src/dataIntegrity.js';
@@ -1747,6 +1747,18 @@ app.get('/api/export-period', async (req, res) => {
   }
 });
 
+function selectUnifiedImportForDiagnostics(reportDate=''){
+  const latest=getLatestUnifiedImport();
+  if(String(latest?.reportDate||'')===reportDate)return latest;
+  return listUnifiedImportHistory(1000).find(item=>String(item?.reportDate||'')===reportDate)||null;
+}
+app.get('/api/timing-diagnostics', (req,res)=>{
+  const reportDate=String(req.query?.reportDate||'').slice(0,10);
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(reportDate))return res.status(400).json({ok:false,error:'缺少有效日报日期。'});
+  const batch=selectUnifiedImportForDiagnostics(reportDate);
+  if(!batch)return res.status(404).json({ok:false,error:'未找到该日报快照。'});
+  res.json({ok:true,...diagnoseSelectedDateTiming(reportDate,batch.snapshotId)});
+});
 app.post('/api/timing-repair/start', (req,res)=>{
   const reportDate=String(req.body?.reportDate||'').slice(0,10);
   if(!/^\d{4}-\d{2}-\d{2}$/.test(reportDate))return res.status(400).json({ok:false,error:'缺少有效日报日期。'});
