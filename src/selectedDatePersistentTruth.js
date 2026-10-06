@@ -9,6 +9,45 @@ function latestValidBatch(db,date){
 }
 function latestValidBatchId(db,date){return String(latestValidBatch(db,date)?.batchId||'')}
 
+function billOf(row={}){return String(row.shipmentCode||row.运单号||row.waybill||'').trim().toUpperCase()}
+function uniqueBills(rows=[]){return [...new Set((rows||[]).map(billOf).filter(Boolean))].sort()}
+function sameBills(a=[],b=[]){
+  const left=[...new Set(a)].sort(),right=[...new Set(b)].sort();
+  return left.length===right.length&&left.every((value,index)=>value===right[index]);
+}
+function completedShopeeSnapshotPodTruth(db,date,group,sourceRows=[]){
+  const sourceBills=uniqueBills(sourceRows);
+  if(!sourceBills.length)return null;
+  let snapshots=[];
+  try{
+    snapshots=db.prepare(`SELECT snapshotId,payloadJson,status,reconciliationStatus,createdAt
+      FROM business_export_snapshots
+      WHERE businessType='SHOPEE' AND reportDate=?
+      ORDER BY id DESC LIMIT 20`).all(date);
+  }catch{
+    try{snapshots=db.prepare(`SELECT snapshotId,payloadJson,status,reconciliationStatus,createdAt
+      FROM business_export_snapshots
+      WHERE businessType='SHOPEE' AND reportDate=?
+      ORDER BY createdAt DESC LIMIT 20`).all(date)}catch{return null}
+  }
+  for(const row of snapshots){
+    const status=String(row.status||'VALID').toUpperCase();
+    const recon=String(row.reconciliationStatus||'COMPLETED').toUpperCase();
+    if(status==='INVALID'||recon==='FAILED')continue;
+    const payload=safeJson(row.payloadJson,{}),tabs=payload?.view?.detailTabs||{};
+    const allRows=tabs?.[`${group}_all`]?.rows||tabs?.byRecipientGroup?.[group]?.all?.rows||[];
+    const podRows=tabs?.[`${group}_pod`]?.rows||tabs?.byRecipientGroup?.[group]?.pod?.rows||[];
+    const allBills=uniqueBills(allRows);
+    if(!sameBills(sourceBills,allBills))continue;
+    const podBills=uniqueBills(podRows).filter(code=>sourceBills.includes(code));
+    return{
+      authoritative:true,bills:podBills,sourceCount:sourceBills.length,resolvedCount:allBills.length,
+      source:'IMMUTABLE_SHOPEE_COMPLETED_SNAPSHOT',snapshotId:String(row.snapshotId||'')
+    };
+  }
+  return null;
+}
+
 export function persistentSelectedDatePodTruth(db,businessType='',reportDate=''){
   const type=String(businessType||'').trim().toUpperCase(),date=dateKey(reportDate);
   if(!date)return{authoritative:false,bills:[],sourceCount:0,resolvedCount:0,source:'REPORT_DATE_MISSING'};
@@ -34,6 +73,17 @@ export function persistentSelectedDatePodTruth(db,businessType='',reportDate='')
     }
 
     if(!['SHOPEECN','SHOPEEVN'].includes(type))return{authoritative:false,bills:[],sourceCount:0,resolvedCount:0,source:'UNSUPPORTED_BUSINESS'};
+    const group=type==='SHOPEECN'?'CN':'VN';
+    const sourceRows=db.prepare(`
+      SELECT u.shipmentCode
+      FROM unified_import_rows u
+      WHERE u.batchId=? AND u.reportDate=? AND UPPER(TRIM(u.businessType))=?
+      ORDER BY u.rowNumber,u.shipmentCode
+    `).all(batch.batchId,date,type);
+
+    const snapshotTruth=completedShopeeSnapshotPodTruth(db,date,group,sourceRows);
+    if(snapshotTruth)return snapshotTruth;
+
     const rows=db.prepare(`
       SELECT u.shipmentCode,
              CASE
@@ -60,14 +110,14 @@ export function persistentSelectedDatePodTruth(db,businessType='',reportDate='')
       const bill=String(row.shipmentCode||'').trim().toUpperCase();
       if(bill&&!unique.has(bill))unique.set(bill,row);
     }
-    const sourceRows=[...unique.values()];
-    const bills=sourceRows.filter(row=>Number(row.isPod||0)===1)
+    const formalRows=[...unique.values()];
+    const bills=formalRows.filter(row=>Number(row.isPod||0)===1)
       .map(row=>String(row.shipmentCode||'').trim().toUpperCase()).filter(Boolean);
     return{
-      authoritative:sourceRows.length>0,
+      authoritative:bills.length>0,
       bills,
-      sourceCount:sourceRows.length,
-      resolvedCount:sourceRows.length,
+      sourceCount:formalRows.length,
+      resolvedCount:formalRows.length,
       source:'FORMAL_DASHBOARD_MEMBERSHIP_SQL'
     };
   }catch(error){
