@@ -16,31 +16,33 @@ function sourceBills(db,businessType,date){
   catch{return new Set()}
 }
 
-export function persistentSelectedDatePodBills(db,businessType='',reportDate=''){
+export function persistentSelectedDatePodTruth(db,businessType='',reportDate=''){
   const type=String(businessType||'').trim().toUpperCase(),date=dateKey(reportDate);
-  if(!date)return[];
+  if(!date)return{authoritative:false,bills:[],sourceCount:0,resolvedCount:0};
   let owner='',group='',sourceType='';
   if(type==='WHPP'){owner='WHPP';sourceType='WHPP';}
   else if(type==='SHOPEECN'){owner='SHOPEE';group='CN';sourceType='SHOPEECN';}
   else if(type==='SHOPEEVN'){owner='SHOPEE';group='VN';sourceType='SHOPEEVN';}
-  else return[];
+  else return{authoritative:false,bills:[],sourceCount:0,resolvedCount:0};
   try{
     const source=sourceBills(db,sourceType,date);
     const rows=db.prepare(`SELECT shipmentCode,isPod,recipient_group,rawJson
       FROM business_final_rows
       WHERE businessType=? AND reportDate=?
       ORDER BY shipmentCode`).all(owner,date);
-    const seen=new Set(),out=[];
+    const resolved=new Set(),pod=new Set();
     for(const row of rows){
       const bill=String(row.shipmentCode||'').trim().toUpperCase();
-      if(!bill||seen.has(bill))continue;
-      if(source.size&&!source.has(bill))continue;
+      if(!bill||!source.has(bill))continue;
       if(group&&persistedGroup(row)!==group)continue;
-      if(!persistedPod(row))continue;
-      seen.add(bill);out.push(bill);
+      resolved.add(bill);
+      if(persistedPod(row))pod.add(bill);
     }
-    return out;
-  }catch{return[]}
+    return{authoritative:source.size>0&&resolved.size===source.size,bills:[...pod],sourceCount:source.size,resolvedCount:resolved.size};
+  }catch{return{authoritative:false,bills:[],sourceCount:0,resolvedCount:0}}
+}
+export function persistentSelectedDatePodBills(db,businessType='',reportDate=''){
+  return persistentSelectedDatePodTruth(db,businessType,reportDate).bills;
 }
 
 export function persistentWhppCompletionTruth(db,reportDate=''){
