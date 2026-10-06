@@ -18,7 +18,7 @@ assert.doesNotMatch(business,/DELETE FROM business_track_events WHERE businessTy
 assert.match(business,/appendPermanentBusinessTrackEvents\(db,type,date,state\.trackEvents\|\|\[\],now\)/,'business final save must append timing events');
 assert.match(business,/if\(date&&\(state\.trackEvents\|\|\[\]\)\.length\)appendPermanentBusinessTrackEvents/,'runtime checkpoints must persist timing events immediately');
 assert.match(business,/strictPodEventTime/,'strict POD event timestamp persistence missing');
-assert.match(business,/source='strict_track_event'/,'POD lock must retain strict track source');
+assert.match(business,/VALUES\(\?,\?,\?,'strict_track_event',\?,\?\)/,'POD lock must retain strict track source');
 
 assert.doesNotMatch(whpp,/\['business_scan_results','business_track_events','business_exception_items','business_final_rows'\]/,'WHPP finalization must not delete saved timing events');
 assert.match(whpp,/appendPermanentWhppTrackEvents\(db,reportDate,normalized\.trackEvents\|\|\[\],now\)/,'WHPP finalization must append timing events');
