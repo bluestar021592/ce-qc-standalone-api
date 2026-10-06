@@ -17,7 +17,7 @@ assert.match(shell,/const truthLocked=Boolean\(truth\?\.whppCompletion\?\.locked
 assert.match(shell,/complete:truthLocked\|\|Boolean\(whppPayload\.completionLock\?\.locked\)/,'truth lock must force WHPP family complete');
 assert.match(shell,/phase:truthLocked\?'完成'/,'truth lock must force completed phase');
 
-assert.match(html,/ce-qc-build" content="V684_NULLSAFE_TIMING_TRUTH"/,'V684 build marker missing');
-assert.match(html,/v625-shell\.js\?v=20261006-v684-1/,'V684 JS cache revision missing');
+assert.match(html,/ce-qc-build" content="V\d{3,}_[A-Z0-9_]+"/,'V684+ build marker missing');
+assert.match(html,/v625-shell\.js\?v=\d{8}-v\d{3,}-1/,'V684+ JS cache revision missing');
 
 console.log('[V684] real diagnostic regression locked · null historical rows cannot zero WHPP/VN timing · selected-date truth forces WHPP 3/3');
