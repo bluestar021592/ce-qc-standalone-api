@@ -105,7 +105,8 @@ function groupRows(rows=[],fallbackBills=[]){
   const map=new Map();
   const normalizedRows=normalizeV485TrackRows(rows,{fallbackBills});
   for(const raw of normalizedRows){
-    const row={...normalizeEvent(raw)},bill=billOf(row);
+    if(!raw)continue;
+    const row={...normalizeEvent(raw||{})},bill=billOf(row);
     if(!bill)continue;
     if(!map.has(bill))map.set(bill,[]);
     map.get(bill).push({...raw,...row,shipmentCode:bill});
@@ -113,6 +114,7 @@ function groupRows(rows=[],fallbackBills=[]){
   return map;
 }
 function eventFingerprint(row={}){
+  row=row||{};
   const normalized={...normalizeEvent(row)};
   const time=String(normalized.eventTime||normalized.trackingEventTime||normalized.creationDate||normalized.lastUpdateDate||'').trim();
   const code=String(normalized.eventCode??normalized.trackingEventCode??normalized.statusCode??'').trim();
@@ -130,12 +132,29 @@ function persistBillEvents(type,date,bill,rows=[]){
   db.exec('BEGIN IMMEDIATE');
   try{
     for(const raw of rows){
-      const row={...normalizeEvent(raw),shipmentCode:bill,reportDate:date};
+      if(!raw)continue;
+      const row={...normalizeEvent(raw||{}),shipmentCode:bill,reportDate:date};
       const fp=eventFingerprint(row);if(seen.has(fp))continue;seen.add(fp);
       insert.run(owner,bill,date,row.eventTime||row.trackingEventTime||row.creationDate||row.lastUpdateDate||'',String(row.eventCode??row.trackingEventCode??row.statusCode??''),JSON.stringify(row),stamp);added++;
     }
     db.exec('COMMIT');return added;
   }catch(error){try{db.exec('ROLLBACK')}catch{};throw error}
+}
+
+async function queryTimingEvidenceRows(client,codes=[]){
+  const bills=unique(codes);
+  if(!bills.length)return[];
+  let primary=[];
+  try{primary=await client.trackQuery(bills)}catch(error){primary=[]}
+  const primaryNormalized=normalizeV485TrackRows(primary,{fallbackBills:bills});
+  if(primaryNormalized.length)return primary;
+
+  let fallback=[];
+  try{fallback=await client.shipmentTrack(bills)}catch(error){fallback=[]}
+  const fallbackNormalized=normalizeV485TrackRows(fallback,{fallbackBills:bills});
+  if(fallbackNormalized.length)return fallback;
+
+  return primary?.length?primary:fallback;
 }
 
 async function runOne(type,date,snapshotId=''){
@@ -148,7 +167,7 @@ async function runOne(type,date,snapshotId=''){
     const wave=batches.slice(offset,offset+4);
     const results=await Promise.all(wave.map(async batch=>{
       queried+=batch.length;
-      try{return await queryTrackBatchWithFallback({batch,query:codes=>client.trackQuery(codes),apiName:`v648-${type.toLowerCase()}-selected-date-timing`,fallbackSizes:[25,10,5,1],onLog:async()=>{}})}
+      try{return await queryTrackBatchWithFallback({batch,query:codes=>queryTimingEvidenceRows(client,codes),apiName:`v686-${type.toLowerCase()}-selected-date-timing`,fallbackSizes:[25,10,5,1],onLog:async()=>{}})}
       catch(error){return{successes:[],failures:[{batch,error}]}}
     }));
     for(const outcome of results){
