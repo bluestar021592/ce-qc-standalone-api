@@ -24,7 +24,10 @@ assert.match(js,/setText\('kpiReturned',fmt\(\(counts\.returned\?\?m\.returned\)
 assert.match(js,/setText\('kpiOtherNormal',fmt\(counts\.otherNormal\|\|0\)\)/,'other-normal status must be visible from exclusive accounting');
 assert.match(html,/data-kpi-detail="returned"/,'returned KPI must be clickable');
 assert.match(html,/data-kpi-detail="otherNormal"/,'other-normal KPI must be clickable');
-assert.match(html,/v625-shell\.js\?v=202610(?:04-v630-1|05-v(?:63[123567]|640|641|642|643)-1)/,'V630 JS cache bust missing');
-assert.match(html,/v625-shell\.css\?v=202610(?:04-v630-1|05-v(?:63[123567]|640|641|642|643)-1)/,'V630 CSS cache bust missing');
+assert.match(html,/v625-shell\\.js\\?v=\\d{8}-v6\\d{2}-1/,'V630+ JS cache bust missing');
+assert.match(html,/v625-shell\\.css\\?v=\\d{8}-v6\\d{2}-1/,'V630+ CSS cache bust missing');
 
+
+const assetBuild=Number((html.match(/v625-shell\\.js\\?v=\\d{8}-v(6\\d{2})-1/)||[])[1]||0);
+assert.ok(assetBuild>=630,'asset cache build must not predate V630');
 console.log('[V630] strict return truth + same-state KPI drilldown + WHPP remainder visibility smoke passed');
