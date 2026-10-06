@@ -131,7 +131,8 @@ must(whppStore, "'IDENTICAL_MEMBERSHIP_REUPLOAD'");
 must(whppStore, 'function invalidatePriorWhppLifecycle');
 must(whppStore, "SET status='INVALID',reconciliationStatus='FAILED',invalidReason=?");
 must(whppStore, "DELETE FROM business_history_summary WHERE businessType='WHPP' AND reportDate=?");
-for (const table of ['business_scan_results','business_track_events','business_exception_items','business_final_rows']) must(whppStore, `'${table}'`);
+for (const table of ['business_scan_results','business_exception_items','business_final_rows']) must(whppStore, `'${table}'`);
+forbid(whppStore, "DELETE FROM business_track_events WHERE businessType='WHPP' AND reportDate=?", 'WHPP reimport must preserve append-only timing evidence');
 must(whppStore, 'WHPP_DAILY_REIMPORT_NEW_LIFECYCLE');
 must(whppStore, '[CE-QC][WHPP_REIMPORT_LIFECYCLE_INVALIDATED]');
 
