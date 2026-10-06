@@ -3,6 +3,11 @@ import { getDb } from './db.js';
 import { normalizeEvent } from './analyzer.js';
 import { queryTrackBatchWithFallback, splitTrackBatches } from './trackBatching.js';
 import { loadWhppCanonicalTruth } from './whppCanonicalTruth.js';
+import { loadWhppState } from './whppStore.js';
+import { buildWhppDashboard } from './whppReporting.js';
+import { loadBusinessState } from './businessStore.js';
+import { buildShopeeDashboard } from './shopeeReporting.js';
+import { recipientGroupOf } from './recipientGroup.js';
 import { normalizeV485TrackRows, archiveV485TrackQueryResponse } from './v485StrictTrackEvidence.js';
 
 export const V645_SELECTED_DATE_TIMING_REPAIR_ID='2026-10-05-v645-selected-date-pod-track-repair-v1';
@@ -36,6 +41,14 @@ function unique(values=[]){return [...new Set(values.map(v=>String(v||'').trim()
 function whppPodBills(date){
   const out=[];
   try{
+    const state=loadWhppState();
+    if(String(state?.reportDate||'').slice(0,10)===date){
+      const dashboard=buildWhppDashboard(state);
+      for(const row of dashboard?.detailTabs?.pod?.rows||[]) out.push(billOf(row));
+      if(out.length)return unique(out);
+    }
+  }catch{}
+  try{
     const truth=loadWhppCanonicalTruth(date);
     for(const row of truth.rows||[]){
       const pod=Boolean(row?.truthEvidence?.pod||Number(row?.isPod||0)===1||row?.是否POD==='是'||row?.POD状态==='POD'||['POD','DELIVERED','SIGNED'].includes(String(row?.currentState||'').toUpperCase()));
@@ -61,6 +74,16 @@ function tbkhPodBills(date,snapshotId=''){
   }catch{return[]}
 }
 function shopeePodBills(type,date,snapshotId=''){
+  const wantedGroup=type==='SHOPEECN'?'CN':type==='SHOPEEVN'?'VN':'';
+  try{
+    const state=loadBusinessState('SHOPEE');
+    if(String(state?.reportDate||'').slice(0,10)===date){
+      const dashboard=buildShopeeDashboard(state);
+      const rows=dashboard?.detailTabs?.pod?.rows||[];
+      const bills=rows.filter(row=>!wantedGroup||recipientGroupOf(row)===wantedGroup).map(billOf);
+      if(bills.length)return unique(bills);
+    }
+  }catch{}
   const db=getDb(),params=[storageType(type),storageType(type),storageType(type)];
   let snapshot='';
   if(snapshotId){snapshot=' AND u.snapshotId=?';}
