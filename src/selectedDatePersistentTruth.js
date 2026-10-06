@@ -17,7 +17,7 @@ export function persistentSelectedDatePodTruth(db,businessType='',reportDate='')
 
   try{
     if(type==='WHPP'){
-      const truth=loadWhppCanonicalTruth(date,String(batch.snapshotId||''));
+      const truth=loadWhppCanonicalTruth(date,String(batch.snapshotId||''),db);
       const rows=Array.isArray(truth?.rows)?truth.rows:[];
       const bills=rows
         .filter(row=>row?.truthEvidence?.pod===true||Number(row?.isPod||0)===1||row?.是否POD==='是'||String(row?.currentState||'').toUpperCase()==='POD')
@@ -94,7 +94,7 @@ export function persistentWhppCompletionTruth(db,reportDate=''){
   try{finalCount=Number(db.prepare("SELECT COUNT(DISTINCT UPPER(TRIM(shipmentCode))) count FROM business_final_rows WHERE businessType='WHPP' AND reportDate=?").get(date)?.count||0)}catch{}
   try{sourceCount=batch?Number(db.prepare("SELECT COUNT(DISTINCT UPPER(TRIM(shipmentCode))) count FROM unified_import_rows WHERE batchId=? AND reportDate=? AND UPPER(TRIM(businessType))='WHPP'").get(batch.batchId,date)?.count||0):0}catch{}
   try{unifiedSnapshot=batch?db.prepare("SELECT status,payloadJson,createdAt FROM unified_snapshots WHERE snapshotId=? LIMIT 1").get(batch.snapshotId)||null:null}catch{}
-  try{canonical=loadWhppCanonicalTruth(date,String(batch?.snapshotId||''))}catch{}
+  try{canonical=loadWhppCanonicalTruth(date,String(batch?.snapshotId||''),db)}catch{}
 
   const dailySummary=safeJson(daily?.summaryJson,{});
   const historySummary=safeJson(history?.summaryJson,{});
