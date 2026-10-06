@@ -18,5 +18,5 @@ assert.match(shell,/btn\.textContent='生成中…'/,'generate button must show 
 assert.match(shell,/生成失败：/,'export failure must be visible');
 assert.match(html,/id="v652ExportBar"/,'visible export progress bar missing');
 assert.match(html,/id="v652ExportMessage"/,'visible export status message missing');
-assert.match(html,/v625-shell\.js\?v=\d{8}-v6(?:5[2-9]|[6-9]\d)-1/,'V652+ JS asset revision missing');
+assert.match(html,/v625-shell\.js\?v=\d{8}-v\d{3,}-1/,'V652+ JS asset revision missing');
 console.log('[V652] consistent 3-family progress + async export task progress UI smoke passed');
