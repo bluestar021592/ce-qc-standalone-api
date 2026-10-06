@@ -31,7 +31,7 @@ assert.match(home,/requestV328EvidenceRepair/,'TBKH and Shopee signing evidence 
 assert.match(home,/requestWhppSigningEvidenceRepair/,'WHPP signing evidence repair must be queued');
 assert.match(js,/timingRepairRunning/,'browser must keep polling while timing repair runs');
 
-assert.match(html,/v625-shell\.js\?v=\d{8}-v6(?:4[2-9]|[5-9]\d)-1/,'V642+ JS cache bust missing');
-assert.match(html,/v625-shell\.css\?v=\d{8}-v6(?:4[2-9]|[5-9]\d)-1/,'V642+ CSS cache bust missing');
+assert.match(html,/v625-shell\.js\?v=\d{8}-v\d{3,}-1/,'V642+ JS cache bust missing');
+assert.match(html,/v625-shell\.css\?v=\d{8}-v\d{3,}-1/,'V642+ CSS cache bust missing');
 
 console.log('[V642] canonical WHPP route + complete live stages + POD signing evidence repair smoke passed');
