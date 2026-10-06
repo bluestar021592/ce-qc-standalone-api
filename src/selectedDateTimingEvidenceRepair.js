@@ -9,7 +9,7 @@ import { loadBusinessState, getBusinessSnapshot } from './businessStore.js';
 import { buildShopeeDashboard } from './shopeeReporting.js';
 import { recipientGroupOf } from './recipientGroup.js';
 import { normalizeV485TrackRows, archiveV485TrackQueryResponse } from './v485StrictTrackEvidence.js';
-import { persistentSelectedDatePodBills } from './selectedDatePersistentTruth.js';
+import { persistentSelectedDatePodTruth } from './selectedDatePersistentTruth.js';
 
 export const V645_SELECTED_DATE_TIMING_REPAIR_ID='2026-10-05-v645-selected-date-pod-track-repair-v1';
 const TYPES=new Set(['TBKH','WHPP','SHOPEECN','SHOPEEVN']);
@@ -40,8 +40,8 @@ function patch(type,date,snapshotId='',value={}){
 function unique(values=[]){return [...new Set(values.map(v=>String(v||'').trim().toUpperCase()).filter(Boolean))].sort();}
 
 function whppPodBills(date){
-  const persisted=persistentSelectedDatePodBills(getDb(),'WHPP',date);
-  if(persisted.length)return persisted;
+  const persisted=persistentSelectedDatePodTruth(getDb(),'WHPP',date);
+  if(persisted.authoritative||persisted.bills.length)return persisted.bills;
   try{
     const hit=listWhppHistory(500).find(item=>String(item?.reportDate||'').slice(0,10)===date);
     if(hit?.snapshotId){
@@ -75,8 +75,8 @@ function tbkhPodBills(date,snapshotId=''){
 }
 function shopeePodBills(type,date){
   const wantedGroup=type==='SHOPEECN'?'CN':'VN';
-  const persisted=persistentSelectedDatePodBills(getDb(),type,date);
-  if(persisted.length)return persisted;
+  const persisted=persistentSelectedDatePodTruth(getDb(),type,date);
+  if(persisted.authoritative||persisted.bills.length)return persisted.bills;
   try{
     const snapshot=getBusinessSnapshot('SHOPEE',date);
     const rows=snapshot?.view?.detailTabs?.[wantedGroup+'_pod']?.rows
