@@ -13,5 +13,5 @@ assert.match(summary,/canonicalPodSet\.has\(shipmentCode\)/,'canonical repair PO
 assert.match(server,/\/api\/timing-repair\/start/,'explicit post-processing timing repair trigger missing');
 assert.match(shell,/WHPP待处理，请点击“继续未完成处理”/,'2-of-3 UI must state the exact next action');
 assert.match(shell,/post\('\/api\/timing-repair\/start'/,'3-family completion must start timing repair');
-assert.match(html,/v625-shell\.js\?v=20261005-v6(?:5[6-9]|[6-9]\d)-1/,'V656+ JS revision missing');
+assert.match(html,/v625-shell\.js\?v=\d{8}-v6(?:5[6-9]|[6-9]\d)-1/,'V656+ JS revision missing');
 console.log('[V656] canonical POD timing denominator + explicit post-run repair trigger + actionable 2-of-3 UI passed');
