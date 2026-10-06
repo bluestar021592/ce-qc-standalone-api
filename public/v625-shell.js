@@ -790,7 +790,8 @@ async function waitWhppTerminal(reportDate,timeoutMs=1800000){
   while(Date.now()-started<timeoutMs){
     const r=await json('/api/whpp/progress'+(reportDate?'?reportDate='+encodeURIComponent(reportDate):''),10000);
     const runtime=r.runtime||{};
-    renderLiveProgress({ccsl:{},shopee:{},whpp:{...runtime,summary:r.summary||{},log:r.log||[],active:Boolean(runtime.active)}});
+    // Keep the global 1.4s progress poll as the single UI owner. Do not overwrite
+    // completed CCSL/SHOPEE state with empty objects while waiting for WHPP.
     if(!runtime.active&&runtime.outcome){
       if(runtime.outcome==='FAILED')throw new Error(runtime.error||'WHPP处理失败');
       return r;
@@ -801,7 +802,7 @@ async function waitWhppTerminal(reportDate,timeoutMs=1800000){
 }
 async function safeWhppRun(mode,reportDate){
   try{
-    const r=await post('/api/whpp/run/'+(mode==='resume'?'resume':'start'),{reportDate},30000);
+    const r=await post('/api/whpp/run/'+(mode==='resume'?'resume':'start'),{reportDate},0);
     if(r.runtime?.active||r.active)await waitWhppTerminal(reportDate);
     return r;
   }catch(error){
