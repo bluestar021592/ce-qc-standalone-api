@@ -24,13 +24,39 @@ const storageType=type=>/^SHOPEE/.test(type)?'SHOPEE':type;
 const active=s=>['QUEUED','RUNNING'].includes(String(s||'').toUpperCase());
 const snapshotKey=v=>String(v||'').trim();
 const keyOf=(type,date,snapshotId='')=>typeKey(type)+'|'+dateKey(date)+'|'+snapshotKey(snapshotId);
+const HISTORICAL_AUTO_REPAIR_MAX_AGE_DAYS=30;
+const durableStopKey=(type,date)=>'selected_date_timing_stop:'+typeKey(type)+':'+dateKey(date);
+function reportAgeDays(date){
+  const d=dateKey(date);if(!d)return 0;
+  const stamp=Date.parse(d+'T00:00:00+07:00');if(!Number.isFinite(stamp))return 0;
+  return Math.floor((Date.now()-stamp)/86400000);
+}
+function readDurableStop(type,date){
+  try{
+    const row=getDb().prepare('SELECT valueJson,updatedAt FROM app_state WHERE key=?').get(durableStopKey(type,date));
+    if(!row?.valueJson)return null;
+    const value=JSON.parse(row.valueJson);
+    return value&&value.status==='HISTORICAL_EVIDENCE_UNAVAILABLE'?{...value,updatedAt:row.updatedAt||value.updatedAt||''}:null;
+  }catch{return null}
+}
+function writeDurableStop(type,date,snapshotId,total,message){
+  const value={id:V645_SELECTED_DATE_TIMING_REPAIR_ID,businessType:typeKey(type),reportDate:dateKey(date),snapshotId:snapshotKey(snapshotId),status:'HISTORICAL_EVIDENCE_UNAVAILABLE',phase:'DONE',total:Number(total||0),completed:0,failed:Number(total||0),queried:0,persistedEvents:0,message:message||'历史轨迹证据缺失，自动补查已停止。',completedAt:now(),updatedAt:now()};
+  try{
+    getDb().prepare(`INSERT INTO app_state(key,valueJson,updatedAt) VALUES(?,?,?)
+      ON CONFLICT(key) DO UPDATE SET valueJson=excluded.valueJson,updatedAt=excluded.updatedAt`).run(durableStopKey(type,date),JSON.stringify(value),value.updatedAt);
+  }catch{}
+  return value;
+}
+
 
 function baseState(type,date,snapshotId=''){
   return {id:V645_SELECTED_DATE_TIMING_REPAIR_ID,businessType:type,reportDate:date,snapshotId:snapshotKey(snapshotId),status:'IDLE',phase:'WAITING',total:0,completed:0,failed:0,queried:0,message:'',startedAt:'',updatedAt:'',completedAt:''};
 }
 function stateFor(type,date,snapshotId=''){
   const typeN=typeKey(type),dateN=dateKey(date),snap=snapshotKey(snapshotId),key=keyOf(typeN,dateN,snap);
-  return states.get(key)||baseState(typeN,dateN,snap);
+  const memory=states.get(key);if(memory)return memory;
+  const durable=readDurableStop(typeN,dateN);if(durable)return{...baseState(typeN,dateN,snap),...durable,snapshotId:snap||durable.snapshotId||''};
+  return baseState(typeN,dateN,snap);
 }
 function patch(type,date,snapshotId='',value={}){
   const typeN=typeKey(type),dateN=dateKey(date),snap=snapshotKey(snapshotId),key=keyOf(typeN,dateN,snap);
@@ -187,6 +213,10 @@ async function runOne(type,date,snapshotId=''){
     }
     patch(type,date,snapshotId,{status:'RUNNING',phase:'TRACK_QUERY',completed,failed,queried,persistedEvents,message:`${type} ${date} 轨迹补证 ${Math.min(offset+4,totalBatches)}/${totalBatches}批：成功 ${completed}/${bills.length}，失败 ${failed}`});
   }
+  if(bills.length>0&&completed===0&&failed>=bills.length&&persistedEvents===0&&reportAgeDays(date)>HISTORICAL_AUTO_REPAIR_MAX_AGE_DAYS){
+    const durable=writeDurableStop(type,date,snapshotId,bills.length,`${type} ${date} 历史轨迹证据缺失；POD成员已确认，但本地无真实60/70→80轨迹，自动补查已停止。`);
+    return patch(type,date,snapshotId,durable);
+  }
   return patch(type,date,snapshotId,{status:failed?'COMPLETED_WITH_GAPS':'COMPLETED',phase:'DONE',completed,failed,queried,persistedEvents,completedAt:now(),message:failed?`${type} ${date} 轨迹补证完成，仍有 ${failed}票待补。`:`${type} ${date} 轨迹补证完成。`});
 }
 async function pump(){
@@ -199,6 +229,19 @@ export function requestSelectedDateTimingRepair(businessType='',reportDate='',sn
   const type=typeKey(businessType),date=dateKey(reportDate),snap=snapshotKey(snapshotId);
   if(!TYPES.has(type)||!date)return stateFor(type,date,snap);
   const current=stateFor(type,date,snap),status=String(current.status||'').toUpperCase();
+  if(status==='HISTORICAL_EVIDENCE_UNAVAILABLE')return current;
+  if(reportAgeDays(date)>HISTORICAL_AUTO_REPAIR_MAX_AGE_DAYS){
+    const bills=selectedDatePodBills(type,date,snap);
+    if(bills.length){
+      const owner=storageType(type);
+      let savedEvents=0;
+      try{savedEvents=Number(getDb().prepare('SELECT COUNT(*) c FROM business_track_events WHERE businessType=? AND reportDate=?').get(owner,date)?.c||0)}catch{}
+      if(savedEvents===0){
+        const durable=writeDurableStop(type,date,snap,bills.length,`${type} ${date} 为历史日报，POD成员已确认但本地没有真实轨迹证据；为避免无效重复查询，自动补查已停止。`);
+        return patch(type,date,snap,durable);
+      }
+    }
+  }
   if(active(status))return current;
   const age=Date.now()-Date.parse(current.completedAt||current.updatedAt||0);
   if(status==='WAITING_FOR_POD_MEMBERS'&&Number.isFinite(age)&&age<5_000)return current;
