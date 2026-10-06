@@ -144,17 +144,20 @@ function persistBillEvents(type,date,bill,rows=[]){
 async function queryTimingEvidenceRows(client,codes=[]){
   const bills=unique(codes);
   if(!bills.length)return[];
+
   let primary=[];
   try{primary=await client.trackQuery(bills)}catch(error){primary=[]}
   const primaryNormalized=normalizeV485TrackRows(primary,{fallbackBills:bills});
-  if(primaryNormalized.length)return primary;
+  const covered=new Set(primaryNormalized.map(row=>billOf(row)).filter(Boolean));
+  const missing=bills.filter(code=>!covered.has(code));
+  if(!missing.length)return primary;
 
   let fallback=[];
-  try{fallback=await client.shipmentTrack(bills)}catch(error){fallback=[]}
-  const fallbackNormalized=normalizeV485TrackRows(fallback,{fallbackBills:bills});
-  if(fallbackNormalized.length)return fallback;
-
-  return primary?.length?primary:fallback;
+  try{fallback=await client.shipmentTrack(missing)}catch(error){fallback=[]}
+  const fallbackNormalized=normalizeV485TrackRows(fallback,{fallbackBills:missing});
+  if(!primary?.length)return fallbackNormalized.length?fallback:fallback;
+  if(!fallback?.length)return primary;
+  return [...primary,...fallback];
 }
 
 async function runOne(type,date,snapshotId=''){
