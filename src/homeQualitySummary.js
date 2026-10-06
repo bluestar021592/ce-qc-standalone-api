@@ -516,6 +516,29 @@ function safeReturnSummaryForBatch(batch,type){
 }
 
 
+export function diagnoseSelectedDateTiming(reportDate='',snapshotId=''){
+  const date=String(reportDate||'').slice(0,10);
+  const result={reportDate:date,snapshotId:String(snapshotId||''),types:{}};
+  for(const type of TIMING_TYPES){
+    try{
+      const canonical=selectedDatePodBills(type,date,snapshotId);
+      const rows=timingRows(snapshotId,date,type);
+      const summary=summarizeTimingRows(rows);
+      result.types[type]={
+        canonicalPodCount:canonical.length,
+        timingRowCount:rows.length,
+        timingPodCount:summary.overall.totalPodCount,
+        validEvidenceCount:summary.overall.podCount,
+        missingEvidenceCount:summary.overall.missingEvidenceCount,
+        sampleCanonicalBills:canonical.slice(0,5),
+        sampleTimingPodBills:rows.filter(row=>row.isPod).slice(0,5).map(row=>row.shipmentCode)
+      };
+    }catch(error){
+      result.types[type]={error:String(error?.message||error)};
+    }
+  }
+  return result;
+}
 export async function buildHomeQualitySummaryWithArchive(options={}){
   const base=buildHomeQualitySummary(options);
   const batch=selectUnifiedBatch(options);
