@@ -19,6 +19,6 @@ assert.match(html,/v625-shell\.js\?v=\d{8}-v\d{3,}-1/,'V636+ JS cache bust missi
 assert.match(html,/v625-shell\.css\?v=\d{8}-v\d{3,}-1/,'V636+ CSS cache bust missing');
 
 
-const assetBuild=Number((html.match(/v625-shell\.js\?v=\d{8}-v(6\d{2})-1/)||[])[1]||0);
+const assetBuild=Number((html.match(/v625-shell\.js\?v=\d{8}-v(\d{3,})-1/)||[])[1]||0);
 assert.ok(assetBuild>=636,'asset cache build must not predate V636');
 console.log('[V636] WHPP backend canonical buckets drive KPI, drilldown, donut, and conservation');
