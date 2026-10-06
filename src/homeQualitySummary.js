@@ -10,6 +10,8 @@ import { requestV328EvidenceRepair, inspectV328EvidenceRepair } from './v328Evid
 import { requestWhppSigningEvidenceRepair, inspectWhppSigningEvidenceRepair } from './whppSigningEvidenceRepair.js';
 import { readV329ThreeBusinessDailyCache } from './v329ThreeBusinessDailyCache.js';
 import { requestSelectedDateTimingRepair, inspectSelectedDateTimingRepair, selectedDatePodBills } from './selectedDateTimingEvidenceRepair.js';
+import { recoverV498SavedShopeePodDates, extractV498SavedShopeePodEvidence } from './v498SavedShopeePodEvidence.js';
+import { v495SavedTerminalEventPodDate } from './v419CanonicalExportLedgerTruth.js';
 
 const TYPES = Object.freeze(['CE','CEAF','TBKH','ALI1688','WHPP','SHOPEECN','SHOPEEVN']);
 const TIMING_TYPES = Object.freeze(['TBKH','WHPP','SHOPEECN','SHOPEEVN']);
@@ -331,6 +333,55 @@ function snapshotEvidenceFromRow(row,reportDate,attempt=0){
     attemptSource:'COMPLETED_SNAPSHOT_DAY',evidenceSource:'completed_snapshot_pod_date'
   };
 }
+function savedTerminalPodTimingEvidence(reportDate,businessType,canonicalPodSet=new Set()){
+  const date=normalizeDate(reportDate),type=String(businessType||'').toUpperCase(),db=getDb(),result=new Map();
+  const bills=[...canonicalPodSet].filter(Boolean);
+  if(!date||!bills.length||!['WHPP','SHOPEECN','SHOPEEVN'].includes(type))return result;
+
+  const consider=(bill,evidence,source)=>{
+    if(!bill||!canonicalPodSet.has(bill)||!evidence?.podDate)return;
+    const days=naturalDays(date,evidence.podDate);if(days<=0)return;
+    result.set(bill,{
+      ok:true,reason:'',startTime:date,podTime:evidence.timestamp||evidence.podDate,
+      days,attempt:Math.max(1,Math.min(3,days)),startMode:'REPORT_DATE_TO_SAVED_TERMINAL_POD',
+      attemptSource:'SAVED_TERMINAL_POD_DATE',evidenceSource:source||evidence.source||'saved_terminal_pod_date',
+      podField:evidence.field||'',terminalProof:evidence.terminalProof||''
+    });
+  };
+
+  if(type==='SHOPEECN'||type==='SHOPEEVN'){
+    try{
+      const recovered=recoverV498SavedShopeePodDates({db,targetBills:bills});
+      for(const [bill,evidence] of recovered.evidenceByBill||[])consider(bill,evidence,'v498_saved_sqlite_pod_date');
+    }catch{}
+  }
+
+  const owner=type.startsWith('SHOPEE')?'SHOPEE':type;
+  for(let i=0;i<bills.length;i+=220){
+    const chunk=bills.slice(i,i+220),marks=chunk.map(()=>'?').join(',');
+    if(!marks)continue;
+    for(const spec of [
+      ['business_scan_results',`SELECT shipmentCode,reportDate,orderStatus,isPod,rawJson FROM business_scan_results WHERE businessType=? AND shipmentCode IN (${marks})`],
+      ['business_shipment_tracks',`SELECT shipmentCode,reportDate,shipmentStatus,statusText,apiStatus,rawJson FROM business_shipment_tracks WHERE businessType=? AND shipmentCode IN (${marks})`],
+      ['business_final_rows',`SELECT shipmentCode,reportDate,isPod,apiStatus,rawJson FROM business_final_rows WHERE businessType=? AND shipmentCode IN (${marks})`]
+    ]){
+      let rows=[];try{rows=db.prepare(spec[1]).all(owner,...chunk)}catch{}
+      for(const row of rows){
+        const bill=snapshotBill(row);if(result.has(bill))continue;
+        const evidence=extractV498SavedShopeePodEvidence(row,spec[0]);
+        if(evidence)consider(bill,evidence,`local_${spec[0]}_pod_date`);
+      }
+    }
+    let states=[];try{states=db.prepare(`SELECT shipmentCode,state,apiStatus,lastEventTime,stateJson FROM shipment_current_state WHERE shipmentCode IN (${marks})`).all(...chunk)}catch{}
+    for(const row of states){
+      const bill=snapshotBill(row);if(result.has(bill))continue;
+      const podDate=v495SavedTerminalEventPodDate(row);if(!podDate)continue;
+      consider(bill,{shipmentCode:bill,podDate,timestamp:row.lastEventTime,field:'lastEventTime',terminalProof:'V495_TERMINAL_STATE'},'v495_saved_terminal_event_time');
+    }
+  }
+  return result;
+}
+
 function completedSnapshotTimingEvidence(reportDate,businessType,canonicalPodSet=new Set()){
   const db=getDb(),date=normalizeDate(reportDate),result=new Map();
   if(!date||!canonicalPodSet?.size)return result;
@@ -406,6 +457,7 @@ function timingRows(snapshotId,reportDate,businessType) {
     : membershipFinalRows(snapshotId,reportDate,businessType);
 
   const canonicalPodSet=new Set(selectedDatePodBills(businessType,reportDate,snapshotId));
+  const savedTerminalTiming=savedTerminalPodTimingEvidence(reportDate,businessType,canonicalPodSet);
   const snapshotTiming=completedSnapshotTimingEvidence(reportDate,businessType,canonicalPodSet);
   const rowMap=new Map();
   for(const row of sourceRows||[]){
@@ -453,12 +505,13 @@ function timingRows(snapshotId,reportDate,businessType) {
     const shipmentCode=String(row.shipmentCode||'').trim().toUpperCase();
     const direct=timingEvidence(events.get(shipmentCode)||[]);
     const strictLedger=!direct.ok?strictLedgerTiming(ledger.get(shipmentCode)||{}):null;
-    const snapshotFallback=!direct.ok&&!strictLedger?snapshotTiming.get(shipmentCode)||null:null;
+    const savedTerminalFallback=!direct.ok&&!strictLedger?savedTerminalTiming.get(shipmentCode)||null:null;
+    const snapshotFallback=!direct.ok&&!strictLedger&&!savedTerminalFallback?snapshotTiming.get(shipmentCode)||null:null;
     const ledgerRow=ledger.get(shipmentCode)||{};
     return {
       shipmentCode,region:String(row.regionCode||'').toUpperCase(),
       isPod:Boolean(canonicalPodSet.has(shipmentCode)||positivePodMembership(row,ledgerRow)),isReturned:isReturned(row),
-      evidence:direct.ok?{...direct,evidenceSource:(events.get(shipmentCode)||[]).some(x=>x.evidenceSource==='track_events')?'track_events':'business_track_events'}:(strictLedger||snapshotFallback||direct),
+      evidence:direct.ok?{...direct,evidenceSource:(events.get(shipmentCode)||[]).some(x=>x.evidenceSource==='track_events')?'track_events':'business_track_events'}:(strictLedger||savedTerminalFallback||snapshotFallback||direct),
       membershipSource:canonicalPodSet.has(shipmentCode)?'canonical_pod_snapshot':(Number(row.isPod||0)===1?'final_rows':(String(ledgerRow.terminalReason||'').toUpperCase()==='POD'?'qc_tracking_ledger':'raw_terminal_proof'))
     };
   });
