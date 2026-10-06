@@ -309,6 +309,32 @@ export function saveWhppDailyImport({ reportDate, sourceName = '', rows = [], ba
   return state;
 }
 
+function permanentWhppEventTime(row={}) {
+  return String(row.eventTime||row.trackingEventTime||row.creationDate||row.lastUpdateDate||row.eventDate||row.occurTime||row.scanTime||'').trim();
+}
+function permanentWhppEventCode(row={}) {
+  return String(row.eventCode??row.trackingEventCode??row.statusCode??row.eventStatusCode??row.nodeCode??row.scanCode??row.trackCode??'').trim();
+}
+function appendPermanentWhppTrackEvents(db,reportDate,rows=[],now='') {
+  const existing=new Set();
+  try{
+    for(const row of db.prepare("SELECT shipmentCode,eventTime,eventCode FROM business_track_events WHERE businessType='WHPP' AND reportDate=?").all(reportDate)){
+      existing.add([String(row.shipmentCode||'').toUpperCase(),String(row.eventTime||''),String(row.eventCode||'')].join('|'));
+    }
+  }catch{}
+  const insert=db.prepare(`INSERT INTO business_track_events(businessType,shipmentCode,reportDate,eventTime,eventCode,rawJson,createdAt)
+    VALUES('WHPP',?,?,?,?,?,?)`);
+  let added=0;
+  for(const row of rows||[]){
+    const bill=billOf(row),eventTime=permanentWhppEventTime(row),eventCode=permanentWhppEventCode(row);
+    if(!bill||(!eventTime&&!eventCode))continue;
+    const key=[bill,eventTime,eventCode].join('|');
+    if(existing.has(key))continue;
+    existing.add(key);insert.run(bill,reportDate,eventTime,eventCode,JSON.stringify(row),now);added++;
+  }
+  return added;
+}
+
 export function finalizeWhppState(state = {}) {
   const db = getDb();
   const normalized = { ...state, businessType: WHPP };
@@ -324,7 +350,7 @@ export function finalizeWhppState(state = {}) {
 
   db.exec('BEGIN IMMEDIATE');
   try {
-    for (const table of ['business_scan_results','business_track_events','business_exception_items','business_final_rows']) {
+    for (const table of ['business_scan_results','business_exception_items','business_final_rows']) {
       db.prepare(`DELETE FROM ${table} WHERE businessType=? AND reportDate=?`).run(WHPP, reportDate);
     }
 
@@ -334,8 +360,9 @@ export function finalizeWhppState(state = {}) {
       insertScan.run(WHPP, billOf(row), reportDate, isPod(row) ? 1 : 0, String(row.orderStatus ?? ''), row.recipient_raw || row.recipientRaw || '', row.recipient_normalized || row.recipientNormalized || '', 'WHPP', 'SHIPMENT_PREFIX_CE', Number(row.source_row_number || row.rowNumber || 0), JSON.stringify(row), now, now);
     }
 
-    const insertEvent = db.prepare(`INSERT INTO business_track_events(businessType,shipmentCode,reportDate,eventTime,eventCode,rawJson,createdAt) VALUES(?,?,?,?,?,?,?)`);
-    for (const row of normalized.trackEvents || []) insertEvent.run(WHPP, billOf(row), reportDate, row.eventTime || '', String(row.eventCode ?? ''), JSON.stringify(row), now);
+    // V700 preserves the complete WHPP delivery lifecycle permanently.
+    // Finalization can add newly observed events, but never deletes earlier 60/70/Pending/80 evidence.
+    appendPermanentWhppTrackEvents(db,reportDate,normalized.trackEvents||[],now);
 
     const insertException = db.prepare(`INSERT INTO business_exception_items(businessType,shipmentCode,reportDate,exceptionType,exceptionDesc,reportTime,statusCode,fileId,rawJson,createdAt) VALUES(?,?,?,?,?,?,?,?,?,?)`);
     for (const row of normalized.exceptionItems || []) insertException.run(WHPP, billOf(row), reportDate, String(row.exceptionType ?? ''), row.exceptionDesc || row.exceptionReason || '', row.reportTime || '', String(row.statusCode ?? ''), String(row.fileId ?? ''), JSON.stringify(row), now);
