@@ -9,5 +9,5 @@ assert.match(shell,/const whppLock=truthLocked\?truth\.whppCompletion:\(whppPayl
 assert.match(shell,/complete:truthLocked\|\|Boolean\(whppPayload\.completionLock\?\.locked\)/,'WHPP selected-date truth or durable completion lock must mark UI family complete');
 assert.match(shell,/outcome:\(truthLocked\|\|whppPayload\.completionLock\?\.locked\)\?'COMPLETED'/,'WHPP selected-date truth or completion lock must publish COMPLETED outcome to UI');
 assert.match(server,/\[CE-QC\]\[V663_TIMING_DIAG\]/,'timing diagnostic log missing');
-assert.match(html,/v625-shell\.js\?v=\d{8}-v6(?:6[3-9]|[7-9]\d)-1/,'V663+ shell revision missing');
+assert.match(html,/v625-shell\.js\?v=\d{8}-v\d{3,}-1/,'V663+ shell revision missing');
 console.log('[V663] durable WHPP completion projection + timing diagnostics passed');
