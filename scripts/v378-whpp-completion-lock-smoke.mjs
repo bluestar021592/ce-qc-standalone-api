@@ -150,7 +150,7 @@ assert.notEqual(changedState.snapshotStatus,'COMPLETED');
 const afterChanged=inspectV378WhppCompletionLock(date,changedState,db);
 assert.equal(afterChanged.locked,false);
 assert.equal(afterChanged.finalized,false);
-assert.equal(afterChanged.reason,'CURRENT_DAILY_NOT_FINALIZED');
+assert.equal(afterChanged.reason,'PERSISTED_WHPP_INCOMPLETE');
 const changedSummary=JSON.parse(db.prepare("SELECT summaryJson FROM business_daily_reports WHERE businessType='WHPP' AND reportDate=?").get(date).summaryJson);
 assert.equal(changedSummary.snapshotId,'SOURCE-0824-B');
 assert.equal(changedSummary.completed,undefined);
