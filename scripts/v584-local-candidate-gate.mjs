@@ -87,6 +87,7 @@ const TASKS=[
   ['node',['scripts/v684-real-diagnostic-nullsafe-progress-smoke.mjs']],
   ['node',['scripts/v685-whpp-projection-gate-alignment-smoke.mjs']],
   ['node',['scripts/v686-dual-track-endpoint-timing-repair-smoke.mjs']],
+  ['node',['scripts/v687-per-bill-timing-fallback-smoke.mjs']],
   ['node',['--test',
     'test/unified-import-v7.test.js',
     'test/unified-import-ceaf.test.js',
