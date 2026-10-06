@@ -13,10 +13,10 @@ assert.match(icons,/12 3 3\.5 7\.5 12 12/,'top layer geometry missing');
 assert.match(html,/ui-icons-v625\.svg#icon-stack-total/,'total card must render layered icon');
 assert.doesNotMatch(html,/v632-total-icon">▰</,'legacy placeholder glyph must be removed');
 assert.match(css,/\.v632-total-icon\{[^}]*color:#7a42ea[^}]*background:#efe6ff/,'approved purple icon treatment missing');
-assert.match(html,/v625-shell\\.js\\?v=\\d{8}-v6\\d{2}-1/,'V633+ JS cache bust missing');
-assert.match(html,/v625-shell\\.css\\?v=\\d{8}-v6\\d{2}-1/,'V633+ CSS cache bust missing');
+assert.match(html,/v625-shell\.js\?v=\d{8}-v6\d{2}-1/,'V633+ JS cache bust missing');
+assert.match(html,/v625-shell\.css\?v=\d{8}-v6\d{2}-1/,'V633+ CSS cache bust missing');
 
 
-const assetBuild=Number((html.match(/v625-shell\\.js\\?v=\\d{8}-v(6\\d{2})-1/)||[])[1]||0);
+const assetBuild=Number((html.match(/v625-shell\.js\?v=\d{8}-v(6\d{2})-1/)||[])[1]||0);
 assert.ok(assetBuild>=633,'asset cache build must not predate V633');
 console.log('[V633] approved layered total-ticket icon smoke passed');
