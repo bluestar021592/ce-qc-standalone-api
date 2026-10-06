@@ -79,6 +79,7 @@ const TASKS=[
   ['node',['scripts/v668-selected-date-truth-smoke.mjs']],
   ['node',['scripts/v670-persistent-selected-date-sqlite-smoke.mjs']],
   ['node',['scripts/v672-selected-date-persistent-truth-wiring-smoke.mjs']],
+  ['node',['scripts/v675-dashboard-equivalent-pod-persistence-smoke.mjs']],
   ['node',['--test',
     'test/unified-import-v7.test.js',
     'test/unified-import-ceaf.test.js',
