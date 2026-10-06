@@ -89,6 +89,7 @@ const TASKS=[
   ['node',['scripts/v686-dual-track-endpoint-timing-repair-smoke.mjs']],
   ['node',['scripts/v687-per-bill-timing-fallback-smoke.mjs']],
   ['node',['scripts/v689-completed-snapshot-timing-fallback-smoke.mjs']],
+  ['node',['scripts/v690-saved-terminal-pod-timing-smoke.mjs']],
   ['node',['--test',
     'test/unified-import-v7.test.js',
     'test/unified-import-ceaf.test.js',
