@@ -81,6 +81,7 @@ const TASKS=[
   ['node',['scripts/v672-selected-date-persistent-truth-wiring-smoke.mjs']],
   ['node',['scripts/v675-dashboard-equivalent-pod-persistence-smoke.mjs']],
   ['node',['scripts/v677-whpp-dual-route-convergence-smoke.mjs']],
+  ['node',['scripts/v678-timing-cache-denominator-guard-smoke.mjs']],
   ['node',['--test',
     'test/unified-import-v7.test.js',
     'test/unified-import-ceaf.test.js',
