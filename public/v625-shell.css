@@ -321,6 +321,15 @@ svg{width:1em;height:1em;display:inline-block;vertical-align:middle}
 .v628-kpi-detail{scroll-margin-top:18px}
 .v628-kpi-detail .v625-table td:last-child a{color:#1477ee;font-weight:700;text-decoration:none}
 
+/* V748 per-board trajectory quality signals */
+.v748-quality-signals{margin:-4px 0 16px;padding:13px 14px;border:1px solid #dce7f2;border-radius:10px;background:#f8fbff}
+.v748-quality-head{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:10px;color:#5f748b;font-size:11px}
+.v748-quality-head b{font-size:12px;color:#153957}.v748-quality-head span{color:#7b8da0;text-align:right}
+.v748-quality-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.v748-quality-grid article{min-height:94px;border:1px solid #dfe8f1;border-radius:9px;background:#fff;padding:12px 13px;box-shadow:0 2px 8px rgba(29,77,123,.04)}
+.v748-quality-grid article span{font-size:11px;font-weight:700;color:#5f748b}.v748-quality-grid article b{display:block;margin-top:7px;font-size:25px;color:#153957}.v748-quality-grid article small{display:block;margin-top:5px;color:#8191a1;font-size:10px}
+@media(max-width:860px){.v748-quality-grid{grid-template-columns:1fr}.v748-quality-head{align-items:flex-start;flex-direction:column}}
+
 /* V631 traceable accounting */
 .v631-accounting-bar{display:flex;align-items:center;gap:10px;margin:-4px 0 16px;padding:9px 12px;border:1px solid #dbe7f3;border-radius:8px;background:#f8fbff;color:#597087;font-size:11px}
 .v631-accounting-bar b{color:#153957;font-size:12px}
