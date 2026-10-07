@@ -672,6 +672,8 @@ let v630BusinessDetailTabs={};
 let v631BusinessAccounting={rowsByKind:{},total:0,accounted:0,difference:0};
 let v628BusinessMetricState={};
 let v628BusinessReportDate='';
+let v748QualityRows={shopArrived:[],pendingGap:[],oc2Plus:[]};
+const v748QualityRefreshKeys=new Set();
 function businessTypeMatches(row){
   const t=String(row?.businessType||'').toUpperCase();
   return business.startsWith('SHOPEE')?t===business||t===business.replace('SHOPEE',''):t===business;
@@ -758,6 +760,10 @@ function buildBusinessAccounting(state={},fallback={}){
   return{total:total||source.length,accounted,difference:(total||source.length)-accounted,rowsByKind};
 }
 function v628MetricRows(kind){
+  if(['shopArrived','pendingGap','oc2Plus'].includes(kind)){
+    const quality=v748QualityRows?.[kind];
+    return Array.isArray(quality)?quality:[];
+  }
   const exact=v631BusinessAccounting?.rowsByKind?.[kind];
   if(Array.isArray(exact)&&exact.length)return exact;
   if(kind==='total'&&Array.isArray(v631BusinessAccounting?.rowsByKind?.total))return v631BusinessAccounting.rowsByKind.total;
@@ -765,7 +771,7 @@ function v628MetricRows(kind){
 }
 function renderKpiDetail(kind){
   const panel=byId('v628KpiDetailPanel'),tbody=byId('v628KpiDetailRows');if(!panel||!tbody)return;
-  const labels={total:'总票数',delivery:'派送中',pod:'已签收(POD)',pending:'Pending',abnormal:'异常',returned:'退回件',otherNormal:'其他正常状态',unprocessed:'待处理'};
+  const labels={total:'总票数',delivery:'派送中',pod:'已签收(POD)',pending:'Pending',abnormal:'异常',returned:'退回件',otherNormal:'其他正常状态',unprocessed:'待处理',shopArrived:'到达门店',pendingGap:'Pending不连续',oc2Plus:'OC 2天+'};
   const rows=v628MetricRows(kind);
   qa('[data-kpi-detail]').forEach(el=>el.classList.toggle('active',el.dataset.kpiDetail===kind));
   setText('v628KpiDetailTitle',(labels[kind]||'指标')+'明细');
@@ -775,9 +781,16 @@ function renderKpiDetail(kind){
   else for(const row of rows){
     const tr=document.createElement('tr');
     const code=row.shipmentCode||row.运单号||'';
-    const status=row.category||row.primaryCategory||row.主分类||row.异常分类||row.latestNode||row.最后节点||row.queryStatus||row.scanStatus||row.currentState||'—';
-    const latestNode=row.latestNode||row.latestEventDesc||row.最后节点||row.lastEventDesc||'—';
-    const latestTime=row.latestTime||row.latestEventTime||row.最后节点时间||row.lastEventTime||'—';
+    const qualityStatus=kind==='shopArrived'
+      ?('到达门店'+(row.shopName||row.shopCode?' · '+[row.shopName,row.shopCode].filter(Boolean).join(' / '):''))
+      :kind==='pendingGap'
+        ?('Pending不连续 · '+fmt(row.pendingDistinctDayCount||0)+'个自然日')
+        :kind==='oc2Plus'
+          ?('OC '+fmt(row.ocDays||0)+'天')
+          :'';
+    const status=qualityStatus||row.category||row.primaryCategory||row.主分类||row.异常分类||row.latestNode||row.最后节点||row.queryStatus||row.scanStatus||row.currentState||'—';
+    const latestNode=row.latestNode||row.latestEventDesc||row.最后节点||row.lastEventDesc||(kind==='shopArrived'?(row.shopName||row.shopCode||'门店到达'):'—');
+    const latestTime=(kind==='shopArrived'?(row.shopArrivedAt||''):'')||row.latestTime||row.latestEventTime||row.最后节点时间||row.lastEventTime||'—';
     const region=row.region||row.regionCode||row.区域||'—';
     for(const value of [code,row.businessType||business,region,status,latestNode,latestTime]){
       const td=document.createElement('td');td.textContent=value||'—';tr.appendChild(td);
@@ -789,7 +802,48 @@ function renderKpiDetail(kind){
   panel.hidden=false;
   panel.scrollIntoView({behavior:'smooth',block:'start'});
 }
-async function loadBusiness(){
+function applyV748QualitySignals(payload={}){
+  const q=payload.qualitySignals||{};
+  v748QualityRows={
+    shopArrived:Array.isArray(payload.qualityRows?.shopArrived)?payload.qualityRows.shopArrived.filter(businessTypeMatches):[],
+    pendingGap:Array.isArray(payload.qualityRows?.pendingGap)?payload.qualityRows.pendingGap.filter(businessTypeMatches):[],
+    oc2Plus:Array.isArray(payload.qualityRows?.oc2Plus)?payload.qualityRows.oc2Plus.filter(businessTypeMatches):[]
+  };
+  setText('kpiShopArrived',fmt(q.shopArrived||0));
+  setText('kpiPendingGap',fmt(q.pendingGap||0));
+  setText('kpiOc2Plus',fmt(q.oc2Plus||0));
+}
+async function refreshV748BusinessTrackQuality(reportDate=''){
+  const date=String(reportDate||'').slice(0,10);
+  if(!date||!business)return;
+  const key=business+'|'+date;
+  if(v748QualityRefreshKeys.has(key))return;
+  v748QualityRefreshKeys.add(key);
+  setText('v748QualityRefreshMeta','正在按 '+business+' 未终态运单精准补抓最新轨迹…');
+  try{
+    const started=await post('/api/v246/tracking/reconcile',{businessType:business,fromDate:date,toDate:date},30000);
+    const jobId=String(started?.job?.jobId||'');
+    if(!jobId)throw new Error('轨迹补抓任务未返回任务号');
+    for(let i=0;i<900;i++){
+      const r=await json('/api/v246/tracking/job/'+encodeURIComponent(jobId),12000);
+      const job=r.job||{};
+      const status=String(job.status||'').toUpperCase();
+      if(['COMPLETED','FAILED'].includes(status)){
+        if(status==='FAILED')throw new Error(job.error||job.message||'精准轨迹补抓失败');
+        setText('v748QualityRefreshMeta','轨迹补抓完成 · 成功 '+fmt(job.refreshed||0)+' 票 · 待重试 '+fmt(job.failed||0)+' 票');
+        await loadBusiness({skipQualityRefresh:true});
+        return;
+      }
+      setText('v748QualityRefreshMeta',job.message||('精准补抓中 '+fmt(job.completed||0)+'/'+fmt(job.total||0)));
+      await new Promise(resolve=>setTimeout(resolve,1500));
+    }
+    throw new Error('精准轨迹补抓等待超时');
+  }catch(error){
+    const msg=String(error?.message||error);
+    setText('v748QualityRefreshMeta',/其他业务任务运行/.test(msg)?'当前有业务任务运行，稍后重新进入看板会继续补抓':'轨迹补抓暂未完成：'+msg);
+  }
+}
+async function loadBusiness(options={}){
   // Navigation first: the visible KPI shell reads only compact/current-day state.
   // Archive evidence, integrity and row-level workspace hydrate after first paint.
   const whppOnlyAction=byId('v641WhppScanPending');
@@ -883,6 +937,7 @@ async function loadBusiness(){
 
     const wr=workspaceR.status==='fulfilled'?workspaceR.value:{rows:[]};
     v628BusinessWorkspaceRows=(wr.rows||[]).filter(businessTypeMatches);
+    applyV748QualitySignals(wr);
     const workspaceAllCount=Number(wr.allRowCount||v628BusinessWorkspaceRows.length);
     const workspaceTruncated=workspaceAllCount>v628BusinessWorkspaceRows.length;
     if(bi){
@@ -892,6 +947,11 @@ async function loadBusiness(){
       const detailed=buildBusinessAccounting({finalRows:v628BusinessWorkspaceRows},m);
       v631BusinessAccounting=detailed;
       if(!bi)setText('v631AccountingMeta','已归类 '+fmt(detailed.accounted)+' / '+fmt(m.total)+' · 差异 '+fmt(Math.max(0,m.total-detailed.accounted)));
+    }
+    if(!options.skipQualityRefresh){
+      const openCount=v628BusinessWorkspaceRows.filter(row=>row.isActionable).length;
+      if(openCount>0)void refreshV748BusinessTrackQuality(reportDate);
+      else setText('v748QualityRefreshMeta','当前无未终态运单，无需轨迹补抓');
     }
     const rows=v628BusinessWorkspaceRows.filter(x=>x.isActionable).slice(0,8);
     const tbody=byId('v625BusinessRows');tbody.replaceChildren();
