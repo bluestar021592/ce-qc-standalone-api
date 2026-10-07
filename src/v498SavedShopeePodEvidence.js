@@ -14,7 +14,18 @@ const TERMINAL_TEXT_KEYS=['currentState','state','status','shipmentStatus','stat
 const TERMINAL_TEXT=new Set(['POD','DELIVERED','SIGNED','签收','已签收','妥投','已妥投']);
 
 function terminalProof(row={},raw={}){
-  for(const value of [row.orderStatus,raw.orderStatus,row.shipmentStatus,raw.shipmentStatus,raw.statusCode])if(text(value)==='85')return'85';
+  // Shipment-status endpoint semantics are field-specific and must stay
+  // separate from trajectory eventCode semantics:
+  //   shipmentStatus=60 => POD
+  //   shipmentStatus=80 => return in progress
+  //   shipmentStatus=81 => returned
+  // Never treat a generic statusCode/eventCode=60 as POD.
+  for(const value of [row.shipmentStatus,raw.shipmentStatus]){
+    const code=text(value);
+    if(code==='60')return'shipmentStatus=60';
+    if(code==='85')return'shipmentStatus=85';
+  }
+  for(const value of [row.orderStatus,raw.orderStatus,raw.statusCode])if(text(value)==='85')return'85';
   for(const key of TERMINAL_TEXT_KEYS){const value=text(raw?.[key]).toUpperCase();if(TERMINAL_TEXT.has(value))return`${key}=${text(raw?.[key])}`;}
   return'';
 }
@@ -54,4 +65,4 @@ export function recoverV498SavedShopeePodDates({db=getDb(),targetBills=[]}={}){
   return{evidenceByBill,targetBills:targets.length,matchedBills:evidenceByBill.size,scanRows,trackRows,finalRows};
 }
 
-console.info('[CE-QC][V498_SAVED_SHOPEE_POD_EVIDENCE]',V498_SAVED_SHOPEE_POD_EVIDENCE_ID,'strict Shopee POD rows with blank podDate may recover only from exact-member saved SQLite scan/shipment/final raw evidence: explicit POD timestamp, or saved terminal proof (orderStatus/shipmentStatus=85 or exact POD terminal token) plus updateTime/lastUpdateDate/scanTime/statusTime/modifyTime; table updatedAt/export time/lastCheckedAt are never used.');
+console.info('[CE-QC][V498_SAVED_SHOPEE_POD_EVIDENCE]',V498_SAVED_SHOPEE_POD_EVIDENCE_ID,'strict POD rows with blank podDate may recover only from exact-member saved SQLite evidence: explicit POD timestamp, shipmentStatus=60 POD proof, legacy orderStatus/shipmentStatus=85, or exact POD terminal token plus updateTime/lastUpdateDate/scanTime/statusTime/modifyTime; generic event/statusCode=60 is never treated as POD; table updatedAt/export time/lastCheckedAt are never used.');
