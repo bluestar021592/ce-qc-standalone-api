@@ -228,6 +228,7 @@ async function loadSession(){
 let v626LatestImport=null;
 let v631TimingMissing={};
 let v700TimingAvailability={};
+let v741TimingRepairStates={};
 let v626OpenRows=[];
 let v626OpenFilter='all';
 let v626ProgressTimer=null;
@@ -546,6 +547,7 @@ async function loadHome(options={}){
 
   const timing=summary?.timing||{},timingTrend=summary?.timingTrend||{};
   const timingRepairTypes=summary?.timingEvidenceRepair?.types||{};
+  v741TimingRepairStates=timingRepairTypes;
   v700TimingAvailability=Object.fromEntries(Object.entries(timingRepairTypes).map(([type,state])=>[type,String(state?.status||'').toUpperCase()]));
   v631TimingMissing=Object.fromEntries(Object.entries(timing).map(([type,data])=>[type,data?.evidence?.missingBills||[]]));
   const timingMeta=[
@@ -555,31 +557,43 @@ async function loadHome(options={}){
     ['SHOPEEVN','v625TimingSHOPEEVN','#ed4b61']
   ];
   const showDays=value=>value===null||value===undefined?'—':Number(value).toFixed(2).replace(/\.00$/,'')+'天';
+  let exhaustedMissingCount=0,repairableMissingCount=0;
   for(const [type,prefix,tone] of timingMeta){
     const data=timing[type]||{};
-    const historicalUnavailable=v700TimingAvailability[type]==='HISTORICAL_EVIDENCE_UNAVAILABLE'&&Number(data.overall?.podCount||0)===0;
-    if(!historicalUnavailable&&Number(data.overall?.podCount||0)>0)v700TimingAvailability[type]='AVAILABLE';
+    const missingCount=Number(data.evidence?.missing||data.overall?.missingEvidenceCount||0);
+    const exhausted=v700TimingAvailability[type]==='HISTORICAL_EVIDENCE_UNAVAILABLE'&&missingCount>0;
+    if(exhausted)exhaustedMissingCount+=missingCount;
+    else if(missingCount>0)repairableMissingCount+=missingCount;
+    if(!exhausted&&missingCount===0&&Number(data.overall?.podCount||0)>0)v700TimingAvailability[type]='AVAILABLE';
     setText(prefix+'Overall',showDays(data.overall?.avgDays));
-    setText(prefix+'Pod',historicalUnavailable
-      ?('POD总数 '+fmt(data.overall?.totalPodCount||0)+' 票 · 历史轨迹证据缺失')
+    setText(prefix+'Pod',exhausted
+      ?('POD已确认 '+fmt(data.overall?.totalPodCount||0)+' 票 · 历史签收时间缺失')
       :('有效轨迹 '+fmt(data.overall?.podCount||0)+' / POD总数 '+fmt(data.overall?.totalPodCount||0)+' 票'));
     setText(prefix+'PP',showDays(data.pp?.avgDays));setText(prefix+'PPPod',fmt(data.pp?.podCount||0)+' / '+fmt(data.pp?.totalPodCount||0)+'票');
     setText(prefix+'PV',showDays(data.pv?.avgDays));setText(prefix+'PVPod',fmt(data.pv?.podCount||0)+' / '+fmt(data.pv?.totalPodCount||0)+'票');
     setText(prefix+'A1',showDays(data.attempt1?.avgDays));setText(prefix+'A2',showDays(data.attempt2?.avgDays));setText(prefix+'A3',showDays(data.attempt3?.avgDays));
     renderMiniTrend('v625TimingTrend'+type,timingTrend[type]||[],tone);
-    const missingCount=Number(data.evidence?.missing||data.overall?.missingEvidenceCount||0);
     setText('v626Timing'+type+'Missing',fmt(missingCount));
     setText('v626Timing'+type+'Valid',fmt(data.evidence?.valid||data.overall?.podCount||0));
     const missingButton=q('[data-timing-missing="'+type+'"]');
     if(missingButton){
       const counter=byId('v626Timing'+type+'Missing');
       for(const node of [...missingButton.childNodes])if(node!==counter)node.remove();
-      missingButton.insertBefore(document.createTextNode(historicalUnavailable?'历史证据缺失 ':'待补轨迹 '),counter||null);
-      missingButton.title=historicalUnavailable?'历史日报缺少真实60/70→80轨迹，系统已停止自动重复补查。':'查看缺失轨迹明细';
+      missingButton.insertBefore(document.createTextNode(exhausted?'历史时间缺失 ':'待补轨迹 '),counter||null);
+      missingButton.title=exhausted?'POD状态已确认，但CE当前可用历史接口不再提供该批运单的真实签收时间；系统已停止重复补查。':'查看缺失轨迹明细';
     }
     if(['WHPP','SHOPEECN','SHOPEEVN'].includes(type)){setText('v626Timing'+type+'Return',fmt(returns[type]?.count||0));setText('v626Timing'+type+'ReturnRate',pct(returns[type]?.rate||0))}
   }
-  setText('v625TimingPeriod',summary?.reportDate?'统计日报 '+summary.reportDate+' · 真实轨迹 / 已保存POD时间证据':'统计当前日报POD');
+  const timingRepairBtn=byId('v734TimingRepairNow');
+  const noMoreRepair=exhaustedMissingCount>0&&repairableMissingCount===0;
+  if(timingRepairBtn){
+    timingRepairBtn.disabled=noMoreRepair;
+    timingRepairBtn.hidden=noMoreRepair;
+    timingRepairBtn.style.setProperty('display',noMoreRepair?'none':'inline-flex','important');
+  }
+  setText('v625TimingPeriod',summary?.reportDate
+    ?('统计日报 '+summary.reportDate+(noMoreRepair?' · POD已确认，历史签收时间证据已耗尽':' · 真实轨迹 / 已保存POD时间证据'))
+    :'统计当前日报POD');
 
   const history=historyRows;
   renderTrend('v625HomeTrend',history.slice().reverse().map(r=>({label:r.reportDate,value:Object.values(r.classificationCounts||{}).reduce((a,b)=>a+Number(b||0),0)})));
@@ -591,6 +605,14 @@ function timingMissingReason(code=''){
 }
 async function runTimingRepairNow(){
   const btn=byId('v734TimingRepairNow');
+  const missingTypes=Object.entries(v631TimingMissing||{}).filter(([,rows])=>(rows||[]).length>0);
+  const repairable=missingTypes.some(([type])=>String(v700TimingAvailability?.[type]||'').toUpperCase()!=='HISTORICAL_EVIDENCE_UNAVAILABLE');
+  if(missingTypes.length&&!repairable){
+    if(btn){btn.disabled=true;btn.hidden=true;btn.style.setProperty('display','none','important')}
+    const date=selectedReportDate()||v626LatestImport?.reportDate||'';
+    setText('v625TimingPeriod','统计日报 '+date+' · POD已确认，历史签收时间证据已耗尽');
+    return;
+  }
   const latest=v626LatestImport||await latestImportContext();
   const reportDate=selectedReportDate()||latest?.reportDate||'';
   if(!reportDate){if(btn)btn.textContent='请先选择日报';return}
@@ -626,13 +648,16 @@ async function runTimingRepairNow(){
 function renderTimingMissing(type){
   const rows=v631TimingMissing?.[type]||[],panel=byId('v631TimingMissingPanel'),tbody=byId('v631TimingMissingRows');if(!panel||!tbody)return;
   const historicalUnavailable=v700TimingAvailability?.[type]==='HISTORICAL_EVIDENCE_UNAVAILABLE';
-  setText('v631TimingMissingTitle',(type==='SHOPEECN'?'SHOPEE CN':type==='SHOPEEVN'?'SHOPEE VN':type)+(historicalUnavailable?' 历史轨迹证据缺失':' 待补轨迹'));
-  setText('v631TimingMissingMeta',(selectedReportDate()||byId('v625ToDate')?.value||'')+' · '+rows.length+' 票'+(historicalUnavailable?' · 时效不可计算':''));
+  const repairState=v741TimingRepairStates?.[type]||{};
+  const podConfirmedNoTime=historicalUnavailable&&Number(repairState.confirm85||0)>0&&Number(repairState.confirm85WithTime||0)===0;
+  setText('v631TimingMissingTitle',(type==='SHOPEECN'?'SHOPEE CN':type==='SHOPEEVN'?'SHOPEE VN':type)+(historicalUnavailable?' 历史签收时间缺失':' 待补轨迹'));
+  setText('v631TimingMissingMeta',(selectedReportDate()||byId('v625ToDate')?.value||'')+' · '+rows.length+' 票'+(historicalUnavailable?' · POD已确认，时效不可计算':''));
   tbody.replaceChildren();
   if(!rows.length)tbody.innerHTML='<tr><td colspan="4">当前没有待补轨迹运单</td></tr>';
   else for(const row of rows){
     const tr=document.createElement('tr');
-    for(const value of [row.shipmentCode,type,historicalUnavailable?'历史60/70→80轨迹未保存，签收时效不可计算':timingMissingReason(row.reason)]){const td=document.createElement('td');td.textContent=value||'—';tr.appendChild(td)}
+    const exhaustedReason=podConfirmedNoTime?'POD已确认（orderStatus=85），但CE历史接口未提供真实签收时间，时效不可计算':'POD已确认，但当前可用历史证据缺少真实签收时间，时效不可计算';
+    for(const value of [row.shipmentCode,type,historicalUnavailable?exhaustedReason:timingMissingReason(row.reason)]){const td=document.createElement('td');td.textContent=value||'—';tr.appendChild(td)}
     const td=document.createElement('td'),a=document.createElement('a');
     a.href='/tracking?auth=v625&code='+encodeURIComponent(row.shipmentCode||'')+'&reportDate='+encodeURIComponent(selectedReportDate()||byId('v625ToDate')?.value||'')+'&businessType='+encodeURIComponent(type);
     a.textContent='查看轨迹';td.appendChild(a);tr.appendChild(td);tbody.appendChild(tr);
