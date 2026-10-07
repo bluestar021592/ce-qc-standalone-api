@@ -13,9 +13,10 @@ assert.match(home,/v495_saved_terminal_event_time/,'saved terminal event time so
 assert.match(home,/local_\$\{spec\[0\]\}_pod_date/,'WHPP\/Shopee local business-table POD evidence source missing');
 
 assert.match(home,/const savedTerminalFallback=!direct\.ok&&!strictLedger\?savedTerminalTiming\.get\(shipmentCode\)\|\|null:null/,'saved terminal evidence must never outrank strict track or strict ledger');
-assert.match(home,/strictLedger\|\|savedTerminalFallback\|\|snapshotFallback\|\|direct/,'timing priority must be strict track > strict ledger > saved terminal POD > completed snapshot > missing');
+assert.match(home,/const trackEvidence=direct\.ok\?[\s\S]*?\(strictLedger\|\|savedTerminalFallback\|\|snapshotFallback\|\|direct\)/,'saved terminal POD evidence must remain behind strict track/ledger inside the track fallback chain');
+assert.match(home,/evidence:dailyReportFallback\|\|trackEvidence/,'overall signing days must prefer uploaded daily-report order-to-delivery evidence');
 
 assert.match(home,/const usableLocalTiming=n\(current\.overall\?\.podCount,0\)>0&&current\.overall\?\.avgDays!=null/,'usable local timing guard missing');
 assert.match(home,/const needs=count>0&&!usableLocalTiming/,'remote repair must stop once local timing is usable');
 
-console.log('[V690] selected-date timing reuses formal saved terminal POD evidence and stops redundant remote retries once usable');
+console.log('[V690] saved terminal POD evidence remains a fallback; V742 daily-report signing timing stops redundant remote repair when usable');
