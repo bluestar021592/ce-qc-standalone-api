@@ -16,7 +16,7 @@ assert.match(home,/export function buildHomeQualitySummary\(options=\{\}\)/,'hom
 assert.match(server,/buildHomeQualitySummary\(\{[\s\S]*reportDate:String\(req\.query\.reportDate/,'home API must pass reportDate');
 
 assert.match(js,/const selectedReportDate=\(\)=>\{[\s\S]*p\.get\('reportDate'\)/,'dashboard date must come from URL selection');
-assert.match(js,/summaryUrl='\/api\/home-quality-summary'[\s\S]*reportDate=/,'home must request selected date');
+assert.match(js,/summaryUrl='\/api\/home-quality-summary\?fast=1'[\s\S]*reportDate=/,'home must request selected date through the fast local summary');
 assert.match(js,/p\.set\('reportDate',reportDate\)/,'query button must persist selected report date');
 assert.match(js,/p\.delete\('snapshotId'\)/,'changing date must not retain stale snapshot');
 assert.match(js,/const summaryPromise=json\('\/api\/home-quality-summary\?'\+summaryQuery\.toString\(\),10000\)/,'business board must resolve selected date through the non-blocking fast summary');
