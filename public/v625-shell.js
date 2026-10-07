@@ -456,7 +456,7 @@ async function scanWhppPending(){
 }
 async function loadHome(options={}){
   const requestedDate=selectedReportDate();
-  const summaryUrl='/api/home-quality-summary'+(requestedDate?'?reportDate='+encodeURIComponent(requestedDate):'');
+  const summaryUrl='/api/home-quality-summary?fast=1'+(requestedDate?'&reportDate='+encodeURIComponent(requestedDate):'');
   const integrityUrl='/api/data-integrity'+(requestedDate?'?reportDate='+encodeURIComponent(requestedDate):'');
   const [summaryR,historyR,integrityR]=await Promise.allSettled([
     json(summaryUrl,20000),
@@ -823,7 +823,7 @@ async function loadImport(){
       }
       if(!(history.rows||[]).length)tbody.innerHTML='<tr><td colspan="6">暂无导入记录</td></tr>';
     }
-    await Promise.all([refreshLiveProgress(),loadOpenPod(),refreshImportCanonicalClassification(v626LatestImport?.reportDate||'')]);
+    void refreshLiveProgress();void loadOpenPod();void refreshImportCanonicalClassification(v626LatestImport?.reportDate||'');
   }catch(error){note('v625ImportMessage','读取导入状态失败：'+error.message,'error')}
 }
 function dateSourceText(data={}){
