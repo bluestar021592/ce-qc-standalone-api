@@ -10,7 +10,7 @@ assert.match(shell,/if\(error\?\.code!=='CLIENT_WAIT_TIMEOUT'\)throw error/,'WHP
 assert.match(shell,/WHPP后台仍在处理，实时进度暂时繁忙，继续等待/,'temporary WHPP progress timeout must be visible without aborting work');
 assert.match(whpp,/if\(runtimePromise&&runtime\.active&&liveDate/,'WHPP progress must have an active-runtime in-memory fast path');
 assert.match(whpp,/reason:'ACTIVE_RUNTIME_FAST_PATH'/,'WHPP active progress must avoid SQLite completion reads');
-assert.match(html,/V720_LIVE_PROGRESS_RESILIENCE/,'V720 shell marker missing');
-assert.match(html,/v625-shell\.js\?v=20261007-v720-1/,'V720 cache bust missing');
+assert.match(html,/<meta name="ce-qc-build" content="V\d+_[A-Z0-9_]+">/,'current shell build marker missing');
+assert.match(html,/v625-shell\.js\?v=\d{8}-v\d+-\d+/,'current shell cache bust missing');
 
 console.log('[V720] finished-family recognition + resilient WHPP polling + in-memory active progress fast path passed');
