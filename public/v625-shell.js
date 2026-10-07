@@ -293,6 +293,7 @@ function familyProgressLabel(value={}){
   if(scanTotal||trackTotal)return '扫描 '+scanDone+'/'+scanTotal+' · 轨迹 '+trackDone+'/'+trackTotal;
   return String(value.phase||'待处理');
 }
+const v738WhppCompletionLatch=new Set();
 async function fetchLiveProgress(reportDate=''){
   const date=reportDate||v626LatestImport?.reportDate||'';
   const [ccslR,shopeeR,whppR]=await Promise.allSettled([
@@ -302,7 +303,13 @@ async function fetchLiveProgress(reportDate=''){
   ]);
   const ccsl=ccslR.status==='fulfilled'?ccslR.value:{};
   const shopee=shopeeR.status==='fulfilled'?shopeeR.value:{};
-  const whppPayload=whppR.status==='fulfilled'?whppR.value:{};
+  let whppPayload=whppR.status==='fulfilled'?whppR.value:null;
+  const unifiedCompleted=Boolean(date&&String(v626LatestImport?.reportDate||'').slice(0,10)===date&&String(v626LatestImport?.snapshotStatus||'').toUpperCase()==='COMPLETED');
+  if(whppPayload?.completionLock?.locked||familyComplete(whppPayload?.runtime||{}))v738WhppCompletionLatch.add(date);
+  if(!whppPayload&&(unifiedCompleted||v738WhppCompletionLatch.has(date))){
+    whppPayload={runtime:{active:false,reportDate:date,phase:'完成',outcome:'COMPLETED',lastMessage:'WHPP已完成（统一日报完成锁）'},completionLock:{locked:true,reportDate:date,reason:'V738_UNIFIED_COMPLETED_FALLBACK'},summary:{},log:[]};
+  }
+  whppPayload=whppPayload||{};
   const whppLock=whppPayload.completionLock||{};
   const whpp={...(whppPayload.runtime||{}),summary:whppPayload.summary||{},log:whppPayload.log||[],completionLock:whppLock,active:Boolean(whppPayload.runtime?.active)&&!whppLock.locked,complete:Boolean(whppLock.locked)||familyComplete(whppPayload.runtime||{}),outcome:whppLock.locked?'COMPLETED':String(whppPayload.runtime?.outcome||''),phase:whppLock.locked?'完成':String(whppPayload.runtime?.phase||'')};
   return{ccsl,shopee,whpp,reportDate:date};
