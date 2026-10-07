@@ -361,7 +361,7 @@ async function runOne(type,date,snapshotId=''){
       }
       for(const failure of outcome.failures||[])failed+=(failure.batch||[]).length;
     }
-    patch(type,date,snapshotId,{status:'RUNNING',phase:'TRACK_QUERY',completed,failed,queried,persistedEvents,statusQueried,statusFailed,statusPersistedRows,status60,status60WithTime,status60WithoutTime,repairRevision:V737_STATUS_FIRST_TIMING_REPAIR_REVISION,message:`${type} ${date} 轨迹补证 ${Math.min(offset+4,totalBatches)}/${totalBatches}批：已有POD时间 ${timedBills.size}，轨迹成功 ${Math.max(0,completed-timedBills.size)}，失败 ${failed}`});
+    patch(type,date,snapshotId,{status:'RUNNING',phase:'TRACK_QUERY',completed,failed,queried,persistedEvents,confirmQueried,confirmFailed,confirmPersistedRows,confirm85,confirm85WithTime,confirm85WithoutTime,statusQueried,statusFailed,statusPersistedRows,status60,status60WithTime,status60WithoutTime,repairRevision:V740_CONFIRM_FIRST_TIMING_REPAIR_REVISION,message:`${type} ${date} 轨迹补证 ${Math.min(offset+4,totalBatches)}/${totalBatches}批：已有POD时间 ${timedBills.size}，轨迹成功 ${Math.max(0,completed-timedBills.size)}，失败 ${failed}`});
   }
   if(bills.length>0&&timedBills.size===0&&completed===0&&failed>=trackBills.length&&persistedEvents===0&&reportAgeDays(date)>HISTORICAL_AUTO_REPAIR_MAX_AGE_DAYS){
     const durable=writeDurableStop(
