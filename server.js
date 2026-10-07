@@ -689,7 +689,8 @@ app.get('/api/data-integrity', (req,res)=>{
   try{
     res.json(buildDataIntegrityReport({
       reportDate:String(req.query.reportDate||''),
-      snapshotId:String(req.query.snapshotId||'')
+      snapshotId:String(req.query.snapshotId||''),
+      businessType:String(req.query.businessType||'')
     }));
   }catch(error){
     res.status(500).json({ok:false,error:error?.message||String(error)});
