@@ -24,7 +24,7 @@ assert.match(html,/V748_PER_BOARD_TRACK_QUALITY_SIGNALS/,'V748 shell marker miss
 assert.match(html,/v625-shell\.js\?v=20261007-v748-1/,'V748 JS cache bust missing');
 assert.match(css,/v748-quality-signals/,'V748 quality card layout missing');
 
-assert.match(shell,/businessType:business,fromDate:date,toDate:date/,'board must launch business-scoped exact-date tracking reconcile');
+assert.match(shell,/businessType:requestedBusiness,fromDate:date,toDate:date/,'board must launch business-scoped exact-date tracking reconcile');
 assert.match(shell,/\/api\/v246\/tracking\/reconcile/,'board precision refresh must use existing CE trajectory reconcile engine');
 assert.match(shell,/await loadBusiness\(\{skipQualityRefresh:true\}\)/,'completed track refresh must immediately repaint the board without recursion');
 assert.match(shell,/v748QualityRefreshKeys/,'automatic track refresh must be once-per-business/date per browser session');
