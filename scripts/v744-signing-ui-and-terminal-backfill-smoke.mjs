@@ -5,6 +5,9 @@ import { dailyReportProvesPod, extractDailyReportSigningEvidence } from '../src/
 const html=fs.readFileSync('public/v625-shell.html','utf8');
 const shell=fs.readFileSync('public/v625-shell.js','utf8');
 const home=fs.readFileSync('src/homeQualitySummary.js','utf8');
+const diag=fs.readFileSync('src/v745WhppTimingSourceDiagnostics.js','utf8');
+const launcher=fs.readFileSync('tools/CE_QC_Managed_Launcher.ps1','utf8');
+
 
 assert.doesNotMatch(html,/1派平均签收|2派平均签收|3派平均签收/,'home signing overview must not render 1/2/3 attempt cards');
 assert.doesNotMatch(html,/v625-attempt-grid/,'obsolete attempt-signing grid must be removed from the home shell');
@@ -30,4 +33,10 @@ assert.match(shell,/当日无POD/,'zero-POD boards must explain why no signing a
 assert.match(html,/V744_SIGNING_UI_SIMPLIFIED_AND_TERMINAL_BACKFILL/,'V744 shell marker missing');
 assert.match(html,/v625-shell\.js\?v=20261007-v744-1/,'V744 cache bust missing');
 
-console.log('[V744] 1/2/3 attempt signing cards removed; terminal daily-report POD markers broadened safely; newest-to-older valid daily observations can backfill WHPP/VN signing days');
+assert.match(home,/FROM business_daily_parse_rows[\s\S]*businessType='WHPP'/,'V746 WHPP signing must read canonical business_daily_parse_rows fallback');
+assert.match(home,/latest_whpp_daily_parse_delivery_time/,'V746 later WHPP daily backfill source missing');
+assert.match(diag,/legacyObservationRows/,'V746 diagnostic must expose WHPP canonical daily-row coverage');
+assert.match(launcher,/currentDependencyMetadata/,'V747 dependency-aware updater comparison missing');
+assert.match(launcher,/Dependency graph unchanged; reusing installed node_modules/,'V747 offline-safe module reuse missing');
+
+console.log('[V744/V745/V746/V747] simplified signing UI + WHPP canonical daily backfill + source diagnostics + offline-safe updater dependency logic passed');
