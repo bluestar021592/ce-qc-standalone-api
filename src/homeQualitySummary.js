@@ -213,20 +213,53 @@ function dailyReportSigningEvidenceForBills(snapshotId='',reportDate='',business
   const result=new Map();
   const values=[...new Set((bills||[]).map(value=>String(value||'').trim().toUpperCase()).filter(Boolean))];
   if(!snapshotId||!reportDate||!businessType||!values.length)return result;
-  const db=getDb();
-  for(let i=0;i<values.length;i+=350){
-    const chunk=values.slice(i,i+350),marks=chunk.map(()=>'?').join(',');
-    let rows=[];
+  const db=getDb(),type=String(businessType||'').toUpperCase();
+
+  // V743: selected-date membership is immutable, but status/delivery time is a
+  // latest-observation fact. This mirrors the proven Shopee analysis workflow:
+  // later uploaded reports may turn an old W/P row into Y/POD and provide the
+  // final 派件时间. We therefore keep the original July-1 member set/region but
+  // read the newest VALID observation for each exact waybill.
+  for(let i=0;i<values.length;i+=300){
+    const chunk=values.slice(i,i+300),marks=chunk.map(()=>'?').join(',');
+    let baseRows=[],observations=[];
     try{
-      rows=db.prepare(`SELECT shipmentCode,regionCode,rowJson FROM unified_import_rows
+      baseRows=db.prepare(`SELECT UPPER(TRIM(shipmentCode)) shipmentCode,regionCode,rowJson,reportDate,createdAt
+        FROM unified_import_rows
         WHERE snapshotId=? AND reportDate=? AND UPPER(TRIM(businessType))=? AND UPPER(TRIM(shipmentCode)) IN (${marks})`)
-        .all(snapshotId,reportDate,String(businessType||'').toUpperCase(),...chunk);
+        .all(snapshotId,reportDate,type,...chunk);
     }catch{}
-    for(const row of rows){
-      const bill=String(row.shipmentCode||'').trim().toUpperCase();if(!bill)continue;
-      const parsed=safeJson(row.rowJson),raw=parsed?.raw&&typeof parsed.raw==='object'?parsed.raw:parsed;
-      const evidence=extractDailyReportSigningEvidence(raw);
-      if(evidence?.ok)result.set(bill,{...evidence,region:String(row.regionCode||parsed?.regionCode||'').toUpperCase()});
+    const baseByBill=new Map(baseRows.map(row=>[String(row.shipmentCode||'').trim().toUpperCase(),row]));
+    try{
+      observations=db.prepare(`SELECT UPPER(TRIM(u.shipmentCode)) shipmentCode,u.regionCode,u.rowJson,u.reportDate,u.createdAt
+        FROM unified_import_rows u
+        JOIN unified_import_batches b ON b.batchId=u.batchId AND b.status='VALID'
+        WHERE u.reportDate>=? AND UPPER(TRIM(u.businessType))=? AND UPPER(TRIM(u.shipmentCode)) IN (${marks})
+        ORDER BY UPPER(TRIM(u.shipmentCode)),u.reportDate DESC,u.createdAt DESC,u.rowid DESC`)
+        .all(reportDate,type,...chunk);
+    }catch{}
+    const obsByBill=new Map();
+    for(const row of observations){
+      const bill=String(row.shipmentCode||'').trim().toUpperCase();
+      if(!bill||obsByBill.has(bill))continue;
+      obsByBill.set(bill,row);
+    }
+    for(const bill of chunk){
+      const base=baseByBill.get(bill)||null;
+      const candidates=[obsByBill.get(bill),base].filter(Boolean);
+      let chosen=null,evidence=null;
+      for(const row of candidates){
+        const parsed=safeJson(row.rowJson),raw=parsed?.raw&&typeof parsed.raw==='object'?parsed.raw:parsed;
+        const current=extractDailyReportSigningEvidence(raw);
+        if(current?.ok){chosen={row,parsed};evidence=current;break;}
+      }
+      if(!chosen||!evidence)continue;
+      result.set(bill,{
+        ...evidence,
+        region:String(base?.regionCode||chosen.row.regionCode||chosen.parsed?.regionCode||'').toUpperCase(),
+        observationReportDate:String(chosen.row.reportDate||reportDate).slice(0,10),
+        evidenceSource:String(chosen.row.reportDate||'').slice(0,10)===reportDate?'daily_report_delivery_time':'latest_daily_report_delivery_time'
+      });
     }
   }
   return result;
