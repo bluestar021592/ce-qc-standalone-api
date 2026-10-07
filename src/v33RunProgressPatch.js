@@ -214,8 +214,11 @@ function ccslProgress(db, requestedReportDate = '') {
   };
 }
 
-function shopeeProgress(db) {
-  const reportDate = db.prepare("SELECT reportDate FROM business_daily_reports WHERE businessType='SHOPEE' ORDER BY updatedAt DESC,reportDate DESC LIMIT 1").get()?.reportDate || '';
+function shopeeProgress(db, requestedReportDate = '') {
+  const requested = normalizeReportDate(requestedReportDate);
+  const reportDate = requested
+    || db.prepare("SELECT reportDate FROM business_daily_reports WHERE businessType='SHOPEE' ORDER BY updatedAt DESC,reportDate DESC LIMIT 1").get()?.reportDate
+    || '';
   if (!reportDate) return emptyProgress('SHOPEE');
   const lock = db.prepare("SELECT * FROM business_run_locks WHERE businessType='SHOPEE' AND reportDate=?").get(reportDate) || {};
   const checkpoint = lock.runId
@@ -301,7 +304,7 @@ function progressHandler(req, res) {
   const type = String(req.query.businessType || 'CCSL').trim().toUpperCase() === 'SHOPEE' ? 'SHOPEE' : 'CCSL';
   const db = getDb();
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
-  res.json(type === 'SHOPEE' ? shopeeProgress(db) : ccslProgress(db, req.query.reportDate));
+  res.json(type === 'SHOPEE' ? shopeeProgress(db, req.query.reportDate) : ccslProgress(db, req.query.reportDate));
 }
 
 const previousPost = express.application.post;
