@@ -15,8 +15,9 @@ assert.match(home,/tabs\?\.\[group\+'_attempt2'\]/,'Shopee snapshot attempt2 mem
 assert.match(home,/tabs\?\.\[group\+'_attempt3'\]/,'Shopee snapshot attempt3 membership must be reused');
 
 assert.match(home,/const snapshotFallback=!direct\.ok&&!strictLedger&&!savedTerminalFallback\?snapshotTiming\.get\(shipmentCode\)\|\|null:null/,'snapshot fallback must remain behind strict track, strict ledger, and saved terminal POD evidence');
-assert.match(home,/strictLedger\|\|savedTerminalFallback\|\|snapshotFallback\|\|direct/,'local timing priority must be track > strict ledger > saved terminal POD > completed snapshot > missing');
-assert.match(home,/const savedFallback=!direct\.ok&&!strictLedger&&row\.evidence\?\.ok\?row\.evidence:null/,'archive pass must preserve a valid completed-snapshot fallback');
-assert.match(home,/strictLedger\|\|savedFallback\|\|direct/,'archive timing priority must preserve saved snapshot fallback');
+assert.match(home,/const trackEvidence=direct\.ok\?[\s\S]*?\(strictLedger\|\|savedTerminalFallback\|\|snapshotFallback\|\|direct\)/,'track fallback priority must remain track > strict ledger > saved terminal POD > completed snapshot > missing');
+assert.match(home,/evidence:dailyReportFallback\|\|trackEvidence/,'uploaded daily-report signing time must own the overall signing-day metric when available');
+assert.match(home,/const existingSigning=row\.evidence\?\.ok\?row\.evidence:null/,'archive pass must preserve already-valid local signing evidence');
+assert.match(home,/evidence:existingSigning\|\|recoveredTrack/,'archive timing must never replace a valid daily-report signing result');
 
-console.log('[V689] completed snapshot POD-date timing fallback preserves strict-track priority and survives archive pass');
+console.log('[V689] completed snapshot remains a track fallback while V742 daily-report signing evidence owns overall signing days');
