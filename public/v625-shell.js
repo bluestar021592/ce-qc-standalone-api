@@ -662,8 +662,8 @@ function renderTimingMissing(type){
     const exhaustedReason=podConfirmedNoTime?'POD已确认（orderStatus=85），当前已上传日报尚无最终派件时间；后续日报更新后自动回补':'POD已确认，当前日报尚无最终派件时间；后续日报更新后自动回补';
     for(const value of [row.shipmentCode,type,historicalUnavailable?exhaustedReason:timingMissingReason(row.reason)]){const td=document.createElement('td');td.textContent=value||'—';tr.appendChild(td)}
     const td=document.createElement('td'),a=document.createElement('a');
-    a.href='/tracking?auth=v625&code='+encodeURIComponent(row.shipmentCode||'')+'&reportDate='+encodeURIComponent(selectedReportDate()||byId('v625ToDate')?.value||'')+'&businessType='+encodeURIComponent(type);
-    a.textContent='查看轨迹';td.appendChild(a);tr.appendChild(td);tbody.appendChild(tr);
+    a.href='/tracking?auth=v625&code='+encodeURIComponent(row.shipmentCode||'')+'&reportDate='+encodeURIComponent(selectedReportDate()||byId('v625ToDate')?.value||'')+'&businessType='+encodeURIComponent(type)+(historicalUnavailable?'&source=timing-backfill':'');
+    a.textContent=historicalUnavailable?'查看轨迹/状态':'查看轨迹';td.appendChild(a);tr.appendChild(td);tbody.appendChild(tr);
   }
   panel.hidden=false;panel.scrollIntoView({behavior:'smooth',block:'start'});
 }
@@ -1103,14 +1103,57 @@ function note(id,msg,tone=''){const el=byId(id);if(!el)return;el.textContent=msg
 
 async function queryTrack(){
   const code=byId('v625TrackCode').value.trim();if(!code){setText('v625TrackMeta','请输入运单号');return}
+  const wanted=code.toUpperCase(),source=currentParams().get('source')||'';
   setText('v625TrackMeta','查询中…');byId('v625TrackTimeline').innerHTML='<div class="v625-empty-state">查询中…</div>';
   try{
     const r=await post('/api/track-query',{businessType:byId('v625TrackBusiness').value,shipmentCodes:[code],reportDate:byId('v625TrackDate').value||today()},60000);
-    const events=(r.trackEvents||[]).filter(x=>String(x.shipmentCode||x.waybill||x.orderNo||'').toUpperCase()===code.toUpperCase()||!x.shipmentCode);
+    const rowBill=row=>String(row?.shipmentCode||row?.waybill||row?.orderNo||row?.trackingNo||'').trim().toUpperCase();
+    const belongs=row=>!rowBill(row)||rowBill(row)===wanted;
+    const events=(r.trackEvents||[]).filter(belongs);
     const eventDesc=e=>{let raw={};try{raw=typeof e.rawJson==='string'?JSON.parse(e.rawJson):e.rawJson||{}}catch{}return first(e,['trackingEventDescZh','trackingEventDesc','eventName','statusName','description','content','remark'])||first(raw,['trackingEventDescZh','trackingEventDesc','statusText','statusName','eventName','remark','message'])||'已保存轨迹证据'};
-    byId('v625TrackTimeline').innerHTML=events.length?events.map(e=>'<div class="v625-timeline-item"><b>'+esc(first(e,['eventTime','time','updateTime','createdAt'])||'—')+'</b><p>'+esc(eventDesc(e))+'</p><small>'+esc(e.evidenceSource||'CE实时轨迹')+'</small></div>').join(''):'<div class="v625-empty-state">暂无轨迹节点</div>';
-    setText('v625TrackMeta','查询完成 · '+events.length+' 个节点'+(r.localEvidence?' · 含本地已保存证据':''));
-  }catch(e){byId('v625TrackTimeline').innerHTML='<div class="v625-empty-state">'+esc(e.message)+'</div>';setText('v625TrackMeta','查询失败')}
+    const statusEvidence=[],statusSeen=new Set();
+    const evidenceTime=row=>first(row,['updateTime','lastUpdateDate','scanTime','statusTime','modifyTime','eventTime','lastEventTime','podDate','terminalAt'])||'';
+    const addStatus=(row,title,description,evidenceSource)=>{
+      if(!row||!belongs(row))return;
+      const key=[title,description,evidenceTime(row),evidenceSource].join('|');if(statusSeen.has(key))return;statusSeen.add(key);
+      statusEvidence.push({title,description,time:evidenceTime(row),source:evidenceSource});
+    };
+    for(const row of r.scanRows||[]){
+      const status=String(row?.orderStatus??'').trim().toUpperCase();
+      if(status==='85')addStatus(row,'POD状态已确认','orderStatus=85；这是终态状态证据，但若没有最终派件/签收时间，不能据此虚构签收日期。','confirm-query 状态证据（非轨迹时间）');
+      else if(status)addStatus(row,'订单状态 '+status,'接口已返回订单状态，但未形成可展示的历史轨迹节点。','confirm-query 状态证据');
+    }
+    for(const row of r.shipmentRows||[]){
+      const status=String(row?.shipmentStatus??'').trim().toUpperCase();
+      const label=status==='60'?'POD状态已确认':status==='80'?'退回处理中':status==='81'?'已退回':('shipmentStatus '+(status||'—'));
+      const desc=status==='60'
+        ?'shipmentStatus=60；POD终态已确认，但该状态本身没有可用于签收天数的时间时，仍需轨迹或后续日报派件时间。'
+        :status==='80'?'shipmentStatus=80；当前为退回处理中。':status==='81'?'shipmentStatus=81；当前为已退回。':'接口返回了运单状态记录。';
+      addStatus(row,label,desc,'shipment-track 状态证据（非轨迹时间）');
+    }
+    for(const row of r.rows||[]){
+      const state=String(row?.currentState||row?.primaryCategory||row?.scanNormalizedState||'').trim();
+      if(state)addStatus(row,'当前分析状态 '+state,'系统已识别当前业务状态；如无轨迹节点，下方状态仅用于说明当前事实，不作为签收日期。','业务分析状态');
+    }
+    for(const row of r.ledger||[]){
+      const terminal=String(row?.terminalReason||'').trim().toUpperCase(),state=String(row?.currentState||'').trim();
+      if(terminal==='POD')addStatus(row,'本地账本：POD','本地持续追踪账本已确认POD'+(row?.podDate?'，并保存POD时间。':'，但未保存可用POD时间。'),'qc_tracking_ledger');
+      else if(state||terminal)addStatus(row,'本地账本：'+(state||terminal),'本地账本存在当前状态记录。','qc_tracking_ledger');
+    }
+    const eventHtml=events.map(e=>'<div class="v625-timeline-item"><b>'+esc(first(e,['eventTime','time','updateTime','createdAt'])||'—')+'</b><p>'+esc(eventDesc(e))+'</p><small>'+esc(e.evidenceSource||'CE实时轨迹')+'</small></div>').join('');
+    const statusHtml=statusEvidence.map(e=>'<div class="v625-timeline-item"><b>'+esc(e.time||'无可用时间')+'</b><p><strong>'+esc(e.title)+'</strong> · '+esc(e.description)+'</p><small>'+esc(e.source)+'</small></div>').join('');
+    const root=byId('v625TrackTimeline');
+    if(events.length||statusEvidence.length){
+      root.innerHTML=(events.length?eventHtml:'')+(statusEvidence.length?('<div class="v625-empty-state" style="padding:10px 0 6px">状态证据（不等同于轨迹时间）</div>'+statusHtml):'');
+    }else{
+      root.innerHTML='<div class="v625-empty-state">'+(source==='timing-backfill'?'该运单当前没有可显示的历史轨迹或时间证据；系统会继续等待后续日报出现最终派件时间后自动回补。':'当前没有查到本地或接口轨迹/状态证据。')+'</div>';
+    }
+    const suffix=source==='timing-backfill'&&events.length===0?' · 当前仍缺少可用于签收天数的轨迹时间/日报派件时间':'';
+    setText('v625TrackMeta','查询完成 · '+events.length+' 个轨迹节点 · '+statusEvidence.length+' 条状态证据'+(r.localEvidence?' · 含本地已保存证据':'')+suffix);
+  }catch(e){
+    byId('v625TrackTimeline').innerHTML='<div class="v625-empty-state">'+esc(e.message)+'</div>';
+    setText('v625TrackMeta','查询失败 · '+String(e?.message||e));
+  }
 }
 async function loadExceptions(){
   try{
