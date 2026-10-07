@@ -16,6 +16,10 @@ assert.match(server,/pendingFactDateContinuity \|\| row\.Pending事实连续性/
 assert.match(server,/workspaceOcDays/,'OC2+ must calculate current inclusive OC days');
 assert.match(server,/shopCode: row\.currentShopCode/,'store detail must expose exact current shop code');
 assert.match(server,/shopArrivedAt: row\.shopArrivedAt/,'store detail must expose arrival timestamp');
+assert.match(server,/business_scan_results/,'manual track view must be able to read locally saved scan/POD status evidence');
+assert.match(server,/return\{events:unique,ledger,scanRows,shipmentRows\}/,'local track evidence must publish saved status rows as well as trajectory events');
+assert.match(server,/scanRows:\[\.\.\.scans\.rows,\.\.\.local\.scanRows\]/,'CCSL/WHPP manual track response must merge remote and saved scan evidence');
+assert.match(server,/shipmentRows:\[\.\.\.shipment\.rows,\.\.\.local\.shipmentRows\]/,'Shopee manual track response must merge remote and saved shipment-status evidence');
 
 assert.match(html,/data-kpi-detail="shopArrived"/,'every business board must render store-arrival KPI');
 assert.match(html,/data-kpi-detail="pendingGap"/,'every business board must render Pending-gap KPI');
