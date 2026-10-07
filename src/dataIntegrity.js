@@ -7,43 +7,48 @@ import { loadWhppCanonicalTruth } from './whppCanonicalTruth.js';
 
 const TYPES=['CE','CEAF','TBKH','ALI1688','WHPP','SHOPEECN','SHOPEEVN'];
 
-export function buildDataIntegrityReport({snapshotId='',reportDate=''}={}){
+export function buildDataIntegrityReport({snapshotId='',reportDate='',businessType=''}={}){
   const db=getDb();
   const batch=resolveBatch(db,snapshotId,reportDate);
   if(!batch)return emptyReport();
 
+  const requestedType=String(businessType||'').trim().toUpperCase();
+  const selectedTypes=TYPES.includes(requestedType)?[requestedType]:TYPES;
   const sourceSets=Object.fromEntries(TYPES.map(type=>[type,new Set()]));
-  for(const row of db.prepare('SELECT businessType,shipmentCode FROM unified_import_rows WHERE snapshotId=?').all(batch.snapshotId)){
+  const sourceRows=requestedType&&requestedType!=='WHPP'
+    ? db.prepare('SELECT businessType,shipmentCode FROM unified_import_rows WHERE snapshotId=? AND businessType=?').all(batch.snapshotId,requestedType)
+    : db.prepare('SELECT businessType,shipmentCode FROM unified_import_rows WHERE snapshotId=?').all(batch.snapshotId);
+  for(const row of sourceRows){
     const type=String(row.businessType||'').toUpperCase(),code=norm(row.shipmentCode);
     if(sourceSets[type]&&code)sourceSets[type].add(code);
   }
 
   const whppState=loadWhppState();
-  if(String(whppState?.reportDate||'')===String(batch.reportDate||'')){
+  if(selectedTypes.includes('WHPP')&&String(whppState?.reportDate||'')===String(batch.reportDate||'')){
     for(const code of whppState.pnhBills||[])if(norm(code))sourceSets.WHPP.add(norm(code));
   }
 
   const businesses={};
-  for(const type of TYPES){
+  for(const type of selectedTypes){
     if(type==='WHPP')businesses[type]=whppIntegrity(sourceSets[type],whppState,batch.reportDate);
     else businesses[type]=standardIntegrity(type,sourceSets[type],batch.snapshotId);
   }
 
-  const sourceTotal=TYPES.reduce((sum,type)=>sum+businesses[type].sourceCount,0);
-  const stateTotal=TYPES.reduce((sum,type)=>sum+businesses[type].stateMemberCount,0);
-  const accountedTotal=TYPES.reduce((sum,type)=>sum+businesses[type].accounted,0);
-  const scanTotal=TYPES.reduce((sum,type)=>sum+businesses[type].scanCount,0);
-  const missingFromState=TYPES.reduce((sum,type)=>sum+Math.max(0,businesses[type].sourceCount-businesses[type].stateMemberCount),0);
-  const waitingScan=TYPES.reduce((sum,type)=>sum+businesses[type].waitingScan,0);
-  const accountingDifference=TYPES.reduce((sum,type)=>sum+Math.abs(businesses[type].difference),0);
-  const sourceUnique=new Set(TYPES.flatMap(type=>[...sourceSets[type]])).size;
+  const sourceTotal=selectedTypes.reduce((sum,type)=>sum+businesses[type].sourceCount,0);
+  const stateTotal=selectedTypes.reduce((sum,type)=>sum+businesses[type].stateMemberCount,0);
+  const accountedTotal=selectedTypes.reduce((sum,type)=>sum+businesses[type].accounted,0);
+  const scanTotal=selectedTypes.reduce((sum,type)=>sum+businesses[type].scanCount,0);
+  const missingFromState=selectedTypes.reduce((sum,type)=>sum+Math.max(0,businesses[type].sourceCount-businesses[type].stateMemberCount),0);
+  const waitingScan=selectedTypes.reduce((sum,type)=>sum+businesses[type].waitingScan,0);
+  const accountingDifference=selectedTypes.reduce((sum,type)=>sum+Math.abs(businesses[type].difference),0);
+  const sourceUnique=new Set(selectedTypes.flatMap(type=>[...sourceSets[type]])).size;
 
   return {
     ok:true,reportDate:batch.reportDate,snapshotId:batch.snapshotId,
     source:{classifiedTotal:sourceTotal,uniqueWaybills:sourceUnique,balanced:sourceTotal===sourceUnique},
     processing:{stateMemberTotal:stateTotal,scanCount:scanTotal,waitingScan,missingFromState},
     accounting:{accountedTotal,difference:accountingDifference,balanced:accountingDifference===0&&stateTotal===sourceTotal},
-    businesses,
+    businesses,scope:requestedType||'ALL',
     safeForDashboard:sourceTotal===sourceUnique&&missingFromState===0&&accountingDifference===0,
     processingComplete:waitingScan===0&&missingFromState===0
   };
