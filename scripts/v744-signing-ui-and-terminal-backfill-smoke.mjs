@@ -30,8 +30,8 @@ assert.equal(whppLike.days,3);
 assert.match(home,/if\(!obsByBill\.has\(bill\)\)obsByBill\.set\(bill,\[\]\)/,'later-report backfill must retain all observations per waybill');
 assert.match(home,/for\(const row of candidates\)/,'backfill must scan newest-to-older observations until a valid terminal signing row is found');
 assert.match(shell,/当日无POD/,'zero-POD boards must explain why no signing average exists');
-assert.match(html,/V748_PER_BOARD_TRACK_QUALITY_SIGNALS|V744_SIGNING_UI_SIMPLIFIED_AND_TERMINAL_BACKFILL/,'V744+ shell marker missing');
-assert.match(html,/v625-shell\.js\?v=20261007-v(?:744|748)-1/,'V744+ cache bust missing');
+assert.match(html,/V750_TIMING_EVIDENCE_TRACK_VIEW|V748_PER_BOARD_TRACK_QUALITY_SIGNALS|V744_SIGNING_UI_SIMPLIFIED_AND_TERMINAL_BACKFILL/,'V744+ shell marker missing');
+assert.match(html,/v625-shell\.js\?v=20261007-v(?:744|748|750)-1/,'V744+ cache bust missing');
 
 assert.match(home,/FROM business_daily_parse_rows[\s\S]*businessType='WHPP'/,'V746 WHPP signing must read canonical business_daily_parse_rows fallback');
 assert.match(home,/latest_whpp_daily_parse_delivery_time/,'V746 later WHPP daily backfill source missing');
@@ -44,5 +44,9 @@ assert.match(html,/data-kpi-detail="pendingGap"/,'V748 Pending-gap KPI missing')
 assert.match(html,/data-kpi-detail="oc2Plus"/,'V748 OC2+ KPI missing');
 assert.match(shell,/\/api\/v246\/tracking\/reconcile/,'V748 board precision track refresh must use V246 reconcile');
 assert.match(shell,/v748QualityRefreshKeys\.clear\(\)/,'V748 latest store list import must invalidate prior track-quality refresh');
+assert.match(shell,/source=timing-backfill/,'timing backfill detail must tag trajectory navigation context');
+assert.match(shell,/orderStatus=85；这是终态状态证据/,'empty-track page must surface WHPP confirm-query POD status');
+assert.match(shell,/状态证据（不等同于轨迹时间）/,'tracking page must distinguish terminal status evidence from real trajectory time');
+assert.match(shell,/currentParams\(\)\.get\('source'\)/,'tracking page must retain timing-backfill context');
 
 console.log('[V744/V745/V746/V747/V748] signing UI + WHPP canonical timing + offline-safe updater + per-board store/Pending-gap/OC2+ trajectory quality passed');
