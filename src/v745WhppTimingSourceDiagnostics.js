@@ -2,7 +2,7 @@ import { getDb } from './db.js';
 import { persistentSelectedDatePodBills } from './selectedDatePersistentTruth.js';
 import { extractDailyReportSigningEvidence, dailyReportProvesPod } from './dailyReportSigningTiming.js';
 
-export const V745_WHPP_TIMING_SOURCE_DIAG='2026-10-07-v745-whpp-daily-source-diagnostic-v1';
+export const V745_WHPP_TIMING_SOURCE_DIAG='2026-10-07-v746-whpp-canonical-daily-source-diagnostic-v1';
 
 function text(value){return String(value??'').trim();}
 function safeJson(value){try{return JSON.parse(value||'{}')}catch{return{}}}
@@ -32,13 +32,13 @@ export function diagnoseWhppDailyTimingSources(reportDate='',limit=8){
   const values=[...new Set(bills.map(x=>text(x).toUpperCase()).filter(Boolean))];
   const observationsByBill=new Map();
   const keyStats=new Map();
-  let observationRows=0,terminalRows=0,orderTimeRows=0,deliveryTimeRows=0,validRows=0,validBills=0;
+  let observationRows=0,unifiedObservationRows=0,legacyObservationRows=0,terminalRows=0,orderTimeRows=0,deliveryTimeRows=0,validRows=0,validBills=0;
 
   for(let i=0;i<values.length;i+=300){
     const chunk=values.slice(i,i+300),marks=chunk.map(()=>'?').join(',');
-    let rows=[];
+    let rows=[],unifiedRows=[],legacyRows=[];
     try{
-      rows=db.prepare(`SELECT UPPER(TRIM(u.shipmentCode)) shipmentCode,u.reportDate,u.createdAt,u.rowJson,u.regionCode
+      unifiedRows=db.prepare(`SELECT UPPER(TRIM(u.shipmentCode)) shipmentCode,u.reportDate,u.createdAt,u.rowJson,u.regionCode,'UNIFIED' sourceTable
         FROM unified_import_rows u
         JOIN unified_import_batches b ON b.batchId=u.batchId AND b.status='VALID'
         WHERE u.reportDate>=? AND UPPER(TRIM(u.businessType))='WHPP'
@@ -46,8 +46,21 @@ export function diagnoseWhppDailyTimingSources(reportDate='',limit=8){
         ORDER BY UPPER(TRIM(u.shipmentCode)),u.reportDate DESC,u.createdAt DESC,u.rowid DESC`)
         .all(date,...chunk);
     }catch{}
+    try{
+      legacyRows=db.prepare(`SELECT UPPER(TRIM(shipmentCode)) shipmentCode,reportDate,createdAt,rowJson,'' regionCode,'WHPP_DAILY_PARSE' sourceTable
+        FROM business_daily_parse_rows
+        WHERE businessType='WHPP' AND reportDate>=?
+          AND UPPER(TRIM(shipmentCode)) IN (${marks})
+        ORDER BY UPPER(TRIM(shipmentCode)),reportDate DESC,createdAt DESC,id DESC`)
+        .all(date,...chunk);
+    }catch{}
+    rows=[...unifiedRows,...legacyRows].sort((a,b)=>
+      String(b.reportDate||'').localeCompare(String(a.reportDate||''))||
+      String(b.createdAt||'').localeCompare(String(a.createdAt||''))||
+      String(a.sourceTable||'').localeCompare(String(b.sourceTable||'')));
     for(const row of rows){
       observationRows++;
+      if(row.sourceTable==='WHPP_DAILY_PARSE')legacyObservationRows++;else unifiedObservationRows++;
       const bill=text(row.shipmentCode).toUpperCase();
       const raw=rawOf(row);
       const terminal=dailyReportProvesPod(raw);
@@ -67,7 +80,7 @@ export function diagnoseWhppDailyTimingSources(reportDate='',limit=8){
       if(!observationsByBill.has(bill))observationsByBill.set(bill,[]);
       const list=observationsByBill.get(bill);
       if(list.length<5)list.push({
-        reportDate:text(row.reportDate),regionCode:text(row.regionCode),terminal,
+        reportDate:text(row.reportDate),sourceTable:text(row.sourceTable),regionCode:text(row.regionCode),terminal,
         orderTime:order.value,orderTimeField:order.key,
         deliveryTime:delivery.value,deliveryTimeField:delivery.key,
         evidenceOk:Boolean(evidence?.ok),evidenceReason:text(evidence?.reason),
@@ -84,7 +97,7 @@ export function diagnoseWhppDailyTimingSources(reportDate='',limit=8){
   const samples=values.slice(0,Math.max(1,Math.min(Number(limit||8),20))).map(bill=>({shipmentCode:bill,observations:observationsByBill.get(bill)||[]}));
   return{
     ok:true,id:V745_WHPP_TIMING_SOURCE_DIAG,reportDate:date,
-    podMembers:values.length,observationRows,terminalRows,orderTimeRows,deliveryTimeRows,validRows,validBills,
+    podMembers:values.length,observationRows,unifiedObservationRows,legacyObservationRows,terminalRows,orderTimeRows,deliveryTimeRows,validRows,validBills,
     missingBills:Math.max(0,values.length-validBills),topTimingFields:topFields,samples
   };
 }
