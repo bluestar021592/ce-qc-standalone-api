@@ -52,6 +52,7 @@ import { createPurgeChallenge, executePurge } from './src/dataPurge.js';
 import { queueDirectDataPurge, getDirectDataPurgeStatus, DIRECT_PURGE_ID } from './src/directDataPurge.js';
 import { buildHomeQualitySummary, buildHomeQualitySummaryWithArchive, diagnoseSelectedDateTiming } from './src/homeQualitySummary.js';
 import { diagnoseV736Timing } from './src/v736TimingDiagnostics.js';
+import { diagnoseWhppDailyTimingSources } from './src/v745WhppTimingSourceDiagnostics.js';
 import { requestSelectedDateTimingRepair, inspectSelectedDateTimingRepair } from './src/selectedDateTimingEvidenceRepair.js';
 import { persistentSelectedDatePodTruth, persistentWhppCompletionTruth } from './src/selectedDatePersistentTruth.js';
 import { buildCanonicalBusinessAccounting } from './src/businessAccounting.js';
@@ -1988,6 +1989,14 @@ app.get('/api/results/:reportDate', async (req, res) => {
   const rows = safeFinalRows(state).filter(row => row?.是否POD !== '是' && row?.异常分类 !== '最终分流排除');
   const start = (page - 1) * pageSize;
   res.json({ ok: true, reportDate: req.params.reportDate, page, pageSize, total: rows.length, rows: rows.slice(start, start + pageSize) });
+});
+
+app.get('/api/whpp-timing-source-diagnostics', (req,res)=>{
+  try{
+    const reportDate=String(req.query.reportDate||'').slice(0,10);
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(reportDate))return res.status(400).json({ok:false,error:'reportDate格式必须为YYYY-MM-DD'});
+    res.json(diagnoseWhppDailyTimingSources(reportDate,Number(req.query.limit||8)));
+  }catch(error){res.status(500).json({ok:false,error:String(error?.message||error)})}
 });
 
 app.get('/api/detail', async (req, res) => {
