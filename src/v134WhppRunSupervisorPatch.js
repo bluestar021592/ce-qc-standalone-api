@@ -125,8 +125,24 @@ globalThis.__CE_QC_IDLE_WHPP_BACKEND_CONTINUITY__=idleBackendContinuity;
 function scheduleBackendContinuity(server){[1200,3500,8000].forEach(ms=>{const timer=setTimeout(()=>{void maybeAutoResumeWhpp(`server-ready-${ms}`);},ms);timer.unref?.();});ensureBackendContinuityLoop();server?.once?.('close',()=>{stopBackendContinuityLoop();});}
 function startHandler(mode){return(req,res)=>{try{if(runtimePromise&&runtime.active)return res.status(409).json({ok:false,code:'WHPP_RUN_ALREADY_ACTIVE',error:'WHPP当前任务正在后台运行，请勿重复启动。',runtime:publicRuntime(runtime)});const started=launchWhpp(mode);return res.status(202).json({ok:true,accepted:true,patchId:PATCH_ID,backendContinuityRevision:BACKEND_CONTINUITY_REVISION,selectedDateContinuityRevision:SELECTED_DATE_CONTINUITY_REVISION,v414Revision:V414_EXPLICIT_UNIFIED_WHPP_REVISION,completionLockRevision:V378_WHPP_COMPLETION_LOCK_REVISION,finalMaterializationRevision:V134_FINAL_MATERIALIZATION_EVENT_REVISION,continuityIdleRevision:V134_CONTINUITY_IDLE_REVISION,reportDate:started.reportDate,processing:{running:true,phase:started.phase},runtime:started,message:'WHPP任务已进入后台执行；页面可继续响应，进度由 /api/whpp/progress 查询。'});}catch(error){if(error?.code==='WHPP_ALREADY_FINALIZED')return res.status(200).json({ok:true,accepted:false,completed:true,code:'WHPP_ALREADY_FINALIZED',patchId:PATCH_ID,v414Revision:V414_EXPLICIT_UNIFIED_WHPP_REVISION,completionLockRevision:V378_WHPP_COMPLETION_LOCK_REVISION,continuityIdleRevision:V134_CONTINUITY_IDLE_REVISION,reportDate:error.completionLock?.reportDate||'',snapshotStatus:error.completionLock?.snapshotStatus||'COMPLETED',finalizedSnapshotId:error.completionLock?.finalizedSnapshotId||'',message:'WHPP本土当前日报已经正式完成，本次重复启动已安全忽略。'});const status=error?.code==='WHPP_REPORT_MISSING'?400:500;return res.status(status).json({ok:false,code:error?.code||'WHPP_RUN_START_FAILED',error:error?.message||String(error)});}};}
 function progressHandler(req,res){
+  const requestedFromQuery=dateOnly(req.query?.reportDate||'');
+  const liveDate=dateOnly(runtime?.reportDate||'');
+  if(runtimePromise&&runtime.active&&liveDate&&(!requestedFromQuery||requestedFromQuery===liveDate)){
+    const runtimeView=publicRuntime(runtime);
+    return res.json({
+      ok:true,patchId:PATCH_ID,backendContinuityRevision:BACKEND_CONTINUITY_REVISION,
+      selectedDateContinuityRevision:SELECTED_DATE_CONTINUITY_REVISION,v414Revision:V414_EXPLICIT_UNIFIED_WHPP_REVISION,
+      completionLockRevision:V378_WHPP_COMPLETION_LOCK_REVISION,finalMaterializationRevision:V134_FINAL_MATERIALIZATION_EVENT_REVISION,
+      continuityIdleRevision:V134_CONTINUITY_IDLE_REVISION,reportDate:liveDate,
+      processing:{running:true,paused:false,phase:runtimeView.lastMessage||runtimeView.phase||'WHPP处理中',batchIndex:Number(runtimeView.batchIndex||0),totalBatches:Number(runtimeView.totalBatches||0),heartbeatAt:runtimeView.heartbeatAt||''},
+      restartRecovery:null,runtimeActive:true,stale:false,runtime:runtimeView,requestTimeoutMs:WHPP_REQUEST_TIMEOUT_MS,
+      backendContinuity:{enabled:true,restartOnly:true,explicitRunOnly:true,pollMs:AUTO_RESUME_POLL_MS,pollingActive:Boolean(autoResumeTimer),cooldownMs:AUTO_RESUME_COOLDOWN_MS,busy:autoResumeBusy,lastAttemptAt:lastAutoResumeAt,lastKey:lastAutoResumeKey,completedDateLatch:continuityCompletedDate},
+      completionLock:{locked:false,reportDate:liveDate,reason:'ACTIVE_RUNTIME_FAST_PATH',revision:V378_WHPP_COMPLETION_LOCK_REVISION},
+      summary:null,log:[]
+    });
+  }
   const state=loadWhppState();
-  const requestedDate=dateOnly(req.query?.reportDate||state.reportDate||'');
+  const requestedDate=requestedFromQuery||dateOnly(state.reportDate||'');
   const currentDate=dateOnly(state.reportDate||'');
   const dateState=requestedDate&&requestedDate===currentDate?state:null;
   const completionLock=inspectV378WhppCompletionLock(requestedDate,dateState);
