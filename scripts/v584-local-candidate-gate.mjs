@@ -111,6 +111,7 @@ const TASKS=[
   ['node',['scripts/v739-import-completed-3of3-lock-smoke.mjs']],
   ['node',['scripts/v740-confirm-first-historical-timing-smoke.mjs']],
   ['node',['scripts/v741-historical-timing-closed-loop-smoke.mjs']],
+  ['node',['scripts/v742-daily-report-signing-time-smoke.mjs']],
   ['node',['--test',
     'test/unified-import-v7.test.js',
     'test/unified-import-ceaf.test.js',
