@@ -5,7 +5,7 @@ const truth=fs.readFileSync('src/selectedDatePersistentTruth.js','utf8');
 const shell=fs.readFileSync('public/v625-shell.js','utf8');
 const html=fs.readFileSync('public/v625-shell.html','utf8');
 
-assert.match(truth,/UNIFIED_COMPLETED_FAST_PATH/,'completed unified snapshot must own WHPP completion fast path');
+assert.match(truth,/completionFastPath:true/,'completed unified snapshot must own WHPP completion fast path');
 assert.match(truth,/if\(String\(unified\?\.status\|\|''\)\.toUpperCase\(\)==='COMPLETED'\)/,'exact selected-date unified COMPLETED fast path missing');
 assert.match(truth,/return\{\s*locked:true,finalized:true,reportDate:date/,'completed unified snapshot must return a locked WHPP lifecycle before downstream reconstruction');
 
