@@ -113,6 +113,7 @@ const TASKS=[
   ['node',['scripts/v741-historical-timing-closed-loop-smoke.mjs']],
   ['node',['scripts/v742-daily-report-signing-time-smoke.mjs']],
   ['node',['scripts/v743-latest-daily-report-signing-backfill-smoke.mjs']],
+  ['node',['scripts/v744-signing-ui-and-terminal-backfill-smoke.mjs']],
   ['node',['--test',
     'test/unified-import-v7.test.js',
     'test/unified-import-ceaf.test.js',
