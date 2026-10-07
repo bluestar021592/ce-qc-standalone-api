@@ -208,7 +208,7 @@ async function latestImportContext(){
 }
 function progressPercent(done,total){return total>0?Math.max(0,Math.min(100,Math.round(done*100/total))):0}
 function familyComplete(value={}){
-  return Boolean(value.complete)||/COMPLETED|完成/i.test(String(value.runStatus||value.outcome||value.phase||''));
+  return Boolean(value.complete)||/FINISHED|COMPLETED|完成/i.test(String(value.runStatus||value.outcome||value.phase||''));
 }
 function familyProgressLabel(value={}){
   const scanTotal=Number(value.scanTotal||0),scanDone=Number(value.scanDone||0),trackTotal=Number(value.trackTotal||0),trackDone=Number(value.trackDone||0);
@@ -787,11 +787,22 @@ async function doImport(){
 }
 async function waitWhppTerminal(reportDate,timeoutMs=1800000){
   const started=Date.now();
+  let transientPollFailures=0;
   while(Date.now()-started<timeoutMs){
-    const r=await json('/api/whpp/progress'+(reportDate?'?reportDate='+encodeURIComponent(reportDate):''),10000);
-    const runtime=r.runtime||{};
-    // Keep the global 1.4s progress poll as the single UI owner. Do not overwrite
-    // completed CCSL/SHOPEE state with empty objects while waiting for WHPP.
+    let r=null;
+    try{
+      r=await json('/api/whpp/progress'+(reportDate?'?reportDate='+encodeURIComponent(reportDate):''),15000);
+      transientPollFailures=0;
+    }catch(error){
+      if(error?.code!=='CLIENT_WAIT_TIMEOUT')throw error;
+      transientPollFailures+=1;
+      if(transientPollFailures===1||transientPollFailures%4===0)appendLiveLog('WHPP后台仍在处理，实时进度暂时繁忙，继续等待…');
+      await new Promise(resolve=>setTimeout(resolve,1500));
+      continue;
+    }
+    const runtime=r?.runtime||{};
+    // Keep the global 1.4s progress poll as the single UI owner. A temporary
+    // progress-read timeout never aborts the detached WHPP background task.
     if(!runtime.active&&runtime.outcome){
       if(runtime.outcome==='FAILED')throw new Error(runtime.error||'WHPP处理失败');
       return r;
