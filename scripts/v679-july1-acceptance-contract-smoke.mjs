@@ -28,7 +28,8 @@ assert.match(helper,/UNIFIED_COMPLETED/,'WHPP progress must recognize unified CO
 assert.match(repair,/persistentSelectedDatePodTruth/,'timing denominator must read selected-date canonical POD truth');
 assert.match(modern,/persistentWhppCompletionTruth/,'modern WHPP progress must use persistent completion truth');
 assert.match(legacy,/persistentWhppCompletionTruth/,'legacy WHPP progress must converge on persistent completion truth');
-assert.match(shell,/completionLock\?\.locked/,'UI must consume persistent WHPP completion lock');
+assert.match(shell,/const whppLock=whppPayload\.completionLock\|\|\{\}/,'UI must consume persistent WHPP completion lock projected by the progress owner');
+assert.match(shell,/complete:Boolean\(whppLock\.locked\)\|\|familyComplete\(whppPayload\.runtime\|\|\{\}\)/,'WHPP completion lock must close the UI family without a duplicate selected-date truth read');
 assert.match(store,/persistedBusinessPodFlag/,'future SQLite writes must preserve formal POD semantics');
 assert.match(home,/currentTotal>0\?currentTotal:n\(row\.pod,0\)/,'cache must not shrink canonical POD denominator');
 assert.match(home,/requestSelectedDateTimingRepair/,'missing signing evidence must auto-enter selected-date repair');
