@@ -571,7 +571,7 @@ async function loadHome(options={}){
     }
     if(['WHPP','SHOPEECN','SHOPEEVN'].includes(type)){setText('v626Timing'+type+'Return',fmt(returns[type]?.count||0));setText('v626Timing'+type+'ReturnRate',pct(returns[type]?.rate||0))}
   }
-  setText('v625TimingPeriod',summary?.reportDate?'统计日报 '+summary.reportDate+' · 仅真实60/70→80轨迹POD':'统计当前日报POD');
+  setText('v625TimingPeriod',summary?.reportDate?'统计日报 '+summary.reportDate+' · 真实轨迹 / 已保存POD时间证据':'统计当前日报POD');
 
   const history=historyRows;
   renderTrend('v625HomeTrend',history.slice().reverse().map(r=>({label:r.reportDate,value:Object.values(r.classificationCounts||{}).reduce((a,b)=>a+Number(b||0),0)})));
@@ -587,7 +587,7 @@ async function runTimingRepairNow(){
   const reportDate=selectedReportDate()||latest?.reportDate||'';
   if(!reportDate){if(btn)btn.textContent='请先选择日报';return}
   if(btn){btn.disabled=true;btn.textContent='正在启动补证…'}
-  setText('v625TimingPeriod','统计日报 '+reportDate+' · 正在补齐真实60/70→80轨迹证据');
+  setText('v625TimingPeriod','统计日报 '+reportDate+' · 正在补齐真实轨迹与已保存POD时间证据');
   try{
     const started=await post('/api/timing-repair/start',{reportDate},15000);
     const snapshotId=String(started?.snapshotId||latest?.snapshotId||'');
