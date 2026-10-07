@@ -739,6 +739,13 @@ export function buildHomeQualitySummary(options={}) {
   const history=listUnifiedImportHistory(30);
   const classification=classificationForBatch(latest);
   const timing=Object.fromEntries(TIMING_TYPES.map(type=>[type,safeTimingForBatch(latest,type)]));
+  const timingRepairTypes=Object.fromEntries(TIMING_TYPES.map(type=>[
+    type,
+    latest?.reportDate?inspectSelectedDateTimingRepair(type,latest.reportDate,latest.snapshotId||''):{status:'IDLE'}
+  ]));
+  const timingRepairActive=Object.values(timingRepairTypes).some(item=>['QUEUED','STARTING','RUNNING'].includes(String(item?.status||'').toUpperCase()));
+  const timingRepairFailed=Object.values(timingRepairTypes).some(item=>String(item?.status||'').toUpperCase()==='FAILED');
+  const timingRepairExhausted=Object.values(timingRepairTypes).some(item=>String(item?.status||'').toUpperCase()==='HISTORICAL_EVIDENCE_UNAVAILABLE');
   const returns=Object.fromEntries(TYPES.map(type=>[type,safeReturnSummaryForBatch(latest,type)]));
   const timingTrend=Object.fromEntries(TIMING_TYPES.map(type=>[
     type,
@@ -761,6 +768,7 @@ export function buildHomeQualitySummary(options={}) {
     timing,
     timingTrend,
     returns,
+    timingEvidenceRepair:{active:timingRepairActive,failed:timingRepairFailed,exhausted:timingRepairExhausted,types:timingRepairTypes,readOnly:true},
     timingRule:{
       start:'TRACK_70_DELIVERY_START',
       fallback:'TRACK_60_ASSIGN_START_ONLY_WHEN_NO_70',
