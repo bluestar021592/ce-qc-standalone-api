@@ -295,19 +295,16 @@ function familyProgressLabel(value={}){
 }
 async function fetchLiveProgress(reportDate=''){
   const date=reportDate||v626LatestImport?.reportDate||'';
-  const [ccslR,shopeeR,whppR,truthR]=await Promise.allSettled([
+  const [ccslR,shopeeR,whppR]=await Promise.allSettled([
     json('/api/v33/run-progress?businessType=CCSL'+(date?'&reportDate='+encodeURIComponent(date):''),7000),
     json('/api/v33/run-progress?businessType=SHOPEE'+(date?'&reportDate='+encodeURIComponent(date):''),7000),
-    json('/api/whpp/progress'+(date?'?reportDate='+encodeURIComponent(date):''),7000),
-    date?json('/api/selected-date-truth?reportDate='+encodeURIComponent(date),7000):Promise.resolve({})
+    json('/api/whpp/progress'+(date?'?reportDate='+encodeURIComponent(date):''),7000)
   ]);
   const ccsl=ccslR.status==='fulfilled'?ccslR.value:{};
   const shopee=shopeeR.status==='fulfilled'?shopeeR.value:{};
   const whppPayload=whppR.status==='fulfilled'?whppR.value:{};
-  const truth=truthR.status==='fulfilled'?truthR.value:{};
-  const truthLocked=Boolean(truth?.whppCompletion?.locked);
-  const whppLock=truthLocked?truth.whppCompletion:(whppPayload.completionLock||{});
-  const whpp={...(whppPayload.runtime||{}),summary:whppPayload.summary||{},log:whppPayload.log||[],completionLock:whppLock,active:Boolean(whppPayload.runtime?.active)&&!truthLocked,complete:truthLocked||Boolean(whppPayload.completionLock?.locked)||familyComplete(whppPayload.runtime||{}),outcome:(truthLocked||whppPayload.completionLock?.locked)?'COMPLETED':String(whppPayload.runtime?.outcome||''),phase:truthLocked?'完成':String(whppPayload.runtime?.phase||'')};
+  const whppLock=whppPayload.completionLock||{};
+  const whpp={...(whppPayload.runtime||{}),summary:whppPayload.summary||{},log:whppPayload.log||[],completionLock:whppLock,active:Boolean(whppPayload.runtime?.active)&&!whppLock.locked,complete:Boolean(whppLock.locked)||familyComplete(whppPayload.runtime||{}),outcome:whppLock.locked?'COMPLETED':String(whppPayload.runtime?.outcome||''),phase:whppLock.locked?'完成':String(whppPayload.runtime?.phase||'')};
   return{ccsl,shopee,whpp,reportDate:date};
 }
 function renderLiveProgress(bundle={}){
@@ -356,7 +353,7 @@ async function refreshLiveProgress(){
 }
 function startProgressPolling(){
   stopProgressPolling();void refreshLiveProgress();
-  v626ProgressTimer=setInterval(()=>{void refreshLiveProgress()},1400);
+  v626ProgressTimer=setInterval(()=>{void refreshLiveProgress()},3000);
 }
 function stopProgressPolling(){if(v626ProgressTimer){clearInterval(v626ProgressTimer);v626ProgressTimer=null}}
 
@@ -802,7 +799,7 @@ async function refreshImportCanonicalClassification(reportDate=''){
   const date=reportDate||v626LatestImport?.reportDate||'';
   if(!date)return null;
   try{
-    const summary=await json('/api/home-quality-summary?reportDate='+encodeURIComponent(date),20000);
+    const summary=await json('/api/home-quality-summary?fast=1&reportDate='+encodeURIComponent(date),10000);
     const counts=summary?.classification?.counts||{};
     let changed=false;
     for(const type of ['CE','CEAF','TBKH','ALI1688','WHPP','SHOPEECN','SHOPEEVN']){
