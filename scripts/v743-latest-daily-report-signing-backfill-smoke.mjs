@@ -15,7 +15,7 @@ assert.match(home,/evidence:dailyReportFallback\|\|trackEvidence/,'daily-report 
 
 assert.match(shell,/待后续日报回补/,'missing final delivery times must be labelled as later-report backfill, not irreversible loss');
 assert.match(shell,/后续日报更新后自动回补/,'UI must explain automatic later-report timing backfill');
-assert.match(html,/V748_PER_BOARD_TRACK_QUALITY_SIGNALS|V744_SIGNING_UI_SIMPLIFIED_AND_TERMINAL_BACKFILL|V743_LATEST_DAILY_REPORT_SIGNING_BACKFILL/,'V743+ shell marker missing');
+assert.match(html,/V750_TIMING_EVIDENCE_TRACK_VIEW|V748_PER_BOARD_TRACK_QUALITY_SIGNALS|V744_SIGNING_UI_SIMPLIFIED_AND_TERMINAL_BACKFILL|V743_LATEST_DAILY_REPORT_SIGNING_BACKFILL/,'V743+ shell marker missing');
 assert.match(html,/v625-shell\.js\?v=20261007-v(?:743|744|748)-1/,'V743+ cache bust missing');
 
 // July-1 VN acceptance reproduced from the proven historical analysis:
