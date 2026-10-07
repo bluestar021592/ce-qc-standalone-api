@@ -457,15 +457,13 @@ async function scanWhppPending(){
 async function loadHome(options={}){
   const requestedDate=selectedReportDate();
   const summaryUrl='/api/home-quality-summary?fast=1'+(requestedDate?'&reportDate='+encodeURIComponent(requestedDate):'');
-  const integrityUrl='/api/data-integrity'+(requestedDate?'?reportDate='+encodeURIComponent(requestedDate):'');
-  const [summaryR,historyR,integrityR]=await Promise.allSettled([
-    json(summaryUrl,20000),
-    json('/api/unified-history?limit=7',7000),
-    json(integrityUrl,20000)
+  const [summaryR,historyR]=await Promise.allSettled([
+    json(summaryUrl,10000),
+    json('/api/unified-history?limit=7',7000)
   ]);
   const summary=summaryR.status==='fulfilled'?summaryR.value:null;
   const historyRows=(historyR.status==='fulfilled'?historyR.value?.rows:[])||[];
-  const integrity=integrityR.status==='fulfilled'?integrityR.value:null;
+  const integrity=null;
   const activeReportDate=summary?.reportDate||requestedDate||'';
   const selectedBatch=historyRows.find(row=>String(row.reportDate||'').slice(0,10)===String(activeReportDate||'').slice(0,10))||null;
   if(selectedBatch){
@@ -488,10 +486,8 @@ async function loadHome(options={}){
   setText('v632GrandTotalCheck',fmt(sevenBusinessTotal));
   const totalCard=q('[data-card="TOTAL"]');
   if(totalCard)totalCard.classList.toggle('v632-total-mismatch',grand!==sevenBusinessTotal);
-  if(integrity){
-    setText('v637HomeIntegrity','源票 '+fmt(integrity.source?.classifiedTotal||0)+' · 已进入处理 '+fmt(integrity.processing?.stateMemberTotal||0)+' · 已扫描 '+fmt(integrity.processing?.scanCount||0)+' · 待扫描 '+fmt(integrity.processing?.waitingScan||0)+' · 已归类 '+fmt(integrity.accounting?.accountedTotal||0)+' · 差异 '+fmt(integrity.accounting?.difference||0));
-    const bar=byId('v637HomeIntegrityBar');if(bar){bar.classList.toggle('error',!integrity.safeForDashboard);bar.classList.toggle('ok',Boolean(integrity.safeForDashboard))}
-  }
+  setText('v637HomeIntegrity','快速看板 · 七业务源票 '+fmt(grand)+' · 完整性明细进入对应业务看板后按需读取');
+  const fastIntegrityBar=byId('v637HomeIntegrityBar');if(fastIntegrityBar){fastIntegrityBar.classList.remove('error');fastIntegrityBar.classList.add('ok')}
 
   for(const type of types){
     const card=q('[data-card="'+type+'"]');if(!card)continue;
@@ -518,13 +514,11 @@ async function loadHome(options={}){
   setText('v626ProcessFile',processExists?(v626LatestImport?.sourceName||('综合日报 '+processDate)):'尚未上传综合日报');
   setText('v626ProcessDateSource',processExists?('当前查看日报：'+processDate+(selectedBatch?.snapshotStatus?' · '+selectedBatch.snapshotStatus:'')):'日报日期将由系统自动识别');
   setText('v626StageParse',summary?.reportDate?'完成':'等待');setText('v626StageClassify',classification.balanced?'完成':'待核验');
-  const integritySafe=integrity?Boolean(integrity.safeForDashboard):true;
-  const processingComplete=integrity?Boolean(integrity.processingComplete):true;
-  const dataHealthy=Boolean(classification.balanced)&&integritySafe&&processingComplete;
-  setText('v625HomeStatusTitle',dataHealthy?'数据完整性校验通过':'数据完整性待核验');
+  const dataHealthy=Boolean(classification.balanced);
+  setText('v625HomeStatusTitle',dataHealthy?'快速看板已就绪':'分类数据待核验');
   setText('v625HomeStatus',dataHealthy
-    ?'七业务源票、处理成员、扫描与看板状态账已完成守恒核对。'
-    :(integrity?'源票 '+fmt(integrity.source?.classifiedTotal||0)+'，待扫描 '+fmt(integrity.processing?.waitingScan||0)+'，状态缺票 '+fmt(integrity.processing?.missingFromState||0)+'，看板差异 '+fmt(integrity.accounting?.difference||0)+'。':'当前分类总量与综合日报未完全守恒，请先检查分类结果。'));
+    ?'七业务分类总量已守恒；处理成员、扫描和状态账完整性在对应业务看板按需核验，不再阻塞首页。'
+    :'当前分类总量与综合日报未完全守恒，请先检查分类结果。');
   setText('v625DataStatus',dataHealthy?'正常':'待核验');
   setText('v625UpdatedAt',summary?.generatedAt?dateTime(summary.generatedAt):new Date().toLocaleString('zh-CN',{hour12:false}));
 
