@@ -11,5 +11,6 @@ assert.match(legacy,/persistentWhppCompletionTruth\(getDb\(\),requestedDate\)/,'
 assert.match(legacy,/completionLock:\{\.\.\.truth,locked,finalized:locked/,'legacy route must publish completionLock to the shell');
 assert.match(legacy,/outcome:'COMPLETED'/,'legacy route must publish completed runtime outcome');
 assert.match(modern,/persistentWhppCompletionTruth\(db,date\)/,'modern WHPP route must use the persisted completion truth too');
-assert.match(shell,/complete:truthLocked\|\|Boolean\(whppPayload\.completionLock\?\.locked\)/,'shell must render selected-date truth or either progress-route completion lock');
-console.log('[V677] both legacy and modern WHPP progress owners converge on selected-date persistent completion truth');
+assert.match(shell,/const whppLock=whppPayload\.completionLock\|\|\{\}/,'shell must consume completionLock projected by either WHPP progress route');
+assert.match(shell,/complete:Boolean\(whppLock\.locked\)\|\|familyComplete\(whppPayload\.runtime\|\|\{\}\)/,'shell must render either progress-route completion lock without a duplicate truth read');
+console.log('[V677] legacy and modern WHPP progress owners converge on selected-date persistent completion truth; shell consumes their completionLock directly');
