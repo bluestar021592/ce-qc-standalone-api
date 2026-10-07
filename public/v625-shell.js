@@ -822,8 +822,8 @@ async function runTask(mode){
       appendLiveLog('CCSL处理完成，开始SHOPEE CN/VN');await post('/api/shopee/run/start',{},0);
       appendLiveLog('SHOPEE处理完成，开始WHPP本土');await safeWhppRun('start',reportDate);
     }else{
-      appendLiveLog('继续CCSL未完成批次');await post('/api/resume',{},0).catch(async e=>{if(e.status===409)return;throw e});
-      appendLiveLog('继续SHOPEE未完成批次');await post('/api/shopee/run/resume',{},0).catch(async e=>{if(e.status===409)return;throw e});
+      appendLiveLog('继续CCSL未完成批次');await post('/api/resume',{},0).catch(async e=>{const code=String(e.payload?.code||'');if(e.status===409&&['RUN_ALREADY_COMPLETED','RUN_NOT_RECOVERABLE'].includes(code))return;throw e});
+      appendLiveLog('继续SHOPEE未完成批次');await post('/api/shopee/run/resume',{},0).catch(async e=>{const code=String(e.payload?.code||'');if(e.status===409&&['RUN_ALREADY_COMPLETED','RUN_NOT_RECOVERABLE'].includes(code))return;throw e});
       appendLiveLog('继续WHPP未完成批次');await safeWhppRun('resume',reportDate);
     }
     appendLiveLog('7业务处理完成，开始补齐签收时效60/70→80证据');
