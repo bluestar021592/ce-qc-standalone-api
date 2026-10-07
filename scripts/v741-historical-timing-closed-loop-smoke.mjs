@@ -29,6 +29,6 @@ assert.doesNotMatch(businessHelper,/bookingDate/,'bookingDate must never be fabr
 assert.doesNotMatch(whppHelper,/bookingDate/,'WHPP bookingDate must never be fabricated as POD time');
 
 assert.match(html,/V742_DAILY_REPORT_SIGNING_TIME|V741_HISTORICAL_TIMING_CLOSED_LOOP/,'V741+ shell marker missing');
-assert.match(html,/v625-shell\.js\?v=20261007-v741-1/,'V741 cache bust missing');
+assert.match(html,/v625-shell\.js\?v=20261007-v(?:741|742)-1/,'V741+ cache bust missing');
 
 console.log('[V741] historical POD-without-time closes as evidence exhausted; repeat repair is removed; future trusted POD timestamps persist permanently; bookingDate is never used as POD time');
