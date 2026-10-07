@@ -821,15 +821,26 @@ async function refreshV748BusinessTrackQuality(reportDate=''){
   v748QualityRefreshKeys.add(key);
   setText('v748QualityRefreshMeta','正在按 '+business+' 未终态运单精准补抓最新轨迹…');
   try{
-    const started=await post('/api/v246/tracking/reconcile',{businessType:business,fromDate:date,toDate:date},30000);
+    const requestedBusiness=business;
+    const started=await post('/api/v246/tracking/reconcile',{businessType:requestedBusiness,fromDate:date,toDate:date},30000);
     const jobId=String(started?.job?.jobId||'');
     if(!jobId)throw new Error('轨迹补抓任务未返回任务号');
+    const actualBusiness=String(started?.job?.selection?.businessType||requestedBusiness).toUpperCase();
+    const actualFrom=String(started?.job?.selection?.fromDate||date).slice(0,10);
+    const actualTo=String(started?.job?.selection?.toDate||date).slice(0,10);
+    const sameTarget=actualBusiness===requestedBusiness&&actualFrom===date&&actualTo===date;
+    if(!sameTarget)setText('v748QualityRefreshMeta','另一板块轨迹任务正在执行，完成后自动继续 '+requestedBusiness+'…');
     for(let i=0;i<900;i++){
       const r=await json('/api/v246/tracking/job/'+encodeURIComponent(jobId),12000);
       const job=r.job||{};
       const status=String(job.status||'').toUpperCase();
       if(['COMPLETED','FAILED'].includes(status)){
         if(status==='FAILED')throw new Error(job.error||job.message||'精准轨迹补抓失败');
+        if(!sameTarget){
+          v748QualityRefreshKeys.delete(key);
+          if(page==='business'&&business===requestedBusiness)setTimeout(()=>void refreshV748BusinessTrackQuality(date),800);
+          return;
+        }
         setText('v748QualityRefreshMeta','轨迹补抓完成 · 成功 '+fmt(job.refreshed||0)+' 票 · 待重试 '+fmt(job.failed||0)+' 票');
         await loadBusiness({skipQualityRefresh:true});
         return;
@@ -839,8 +850,9 @@ async function refreshV748BusinessTrackQuality(reportDate=''){
     }
     throw new Error('精准轨迹补抓等待超时');
   }catch(error){
+    v748QualityRefreshKeys.delete(key);
     const msg=String(error?.message||error);
-    setText('v748QualityRefreshMeta',/其他业务任务运行/.test(msg)?'当前有业务任务运行，稍后重新进入看板会继续补抓':'轨迹补抓暂未完成：'+msg);
+    setText('v748QualityRefreshMeta',/其他业务任务运行/.test(msg)?'当前有业务任务运行，稍后自动/重新进入看板会继续补抓':'轨迹补抓暂未完成：'+msg);
   }
 }
 async function loadBusiness(options={}){
