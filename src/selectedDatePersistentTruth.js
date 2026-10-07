@@ -150,7 +150,7 @@ export function persistentWhppCompletionTruth(db,reportDate=''){
           unifiedCompleted:true,unifiedWhppCompleted:true,
           snapshotLocked:false,dailyLocked:false,historyLocked:false,membershipMatches:true,
           snapshotId:String(batch.snapshotId||''),finalizedAt:String(unified?.createdAt||''),
-          completionSource:'UNIFIED_COMPLETED_FAST_PATH',
+          completionSource:'UNIFIED_COMPLETED',completionFastPath:true,
           reason:'PERSISTED_WHPP_COMPLETED'
         };
       }
