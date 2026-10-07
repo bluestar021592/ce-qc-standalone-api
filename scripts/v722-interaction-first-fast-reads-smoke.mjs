@@ -21,7 +21,7 @@ assert.match(server,/loadFastSqlBusinessState\(req\.params\.businessType, reques
 assert.doesNotMatch(server,/if \(!batch \|\| batch\.snapshotStatus !== 'COMPLETED' \|\| !batch\.reportDate\) return null/,'fast current-day board reads must remain available before processing completes');
 assert.match(server,/const requestedBusinessType=String\(req\.query\.businessType\|\|''\)/,'tracking workspace must support business scoping');
 assert.match(integrity,/selectedTypes=TYPES\.includes\(requestedType\)\?\[requestedType\]:TYPES/,'integrity report must scope to one board when requested');
-assert.match(html,/V722_INTERACTION_FIRST_FAST_READS/,'V722 shell marker missing');
-assert.match(html,/v625-shell\.js\?v=20261007-v722-1/,'V722 cache bust missing');
+assert.match(html,/<meta name="ce-qc-build" content="V\d+_[A-Z0-9_]+">/,'current shell build marker missing');
+assert.match(html,/v625-shell\.js\?v=\d{8}-v\d+-\d+/,'current shell cache bust missing');
 
 console.log('[V722] interaction-first fast reads passed: no heavy truth in live polling, compact selected-date boards, scoped workspace/integrity, fast local home summary');
