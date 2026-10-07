@@ -224,20 +224,47 @@ function dailyReportSigningEvidenceForBills(snapshotId='',reportDate='',business
     const chunk=values.slice(i,i+300),marks=chunk.map(()=>'?').join(',');
     let baseRows=[],observations=[];
     try{
-      baseRows=db.prepare(`SELECT UPPER(TRIM(shipmentCode)) shipmentCode,regionCode,rowJson,reportDate,createdAt
+      baseRows=db.prepare(`SELECT UPPER(TRIM(shipmentCode)) shipmentCode,regionCode,rowJson,reportDate,createdAt,'UNIFIED' sourceTable
         FROM unified_import_rows
         WHERE snapshotId=? AND reportDate=? AND UPPER(TRIM(businessType))=? AND UPPER(TRIM(shipmentCode)) IN (${marks})`)
         .all(snapshotId,reportDate,type,...chunk);
     }catch{}
-    const baseByBill=new Map(baseRows.map(row=>[String(row.shipmentCode||'').trim().toUpperCase(),row]));
+    if(type==='WHPP'&&!baseRows.length){
+      try{
+        baseRows=db.prepare(`SELECT UPPER(TRIM(shipmentCode)) shipmentCode,'' regionCode,rowJson,reportDate,createdAt,'WHPP_DAILY_PARSE' sourceTable
+          FROM business_daily_parse_rows
+          WHERE businessType='WHPP' AND reportDate=? AND UPPER(TRIM(shipmentCode)) IN (${marks})
+          ORDER BY id DESC`)
+          .all(reportDate,...chunk);
+      }catch{}
+    }
+    const baseByBill=new Map();
+    for(const row of baseRows){
+      const bill=String(row.shipmentCode||'').trim().toUpperCase();
+      if(bill&&!baseByBill.has(bill))baseByBill.set(bill,row);
+    }
     try{
-      observations=db.prepare(`SELECT UPPER(TRIM(u.shipmentCode)) shipmentCode,u.regionCode,u.rowJson,u.reportDate,u.createdAt
+      observations=db.prepare(`SELECT UPPER(TRIM(u.shipmentCode)) shipmentCode,u.regionCode,u.rowJson,u.reportDate,u.createdAt,'UNIFIED' sourceTable
         FROM unified_import_rows u
         JOIN unified_import_batches b ON b.batchId=u.batchId AND b.status='VALID'
         WHERE u.reportDate>=? AND UPPER(TRIM(u.businessType))=? AND UPPER(TRIM(u.shipmentCode)) IN (${marks})
         ORDER BY UPPER(TRIM(u.shipmentCode)),u.reportDate DESC,u.createdAt DESC,u.rowid DESC`)
         .all(reportDate,type,...chunk);
     }catch{}
+    if(type==='WHPP'){
+      try{
+        const legacy=db.prepare(`SELECT UPPER(TRIM(shipmentCode)) shipmentCode,'' regionCode,rowJson,reportDate,createdAt,'WHPP_DAILY_PARSE' sourceTable
+          FROM business_daily_parse_rows
+          WHERE businessType='WHPP' AND reportDate>=? AND UPPER(TRIM(shipmentCode)) IN (${marks})
+          ORDER BY UPPER(TRIM(shipmentCode)),reportDate DESC,createdAt DESC,id DESC`)
+          .all(reportDate,...chunk);
+        observations.push(...legacy);
+      }catch{}
+      observations.sort((a,b)=>
+        String(b.reportDate||'').localeCompare(String(a.reportDate||''))||
+        String(b.createdAt||'').localeCompare(String(a.createdAt||''))||
+        String(a.sourceTable||'').localeCompare(String(b.sourceTable||'')));
+    }
     const obsByBill=new Map();
     for(const row of observations){
       const bill=String(row.shipmentCode||'').trim().toUpperCase();
@@ -260,7 +287,9 @@ function dailyReportSigningEvidenceForBills(snapshotId='',reportDate='',business
         ...evidence,
         region:String(base?.regionCode||chosen.row.regionCode||chosen.parsed?.regionCode||'').toUpperCase(),
         observationReportDate:String(chosen.row.reportDate||reportDate).slice(0,10),
-        evidenceSource:String(chosen.row.reportDate||'').slice(0,10)===reportDate?'daily_report_delivery_time':'latest_daily_report_delivery_time'
+        evidenceSource:String(chosen.row.reportDate||'').slice(0,10)===reportDate
+          ?(chosen.row.sourceTable==='WHPP_DAILY_PARSE'?'whpp_daily_parse_delivery_time':'daily_report_delivery_time')
+          :(chosen.row.sourceTable==='WHPP_DAILY_PARSE'?'latest_whpp_daily_parse_delivery_time':'latest_daily_report_delivery_time')
       });
     }
   }
