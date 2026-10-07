@@ -10,6 +10,6 @@ assert.match(repair,/groupRows\(rows=\[\],fallbackBills=\[\]\)/,'groupRows must 
 assert.match(repair,/normalizeV485TrackRows\(rows,\{fallbackBills\}\)/,'nested CE track rows must inherit exact request membership');
 assert.match(repair,/archiveV485TrackQueryResponse/,'fresh timing-repair responses must also enter durable CE evidence archive');
 assert.match(repair,/persistedEvents/,'repair state must expose actual persisted event count');
-assert.match(shell,/有效轨迹 .* POD总数/,'timing UI must expose valid versus total POD coverage');
+assert.match(shell,/有效(?:轨迹|时效) .* POD总数/,'timing UI must expose valid versus total POD coverage');
 assert.match(html,/v625-shell\.js\?v=\d{8}-v\d{3,}-1/,'V653+ JS asset revision missing');
 console.log('[V653] nested CE track flattening + signing evidence coverage diagnostics smoke passed');
