@@ -11,8 +11,8 @@ assert.match(home,/timingEvidenceRepair:\{active:timingRepairActive,failed:timin
 assert.match(home,/FROM business_pod_locks WHERE businessType=\?/,'timing must read permanent POD lock timestamps');
 assert.match(home,/terminalProof:'PERSISTENT_POD_LOCK'/,'permanent POD lock must be an explicit timing evidence source');
 
-assert.match(shell,/历史签收时间缺失/,'exhausted historical timing must not be labelled retryable');
-assert.match(shell,/POD已确认，历史签收时间证据已耗尽/,'home timing header must explain exhausted evidence');
+assert.match(shell,/待后续日报回补|历史签收时间缺失/,'historical timing without final delivery time must be explicitly explained');
+assert.match(shell,/缺失票等待后续日报自动回补|POD已确认，历史签收时间证据已耗尽/,'home timing header must explain the durable no-repeat state');
 assert.match(shell,/timingRepairBtn\.hidden=noMoreRepair/,'repair action must disappear after all missing timing evidence is durably exhausted');
 assert.match(shell,/if\(missingTypes\.length&&!repairable\)/,'manual timing repair must guard against repeated exhausted queries');
 assert.match(shell,/POD已确认（orderStatus=85）/,'detail reason must distinguish POD truth from missing POD timestamp');
@@ -28,7 +28,7 @@ const whppHelper=whpp.match(/function explicitWhppPodTime[\s\S]*?\n\}/)?.[0]||''
 assert.doesNotMatch(businessHelper,/bookingDate/,'bookingDate must never be fabricated as POD time');
 assert.doesNotMatch(whppHelper,/bookingDate/,'WHPP bookingDate must never be fabricated as POD time');
 
-assert.match(html,/V742_DAILY_REPORT_SIGNING_TIME|V741_HISTORICAL_TIMING_CLOSED_LOOP/,'V741+ shell marker missing');
-assert.match(html,/v625-shell\.js\?v=20261007-v(?:741|742)-1/,'V741+ cache bust missing');
+assert.match(html,/V743_LATEST_DAILY_REPORT_SIGNING_BACKFILL|V742_DAILY_REPORT_SIGNING_TIME|V741_HISTORICAL_TIMING_CLOSED_LOOP/,'V741+ shell marker missing');
+assert.match(html,/v625-shell\.js\?v=20261007-v(?:741|742|743)-1/,'V741+ cache bust missing');
 
 console.log('[V741] historical POD-without-time closes as evidence exhausted; repeat repair is removed; future trusted POD timestamps persist permanently; bookingDate is never used as POD time');
