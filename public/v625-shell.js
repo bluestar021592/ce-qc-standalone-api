@@ -581,6 +581,40 @@ async function loadHome(options={}){
 function timingMissingReason(code=''){
   return {POD_TRACK_TIME_MISSING:'缺少80/POD轨迹时间',DELIVERY_START_MISSING:'缺少60/70派送起点',INVALID_TRACK_TIME_RANGE:'轨迹时间顺序异常',TRACK_EVIDENCE_MISSING:'缺少完整轨迹证据'}[code]||code||'缺少完整轨迹证据';
 }
+async function runTimingRepairNow(){
+  const btn=byId('v734TimingRepairNow');
+  const latest=v626LatestImport||await latestImportContext();
+  const reportDate=selectedReportDate()||latest?.reportDate||'';
+  if(!reportDate){if(btn)btn.textContent='请先选择日报';return}
+  if(btn){btn.disabled=true;btn.textContent='正在启动补证…'}
+  setText('v625TimingPeriod','统计日报 '+reportDate+' · 正在补齐真实60/70→80轨迹证据');
+  try{
+    const started=await post('/api/timing-repair/start',{reportDate},15000);
+    const snapshotId=String(started?.snapshotId||latest?.snapshotId||'');
+    for(let i=0;i<450;i++){
+      const qs='?reportDate='+encodeURIComponent(reportDate)+(snapshotId?'&snapshotId='+encodeURIComponent(snapshotId):'');
+      const status=await json('/api/timing-repair/status'+qs,15000);
+      const states=Object.values(status?.states||{});
+      const activeStates=states.filter(state=>['QUEUED','RUNNING'].includes(String(state?.status||'').toUpperCase()));
+      const total=states.reduce((sum,state)=>sum+Number(state?.total||0),0);
+      const done=states.reduce((sum,state)=>sum+Number(state?.completed||0),0);
+      if(btn)btn.textContent=activeStates.length?('补证中 '+fmt(done)+'/'+fmt(total)):'补齐签收时效';
+      if(!activeStates.length){
+        await loadHome({skipAux:true});
+        const exhausted=states.filter(state=>String(state?.status||'').toUpperCase()==='HISTORICAL_EVIDENCE_UNAVAILABLE').length;
+        setText('v625TimingPeriod','统计日报 '+reportDate+(exhausted?' · 补证完成，部分运单无可用历史轨迹':' · 签收时效补证完成'));
+        return;
+      }
+      await sleep(2000);
+    }
+    throw new Error('签收时效补证等待超过15分钟，请查看当前补证状态。');
+  }catch(error){
+    setText('v625TimingPeriod','统计日报 '+reportDate+' · 签收时效补证失败：'+String(error?.message||error));
+  }finally{
+    if(btn){btn.disabled=false;btn.textContent='补齐签收时效'}
+  }
+}
+
 function renderTimingMissing(type){
   const rows=v631TimingMissing?.[type]||[],panel=byId('v631TimingMissingPanel'),tbody=byId('v631TimingMissingRows');if(!panel||!tbody)return;
   const historicalUnavailable=v700TimingAvailability?.[type]==='HISTORICAL_EVIDENCE_UNAVAILABLE';
@@ -1303,6 +1337,7 @@ function bind(){
   byId('v625ImportButton')?.addEventListener('click',doImport);
   byId('v625RunStart')?.addEventListener('click',()=>runTask('start'));
   byId('v625RunResume')?.addEventListener('click',()=>runTask('resume'));
+  byId('v734TimingRepairNow')?.addEventListener('click',runTimingRepairNow);
   byId('v626RefreshOpenPod')?.addEventListener('click',refreshOpenPodNow);
   byId('v641WhppScanPending')?.addEventListener('click',scanWhppPending);
   byId('v626ImportRefreshOpen')?.addEventListener('click',refreshOpenPodNow);
