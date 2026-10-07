@@ -241,12 +241,14 @@ function dailyReportSigningEvidenceForBills(snapshotId='',reportDate='',business
     const obsByBill=new Map();
     for(const row of observations){
       const bill=String(row.shipmentCode||'').trim().toUpperCase();
-      if(!bill||obsByBill.has(bill))continue;
-      obsByBill.set(bill,row);
+      if(!bill)continue;
+      if(!obsByBill.has(bill))obsByBill.set(bill,[]);
+      obsByBill.get(bill).push(row);
     }
     for(const bill of chunk){
       const base=baseByBill.get(bill)||null;
-      const candidates=[obsByBill.get(bill),base].filter(Boolean);
+      const candidates=[...(obsByBill.get(bill)||[])];
+      if(base&&!candidates.some(row=>row===base))candidates.push(base);
       let chosen=null,evidence=null;
       for(const row of candidates){
         const parsed=safeJson(row.rowJson),raw=parsed?.raw&&typeof parsed.raw==='object'?parsed.raw:parsed;
