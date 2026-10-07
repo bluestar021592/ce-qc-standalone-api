@@ -212,8 +212,12 @@ function membershipFinalRows(snapshotId, reportDate, businessType) {
 function dailyReportSigningEvidenceForBills(snapshotId='',reportDate='',businessType='',bills=[]){
   const result=new Map();
   const values=[...new Set((bills||[]).map(value=>String(value||'').trim().toUpperCase()).filter(Boolean))];
-  if(!snapshotId||!reportDate||!businessType||!values.length)return result;
   const db=getDb(),type=String(businessType||'').toUpperCase();
+  if(!reportDate||!type||!values.length)return result;
+  // WHPP historical timing may legitimately survive only in business_daily_parse_rows
+  // after a clean re-upload / legacy migration, so WHPP must not require snapshotId.
+  // Other businesses still require immutable snapshot membership here.
+  if(type!=='WHPP'&&!snapshotId)return result;
 
   // V743: selected-date membership is immutable, but status/delivery time is a
   // latest-observation fact. This mirrors the proven Shopee analysis workflow:
