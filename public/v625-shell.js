@@ -726,8 +726,8 @@ function renderKpiDetail(kind){
   panel.scrollIntoView({behavior:'smooth',block:'start'});
 }
 async function loadBusiness(){
-  // V644 business-only controls fail closed before any async state read.
-  // A failed/slow integrity request must never expose a WHPP operation on another board.
+  // Navigation first: the visible KPI shell reads only compact/current-day state.
+  // Archive evidence, integrity and row-level workspace hydrate after first paint.
   const whppOnlyAction=byId('v641WhppScanPending');
   if(whppOnlyAction){whppOnlyAction.hidden=true;whppOnlyAction.style.setProperty('display','none','important');}
   try{
@@ -735,32 +735,75 @@ async function loadBusiness(){
     const latest=v626LatestImport||await latestImportContext();
     const requestedDate=params.get('reportDate')||params.get('toDate')||params.get('fromDate')||'';
     const requestedSnapshot=params.get('snapshotId')||'';
-    const summaryQuery=new URLSearchParams();
-    if(requestedDate)summaryQuery.set('reportDate',requestedDate);
+    const baseReportDate=requestedDate||latest?.reportDate||'';
+    const stateQuery=new URLSearchParams({compact:'1'});
+    if(requestedSnapshot)stateQuery.set('snapshotId',requestedSnapshot);
+    if(baseReportDate)stateQuery.set('reportDate',baseReportDate);
+    const summaryQuery=new URLSearchParams({fast:'1'});
+    if(baseReportDate)summaryQuery.set('reportDate',baseReportDate);
     if(requestedSnapshot)summaryQuery.set('snapshotId',requestedSnapshot);
-    const summary=await json('/api/home-quality-summary?'+summaryQuery.toString(),20000).catch(()=>null);
-    const snapshotId=summary?.snapshotId||requestedSnapshot||latest?.snapshotId||'';
-    const reportDate=summary?.reportDate||requestedDate||latest?.reportDate||'';
-    const stateUrl='/api/business-state/'+business+(snapshotId?'?snapshotId='+encodeURIComponent(snapshotId):'');
-    const r=await json(stateUrl,15000);
+    const summaryPromise=json('/api/home-quality-summary?'+summaryQuery.toString(),10000).catch(()=>null);
+
+    const r=await json('/api/business-state/'+business+'?'+stateQuery.toString(),10000);
     const state=r.state||{},m=metricState(state);
-    const evidenceState=state?.historicalEvidenceRecovery?.state||summary?.historicalEvidenceRecovery?.state||'';
-    const timingRepairRunning=Boolean(summary?.timingEvidenceRepair?.active);
-    if(evidenceState==='RUNNING'||timingRepairRunning)scheduleHistoricalEvidenceRefresh('business');
-    else if(evidenceState==='COMPLETED'||summary?.timingEvidenceRepair)stopHistoricalEvidenceRefresh();
+    const snapshotId=r.snapshotId||requestedSnapshot||latest?.snapshotId||'';
+    const reportDate=r.reportDate||baseReportDate||latest?.reportDate||'';
     v630BusinessDetailTabs=state.detailTabs||state?.dashboard?.detailTabs||{};
-    v631BusinessAccounting=(state.accounting?.rowsByKind?state.accounting:(business==='WHPP'?buildWhppCanonicalAccounting(state,m):buildBusinessAccounting(state,m)));
+    v631BusinessAccounting=state.accounting?.rowsByKind
+      ? state.accounting
+      : {total:m.total,accounted:state.snapshotStatus==='COMPLETED'?m.total:0,difference:state.snapshotStatus==='COMPLETED'?0:m.total,rowsByKind:{total:[],pod:[],returned:[],pending:[],abnormal:[],otherNormal:[],delivery:[],unprocessed:[]}};
     v628BusinessMetricState=m;v628BusinessReportDate=reportDate;
     if(reportDate&&!selectedReportDate())applyDashboardDate(reportDate);
     if(reportDate){byId('v625FromDate')&&(byId('v625FromDate').value=reportDate);byId('v625ToDate')&&(byId('v625ToDate').value=reportDate)}
+
+    const fastCounts={
+      delivery:Number(m.delivery||0),
+      pod:Number(m.pod||0),
+      pending:Number(m.pending||0),
+      abnormal:Number(m.unresolved||0),
+      returned:Number(m.returned||0),
+      otherNormal:Number(m.otherNormal||0),
+      unprocessed:Math.max(0,Number(m.total||0)-Number(m.pod||0)-Number(m.returned||0)-Number(m.otherNormal||0)-Number(m.delivery||0))
+    };
     const a=v631BusinessAccounting;
-    const counts=a.counts||Object.fromEntries(Object.entries(a.rowsByKind||{}).map(([k,v])=>[k,Array.isArray(v)?v.length:Number(v||0)]));
-    setText('kpiTotal',fmt(a.total||m.total));setText('kpiDelivery',fmt(counts.delivery??m.delivery));setText('kpiPod',fmt(counts.pod??m.pod));
-    setText('kpiPodRate',pct((a.total||m.total)?Number(counts.pod??m.pod)*100/Number(a.total||m.total):0));
-    setText('kpiPending',fmt(counts.pending??m.pending));setText('kpiOpen',fmt(counts.abnormal??m.unresolved));setText('kpiOc',fmt(m.oc));
-    setText('v631AccountingMeta','已归类 '+fmt(a.accounted)+' / '+fmt(a.total)+' · 差异 '+fmt(a.difference));
-    const integrityQuery=new URLSearchParams();if(snapshotId)integrityQuery.set('snapshotId',snapshotId);if(reportDate)integrityQuery.set('reportDate',reportDate);
-    const integrity=await json('/api/data-integrity?'+integrityQuery.toString(),15000).catch(()=>null);
+    const accountingCounts=a.counts||Object.fromEntries(Object.entries(a.rowsByKind||{}).map(([k,v])=>[k,Array.isArray(v)?v.length:Number(v||0)]));
+    const accountingObserved=Object.values(accountingCounts).reduce((sum,value)=>sum+Number(value||0),0);
+    const counts=accountingObserved>0?accountingCounts:fastCounts;
+
+    setText('kpiTotal',fmt(m.total||a.total));setText('kpiDelivery',fmt(counts.delivery??m.delivery));setText('kpiPod',fmt(counts.pod??m.pod));
+    setText('kpiPodRate',pct(m.total?Number(m.pod||0)*100/Number(m.total):0));
+    setText('kpiPending',fmt(counts.pending??m.pending));setText('kpiOpen',fmt(m.unresolved));setText('kpiOc',fmt(m.oc));
+    setText('v631AccountingMeta',state.snapshotStatus==='COMPLETED'
+      ?('当前日报 '+fmt(m.total)+' 票 · 快速看板已就绪')
+      :'正式结果仍在处理中');
+    setText('kpiAvgDays',m.avgDays==null?'—':Number(m.avgDays).toFixed(2).replace(/\.00$/,''));
+    const returnCapable=['WHPP','SHOPEECN','SHOPEEVN'].includes(business);
+    if(byId('kpiReturnedCard'))byId('kpiReturnedCard').hidden=!returnCapable;if(byId('kpiReturnRateCard'))byId('kpiReturnRateCard').hidden=!returnCapable;
+    if(returnCapable){setText('kpiReturned',fmt(m.returned||0));setText('kpiReturnRate',pct(m.total?Number(m.returned||0)*100/Number(m.total):0))}
+    if(byId('kpiOtherCard')){byId('kpiOtherCard').hidden=false;setText('kpiOtherNormal',fmt(m.otherNormal||0))}
+    if(byId('kpiUnprocessedCard')){byId('kpiUnprocessedCard').hidden=true;setText('kpiUnprocessed',fmt(0))}
+    renderDonut({total:m.total,delivery:m.delivery||0,pod:m.pod||0,pending:m.pending||0,unresolved:m.unresolved||0});
+
+    // Fast summary/timing updates are useful, but never gate the board's first paint.
+    void summaryPromise.then(summary=>{
+      if(!summary)return;
+      const evidenceState=state?.historicalEvidenceRecovery?.state||summary?.historicalEvidenceRecovery?.state||'';
+      const timingRepairRunning=Boolean(summary?.timingEvidenceRepair?.active);
+      if(evidenceState==='RUNNING'||timingRepairRunning)scheduleHistoricalEvidenceRefresh('business');
+      else if(evidenceState==='COMPLETED'||summary?.timingEvidenceRepair)stopHistoricalEvidenceRefresh();
+      const timing=summary?.reportDate===reportDate?summary?.timing?.[business]:null;
+      if(timing?.overall?.avgDays!=null)setText('kpiAvgDays',Number(timing.overall.avgDays).toFixed(2).replace(/\.00$/,''));
+    });
+
+    const integrityQuery=new URLSearchParams({businessType:business});
+    if(snapshotId)integrityQuery.set('snapshotId',snapshotId);if(reportDate)integrityQuery.set('reportDate',reportDate);
+    const workspaceQuery=new URLSearchParams({scope:'all',businessType:business});
+    if(snapshotId)workspaceQuery.set('snapshotId',snapshotId);if(reportDate)workspaceQuery.set('reportDate',reportDate);
+    const [integrityR,workspaceR]=await Promise.allSettled([
+      json('/api/data-integrity?'+integrityQuery.toString(),10000),
+      json('/api/tracking-workspace?'+workspaceQuery.toString(),10000)
+    ]);
+    const integrity=integrityR.status==='fulfilled'?integrityR.value:null;
     const bi=integrity?.businesses?.[business];
     if(bi){
       setText('v637BusinessIntegrity','源票 '+fmt(bi.sourceCount)+' · 已进入处理 '+fmt(bi.stateMemberCount)+' · 已扫描 '+fmt(bi.scanCount)+' · 待扫描 '+fmt(bi.waitingScan)+' · 已归类 '+fmt(bi.accounted)+' · 差异 '+fmt(bi.difference));
@@ -773,25 +816,24 @@ async function loadBusiness(){
         whppScanBtn.textContent=waiting>0?'扫描WHPP待处理 '+fmt(waiting)+' 票':'扫描WHPP待处理票';
       }
     }
-    const timing=summary?.reportDate===reportDate?summary?.timing?.[business]:null;
-    setText('kpiAvgDays',timing?.overall?.avgDays==null?'—':Number(timing.overall.avgDays).toFixed(2).replace(/\.00$/,''));
-    const returnCapable=['WHPP','SHOPEECN','SHOPEEVN'].includes(business);
-    if(byId('kpiReturnedCard'))byId('kpiReturnedCard').hidden=!returnCapable;if(byId('kpiReturnRateCard'))byId('kpiReturnRateCard').hidden=!returnCapable;
-    if(returnCapable){setText('kpiReturned',fmt((counts.returned??m.returned)||0));setText('kpiReturnRate',pct((a.total||m.total)?Number((counts.returned??m.returned)||0)*100/Number(a.total||m.total):0))}
-    if(byId('kpiOtherCard')){byId('kpiOtherCard').hidden=false;setText('kpiOtherNormal',fmt(counts.otherNormal||0))}
-    if(byId('kpiUnprocessedCard')){byId('kpiUnprocessedCard').hidden=!(counts.unprocessed>0);setText('kpiUnprocessed',fmt(counts.unprocessed||0))}
-    const hist=state.historySummary||[];renderTrend('v625BusinessTrend',hist.map(x=>({label:x.reportDate||'',value:first(x,['summary.today','summary.total','today','total'])||0})));
-    renderDonut({total:a.total,delivery:counts.delivery||0,pod:counts.pod||0,pending:counts.pending||0,unresolved:(counts.abnormal||0)+(counts.unprocessed||0)});
-    const qs=new URLSearchParams({scope:'all'});if(snapshotId)qs.set('snapshotId',snapshotId);if(reportDate)qs.set('reportDate',reportDate);
-    const wr=await json('/api/tracking-workspace?'+qs.toString(),10000).catch(()=>({rows:[]}));
+
+    const wr=workspaceR.status==='fulfilled'?workspaceR.value:{rows:[]};
     v628BusinessWorkspaceRows=(wr.rows||[]).filter(businessTypeMatches);
+    if(v628BusinessWorkspaceRows.length){
+      const detailed=buildBusinessAccounting({finalRows:v628BusinessWorkspaceRows},m);
+      v631BusinessAccounting=detailed;
+      setText('v631AccountingMeta','已归类 '+fmt(detailed.accounted)+' / '+fmt(m.total)+' · 差异 '+fmt(Math.max(0,m.total-detailed.accounted)));
+    }
     const rows=v628BusinessWorkspaceRows.filter(x=>x.isActionable).slice(0,8);
     const tbody=byId('v625BusinessRows');tbody.replaceChildren();
     if(!rows.length){tbody.innerHTML='<tr><td colspan="7">当前日报暂无异常记录</td></tr>'}
     else for(const row of rows){tbody.appendChild(rowTr([row.shipmentCode,row.businessType,row.category||row.queryStatus||'异常',row.pendingDays||row.ocDays||'—',row.currentState||row.queryStatus||'—',row.latestTime||row.lastEventTime||'—','查看']))}
-  }catch(e){const whppOnlyAction=byId('v641WhppScanPending');if(whppOnlyAction){whppOnlyAction.hidden=true;whppOnlyAction.style.setProperty('display','none','important');}byId('v625BusinessRows').innerHTML='<tr><td colspan="7">业务快照暂未读取：'+esc(e.message)+'</td></tr>'}
+  }catch(e){
+    const whppOnlyAction=byId('v641WhppScanPending');
+    if(whppOnlyAction){whppOnlyAction.hidden=true;whppOnlyAction.style.setProperty('display','none','important');}
+    byId('v625BusinessRows').innerHTML='<tr><td colspan="7">业务快照暂未读取：'+esc(e.message)+'</td></tr>';
+  }
 }
-
 function rowTr(values){const tr=document.createElement('tr');for(const v of values){const td=document.createElement('td');td.textContent=v??'—';tr.appendChild(td)}return tr}
 
 let runBusy=false;
