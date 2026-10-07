@@ -578,7 +578,7 @@ function fastDashboardBatch(snapshotId = '', reportDate = '') {
 }
 
 function cachedFastRange(batch) {
-  if (!batch || batch.snapshotStatus !== 'COMPLETED' || !batch.reportDate) return null;
+  if (!batch || !batch.reportDate) return null;
   const key = `${batch.snapshotId}:${batch.reportDate}`;
   const cached = fastSqlDashboardCache.get(key);
   if (cached && Date.now() - cached.at < 3000) return cached.value;
@@ -597,7 +597,7 @@ function loadFastSqlAggregateState(scope) {
     ...state,
     reportDate: batch.reportDate,
     snapshotId: batch.snapshotId,
-    snapshotStatus: 'COMPLETED',
+    snapshotStatus: batch.snapshotStatus || state.snapshotStatus || 'IMPORTED',
     processing: { running: false, paused: false, phase: '' },
     logs: [],
     _fastSqlSummary: true
@@ -618,7 +618,7 @@ function loadFastSqlBusinessState(businessType, snapshotId = '', reportDate = ''
     viewBusinessType: type,
     reportDate: batch.reportDate,
     snapshotId: batch.snapshotId,
-    snapshotStatus: 'COMPLETED',
+    snapshotStatus: batch.snapshotStatus || source.snapshotStatus || 'IMPORTED',
     processing: { running: false, paused: false, phase: '' },
     logs: [],
     _fastSqlSummary: true
