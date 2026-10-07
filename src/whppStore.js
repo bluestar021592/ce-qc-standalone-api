@@ -22,6 +22,7 @@ export function saveWhppState(state = {}) {
   db.prepare(`INSERT INTO business_states(businessType,valueJson,updatedAt) VALUES(?,?,?)
     ON CONFLICT(businessType) DO UPDATE SET valueJson=excluded.valueJson,updatedAt=excluded.updatedAt`)
     .run(WHPP, JSON.stringify(normalized), now);
+  persistPermanentWhppPodTimes(db,normalized,now);
   if(normalized.reportDate&&(normalized.trackEvents||[]).length)appendPermanentWhppTrackEvents(db,normalized.reportDate,normalized.trackEvents,now);
   return normalized;
 }
@@ -310,6 +311,45 @@ export function saveWhppDailyImport({ reportDate, sourceName = '', rows = [], ba
   return state;
 }
 
+function explicitWhppPodTime(row={}) {
+  for(const value of [
+    row?.POD时间,row?.podTime,row?.podDate,row?.podClosedAt,row?.podAt,row?.deliveredAt,row?.deliveryCompletedAt,row?.签收时间,row?.signTime,row?.signedTime
+  ])if(String(value||'').trim())return String(value).trim();
+  return '';
+}
+function whppRowProvesPod(row={}) {
+  return isPod(row)||String(row?.orderStatus??'').trim()==='85';
+}
+function upsertWhppPodTimes(db,evidence=new Map(),now='') {
+  if(!evidence.size)return 0;
+  const stmt=db.prepare(`INSERT INTO business_pod_locks(businessType,shipmentCode,podTime,source,createdAt,updatedAt)
+    VALUES('WHPP',?,?,?,?,?)
+    ON CONFLICT(businessType,shipmentCode) DO UPDATE SET
+      podTime=CASE WHEN TRIM(COALESCE(business_pod_locks.podTime,''))<>'' THEN business_pod_locks.podTime ELSE excluded.podTime END,
+      source=CASE WHEN TRIM(COALESCE(business_pod_locks.podTime,''))<>'' THEN business_pod_locks.source ELSE excluded.source END,
+      updatedAt=excluded.updatedAt`);
+  for(const [bill,item] of evidence)stmt.run(bill,item.podTime,item.source,now,now);
+  return evidence.size;
+}
+function persistPermanentWhppPodTimes(db,state={},now='') {
+  const evidence=new Map();
+  const consider=(row,source)=>{
+    const bill=billOf(row);if(!bill||!whppRowProvesPod(row))return;
+    const podTime=explicitWhppPodTime(row);if(!podTime)return;
+    if(!evidence.has(bill))evidence.set(bill,{podTime,source});
+  };
+  for(const row of state.scanResults||[])consider(row,'whpp_saved_scan_pod_time');
+  for(const row of state.finalRows||[])consider(row,'whpp_saved_final_pod_time');
+  return upsertWhppPodTimes(db,evidence,now);
+}
+function strictWhppPodEventTime(row={}) {
+  const code=permanentWhppEventCode(row).replace(/^0+/,'')||'0';
+  if(code==='80')return permanentWhppEventTime(row);
+  const text=[row?.trackingEventDesc,row?.trackingEventDescZh,row?.statusText,row?.eventName,row?.remark,row?.message].map(v=>String(v||'')).join(' ');
+  if(!/未签收|未妥投|签收失败|妥投失败|NOT[ _-]*DELIVERED|UNDELIVERED/i.test(text)&&/\bPOD\b|Successfully\s+delivered|已签收|签收成功|已妥投|妥投成功/i.test(text))return permanentWhppEventTime(row);
+  return '';
+}
+
 function permanentWhppEventTime(row={}) {
   return String(row.eventTime||row.trackingEventTime||row.creationDate||row.lastUpdateDate||row.eventDate||row.occurTime||row.scanTime||'').trim();
 }
@@ -325,14 +365,17 @@ function appendPermanentWhppTrackEvents(db,reportDate,rows=[],now='') {
   }catch{}
   const insert=db.prepare(`INSERT INTO business_track_events(businessType,shipmentCode,reportDate,eventTime,eventCode,rawJson,createdAt)
     VALUES('WHPP',?,?,?,?,?,?)`);
+  const podTimes=new Map();
   let added=0;
   for(const row of rows||[]){
     const bill=billOf(row),eventTime=permanentWhppEventTime(row),eventCode=permanentWhppEventCode(row);
     if(!bill||(!eventTime&&!eventCode))continue;
     const key=[bill,eventTime,eventCode].join('|');
-    if(existing.has(key))continue;
-    existing.add(key);insert.run(bill,reportDate,eventTime,eventCode,JSON.stringify(row),now);added++;
+    if(!existing.has(key)){existing.add(key);insert.run(bill,reportDate,eventTime,eventCode,JSON.stringify(row),now);added++;}
+    const podTime=strictWhppPodEventTime(row);
+    if(podTime&&!podTimes.has(bill))podTimes.set(bill,{podTime,source:'whpp_strict_track_event'});
   }
+  upsertWhppPodTimes(db,podTimes,now);
   return added;
 }
 
@@ -364,6 +407,7 @@ export function finalizeWhppState(state = {}) {
     // V700 preserves the complete WHPP delivery lifecycle permanently.
     // Finalization can add newly observed events, but never deletes earlier 60/70/Pending/80 evidence.
     appendPermanentWhppTrackEvents(db,reportDate,normalized.trackEvents||[],now);
+    persistPermanentWhppPodTimes(db,normalized,now);
 
     const insertException = db.prepare(`INSERT INTO business_exception_items(businessType,shipmentCode,reportDate,exceptionType,exceptionDesc,reportTime,statusCode,fileId,rawJson,createdAt) VALUES(?,?,?,?,?,?,?,?,?,?)`);
     for (const row of normalized.exceptionItems || []) insertException.run(WHPP, billOf(row), reportDate, String(row.exceptionType ?? ''), row.exceptionDesc || row.exceptionReason || '', row.reportTime || '', String(row.statusCode ?? ''), String(row.fileId ?? ''), JSON.stringify(row), now);
