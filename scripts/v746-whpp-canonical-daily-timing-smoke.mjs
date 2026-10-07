@@ -11,6 +11,8 @@ assert.match(home,/businessType='WHPP' AND reportDate>=\?/,'later WHPP daily obs
 assert.match(home,/WHPP_DAILY_PARSE/,'WHPP timing evidence source must be observable');
 assert.match(home,/whpp_daily_parse_delivery_time/,'selected-date WHPP daily-parse evidence must be labelled');
 assert.match(home,/latest_whpp_daily_parse_delivery_time/,'later WHPP daily-parse evidence must be labelled');
+assert.match(home,/if\(type!==['"]WHPP['"]&&!snapshotId\)return result/,'non-WHPP timing still requires immutable snapshot membership');
+assert.doesNotMatch(home,/if\(!snapshotId\|\|!reportDate\|\|!businessType\|\|!values\.length\)return result/,'WHPP timing must not be rejected merely because snapshotId is absent');
 
 assert.match(diag,/business_daily_parse_rows/,'WHPP diagnostic must inspect canonical daily-parse rows');
 assert.match(diag,/legacyObservationRows/,'diagnostic must report canonical daily-parse observation coverage');
