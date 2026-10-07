@@ -29,7 +29,7 @@ assert.match(home,/signingTerminal:'DAILY_REPORT_DELIVERY_TIME_WHEN_STATUS_Y'/,'
 
 assert.match(shell,/下单时间→派件时间（含首日）/,'home must explain the actual average-signing formula');
 assert.match(shell,/有效时效/,'card must not call daily-report signing evidence a track');
-assert.match(html,/V743_LATEST_DAILY_REPORT_SIGNING_BACKFILL|V742_DAILY_REPORT_SIGNING_TIME/,'V742+ shell marker missing');
-assert.match(html,/v625-shell\.js\?v=20261007-v(?:742|743)-1/,'V742+ cache bust missing');
+assert.match(html,/V744_SIGNING_UI_SIMPLIFIED_AND_TERMINAL_BACKFILL|V743_LATEST_DAILY_REPORT_SIGNING_BACKFILL|V742_DAILY_REPORT_SIGNING_TIME/,'V742+ shell marker missing');
+assert.match(html,/v625-shell\.js\?v=20261007-v(?:742|743|744)-1/,'V742+ cache bust missing');
 
 console.log('[V742] POD average signing days come directly from uploaded daily report: 状态标识=Y, 下单时间→派件时间, inclusive natural days; 1/2/3 attempt identity still comes from real track evidence');
