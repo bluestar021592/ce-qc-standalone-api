@@ -39,8 +39,17 @@ function readDurableStop(type,date){
     return value&&value.status==='HISTORICAL_EVIDENCE_UNAVAILABLE'?{...value,updatedAt:row.updatedAt||value.updatedAt||''}:null;
   }catch{return null}
 }
-function writeDurableStop(type,date,snapshotId,total,message){
-  const value={id:V645_SELECTED_DATE_TIMING_REPAIR_ID,businessType:typeKey(type),reportDate:dateKey(date),snapshotId:snapshotKey(snapshotId),status:'HISTORICAL_EVIDENCE_UNAVAILABLE',phase:'DONE',total:Number(total||0),completed:0,failed:Number(total||0),queried:0,persistedEvents:0,message:message||'历史轨迹证据缺失，自动补查已停止。',completedAt:now(),updatedAt:now()};
+function clearDurableStop(type,date){
+  try{getDb().prepare('DELETE FROM app_state WHERE key=?').run(durableStopKey(type,date));}catch{}
+}
+function writeDurableStop(type,date,snapshotId,total,message,stats={}){
+  const value={
+    id:V645_SELECTED_DATE_TIMING_REPAIR_ID,businessType:typeKey(type),reportDate:dateKey(date),snapshotId:snapshotKey(snapshotId),
+    status:'HISTORICAL_EVIDENCE_UNAVAILABLE',phase:'DONE',total:Number(total||0),
+    completed:Number(stats.completed||0),failed:Number(stats.failed??total??0),queried:Number(stats.queried||0),
+    persistedEvents:Number(stats.persistedEvents||0),exhaustionSource:String(stats.exhaustionSource||'POST_QUERY_EXHAUSTED'),
+    message:message||'历史轨迹证据缺失，自动补查已停止。',completedAt:now(),updatedAt:now()
+  };
   try{
     getDb().prepare(`INSERT INTO app_state(key,valueJson,updatedAt) VALUES(?,?,?)
       ON CONFLICT(key) DO UPDATE SET valueJson=excluded.valueJson,updatedAt=excluded.updatedAt`).run(durableStopKey(type,date),JSON.stringify(value),value.updatedAt);
@@ -214,7 +223,11 @@ async function runOne(type,date,snapshotId=''){
     patch(type,date,snapshotId,{status:'RUNNING',phase:'TRACK_QUERY',completed,failed,queried,persistedEvents,message:`${type} ${date} 轨迹补证 ${Math.min(offset+4,totalBatches)}/${totalBatches}批：成功 ${completed}/${bills.length}，失败 ${failed}`});
   }
   if(bills.length>0&&completed===0&&failed>=bills.length&&persistedEvents===0&&reportAgeDays(date)>HISTORICAL_AUTO_REPAIR_MAX_AGE_DAYS){
-    const durable=writeDurableStop(type,date,snapshotId,bills.length,`${type} ${date} 历史轨迹证据缺失；POD成员已确认，但本地无真实60/70→80轨迹，自动补查已停止。`);
+    const durable=writeDurableStop(
+      type,date,snapshotId,bills.length,
+      `${type} ${date} 已完成一次实时轨迹补证，但仍未取得真实60/70→80轨迹；为避免重复无效查询，后续自动补查已停止。`,
+      {completed,failed,queried,persistedEvents,exhaustionSource:'POST_QUERY_EXHAUSTED'}
+    );
     return patch(type,date,snapshotId,durable);
   }
   return patch(type,date,snapshotId,{status:failed?'COMPLETED_WITH_GAPS':'COMPLETED',phase:'DONE',completed,failed,queried,persistedEvents,completedAt:now(),message:failed?`${type} ${date} 轨迹补证完成，仍有 ${failed}票待补。`:`${type} ${date} 轨迹补证完成。`});
@@ -228,19 +241,17 @@ async function pump(){
 export function requestSelectedDateTimingRepair(businessType='',reportDate='',snapshotId=''){
   const type=typeKey(businessType),date=dateKey(reportDate),snap=snapshotKey(snapshotId);
   if(!TYPES.has(type)||!date)return stateFor(type,date,snap);
-  const current=stateFor(type,date,snap),status=String(current.status||'').toUpperCase();
-  if(status==='HISTORICAL_EVIDENCE_UNAVAILABLE')return current;
-  if(reportAgeDays(date)>HISTORICAL_AUTO_REPAIR_MAX_AGE_DAYS){
-    const bills=selectedDatePodBills(type,date,snap);
-    if(bills.length){
-      const owner=storageType(type);
-      let savedEvents=0;
-      try{savedEvents=Number(getDb().prepare('SELECT COUNT(*) c FROM business_track_events WHERE businessType=? AND reportDate=?').get(owner,date)?.c||0)}catch{}
-      if(savedEvents===0){
-        const durable=writeDurableStop(type,date,snap,bills.length,`${type} ${date} 为历史日报，POD成员已确认但本地没有真实轨迹证据；为避免无效重复查询，自动补查已停止。`);
-        return patch(type,date,snap,durable);
-      }
-    }
+  let current=stateFor(type,date,snap),status=String(current.status||'').toUpperCase();
+  if(status==='HISTORICAL_EVIDENCE_UNAVAILABLE'){
+    // V734: older builds could mark a historical day unavailable before making
+    // even one live timing query. A zero-query durable stop is therefore stale
+    // and must be retried exactly once. Stops created after a real bounded query
+    // keep queried>0 and remain durable so page refreshes cannot hammer CE.
+    if(Number(current.queried||0)>0)return current;
+    clearDurableStop(type,date);
+    states.delete(keyOf(type,date,snap));
+    current=baseState(type,date,snap);
+    status='IDLE';
   }
   if(active(status))return current;
   const age=Date.now()-Date.parse(current.completedAt||current.updatedAt||0);
