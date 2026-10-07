@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { classifyShipmentStatus } from '../src/shipmentStatusTruth.js';
+import { extractV498SavedShopeePodEvidence } from '../src/v498SavedShopeePodEvidence.js';
 import { analyzeShipment } from '../src/analyzerFinal.js';
 import { analyzeShopeeShipment } from '../src/shopeeAnalyzerV33.js';
 
@@ -14,6 +15,20 @@ assert.equal(classifyShipmentStatus({shipmentStatus:'81'}).currentState,'RETURN_
 assert.equal(classifyShipmentStatus({shipmentStatus:'81'}).returned,true);
 // Field separation: tracking eventCode 80 is not a shipmentStatus 80.
 assert.equal(classifyShipmentStatus({eventCode:'80'}).recognized,false);
+
+// Saved terminal timing must honor shipmentStatus=60 as POD without ever
+// treating a generic event/statusCode=60 as terminal POD proof.
+const saved60=extractV498SavedShopeePodEvidence({
+  shipmentCode:'SPE260730002142',
+  shipmentStatus:'60',
+  rawJson:JSON.stringify({shipmentStatus:'60',statusTime:'2026-07-03 10:00:00'})
+},'business_shipment_tracks');
+assert.equal(saved60?.podDate,'2026-07-03');
+assert.equal(saved60?.terminalProof,'shipmentStatus=60');
+assert.equal(extractV498SavedShopeePodEvidence({
+  shipmentCode:'SPE260730002142',
+  rawJson:JSON.stringify({statusCode:'60',statusTime:'2026-07-03 10:00:00'})
+},'business_shipment_tracks'),null);
 
 const common={waybill:'CE21082600140',scanRow:{shipmentCode:'CE21082600140',orderStatus:'70'},events:[],reportDate:'2026-10-06'};
 let row=analyzeShipment({...common,shipmentTrackRow:{shipmentCode:'CE21082600140',shipmentStatus:'60',statusTime:'2026-10-06 10:00:00'}});
@@ -37,4 +52,4 @@ const truth=fs.readFileSync('src/v191ShopeeTruth.js','utf8');
 assert.match(truth,/BUSINESS_SHIPMENT_TRACKS/);
 assert.match(truth,/classifyShipmentStatus/);
 assert.match(truth,/if\(sh\?\.returned \|\| sh\?\.returnInProgress\)return false/);
-console.log('[V711] shipmentStatus field is isolated and locked: 60=POD, 80=return-in-progress, 81=returned; eventCode semantics remain separate');
+console.log('[V711] shipmentStatus field is isolated and locked: 60=POD, 80=return-in-progress, 81=returned; saved status-60 timestamps recover POD time while generic event/statusCode 60 remains non-terminal');
