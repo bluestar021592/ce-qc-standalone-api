@@ -11,9 +11,11 @@ import { recipientGroupOf } from './recipientGroup.js';
 import { normalizeV485TrackRows, archiveV485TrackQueryResponse } from './v485StrictTrackEvidence.js';
 import { persistentSelectedDatePodTruth } from './selectedDatePersistentTruth.js';
 import { classifyShipmentStatus, shipmentStatusTime } from './shipmentStatusTruth.js';
+import { extractV498SavedShopeePodEvidence } from './v498SavedShopeePodEvidence.js';
 
 export const V645_SELECTED_DATE_TIMING_REPAIR_ID='2026-10-05-v645-selected-date-pod-track-repair-v1';
 export const V737_STATUS_FIRST_TIMING_REPAIR_REVISION='2026-10-07-v737-status-first-timing-repair-v1';
+export const V740_CONFIRM_FIRST_TIMING_REPAIR_REVISION='2026-10-07-v740-confirm-first-timing-repair-v1';
 const TYPES=new Set(['TBKH','WHPP','SHOPEECN','SHOPEEVN']);
 const states=new Map();
 const queue=new Map();
@@ -50,6 +52,8 @@ function writeDurableStop(type,date,snapshotId,total,message,stats={}){
     status:'HISTORICAL_EVIDENCE_UNAVAILABLE',phase:'DONE',total:Number(total||0),
     completed:Number(stats.completed||0),failed:Number(stats.failed??total??0),queried:Number(stats.queried||0),
     persistedEvents:Number(stats.persistedEvents||0),
+    confirmQueried:Number(stats.confirmQueried||0),confirmFailed:Number(stats.confirmFailed||0),confirmPersistedRows:Number(stats.confirmPersistedRows||0),
+    confirm85:Number(stats.confirm85||0),confirm85WithTime:Number(stats.confirm85WithTime||0),confirm85WithoutTime:Number(stats.confirm85WithoutTime||0),
     statusQueried:Number(stats.statusQueried||0),statusFailed:Number(stats.statusFailed||0),statusPersistedRows:Number(stats.statusPersistedRows||0),
     status60:Number(stats.status60||0),status60WithTime:Number(stats.status60WithTime||0),status60WithoutTime:Number(stats.status60WithoutTime||0),
     repairRevision:String(stats.repairRevision||''),exhaustionSource:String(stats.exhaustionSource||'POST_QUERY_EXHAUSTED'),
@@ -161,6 +165,38 @@ function eventFingerprint(row={}){
   const raw=JSON.stringify(normalized);
   return time+'|'+code+'|'+raw;
 }
+function persistConfirmRows(type,date,rows=[]){
+  const owner=storageType(type),db=getDb(),stamp=now(),latest=new Map();
+  for(const raw of rows||[]){
+    const code=billOf(raw);if(!code)continue;
+    latest.set(code,{...raw,shipmentCode:code,reportDate:date});
+  }
+  if(!latest.size)return 0;
+  const ins=db.prepare(`INSERT INTO business_scan_results(
+    businessType,shipmentCode,reportDate,isPod,orderStatus,recipient_raw,recipient_normalized,recipient_group,recipient_group_reason,source_row_number,rawJson,createdAt,updatedAt
+  ) VALUES(?,?,?,?,?,'','','OTHER','',0,?,?,?)
+  ON CONFLICT(businessType,shipmentCode,reportDate) DO UPDATE SET
+    isPod=CASE WHEN excluded.isPod=1 THEN 1 ELSE business_scan_results.isPod END,
+    orderStatus=CASE WHEN excluded.orderStatus<>'' THEN excluded.orderStatus ELSE business_scan_results.orderStatus END,
+    rawJson=excluded.rawJson,updatedAt=excluded.updatedAt`);
+  let saved=0;
+  db.exec('BEGIN IMMEDIATE');
+  try{
+    for(const [code,row] of latest){
+      const orderStatus=String(row.orderStatus??'').trim();
+      const isPod=orderStatus==='85'?1:0;
+      ins.run(owner,code,date,isPod,orderStatus,JSON.stringify(row),stamp,stamp);
+      saved++;
+    }
+    db.exec('COMMIT');
+    return saved;
+  }catch(error){try{db.exec('ROLLBACK')}catch{};throw error}
+}
+function confirmTimingEvidence(row={}){
+  const code=billOf(row);if(!code)return null;
+  return extractV498SavedShopeePodEvidence({shipmentCode:code,orderStatus:String(row.orderStatus??''),rawJson:JSON.stringify(row)},'business_scan_results');
+}
+
 function persistShipmentStatusRows(type,date,rows=[]){
   const owner=storageType(type),db=getDb(),stamp=now(),latest=new Map();
   for(const raw of rows||[]){
@@ -236,7 +272,40 @@ async function runOne(type,date,snapshotId=''){
   patch(type,date,snapshotId,{status:'RUNNING',phase:'TRACK_QUERY',total:bills.length,completed:0,failed:0,queried:0,startedAt:now(),message:`${type} ${date} 签收时效补证：真实POD ${bills.length}票`});
   if(!bills.length)return patch(type,date,snapshotId,{status:'WAITING_FOR_POD_MEMBERS',phase:'WAITING_FOR_POD_MEMBERS',completedAt:now(),message:`${type} ${date} 当前尚未形成真实POD成员；等待扫描/轨迹处理完成后自动重试。`});
   const client=new CEClient();
-  const statusBatches=splitTrackBatches(bills),statusTimedBills=new Set();
+
+  const confirmBatches=splitTrackBatches(bills),confirmTimedBills=new Set();
+  let confirmQueried=0,confirmFailed=0,confirmPersistedRows=0,confirm85=0,confirm85WithTime=0,confirm85WithoutTime=0;
+  for(let offset=0;offset<confirmBatches.length;offset+=4){
+    const wave=confirmBatches.slice(offset,offset+4);
+    const results=await Promise.all(wave.map(async batch=>{
+      confirmQueried+=batch.length;
+      try{return await queryTrackBatchWithFallback({batch,query:codes=>client.confirmQuery(codes),apiName:`v740-${type.toLowerCase()}-confirm-query`,fallbackSizes:[100,50,10,1],onLog:async()=>{}})}
+      catch(error){return{successes:[],failures:[{batch,error}]}}
+    }));
+    for(const outcome of results){
+      for(const success of outcome.successes||[]){
+        const rows=success.events||[];
+        confirmPersistedRows+=persistConfirmRows(type,date,rows);
+        for(const row of rows){
+          const code=billOf(row);if(!code)continue;
+          if(String(row.orderStatus??'').trim()!=='85')continue;
+          confirm85++;
+          const evidence=confirmTimingEvidence(row);
+          if(evidence?.podDate){confirm85WithTime++;confirmTimedBills.add(code);}
+          else confirm85WithoutTime++;
+        }
+      }
+      for(const failure of outcome.failures||[])confirmFailed+=(failure.batch||[]).length;
+    }
+    patch(type,date,snapshotId,{
+      status:'RUNNING',phase:'CONFIRM_QUERY',confirmQueried,confirmFailed,confirmPersistedRows,confirm85,confirm85WithTime,confirm85WithoutTime,
+      repairRevision:V740_CONFIRM_FIRST_TIMING_REPAIR_REVISION,
+      message:`${type} ${date} confirm补证 ${Math.min(offset+4,confirmBatches.length)}/${confirmBatches.length}批：85/POD有时间 ${confirm85WithTime}票，无时间 ${confirm85WithoutTime}票`
+    });
+  }
+
+  const statusBills=bills.filter(code=>!confirmTimedBills.has(code));
+  const statusBatches=splitTrackBatches(statusBills),statusTimedBills=new Set();
   let statusQueried=0,statusFailed=0,statusPersistedRows=0,status60=0,status60WithTime=0,status60WithoutTime=0;
   for(let offset=0;offset<statusBatches.length;offset+=4){
     const wave=statusBatches.slice(offset,offset+4);
@@ -264,14 +333,15 @@ async function runOne(type,date,snapshotId=''){
     }
     patch(type,date,snapshotId,{
       status:'RUNNING',phase:'SHIPMENT_STATUS_QUERY',statusQueried,statusFailed,statusPersistedRows,status60,status60WithTime,status60WithoutTime,
-      repairRevision:V737_STATUS_FIRST_TIMING_REPAIR_REVISION,
+      confirmQueried,confirmFailed,confirmPersistedRows,confirm85,confirm85WithTime,confirm85WithoutTime,repairRevision:V740_CONFIRM_FIRST_TIMING_REPAIR_REVISION,
       message:`${type} ${date} shipmentStatus补证 ${Math.min(offset+4,statusBatches.length)}/${statusBatches.length}批：60/POD有时间 ${status60WithTime}票，无时间 ${status60WithoutTime}票`
     });
   }
 
-  const trackBills=bills.filter(code=>!statusTimedBills.has(code));
+  const timedBills=new Set([...confirmTimedBills,...statusTimedBills]);
+  const trackBills=bills.filter(code=>!timedBills.has(code));
   const batches=splitTrackBatches(trackBills),totalBatches=batches.length;
-  let completed=statusTimedBills.size,failed=0,queried=0,persistedEvents=0;
+  let completed=timedBills.size,failed=0,queried=0,persistedEvents=0;
   for(let offset=0;offset<totalBatches;offset+=4){
     const wave=batches.slice(offset,offset+4);
     const results=await Promise.all(wave.map(async batch=>{
@@ -291,17 +361,17 @@ async function runOne(type,date,snapshotId=''){
       }
       for(const failure of outcome.failures||[])failed+=(failure.batch||[]).length;
     }
-    patch(type,date,snapshotId,{status:'RUNNING',phase:'TRACK_QUERY',completed,failed,queried,persistedEvents,statusQueried,statusFailed,statusPersistedRows,status60,status60WithTime,status60WithoutTime,repairRevision:V737_STATUS_FIRST_TIMING_REPAIR_REVISION,message:`${type} ${date} 轨迹补证 ${Math.min(offset+4,totalBatches)}/${totalBatches}批：已有POD时间 ${statusTimedBills.size}，轨迹成功 ${Math.max(0,completed-statusTimedBills.size)}，失败 ${failed}`});
+    patch(type,date,snapshotId,{status:'RUNNING',phase:'TRACK_QUERY',completed,failed,queried,persistedEvents,statusQueried,statusFailed,statusPersistedRows,status60,status60WithTime,status60WithoutTime,repairRevision:V737_STATUS_FIRST_TIMING_REPAIR_REVISION,message:`${type} ${date} 轨迹补证 ${Math.min(offset+4,totalBatches)}/${totalBatches}批：已有POD时间 ${timedBills.size}，轨迹成功 ${Math.max(0,completed-timedBills.size)}，失败 ${failed}`});
   }
-  if(bills.length>0&&statusTimedBills.size===0&&completed===0&&failed>=trackBills.length&&persistedEvents===0&&reportAgeDays(date)>HISTORICAL_AUTO_REPAIR_MAX_AGE_DAYS){
+  if(bills.length>0&&timedBills.size===0&&completed===0&&failed>=trackBills.length&&persistedEvents===0&&reportAgeDays(date)>HISTORICAL_AUTO_REPAIR_MAX_AGE_DAYS){
     const durable=writeDurableStop(
       type,date,snapshotId,bills.length,
       `${type} ${date} 已完成一次实时轨迹补证，但仍未取得真实60/70→80轨迹；为避免重复无效查询，后续自动补查已停止。`,
-      {completed,failed,queried,persistedEvents,statusQueried,statusFailed,statusPersistedRows,status60,status60WithTime,status60WithoutTime,repairRevision:V737_STATUS_FIRST_TIMING_REPAIR_REVISION,exhaustionSource:'POST_STATUS_AND_TRACK_QUERY_EXHAUSTED'}
+      {completed,failed,queried,persistedEvents,confirmQueried,confirmFailed,confirmPersistedRows,confirm85,confirm85WithTime,confirm85WithoutTime,statusQueried,statusFailed,statusPersistedRows,status60,status60WithTime,status60WithoutTime,repairRevision:V740_CONFIRM_FIRST_TIMING_REPAIR_REVISION,exhaustionSource:'POST_CONFIRM_STATUS_AND_TRACK_QUERY_EXHAUSTED'}
     );
     return patch(type,date,snapshotId,durable);
   }
-  return patch(type,date,snapshotId,{status:failed?'COMPLETED_WITH_GAPS':'COMPLETED',phase:'DONE',completed,failed,queried,persistedEvents,statusQueried,statusFailed,statusPersistedRows,status60,status60WithTime,status60WithoutTime,repairRevision:V737_STATUS_FIRST_TIMING_REPAIR_REVISION,completedAt:now(),message:failed?`${type} ${date} 补证完成：shipmentStatus=60有时间 ${status60WithTime}票，轨迹仍缺 ${failed}票。`:`${type} ${date} 签收时效补证完成。`});
+  return patch(type,date,snapshotId,{status:failed?'COMPLETED_WITH_GAPS':'COMPLETED',phase:'DONE',completed,failed,queried,persistedEvents,confirmQueried,confirmFailed,confirmPersistedRows,confirm85,confirm85WithTime,confirm85WithoutTime,statusQueried,statusFailed,statusPersistedRows,status60,status60WithTime,status60WithoutTime,repairRevision:V740_CONFIRM_FIRST_TIMING_REPAIR_REVISION,completedAt:now(),message:failed?`${type} ${date} 补证完成：confirm85有时间 ${confirm85WithTime}票，shipmentStatus60有时间 ${status60WithTime}票，轨迹仍缺 ${failed}票。`:`${type} ${date} 签收时效补证完成。`});
 }
 async function pump(){
   if(runningKey||!queue.size)return;
@@ -314,10 +384,10 @@ export function requestSelectedDateTimingRepair(businessType='',reportDate='',sn
   if(!TYPES.has(type)||!date)return stateFor(type,date,snap);
   let current=stateFor(type,date,snap),status=String(current.status||'').toUpperCase();
   if(status==='HISTORICAL_EVIDENCE_UNAVAILABLE'){
-    // V737 upgrades historical repair from event-only querying to status-first
-    // querying. Any durable stop created before this revision must be retried once
-    // so shipmentStatus=60 timestamps have a chance to recover POD dates.
-    if(String(current.repairRevision||'')===V737_STATUS_FIRST_TIMING_REPAIR_REVISION&&Number(current.statusQueried||0)>0)return current;
+    // V740 adds live confirm-query before shipmentStatus/event fallback. Older
+    // durable stops are reopened exactly once because confirm-query is the same
+    // source that originally established many historical POD memberships.
+    if(String(current.repairRevision||'')===V740_CONFIRM_FIRST_TIMING_REPAIR_REVISION&&Number(current.confirmQueried||0)>0)return current;
     clearDurableStop(type,date);
     states.delete(keyOf(type,date,snap));
     current=baseState(type,date,snap);
