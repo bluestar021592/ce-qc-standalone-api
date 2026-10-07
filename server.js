@@ -1661,6 +1661,21 @@ app.get('/api/tracking-workspace', async (req, res) => {
   const priority = row => row.queryStatus === '待重试' ? 0 : row.isActionable ? 1 : 2;
   allRows.sort((a, b) => priority(a) - priority(b) || String(a.businessType).localeCompare(String(b.businessType)) || String(a.shipmentCode).localeCompare(String(b.shipmentCode)));
   const rows = scope === 'all' ? allRows : scope === 'pod' ? allRows.filter(row => row.isClosed) : allRows.filter(row => row.isActionable);
+  const qualityBuckets={
+    shopArrived:allRows.filter(row=>row.shopArrivedCurrent),
+    pendingGap:allRows.filter(row=>row.pendingNonContinuous),
+    oc2Plus:allRows.filter(row=>row.oc2Plus)
+  };
+  const qualitySignals={
+    shopArrived:qualityBuckets.shopArrived.length,
+    pendingGap:qualityBuckets.pendingGap.length,
+    oc2Plus:qualityBuckets.oc2Plus.length,
+    evidenceMode:'TRACK_FACTS_CURRENT_OPEN_ONLY',
+    shopRule:'CURRENT_STORE_ARRIVAL_FROM_ACTIVE_CP_WHITELIST',
+    pendingRule:'DISTINCT_PENDING_DATES_NON_CONTINUOUS',
+    ocRule:'CURRENT_OC_INCLUSIVE_DAYS_GTE_2'
+  };
+  const qualityRows=Object.fromEntries(Object.entries(qualityBuckets).map(([key,list])=>[key,list.slice(0,1000)]));
   const summary = {
     dailyNew: Number(unified?.summary?.validUniqueWaybills || unified?.summary?.totalUnique || 0),
     historicalCarry: Number(unified?.carryover?.historicalOpen || 0),
@@ -1673,7 +1688,7 @@ app.get('/api/tracking-workspace', async (req, res) => {
     retryPending: allRows.filter(row => row.queryStatus === '待重试').length,
     completed: allRows.filter(row => ['成功', 'POD跳过', '退回跳过', '特殊节点跳过', '正常分流跳过'].includes(row.queryStatus)).length
   };
-  res.json({ ok: true, reportDate, batchId: unified?.batchId || '', snapshotId, scope, allRowCount: allRows.length, summary, rows: rows.slice(0, 5000) });
+  res.json({ ok: true, reportDate, batchId: unified?.batchId || '', snapshotId, scope, allRowCount: allRows.length, summary, qualitySignals, qualityRows, rows: rows.slice(0, 5000) });
 });
 
 app.post('/api/test-ce-api', async (req, res) => {
@@ -2404,6 +2419,38 @@ function broadcastEvent(event, payload = {}) {
   }
 }
 
+function workspacePendingNonContinuous(row = {}) {
+  const explicit=String(row.pendingNonContinuous ?? row.Pending不连续 ?? '').trim().toUpperCase();
+  if(['TRUE','1','YES','Y','是'].includes(explicit))return true;
+  const days=Number(row.pendingDistinctDayCount ?? row.Pending次数 ?? row.Pending天数 ?? 0);
+  const continuity=String(row.pendingFactDateContinuity || row.Pending事实连续性 || row.pendingContinuity || row.Pending连续性 || '').trim();
+  return days>=2 && /不连续|NON[_ -]?CONTINUOUS|GAP/i.test(continuity);
+}
+function workspaceStoreArrived(row = {}) {
+  const shopState=String(row.shopState || row.shopStatus || row.门店状态 || row.storeFlowState || '').trim().toUpperCase();
+  const current=String(row.currentState || row.scanNormalizedState || '').trim().toUpperCase();
+  const category=String(row.primaryCategory || row.主分类 || row.异常分类 || '').trim();
+  return ['SHOP_ARRIVED_CURRENT','SHOP_PENDING','SHOP_OC','SHOP_RETENTION'].includes(shopState)
+    || ['SHOP_ARRIVED_CURRENT','SHOP_PENDING','SHOP_OC','SHOP_RETENTION'].includes(current)
+    || /门店入库|门店PENDING|门店OC|门店滞留/.test(category);
+}
+function workspaceOcDays(row = {}, reportDate = '') {
+  const ordinary=Math.max(0,Number(row.OC天数 ?? row.ocDays ?? 0));
+  const current=String(row.currentState || row.scanNormalizedState || '').trim().toUpperCase();
+  const category=String(row.primaryCategory || row.主分类 || row.异常分类 || '').trim();
+  const storeOc=current==='SHOP_OC'||/门店OC/i.test(category);
+  if(!storeOc)return ordinary;
+  const retained=Math.max(0,Number(row.shopRetentionNaturalDays || row.门店滞留天数 || 0));
+  if(retained)return Math.max(ordinary,retained);
+  const start=String(row.shopOcAt || row.OC开始时间 || '').trim();
+  const dayKey=value=>String(value||'').match(/(\d{4})[-\/]?(\d{2})[-\/]?(\d{2})/)?.slice(1,4).join('-')||'';
+  const a=dayKey(start),b=dayKey(reportDate || row.reportDate);
+  if(a&&b){
+    const ms=Date.parse(b+'T00:00:00Z')-Date.parse(a+'T00:00:00Z');
+    if(Number.isFinite(ms)&&ms>=0)return Math.max(ordinary,Math.floor(ms/86400000)+1);
+  }
+  return Math.max(ordinary,start?1:0);
+}
 function workspaceRows(state = {}, businessType = 'CCSL') {
   const scans = new Map((state.scanResults || state.shipmentTrackResults || []).map(row => [billOfWorkspace(row), row]));
   const queryStatus = new Map([...(state.eventQueryStatus || []), ...(state.apiBatchStatus || [])].flatMap(row => (row.shipmentCodes || []).map(code => [String(code).toUpperCase(), row])));
@@ -2423,16 +2470,28 @@ function workspaceRows(state = {}, businessType = 'CCSL') {
     const normalFinal = category === '正常分流节点' || row.matchedRule === 'NORMAL_FINAL_HUB';
     const isClosed = isPod || isReturn || specialClosed || normalFinal;
     const isActionable = !isClosed;
+    const reportDate=String(row.reportDate || state.reportDate || '').slice(0,10);
+    const pendingNonContinuous=!isClosed&&workspacePendingNonContinuous(row);
+    const shopArrivedCurrent=!isClosed&&workspaceStoreArrived(row);
+    const ocDays=workspaceOcDays(row,reportDate);
+    const oc2Plus=!isClosed&&ocDays>=2;
     return {
       shipmentCode, businessType: row.businessType || businessType, region: row.regionCode || row.区域 || '',
       scanStatus: isPod ? 'POD' : (isReturn ? 'RETURN' : (scan.orderStatus || row.扫描状态 || '已扫描')),
       latestNode: row.最后节点 || row.latestEventDesc || '', latestTime: row.最后节点时间 || row.latestEventTime || '',
       pendingRawEventCount: Number(row.pendingRawEventCount || 0), pendingDistinctDayCount: Number(row.pendingDistinctDayCount ?? row.Pending次数 ?? 0),
       pendingDates: Array.isArray(row.pendingDates) ? row.pendingDates : String(row.Pending日期 || '').split(/[,、]/).map(value => value.trim()).filter(Boolean),
-      pendingContinuity: row.pendingContinuity || row.Pending连续性 || '', ocDays: Number(row.OC天数 || 0),
-      specialState, shopState, category, isClosed, isActionable,
+      pendingContinuity: row.pendingFactDateContinuity || row.Pending事实连续性 || row.pendingContinuity || row.Pending连续性 || '',
+      pendingNonContinuous, ocDays, oc2Plus,
+      specialState, shopState, shopArrivedCurrent,
+      shopCode: row.currentShopCode || row.门店编码 || row.targetShopCode || row.matchedShopCode || '',
+      shopName: row.shopName || row.门店名称 || row.matchedShopName || '',
+      shopArrivedAt: row.shopArrivedAt || row.门店入库时间 || '',
+      shopRetentionDays:Number(row.shopRetentionNaturalDays || row.门店滞留天数 || 0),
+      storeTags:Array.isArray(row.storeTags)?row.storeTags:[],
+      category, isClosed, isActionable,
       queryStatus: isPod ? 'POD跳过' : (isReturn ? '退回跳过' : (specialClosed ? '特殊节点跳过' : (normalFinal ? '正常分流跳过' : (failed ? '待重试' : ((row.轨迹节点数 || row.轨迹节点数量 || 0) > 0 ? '成功' : '需查轨迹'))))),
-      retryCount: Number(batch.attemptCount || row.retryCount || 0), reportDate: row.reportDate || state.reportDate || '', snapshotId: state.snapshotId || ''
+      retryCount: Number(batch.attemptCount || row.retryCount || 0), reportDate, snapshotId: state.snapshotId || ''
     };
   }).filter(row => row.shipmentCode);
 }
