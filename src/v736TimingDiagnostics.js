@@ -41,6 +41,18 @@ export function diagnoseV736Timing(reportDate='',snapshotId=''){
     try{
       const canonical=selectedDatePodBills(type,date,snapshotId);
       const owner=type.startsWith('SHOPEE')?'SHOPEE':type;
+      const scanRows=rowsForBills(db,
+        'SELECT shipmentCode,orderStatus,isPod,rawJson FROM business_scan_results WHERE businessType=? AND reportDate=? AND UPPER(TRIM(shipmentCode)) IN (__MARKS__)',
+        [owner,date],canonical);
+      let confirm85=0,confirm85WithTime=0,confirm85NoTime=0;
+      for(const row of scanRows){
+        const raw=safeJson(row.rawJson),orderStatus=text(row.orderStatus||raw.orderStatus);
+        if(orderStatus!=='85')continue;
+        confirm85++;
+        const evidence=extractV498SavedShopeePodEvidence(row,'business_scan_results');
+        if(evidence?.podDate)confirm85WithTime++;else confirm85NoTime++;
+      }
+
       const statusRows=rowsForBills(db,
         'SELECT shipmentCode,shipmentStatus,statusText,apiStatus,rawJson FROM business_shipment_tracks WHERE businessType=? AND reportDate=? AND UPPER(TRIM(shipmentCode)) IN (__MARKS__)',
         [owner,date],canonical);
@@ -77,10 +89,11 @@ export function diagnoseV736Timing(reportDate='',snapshotId=''){
       }
       const repair=inspectSelectedDateTimingRepair(type,date,snapshotId);
       result.types[type]={
-        podCount:canonical.length,statusRows:statusRows.length,
+        podCount:canonical.length,scanRows:scanRows.length,statusRows:statusRows.length,
+        confirm85,confirm85WithTime,confirm85NoTime,
         shipmentStatus60:status60,shipmentStatus60WithTime:status60WithTime,shipmentStatus60NoTime:status60NoTime,
         anyEventBills:anyEvents,startEventBills:startEvents,podEventBills:podEvents,completeTrackBills:completeTrack,podOnlyBills:podOnly,startOnlyBills:startOnly,noEventBills:noEvents,
-        repair:{status:text(repair?.status),queried:Number(repair?.queried||0),persistedEvents:Number(repair?.persistedEvents||0),completed:Number(repair?.completed||0),failed:Number(repair?.failed||0),message:text(repair?.message)}
+        repair:{status:text(repair?.status),confirmQueried:Number(repair?.confirmQueried||0),confirmPersistedRows:Number(repair?.confirmPersistedRows||0),confirm85WithTime:Number(repair?.confirm85WithTime||0),statusQueried:Number(repair?.statusQueried||0),statusPersistedRows:Number(repair?.statusPersistedRows||0),queried:Number(repair?.queried||0),persistedEvents:Number(repair?.persistedEvents||0),completed:Number(repair?.completed||0),failed:Number(repair?.failed||0),repairRevision:text(repair?.repairRevision),message:text(repair?.message)}
       };
     }catch(error){result.types[type]={error:text(error?.message||error)};}
   }
