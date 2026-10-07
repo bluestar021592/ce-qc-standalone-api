@@ -107,6 +107,7 @@ const TASKS=[
   ['node',['scripts/v722-interaction-first-fast-reads-smoke.mjs']],
   ['node',['scripts/v733-full-ledger-status-conservation-smoke.mjs']],
   ['node',['scripts/v737-status-first-historical-timing-smoke.mjs']],
+  ['node',['scripts/v738-whpp-completed-progress-lock-smoke.mjs']],
   ['node',['--test',
     'test/unified-import-v7.test.js',
     'test/unified-import-ceaf.test.js',
