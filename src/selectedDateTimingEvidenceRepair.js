@@ -49,7 +49,10 @@ function writeDurableStop(type,date,snapshotId,total,message,stats={}){
     id:V645_SELECTED_DATE_TIMING_REPAIR_ID,businessType:typeKey(type),reportDate:dateKey(date),snapshotId:snapshotKey(snapshotId),
     status:'HISTORICAL_EVIDENCE_UNAVAILABLE',phase:'DONE',total:Number(total||0),
     completed:Number(stats.completed||0),failed:Number(stats.failed??total??0),queried:Number(stats.queried||0),
-    persistedEvents:Number(stats.persistedEvents||0),exhaustionSource:String(stats.exhaustionSource||'POST_QUERY_EXHAUSTED'),
+    persistedEvents:Number(stats.persistedEvents||0),
+    statusQueried:Number(stats.statusQueried||0),statusFailed:Number(stats.statusFailed||0),statusPersistedRows:Number(stats.statusPersistedRows||0),
+    status60:Number(stats.status60||0),status60WithTime:Number(stats.status60WithTime||0),status60WithoutTime:Number(stats.status60WithoutTime||0),
+    repairRevision:String(stats.repairRevision||''),exhaustionSource:String(stats.exhaustionSource||'POST_QUERY_EXHAUSTED'),
     message:message||'历史轨迹证据缺失，自动补查已停止。',completedAt:now(),updatedAt:now()
   };
   try{
