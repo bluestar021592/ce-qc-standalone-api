@@ -566,13 +566,15 @@ async function loadHome(options={}){
     if(exhausted)exhaustedMissingCount+=missingCount;
     else if(missingCount>0)repairableMissingCount+=missingCount;
     if(!exhausted&&missingCount===0&&Number(data.overall?.podCount||0)>0)v700TimingAvailability[type]='AVAILABLE';
+    const totalPod=Number(data.overall?.totalPodCount||0);
     setText(prefix+'Overall',showDays(data.overall?.avgDays));
-    setText(prefix+'Pod',exhausted
-      ?('日报时效 '+fmt(data.overall?.podCount||0)+' / POD总数 '+fmt(data.overall?.totalPodCount||0)+' 票 · 待后续日报回补 '+fmt(missingCount))
-      :('有效时效 '+fmt(data.overall?.podCount||0)+' / POD总数 '+fmt(data.overall?.totalPodCount||0)+' 票'));
+    setText(prefix+'Pod',totalPod===0
+      ?'当日无POD'
+      :(exhausted
+        ?('日报时效 '+fmt(data.overall?.podCount||0)+' / POD总数 '+fmt(totalPod)+' 票 · 待后续日报回补 '+fmt(missingCount))
+        :('有效时效 '+fmt(data.overall?.podCount||0)+' / POD总数 '+fmt(totalPod)+' 票')));
     setText(prefix+'PP',showDays(data.pp?.avgDays));setText(prefix+'PPPod',fmt(data.pp?.podCount||0)+' / '+fmt(data.pp?.totalPodCount||0)+'票');
     setText(prefix+'PV',showDays(data.pv?.avgDays));setText(prefix+'PVPod',fmt(data.pv?.podCount||0)+' / '+fmt(data.pv?.totalPodCount||0)+'票');
-    setText(prefix+'A1',showDays(data.attempt1?.avgDays));setText(prefix+'A2',showDays(data.attempt2?.avgDays));setText(prefix+'A3',showDays(data.attempt3?.avgDays));
     renderMiniTrend('v625TimingTrend'+type,timingTrend[type]||[],tone);
     setText('v626Timing'+type+'Missing',fmt(missingCount));
     setText('v626Timing'+type+'Valid',fmt(data.evidence?.valid||data.overall?.podCount||0));
