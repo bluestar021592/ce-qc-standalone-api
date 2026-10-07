@@ -35,11 +35,84 @@ async function request(url,options={},timeout=12000){
       const e=new Error('前端等待超时，但后台任务可能仍在继续；系统将以实时进度为准，不会把超时误报为业务失败。');
       e.code='CLIENT_WAIT_TIMEOUT';e.cause=error;throw e;
     }
+    if(/Failed to fetch|NetworkError|Load failed|network request failed/i.test(String(error?.message||error))){
+      const e=new Error('与本地后台的连接短暂中断，系统正在自动恢复连接并核对任务进度。');
+      e.code='CLIENT_TRANSPORT_ERROR';e.cause=error;throw e;
+    }
     throw error;
   }finally{if(timer)clearTimeout(timer);}
 }
 const json=(url,timeout=12000)=>request(url,{},timeout);
 const post=(url,body={},timeout=120000)=>request(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)},timeout);
+const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+const isTransportLoss=error=>['CLIENT_TRANSPORT_ERROR','CLIENT_WAIT_TIMEOUT'].includes(String(error?.code||''))||/Failed to fetch|NetworkError|Load failed|network request failed/i.test(String(error?.message||error||''));
+async function waitBackendReady(timeoutMs=120000){
+  const started=Date.now();
+  while(Date.now()-started<timeoutMs){
+    try{
+      const res=await fetch('/api/session?reconnect='+Date.now(),{cache:'no-store',credentials:'same-origin'});
+      if(res.ok)return true;
+    }catch{}
+    await sleep(1500);
+  }
+  throw new Error('本地后台连接在2分钟内没有恢复，请保持启动器窗口开启。');
+}
+async function readFamilyProgress(type,reportDate){
+  const qs='?businessType='+encodeURIComponent(type)+(reportDate?'&reportDate='+encodeURIComponent(reportDate):'');
+  return json('/api/v33/run-progress'+qs,15000);
+}
+function familyResumeEndpoint(type){return type==='SHOPEE'?'/api/shopee/run/resume':'/api/resume'}
+async function recoverFamilyTransport(type,reportDate){
+  const label=type==='SHOPEE'?'SHOPEE':'CCSL';
+  appendLiveLog(label+'连接短暂中断，正在等待本地后台恢复并核对已保存进度…');
+  await waitBackendReady();
+  let resubmitted=false;
+  const started=Date.now();
+  while(Date.now()-started<900000){
+    let progress=null;
+    try{progress=await readFamilyProgress(type,reportDate)}catch(error){
+      if(isTransportLoss(error)){await sleep(1500);continue}
+      throw error;
+    }
+    if(familyComplete(progress)){
+      appendLiveLog(label+'后台任务已确认完成，继续下一业务。');
+      void refreshLiveProgress();
+      return {ok:true,recoveredTransport:true,progress};
+    }
+    if(progress?.running){
+      await sleep(1800);
+      continue;
+    }
+    if(!resubmitted){
+      resubmitted=true;
+      appendLiveLog(label+'后台已恢复但任务未运行，自动从已保存断点继续一次。');
+      try{
+        await post(familyResumeEndpoint(type),{},0);
+        void refreshLiveProgress();
+        return {ok:true,recoveredTransport:true,resubmitted:true};
+      }catch(error){
+        const code=String(error?.payload?.code||'');
+        if(error?.status===409&&['RUN_ALREADY_COMPLETED','RUN_NOT_RECOVERABLE'].includes(code)){
+          const current=await readFamilyProgress(type,reportDate).catch(()=>null);
+          if(current&&familyComplete(current))return {ok:true,recoveredTransport:true,progress:current};
+        }
+        if(isTransportLoss(error)){await waitBackendReady();continue}
+        throw error;
+      }
+    }
+    const status=String(progress?.runStatus||progress?.phase||'').toLowerCase();
+    if(/failed|失败/.test(status))throw new Error(progress?.lastMessage||label+'后台任务失败，请查看启动日志。');
+    await sleep(1800);
+  }
+  throw new Error(label+'连接恢复后等待任务完成超时，请查看启动日志。');
+}
+async function runFamilyRequest(type,endpoint,reportDate){
+  try{return await post(endpoint,{},0)}
+  catch(error){
+    if(!isTransportLoss(error))throw error;
+    return recoverFamilyTransport(type,reportDate);
+  }
+}
 const setText=(id,val)=>{const el=byId(id);if(el)el.textContent=val===undefined||val===null||val===''?'—':String(val)};
 const showOnly=id=>qa('.v625-page').forEach(el=>el.hidden=el.id!==id);
 const today=()=>new Date().toISOString().slice(0,10);
@@ -829,12 +902,12 @@ async function runTask(mode){
   startProgressPolling();
   try{
     if(mode==='start'){
-      appendLiveLog('开始CCSL订单扫描/轨迹处理');await post('/api/run',{},0);
-      appendLiveLog('CCSL处理完成，开始SHOPEE CN/VN');await post('/api/shopee/run/start',{},0);
+      appendLiveLog('开始CCSL订单扫描/轨迹处理');await runFamilyRequest('CCSL','/api/run',reportDate);
+      appendLiveLog('CCSL处理完成，开始SHOPEE CN/VN');await runFamilyRequest('SHOPEE','/api/shopee/run/start',reportDate);
       appendLiveLog('SHOPEE处理完成，开始WHPP本土');await safeWhppRun('start',reportDate);
     }else{
-      appendLiveLog('继续CCSL未完成批次');await post('/api/resume',{},0).catch(async e=>{const code=String(e.payload?.code||'');if(e.status===409&&['RUN_ALREADY_COMPLETED','RUN_NOT_RECOVERABLE'].includes(code))return;throw e});
-      appendLiveLog('继续SHOPEE未完成批次');await post('/api/shopee/run/resume',{},0).catch(async e=>{const code=String(e.payload?.code||'');if(e.status===409&&['RUN_ALREADY_COMPLETED','RUN_NOT_RECOVERABLE'].includes(code))return;throw e});
+      appendLiveLog('继续CCSL未完成批次');await runFamilyRequest('CCSL','/api/resume',reportDate).catch(async e=>{const code=String(e.payload?.code||'');if(e.status===409&&['RUN_ALREADY_COMPLETED','RUN_NOT_RECOVERABLE'].includes(code))return;throw e});
+      appendLiveLog('继续SHOPEE未完成批次');await runFamilyRequest('SHOPEE','/api/shopee/run/resume',reportDate).catch(async e=>{const code=String(e.payload?.code||'');if(e.status===409&&['RUN_ALREADY_COMPLETED','RUN_NOT_RECOVERABLE'].includes(code))return;throw e});
       appendLiveLog('继续WHPP未完成批次');await safeWhppRun('resume',reportDate);
     }
     appendLiveLog('7业务处理完成，开始补齐签收时效60/70→80证据');
