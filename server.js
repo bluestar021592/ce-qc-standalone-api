@@ -1552,7 +1552,7 @@ async function executeShopeeRunRequest(req, res, options = {}) {
 
 function localTrackEvidence(shipmentCodes=[], requestedBusinessType='', reportDate=''){
   const db=getDb();const codes=mergeUnique(shipmentCodes,[]).map(x=>String(x).trim().toUpperCase()).filter(Boolean);
-  const events=[];const ledger=[];if(!codes.length)return{events,ledger};
+  const events=[];const ledger=[];const scanRows=[];const shipmentRows=[];if(!codes.length)return{events,ledger,scanRows,shipmentRows};
   const storageType=/^SHOPEE/.test(String(requestedBusinessType||'').toUpperCase())?'SHOPEE':String(requestedBusinessType||'').toUpperCase();
   for(let i=0;i<codes.length;i+=300){
     const chunk=codes.slice(i,i+300),marks=chunk.map(()=>'?').join(',');
@@ -1568,6 +1568,22 @@ function localTrackEvidence(shipmentCodes=[], requestedBusinessType='', reportDa
         : db.prepare(`SELECT shipmentCode,eventTime,eventCode,rawJson,reportDate FROM business_track_events WHERE shipmentCode IN (${marks}) ORDER BY eventTime,id`).all(...params);
       events.push(...rows.map(row=>({...row,evidenceSource:'business_track_events'})));
     }catch{}
+    if(storageType){
+      try{
+        const params=reportDate?[storageType,reportDate,...chunk]:[storageType,...chunk];
+        const rows=reportDate
+          ? db.prepare(`SELECT shipmentCode,reportDate,isPod,orderStatus,rawJson,createdAt,updatedAt FROM business_scan_results WHERE businessType=? AND reportDate=? AND shipmentCode IN (${marks})`).all(...params)
+          : db.prepare(`SELECT shipmentCode,reportDate,isPod,orderStatus,rawJson,createdAt,updatedAt FROM business_scan_results WHERE businessType=? AND shipmentCode IN (${marks}) ORDER BY reportDate DESC`).all(...params);
+        scanRows.push(...rows.map(row=>({...row,evidenceSource:'business_scan_results'})));
+      }catch{}
+      try{
+        const params=reportDate?[storageType,reportDate,...chunk]:[storageType,...chunk];
+        const rows=reportDate
+          ? db.prepare(`SELECT shipmentCode,reportDate,shipmentStatus,statusText,apiStatus,rawJson,createdAt,updatedAt FROM business_shipment_tracks WHERE businessType=? AND reportDate=? AND shipmentCode IN (${marks}) ORDER BY id DESC`).all(...params)
+          : db.prepare(`SELECT shipmentCode,reportDate,shipmentStatus,statusText,apiStatus,rawJson,createdAt,updatedAt FROM business_shipment_tracks WHERE businessType=? AND shipmentCode IN (${marks}) ORDER BY reportDate DESC,id DESC`).all(...params);
+        shipmentRows.push(...rows.map(row=>({...row,evidenceSource:'business_shipment_tracks'})));
+      }catch{}
+    }
     try{
       ledger.push(...db.prepare(`SELECT shipmentCode,businessType,trackingStatus,terminalReason,terminalAt,currentState,currentCategory,lastEventTime,podDate,attemptNo,attemptSource,signingDays,evidenceJson,currentStateJson,lastCheckedAt
         FROM qc_tracking_ledger WHERE shipmentCode IN (${marks})`).all(...chunk));
@@ -1579,7 +1595,7 @@ function localTrackEvidence(shipmentCodes=[], requestedBusinessType='', reportDa
     const key=[String(row.shipmentCode||'').toUpperCase(),row.eventTime||raw.eventTime||raw.creationDate||'',row.eventCode||row.trackingEventCode||raw.eventCode||'',row.trackingEventDesc||row.trackingEventDescZh||raw.trackingEventDesc||raw.statusText||''].join('|');
     if(seen.has(key))return false;seen.add(key);return true;
   });
-  return{events:unique,ledger};
+  return{events:unique,ledger,scanRows,shipmentRows};
 }
 function ledgerAsTrackEvents(rows=[]){
   return rows.flatMap(row=>{
@@ -1602,7 +1618,7 @@ app.post('/api/track-query', async (req, res) => {
   const localEvents=[...local.events,...ledgerAsTrackEvents(local.ledger)];
   const auth=summarizeToken(await loadToken());
   if(!auth.hasAccessToken){
-    if(localEvents.length)return res.json({ok:true,businessType:requestedBusinessType,reportDate,shipmentCodes,trackEvents:localEvents,localEvidence:true,remoteSkipped:'CE_AUTH_REQUIRED',ledger:local.ledger});
+    if(localEvents.length||local.scanRows.length||local.shipmentRows.length||local.ledger.length)return res.json({ok:true,businessType:requestedBusinessType,reportDate,shipmentCodes,trackEvents:localEvents,scanRows:local.scanRows,shipmentRows:local.shipmentRows,localEvidence:true,remoteSkipped:'CE_AUTH_REQUIRED',ledger:local.ledger});
     return res.status(400).json({ok:false,error:'本地暂无轨迹证据，且CE系统尚未登录。'});
   }
   try{
@@ -1618,15 +1634,15 @@ app.post('/api/track-query', async (req, res) => {
       }));
       const merged=[...events.rows,...localEvents];const seen=new Set();
       const trackEvents=merged.filter(row=>{const key=JSON.stringify([row.shipmentCode||row.waybill||'',row.eventTime||row.time||'',row.eventCode||row.trackingEventCode||'',row.trackingEventDesc||row.description||row.rawJson||'']);if(seen.has(key))return false;seen.add(key);return true});
-      return res.json({ok:true,businessType:requestedBusinessType,reportDate,shipmentCodes,rows,shipmentRows:shipment.rows,trackEvents,localEvidence:localEvents.length>0,ledger:local.ledger,exceptionItems:exceptions.rows,batches:[...shipment.batches,...events.batches,...exceptions.batches]});
+      return res.json({ok:true,businessType:requestedBusinessType,reportDate,shipmentCodes,rows,scanRows:local.scanRows,shipmentRows:[...shipment.rows,...local.shipmentRows],trackEvents,localEvidence:localEvents.length>0||local.scanRows.length>0||local.shipmentRows.length>0,ledger:local.ledger,exceptionItems:exceptions.rows,batches:[...shipment.batches,...events.batches,...exceptions.batches]});
     }
     const scans=await manualBatchQuery(shipmentCodes,codes=>client.confirmQuery(codes),'confirm-query');
     const events=await manualBatchQuery(shipmentCodes,codes=>client.trackQuery(codes),'tms-shipment-event/query');
     const merged=[...events.rows,...localEvents];const seen=new Set();
     const trackEvents=merged.filter(row=>{const key=JSON.stringify([row.shipmentCode||row.waybill||'',row.eventTime||row.time||'',row.eventCode||row.trackingEventCode||'',row.trackingEventDesc||row.description||row.rawJson||'']);if(seen.has(key))return false;seen.add(key);return true});
-    return res.json({ok:true,businessType:requestedBusinessType,reportDate,shipmentCodes,scanRows:scans.rows,trackEvents,localEvidence:localEvents.length>0,ledger:local.ledger,batches:[...scans.batches,...events.batches]});
+    return res.json({ok:true,businessType:requestedBusinessType,reportDate,shipmentCodes,scanRows:[...scans.rows,...local.scanRows],shipmentRows:local.shipmentRows,trackEvents,localEvidence:localEvents.length>0||local.scanRows.length>0||local.shipmentRows.length>0,ledger:local.ledger,batches:[...scans.batches,...events.batches]});
   }catch(error){
-    if(localEvents.length)return res.json({ok:true,businessType:requestedBusinessType,reportDate,shipmentCodes,trackEvents:localEvents,localEvidence:true,remoteError:error.message||'远程轨迹查询失败',ledger:local.ledger});
+    if(localEvents.length||local.scanRows.length||local.shipmentRows.length||local.ledger.length)return res.json({ok:true,businessType:requestedBusinessType,reportDate,shipmentCodes,trackEvents:localEvents,scanRows:local.scanRows,shipmentRows:local.shipmentRows,localEvidence:true,remoteError:error.message||'远程轨迹查询失败',ledger:local.ledger});
     res.status(500).json({ok:false,error:error.message||'轨迹查询失败。'});
   }
 });
