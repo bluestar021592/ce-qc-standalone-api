@@ -949,7 +949,7 @@ async function loadBusiness(options={}){
       if(!bi)setText('v631AccountingMeta','已归类 '+fmt(detailed.accounted)+' / '+fmt(m.total)+' · 差异 '+fmt(Math.max(0,m.total-detailed.accounted)));
     }
     if(!options.skipQualityRefresh){
-      const openCount=v628BusinessWorkspaceRows.filter(row=>row.isActionable).length;
+      const openCount=Number(wr?.summary?.actionable ?? v628BusinessWorkspaceRows.filter(row=>row.isActionable).length);
       if(openCount>0)void refreshV748BusinessTrackQuality(reportDate);
       else setText('v748QualityRefreshMeta','当前无未终态运单，无需轨迹补抓');
     }
