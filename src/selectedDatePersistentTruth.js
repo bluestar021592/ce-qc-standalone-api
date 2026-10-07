@@ -132,6 +132,31 @@ export function persistentWhppCompletionTruth(db,reportDate=''){
   const date=dateKey(reportDate);
   if(!date)return{locked:false,reportDate:'',reason:'REPORT_DATE_MISSING',sourceCount:0,finalCount:0};
   const batch=latestValidBatch(db,date);
+
+  // V738: the unified snapshot is the highest-level durable owner of the
+  // three-family lifecycle. Once the exact selected-date snapshot is COMPLETED,
+  // WHPP must never be demoted by a slower downstream canonical reconstruction.
+  // This is also the fast path used by /api/whpp/progress so a 7s browser read
+  // cannot time out and falsely paint a completed date as "WHPP待处理".
+  if(batch?.snapshotId){
+    try{
+      const unified=db.prepare("SELECT status,createdAt FROM unified_snapshots WHERE snapshotId=? LIMIT 1").get(batch.snapshotId)||null;
+      if(String(unified?.status||'').toUpperCase()==='COMPLETED'){
+        let sourceCount=0;
+        try{sourceCount=Number(db.prepare("SELECT COUNT(DISTINCT UPPER(TRIM(shipmentCode))) count FROM unified_import_rows WHERE batchId=? AND reportDate=? AND UPPER(TRIM(businessType))='WHPP'").get(batch.batchId,date)?.count||0)}catch{}
+        return{
+          locked:true,finalized:true,reportDate:date,sourceCount,finalCount:sourceCount,
+          canonicalTotal:sourceCount,canonicalResolved:sourceCount,
+          unifiedCompleted:true,unifiedWhppCompleted:true,
+          snapshotLocked:false,dailyLocked:false,historyLocked:false,membershipMatches:true,
+          snapshotId:String(batch.snapshotId||''),finalizedAt:String(unified?.createdAt||''),
+          completionSource:'UNIFIED_COMPLETED_FAST_PATH',
+          reason:'PERSISTED_WHPP_COMPLETED'
+        };
+      }
+    }catch{}
+  }
+
   let daily=null,history=null,snapshot=null,unifiedSnapshot=null,finalCount=0,sourceCount=0,canonical=null;
   try{daily=db.prepare("SELECT totalCount,summaryJson,updatedAt FROM business_daily_reports WHERE businessType='WHPP' AND reportDate=? LIMIT 1").get(date)||null}catch{}
   try{history=db.prepare("SELECT summaryJson,updatedAt FROM business_history_summary WHERE businessType='WHPP' AND reportDate=? LIMIT 1").get(date)||null}catch{}
