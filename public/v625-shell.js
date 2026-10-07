@@ -813,10 +813,15 @@ async function loadBusiness(){
 
     const wr=workspaceR.status==='fulfilled'?workspaceR.value:{rows:[]};
     v628BusinessWorkspaceRows=(wr.rows||[]).filter(businessTypeMatches);
-    if(v628BusinessWorkspaceRows.length){
+    const workspaceAllCount=Number(wr.allRowCount||v628BusinessWorkspaceRows.length);
+    const workspaceTruncated=workspaceAllCount>v628BusinessWorkspaceRows.length;
+    if(bi){
+      setText('v631AccountingMeta','已归类 '+fmt(bi.accounted)+' / '+fmt(bi.sourceCount)+' · 差异 '+fmt(Math.abs(Number(bi.difference||0))));
+    }
+    if(v628BusinessWorkspaceRows.length&&!workspaceTruncated){
       const detailed=buildBusinessAccounting({finalRows:v628BusinessWorkspaceRows},m);
       v631BusinessAccounting=detailed;
-      setText('v631AccountingMeta','已归类 '+fmt(detailed.accounted)+' / '+fmt(m.total)+' · 差异 '+fmt(Math.max(0,m.total-detailed.accounted)));
+      if(!bi)setText('v631AccountingMeta','已归类 '+fmt(detailed.accounted)+' / '+fmt(m.total)+' · 差异 '+fmt(Math.max(0,m.total-detailed.accounted)));
     }
     const rows=v628BusinessWorkspaceRows.filter(x=>x.isActionable).slice(0,8);
     const tbody=byId('v625BusinessRows');tbody.replaceChildren();
