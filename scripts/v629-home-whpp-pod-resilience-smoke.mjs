@@ -16,7 +16,7 @@ assert.match(home,/safeTimingForBatch\(latest,type\)/,'home must use resilient t
 assert.match(home,/safeReturnSummaryForBatch\(latest,type\)/,'home must use resilient return summary');
 
 assert.match(js,/summary\?\.reportDate===reportDate/,'business timing read must be null-safe');
-assert.match(js,/setText\('kpiReturned',fmt\(\(counts\.returned\?\?m\.returned\)\|\|0\)\)/,'business return card must use exclusive same-state return truth');
+assert.match(js,/setText\('kpiReturned',fmt\(m\.returned\|\|0\)\)/,'business return card first paint must use compact backend return truth');
 assert.match(js,/function renderKpiDetail\(kind\)/,'KPI detail drilldown must remain installed');
 
 assert.match(server,/import \{ loadWhppState, saveWhppDailyImport \} from '\.\/src\/whppStore\.js'/,'WHPP state/import integration missing');
@@ -31,4 +31,4 @@ assert.match(html,/v625-shell\.css\?v=\d{8}-v\d{3,}-1/,'V629+ CSS cache bust mis
 
 const assetBuild=Number((html.match(/v625-shell\.js\?v=\d{8}-v(\d{3,})-1/)||[])[1]||0);
 assert.ok(assetBuild>=629,'asset cache build must not predate V629');
-console.log('[V629] resilient home + null-safe KPI detail + dedicated WHPP POD workspace smoke passed');
+console.log('[V629] resilient home + compact backend return KPI + dedicated WHPP workspace smoke passed');
