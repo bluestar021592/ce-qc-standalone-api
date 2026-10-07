@@ -20,8 +20,8 @@ assert.match(js,/function tabRows\(\.\.\.keys\)/,'same-state detail tab reader m
 assert.match(js,/function buildBusinessAccounting\(state=\{\},fallback=\{\}\)/,'delivery drilldown must use exclusive same-state accounting');
 assert.match(js,/rowsByKind\.delivery\.push\(row\)/,'delivery detail must come from exclusive accounting');
 assert.match(js,/v630BusinessDetailTabs=state\.detailTabs\|\|state\?\.dashboard\?\.detailTabs\|\|\{\}/,'business state or canonical dashboard detail tabs must feed drilldown');
-assert.match(js,/setText\('kpiReturned',fmt\(\(counts\.returned\?\?m\.returned\)\|\|0\)\)/,'business returned card must use same-state accounting metric');
-assert.match(js,/setText\('kpiOtherNormal',fmt\(counts\.otherNormal\|\|0\)\)/,'other-normal status must be visible from exclusive accounting');
+assert.match(js,/setText\('kpiReturned',fmt\(m\.returned\|\|0\)\)/,'business returned card first paint must use compact backend return metric');
+assert.match(js,/setText\('kpiOtherNormal',fmt\(m\.otherNormal\|\|0\)\)/,'other-normal status first paint must use compact backend metric');
 assert.match(html,/data-kpi-detail="returned"/,'returned KPI must be clickable');
 assert.match(html,/data-kpi-detail="otherNormal"/,'other-normal KPI must be clickable');
 assert.match(html,/v625-shell\.js\?v=\d{8}-v\d{3,}-1/,'V630+ JS cache bust missing');
@@ -30,4 +30,4 @@ assert.match(html,/v625-shell\.css\?v=\d{8}-v\d{3,}-1/,'V630+ CSS cache bust mis
 
 const assetBuild=Number((html.match(/v625-shell\.js\?v=\d{8}-v(\d{3,})-1/)||[])[1]||0);
 assert.ok(assetBuild>=630,'asset cache build must not predate V630');
-console.log('[V630] strict return truth + same-state KPI drilldown + WHPP remainder visibility smoke passed');
+console.log('[V630] strict return truth + compact backend KPI first paint + scoped drilldown accounting smoke passed');
