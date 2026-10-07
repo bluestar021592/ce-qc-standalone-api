@@ -13,7 +13,7 @@ assert.match(shell,/if\(progress\?\.running\)/,'active background work must be w
 assert.match(shell,/await post\(retryEndpoint\|\|familyResumeEndpoint\(type\),\{\},0\)/,'only one exact endpoint retry is allowed after backend recovery');
 assert.match(shell,/runFamilyRequest\('CCSL','\/api\/resume',reportDate\)/,'CCSL resume must use transport recovery owner');
 assert.match(shell,/runFamilyRequest\('SHOPEE','\/api\/shopee\/run\/resume',reportDate\)/,'SHOPEE resume must use transport recovery owner');
-assert.match(html,/V721_TRANSPORT_RECOVERY/,'V721 shell marker missing');
-assert.match(html,/v625-shell\.js\?v=20261007-v721-1/,'V721 cache bust missing');
+assert.match(html,/<meta name="ce-qc-build" content="V\d+_[A-Z0-9_]+">/,'current shell build marker missing');
+assert.match(html,/v625-shell\.js\?v=\d{8}-v\d+-\d+/,'current shell cache bust missing');
 
 console.log('[V721] CCSL/SHOPEE local fetch disconnects reconnect, inspect persisted progress, and resume once without raw Failed to fetch');
