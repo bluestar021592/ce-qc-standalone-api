@@ -102,6 +102,7 @@ const TASKS=[
   ['node',['scripts/v717-whpp-progress-owner-smoke.mjs']],
   ['node',['scripts/v718-resume-progress-smoke.mjs']],
   ['node',['scripts/v719-valid-html-shell-smoke.mjs']],
+  ['node',['scripts/v720-live-progress-resilience-smoke.mjs']],
   ['node',['--test',
     'test/unified-import-v7.test.js',
     'test/unified-import-ceaf.test.js',
