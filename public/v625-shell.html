@@ -4,9 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="ce-qc-shell" content="V625_FULL_SYSTEM_UI">
-  <meta name="ce-qc-build" content="V744_SIGNING_UI_SIMPLIFIED_AND_TERMINAL_BACKFILL">
+  <meta name="ce-qc-build" content="V748_PER_BOARD_TRACK_QUALITY_SIGNALS">
   <title>__V625_PAGE_TITLE__ - CE EXPRESS 质量控制管理系统</title>
-  <link rel="stylesheet" href="/v625-shell.css?v=20261007-v744-1">
+  <link rel="stylesheet" href="/v625-shell.css?v=20261007-v748-1">
 </head>
 <body data-page="__V625_PAGE_KEY__" data-business="__V625_BUSINESS_TYPE__">
   <div class="v625-app">
@@ -241,6 +241,14 @@
             <article id="kpiOtherCard" class="kpi gray v628-kpi-click" data-kpi-detail="otherNormal" role="button" tabindex="0" hidden><span>其他正常状态</span><b id="kpiOtherNormal">—</b><small>取消 / 正常分流 / 门店状态 · 点击查看</small></article>
             <article id="kpiUnprocessedCard" class="kpi orange v628-kpi-click" data-kpi-detail="unprocessed" role="button" tabindex="0" hidden><span>待处理</span><b id="kpiUnprocessed">—</b><small>日报已有、尚未形成最终状态 · 点击查看</small></article>
           </div>
+          <section class="v748-quality-signals">
+            <div class="v748-quality-head"><b>轨迹质量监管</b><span id="v748QualityRefreshMeta">进入看板后自动精准补抓未终态轨迹</span></div>
+            <div class="v748-quality-grid">
+              <article class="kpi blue v628-kpi-click" data-kpi-detail="shopArrived" role="button" tabindex="0"><span>到达门店</span><b id="kpiShopArrived">—</b><small>按最新门店CP码与到达轨迹识别 · 点击查看</small></article>
+              <article class="kpi orange v628-kpi-click" data-kpi-detail="pendingGap" role="button" tabindex="0"><span>Pending不连续</span><b id="kpiPendingGap">—</b><small>按真实150节点日期判定 · 点击查看</small></article>
+              <article class="kpi red v628-kpi-click" data-kpi-detail="oc2Plus" role="button" tabindex="0"><span>OC 2天+</span><b id="kpiOc2Plus">—</b><small>当前OC自然日≥2 · 点击查看</small></article>
+            </div>
+          </section>
           <div class="v631-accounting-bar"><b>状态守恒</b><span id="v631AccountingMeta">正在核对总票与状态明细…</span></div>
           <div class="v637-integrity-bar"><b>数据完整性</b><span id="v637BusinessIntegrity">正在核对源票、处理、扫描与归类…</span><button id="v641WhppScanPending" class="v625-btn primary" type="button" hidden>扫描WHPP待处理票</button></div>
           <section id="v628KpiDetailPanel" class="v625-panel v628-kpi-detail" hidden>
@@ -644,6 +652,6 @@
       </main>
     </div>
   </div>
-  <script src="/v625-shell.js?v=20261007-v744-1" defer></script>
+  <script src="/v625-shell.js?v=20261007-v748-1" defer></script>
 </body>
 </html>
