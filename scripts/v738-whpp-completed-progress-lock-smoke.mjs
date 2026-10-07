@@ -11,7 +11,7 @@ assert.match(truth,/return\{\s*locked:true,finalized:true,reportDate:date/,'comp
 
 assert.match(shell,/const v738WhppCompletionLatch=new Set\(\)/,'browser completion latch missing');
 assert.match(shell,/unifiedCompleted\|\|v738WhppCompletionLatch\.has\(date\)/,'failed WHPP progress read must preserve exact-date completed state');
-assert.match(shell,/V738_UNIFIED_COMPLETED_FALLBACK/,'WHPP completed fallback must be observable');
+assert.match(shell,/V739_UNIFIED_COMPLETED_OVERRIDE|V738_UNIFIED_COMPLETED_FALLBACK/,'WHPP completed fallback/override must be observable');
 assert.match(html,/V738_WHPP_COMPLETION_LOCK_FAST_PATH/,'V738 shell build marker missing');
 assert.match(html,/v625-shell\.js\?v=20261007-v738-1/,'V738 JS cache bust missing');
 
