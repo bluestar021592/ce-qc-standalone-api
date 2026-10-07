@@ -231,19 +231,44 @@ function Test-RemoteCandidate([string]$RemoteCommit, [string]$CurrentCommit) {
     }
     Write-ManagedLog "[UPDATE] Candidate worktree/test scratch/npm cache use D: when available so C: does not accumulate update data." DarkCyan
 
-    $dependencyFiles = Get-GitText @('diff','--name-only',$CurrentCommit,$RemoteCommit,'--','package.json','package-lock.json')
+    $lockChanged = Get-GitText @('diff','--name-only',$CurrentCommit,$RemoteCommit,'--','package-lock.json')
     $currentModules = Join-Path $ProjectRoot 'node_modules'
     $candidateModules = Join-Path $tempRoot 'node_modules'
-    $canReuseModules = [string]::IsNullOrWhiteSpace($dependencyFiles) -and (Test-Path -LiteralPath $currentModules)
+    $currentPackage = Get-Content -LiteralPath (Join-Path $ProjectRoot 'package.json') -Raw | ConvertFrom-Json
+    $candidatePackage = Get-Content -LiteralPath (Join-Path $tempRoot 'package.json') -Raw | ConvertFrom-Json
+    $currentDependencyMetadata = [ordered]@{
+      dependencies = $currentPackage.dependencies
+      devDependencies = $currentPackage.devDependencies
+      optionalDependencies = $currentPackage.optionalDependencies
+      peerDependencies = $currentPackage.peerDependencies
+    } | ConvertTo-Json -Depth 20 -Compress
+    $candidateDependencyMetadata = [ordered]@{
+      dependencies = $candidatePackage.dependencies
+      devDependencies = $candidatePackage.devDependencies
+      optionalDependencies = $candidatePackage.optionalDependencies
+      peerDependencies = $candidatePackage.peerDependencies
+    } | ConvertTo-Json -Depth 20 -Compress
+    $dependencyMetadataChanged = ($currentDependencyMetadata -ne $candidateDependencyMetadata)
+    $dependencyGraphChanged = (-not [string]::IsNullOrWhiteSpace($lockChanged)) -or $dependencyMetadataChanged
+    $canReuseModules = (-not $dependencyGraphChanged) -and (Test-Path -LiteralPath $currentModules)
 
     if ($canReuseModules) {
-      Write-ManagedLog '[UPDATE] Dependencies unchanged; reusing installed node_modules for isolated candidate tests.' DarkCyan
+      Write-ManagedLog '[UPDATE] Dependency graph unchanged; reusing installed node_modules for isolated candidate tests.' DarkCyan
       New-Item -ItemType Junction -Path $candidateModules -Target $currentModules -Force | Out-Null
       $linkedModules = $true
     } else {
-      Write-ManagedLog '[UPDATE] Dependencies changed or missing; installing candidate dependencies once.' DarkCyan
+      Write-ManagedLog '[UPDATE] Dependency graph changed or installed modules missing; installing candidate dependencies once.' DarkCyan
       Push-Location $tempRoot
-      try { Invoke-Exe $script:NpmExe @('ci','--prefer-offline','--no-audit','--no-fund') | Out-Null }
+      try {
+        $npmArgs = @('ci','--prefer-offline','--no-audit','--no-fund')
+        $npmExit = Invoke-Exe $script:NpmExe $npmArgs -AllowFailure
+        if ($npmExit -ne 0) {
+          Write-ManagedLog "[UPDATE] npm ci transient failure exit=$npmExit; retrying once with the same D: cache." Yellow
+          Start-Sleep -Seconds 3
+          $npmExit = Invoke-Exe $script:NpmExe $npmArgs -AllowFailure
+        }
+        if ($npmExit -ne 0) { throw "$script:NpmExe exited with code ${npmExit}: $($npmArgs -join ' ')" }
+      }
       finally { Pop-Location }
     }
 
