@@ -28,15 +28,17 @@ assert.match(server,/app\.get\('\/api\/data-integrity'/,'data integrity endpoint
 assert.match(server,/state\.accounting=buildCanonicalBusinessAccounting/,'standard boards must expose backend accounting');
 assert.match(server,/accounting=buildCanonicalBusinessAccounting/,'WHPP must expose backend accounting');
 
-assert.match(js,/state\.accounting\?\.rowsByKind\?state\.accounting/,'frontend must prefer backend accounting');
-assert.match(js,/\/api\/data-integrity/,'home/business must read integrity ledger');
+assert.match(js,/state\.accounting\?\.rowsByKind\s*\?\s*state\.accounting\s*:\s*\{total:m\.total/,'frontend must prefer backend accounting when the compact state includes canonical rowsByKind');
+assert.match(js,/new URLSearchParams\(\{businessType:business\}\)/,'business board must scope integrity reads to the selected business');
+assert.match(js,/json\('\/api\/data-integrity\?'\+integrityQuery\.toString\(\),10000\)/,'business board must hydrate integrity after compact first paint');
 assert.match(js,/待扫描/,'visible waiting-scan signal missing');
-assert.match(js,/const dataHealthy=Boolean\(classification\.balanced\)&&integritySafe&&processingComplete/,'normal status must require all integrity gates');
-assert.match(js,/Array\.isArray\(state\.finalRows\)&&state\.finalRows\.length\?state\.finalRows:null/,'fallback accounting must start from full membership');
+assert.match(js,/const dataHealthy=Boolean\(classification\.balanced\)/,'home first paint must use classification conservation only and defer full integrity checks');
+assert.match(js,/完整性明细进入对应业务看板后按需读取/,'home must explain that detailed integrity is hydrated on demand');
+assert.match(js,/v628BusinessWorkspaceRows\.length[\s\S]*buildBusinessAccounting\(\{finalRows:v628BusinessWorkspaceRows\},m\)/,'fallback accounting must hydrate from the selected-business workspace only');
 
 assert.match(html,/id="v637HomeIntegrity"/,'home integrity ledger UI missing');
 assert.match(html,/id="v637BusinessIntegrity"/,'business integrity ledger UI missing');
 assert.match(html,/v625-shell\.js\?v=\d{8}-v\d{3,}-1/,'V637+ JS cache bust missing');
 assert.match(html,/v625-shell\.css\?v=\d{8}-v\d{3,}-1/,'V637+ CSS cache bust missing');
 
-console.log('[V637] source-processing-scan-dashboard conservation hard gate passed');
+console.log('[V637] conservation hard gate passed: canonical backend accounting retained, home no longer blocks on full integrity, selected business hydrates scoped integrity/workspace on demand');
