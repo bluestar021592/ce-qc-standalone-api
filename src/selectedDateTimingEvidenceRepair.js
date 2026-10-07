@@ -10,8 +10,10 @@ import { buildShopeeDashboard } from './shopeeReporting.js';
 import { recipientGroupOf } from './recipientGroup.js';
 import { normalizeV485TrackRows, archiveV485TrackQueryResponse } from './v485StrictTrackEvidence.js';
 import { persistentSelectedDatePodTruth } from './selectedDatePersistentTruth.js';
+import { classifyShipmentStatus, shipmentStatusTime } from './shipmentStatusTruth.js';
 
 export const V645_SELECTED_DATE_TIMING_REPAIR_ID='2026-10-05-v645-selected-date-pod-track-repair-v1';
+export const V737_STATUS_FIRST_TIMING_REPAIR_REVISION='2026-10-07-v737-status-first-timing-repair-v1';
 const TYPES=new Set(['TBKH','WHPP','SHOPEECN','SHOPEEVN']);
 const states=new Map();
 const queue=new Map();
@@ -156,6 +158,37 @@ function eventFingerprint(row={}){
   const raw=JSON.stringify(normalized);
   return time+'|'+code+'|'+raw;
 }
+function persistShipmentStatusRows(type,date,rows=[]){
+  const owner=storageType(type),db=getDb(),stamp=now(),latest=new Map();
+  for(const raw of rows||[]){
+    const code=billOf(raw);if(!code)continue;
+    latest.set(code,{...raw,shipmentCode:code,reportDate:date});
+  }
+  if(!latest.size)return 0;
+  const del=db.prepare('DELETE FROM business_shipment_tracks WHERE businessType=? AND reportDate=? AND shipmentCode=?');
+  const ins=db.prepare('INSERT INTO business_shipment_tracks(businessType,shipmentCode,reportDate,shipmentStatus,statusText,apiStatus,rawJson,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?)');
+  let saved=0;
+  db.exec('BEGIN IMMEDIATE');
+  try{
+    for(const [code,row] of latest){
+      del.run(owner,date,code);
+      ins.run(owner,code,date,String(row.shipmentStatus??''),String(row.statusText||row.shipmentStatusDesc||''),String(row.apiStatus||'success'),JSON.stringify(row),stamp,stamp);
+      saved++;
+    }
+    db.exec('COMMIT');
+    return saved;
+  }catch(error){try{db.exec('ROLLBACK')}catch{};throw error}
+}
+function rawRowsByBill(rows=[]){
+  const map=new Map();
+  for(const row of rows||[]){
+    const code=billOf(row);if(!code)continue;
+    if(!map.has(code))map.set(code,[]);
+    map.get(code).push(row);
+  }
+  return map;
+}
+
 function persistBillEvents(type,date,bill,rows=[]){
   if(!rows.length)return 0;
   const owner=storageType(type),db=getDb(),stamp=now();
@@ -199,8 +232,43 @@ async function runOne(type,date,snapshotId=''){
   const bills=selectedDatePodBills(type,date,snapshotId);
   patch(type,date,snapshotId,{status:'RUNNING',phase:'TRACK_QUERY',total:bills.length,completed:0,failed:0,queried:0,startedAt:now(),message:`${type} ${date} 签收时效补证：真实POD ${bills.length}票`});
   if(!bills.length)return patch(type,date,snapshotId,{status:'WAITING_FOR_POD_MEMBERS',phase:'WAITING_FOR_POD_MEMBERS',completedAt:now(),message:`${type} ${date} 当前尚未形成真实POD成员；等待扫描/轨迹处理完成后自动重试。`});
-  const client=new CEClient(),batches=splitTrackBatches(bills),totalBatches=batches.length;
-  let completed=0,failed=0,queried=0,persistedEvents=0;
+  const client=new CEClient();
+  const statusBatches=splitTrackBatches(bills),statusTimedBills=new Set();
+  let statusQueried=0,statusFailed=0,statusPersistedRows=0,status60=0,status60WithTime=0,status60WithoutTime=0;
+  for(let offset=0;offset<statusBatches.length;offset+=4){
+    const wave=statusBatches.slice(offset,offset+4);
+    const results=await Promise.all(wave.map(async batch=>{
+      statusQueried+=batch.length;
+      try{return await queryTrackBatchWithFallback({batch,query:codes=>client.shipmentTrack(codes),apiName:`v737-${type.toLowerCase()}-shipment-status`,fallbackSizes:[25,10,5,1],onLog:async()=>{}})}
+      catch(error){return{successes:[],failures:[{batch,error}]}}
+    }));
+    for(const outcome of results){
+      for(const success of outcome.successes||[]){
+        const successBatch=success.batch||[],rows=success.events||[];
+        statusPersistedRows+=persistShipmentStatusRows(type,date,rows);
+        const grouped=rawRowsByBill(rows);
+        for(const codeRaw of successBatch){
+          const code=String(codeRaw||'').trim().toUpperCase(),row=(grouped.get(code)||[]).at(-1)||null;
+          if(!row)continue;
+          const truth=classifyShipmentStatus(row);
+          if(!truth.pod)continue;
+          status60++;
+          if(shipmentStatusTime(row)){status60WithTime++;statusTimedBills.add(code);}
+          else status60WithoutTime++;
+        }
+      }
+      for(const failure of outcome.failures||[])statusFailed+=(failure.batch||[]).length;
+    }
+    patch(type,date,snapshotId,{
+      status:'RUNNING',phase:'SHIPMENT_STATUS_QUERY',statusQueried,statusFailed,statusPersistedRows,status60,status60WithTime,status60WithoutTime,
+      repairRevision:V737_STATUS_FIRST_TIMING_REPAIR_REVISION,
+      message:`${type} ${date} shipmentStatus补证 ${Math.min(offset+4,statusBatches.length)}/${statusBatches.length}批：60/POD有时间 ${status60WithTime}票，无时间 ${status60WithoutTime}票`
+    });
+  }
+
+  const trackBills=bills.filter(code=>!statusTimedBills.has(code));
+  const batches=splitTrackBatches(trackBills),totalBatches=batches.length;
+  let completed=statusTimedBills.size,failed=0,queried=0,persistedEvents=0;
   for(let offset=0;offset<totalBatches;offset+=4){
     const wave=batches.slice(offset,offset+4);
     const results=await Promise.all(wave.map(async batch=>{
@@ -220,17 +288,17 @@ async function runOne(type,date,snapshotId=''){
       }
       for(const failure of outcome.failures||[])failed+=(failure.batch||[]).length;
     }
-    patch(type,date,snapshotId,{status:'RUNNING',phase:'TRACK_QUERY',completed,failed,queried,persistedEvents,message:`${type} ${date} 轨迹补证 ${Math.min(offset+4,totalBatches)}/${totalBatches}批：成功 ${completed}/${bills.length}，失败 ${failed}`});
+    patch(type,date,snapshotId,{status:'RUNNING',phase:'TRACK_QUERY',completed,failed,queried,persistedEvents,statusQueried,statusFailed,statusPersistedRows,status60,status60WithTime,status60WithoutTime,repairRevision:V737_STATUS_FIRST_TIMING_REPAIR_REVISION,message:`${type} ${date} 轨迹补证 ${Math.min(offset+4,totalBatches)}/${totalBatches}批：已有POD时间 ${statusTimedBills.size}，轨迹成功 ${Math.max(0,completed-statusTimedBills.size)}，失败 ${failed}`});
   }
-  if(bills.length>0&&completed===0&&failed>=bills.length&&persistedEvents===0&&reportAgeDays(date)>HISTORICAL_AUTO_REPAIR_MAX_AGE_DAYS){
+  if(bills.length>0&&statusTimedBills.size===0&&completed===0&&failed>=trackBills.length&&persistedEvents===0&&reportAgeDays(date)>HISTORICAL_AUTO_REPAIR_MAX_AGE_DAYS){
     const durable=writeDurableStop(
       type,date,snapshotId,bills.length,
       `${type} ${date} 已完成一次实时轨迹补证，但仍未取得真实60/70→80轨迹；为避免重复无效查询，后续自动补查已停止。`,
-      {completed,failed,queried,persistedEvents,exhaustionSource:'POST_QUERY_EXHAUSTED'}
+      {completed,failed,queried,persistedEvents,statusQueried,statusFailed,statusPersistedRows,status60,status60WithTime,status60WithoutTime,repairRevision:V737_STATUS_FIRST_TIMING_REPAIR_REVISION,exhaustionSource:'POST_STATUS_AND_TRACK_QUERY_EXHAUSTED'}
     );
     return patch(type,date,snapshotId,durable);
   }
-  return patch(type,date,snapshotId,{status:failed?'COMPLETED_WITH_GAPS':'COMPLETED',phase:'DONE',completed,failed,queried,persistedEvents,completedAt:now(),message:failed?`${type} ${date} 轨迹补证完成，仍有 ${failed}票待补。`:`${type} ${date} 轨迹补证完成。`});
+  return patch(type,date,snapshotId,{status:failed?'COMPLETED_WITH_GAPS':'COMPLETED',phase:'DONE',completed,failed,queried,persistedEvents,statusQueried,statusFailed,statusPersistedRows,status60,status60WithTime,status60WithoutTime,repairRevision:V737_STATUS_FIRST_TIMING_REPAIR_REVISION,completedAt:now(),message:failed?`${type} ${date} 补证完成：shipmentStatus=60有时间 ${status60WithTime}票，轨迹仍缺 ${failed}票。`:`${type} ${date} 签收时效补证完成。`});
 }
 async function pump(){
   if(runningKey||!queue.size)return;
@@ -243,11 +311,10 @@ export function requestSelectedDateTimingRepair(businessType='',reportDate='',sn
   if(!TYPES.has(type)||!date)return stateFor(type,date,snap);
   let current=stateFor(type,date,snap),status=String(current.status||'').toUpperCase();
   if(status==='HISTORICAL_EVIDENCE_UNAVAILABLE'){
-    // V734: older builds could mark a historical day unavailable before making
-    // even one live timing query. A zero-query durable stop is therefore stale
-    // and must be retried exactly once. Stops created after a real bounded query
-    // keep queried>0 and remain durable so page refreshes cannot hammer CE.
-    if(Number(current.queried||0)>0)return current;
+    // V737 upgrades historical repair from event-only querying to status-first
+    // querying. Any durable stop created before this revision must be retried once
+    // so shipmentStatus=60 timestamps have a chance to recover POD dates.
+    if(String(current.repairRevision||'')===V737_STATUS_FIRST_TIMING_REPAIR_REVISION&&Number(current.statusQueried||0)>0)return current;
     clearDurableStop(type,date);
     states.delete(keyOf(type,date,snap));
     current=baseState(type,date,snap);
