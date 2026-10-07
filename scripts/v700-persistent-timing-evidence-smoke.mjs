@@ -29,9 +29,9 @@ assert.doesNotMatch(whpp,/\['business_scan_results','business_track_events','bus
 assert.match(whpp,/appendPermanentWhppTrackEvents\(db,reportDate,normalized\.trackEvents\|\|\[\],now\)/,'WHPP finalization must append timing events');
 assert.match(whpp,/if\(normalized\.reportDate&&\(normalized\.trackEvents\|\|\[\]\)\.length\)appendPermanentWhppTrackEvents/,'WHPP checkpoints must persist timing evidence immediately');
 
-assert.match(shell,/历史签收时间缺失|历史轨迹证据缺失/,'historical evidence unavailable UI missing');
-assert.match(shell,/时效不可计算/,'historical timing unavailable explanation missing');
-assert.match(shell,/历史时间缺失|历史证据缺失/,'timing card must stop calling exhausted history retryable');
+assert.match(shell,/待后续日报回补|历史签收时间缺失|历史轨迹证据缺失/,'historical evidence/backfill UI missing');
+assert.match(shell,/后续日报更新后自动回补|时效不可计算/,'historical timing/backfill explanation missing');
+assert.match(shell,/待后续日报回补|历史时间缺失|历史证据缺失/,'timing card must stop calling exhausted CE history retryable');
 assert.match(html,/<meta name="ce-qc-build" content="V\d+_[A-Z0-9_]+">/,'current shell build marker missing');
 assert.match(html,/v625-shell\.js\?v=\d{8}-v\d+-\d+/,'current JS cache bust missing');
 
