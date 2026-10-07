@@ -19,8 +19,8 @@ assert.match(js,/const selectedReportDate=\(\)=>\{[\s\S]*p\.get\('reportDate'\)/
 assert.match(js,/summaryUrl='\/api\/home-quality-summary'[\s\S]*reportDate=/,'home must request selected date');
 assert.match(js,/p\.set\('reportDate',reportDate\)/,'query button must persist selected report date');
 assert.match(js,/p\.delete\('snapshotId'\)/,'changing date must not retain stale snapshot');
-assert.match(js,/summary=await json\('\/api\/home-quality-summary\?'/,'business board must resolve selected date to exact summary/snapshot');
-assert.match(js,/new URLSearchParams\(\{scope:'all'\}\)/,'business KPI drilldown must load all membership rows');
+assert.match(js,/const summaryPromise=json\('\/api\/home-quality-summary\?'\+summaryQuery\.toString\(\),10000\)/,'business board must resolve selected date through the non-blocking fast summary');
+assert.match(js,/new URLSearchParams\(\{scope:'all',businessType:business\}\)/,'business KPI drilldown must load only the selected business membership rows');
 assert.match(js,/function renderKpiDetail\(kind\)/,'business KPI drilldown renderer missing');
 assert.match(js,/function buildBusinessAccounting\(state=\{\},fallback=\{\}\)/,'delivery drilldown must use exclusive same-state accounting');
 assert.match(js,/rowsByKind\.delivery\.push\(row\)/,'delivery detail must come from the same exclusive accounting bucket');
@@ -41,4 +41,4 @@ assert.deepEqual(dupes,[],'duplicate DOM ids: '+dupes.join(', '));
 
 const assetBuild=Number((html.match(/v625-shell\.js\?v=\d{8}-v(\d{3,})-1/)||[])[1]||0);
 assert.ok(assetBuild>=628,'asset cache build must not predate V628');
-console.log('[V628] dashboard date authority + latest non-empty fallback + business KPI drilldown smoke passed');
+console.log('[V628] dashboard date authority + fast selected-date summary + scoped business KPI drilldown smoke passed');
