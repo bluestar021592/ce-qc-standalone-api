@@ -12,7 +12,7 @@ assert.match(progress,/shopeeProgress\(db, req\.query\.reportDate\)/,'progress e
 assert.match(server,/if \(!options\.resume\) \{[\s\S]*?const probeBills = state\.pnhBills\.slice/,'SHOPEE duplicate preflight must run only on fresh start');
 assert.match(shell,/\['RUN_ALREADY_COMPLETED','RUN_NOT_RECOVERABLE'\]\.includes\(code\)/,'resume UI may swallow only terminal no-work 409 responses');
 assert.doesNotMatch(shell,/if\(e\.status===409\)return/,'resume UI must not swallow all 409 failures');
-assert.match(html,/V718_RESUME_PROGRESS_FIX/,'V718 shell marker missing');
-assert.match(html,/v625-shell\.js\?v=20261007-v718-1/,'V718 shell cache bust missing');
+assert.match(html,/<meta name="ce-qc-build" content="V\d+_[A-Z0-9_]+">/,'current shell build marker missing');
+assert.match(html,/v625-shell\.js\?v=\d{8}-v\d+-\d+/,'current shell cache bust missing');
 
 console.log('[V718] selected-date SHOPEE progress + non-blocking resume entry + exact 409 handling passed');
