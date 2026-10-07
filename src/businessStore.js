@@ -4,6 +4,7 @@ import { SHOP_WHITELIST_SOURCE_SHA256, SHOP_WHITELIST_VERSION } from './shopWhit
 import { getDb, nowIso } from './db.js';
 import { buildSnapshotHashes } from './snapshotHash.js';
 import { persistPendingDailyMembers } from './pendingDays.js';
+import { classifyShipmentStatus, shipmentStatusTime } from './shipmentStatusTruth.js';
 
 export const SHOPEE = 'SHOPEE';
 export const BUSINESS_RUNTIME_CHECKPOINT_REVISION = '2026-09-01-shopee-lightweight-runtime-checkpoint-v1';
@@ -461,12 +462,52 @@ function mirrorBusinessRuntimeCheckpoint(db, state, type, now) {
   const podStmt = db.prepare(`INSERT INTO business_pod_locks(businessType,shipmentCode,podTime,source,createdAt,updatedAt) VALUES(?,?,?,'runtime_checkpoint',?,?)
     ON CONFLICT(businessType,shipmentCode) DO UPDATE SET updatedAt=excluded.updatedAt`);
   for (const bill of state.podLocks || []) podStmt.run(type, bill, '', now, now);
+  persistPermanentBusinessPodTimes(db,type,state,now);
   if(date&&(state.trackEvents||[]).length)appendPermanentBusinessTrackEvents(db,type,date,state.trackEvents,now);
   if (!date || !run?.runId) return;
   db.prepare(`UPDATE business_run_locks SET currentStage=?,batchIndex=?,totalBatches=?,errorMessage=?,updatedAt=? WHERE businessType=? AND reportDate=? AND runId=?`)
     .run(state.processing.phase || '', Number(state.processing.batchIndex || 0), Number(state.processing.totalBatches || 0), state.processing.error || '', now, type, date, run.runId);
   db.prepare('INSERT INTO business_run_checkpoints(businessType,runId,reportDate,stage,batchIndex,totalBatches,status,payloadJson,errorMessage,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?,?,?)')
     .run(type, run.runId, date, state.processing.phase || '', Number(state.processing.batchIndex || 0), Number(state.processing.totalBatches || 0), state.processing.running ? 'running' : (state.processing.paused ? 'paused' : 'saved'), JSON.stringify({ scanDone: state.scanResults.length, trackDone: state.trackResults.length, eventsDone: state.trackEvents.length, exceptionsDone: state.exceptionItems.length, revision: BUSINESS_RUNTIME_CHECKPOINT_REVISION }), state.processing.error || '', now, now);
+}
+
+function explicitTrustedPodTime(row={}) {
+  row=row||{};
+  for(const value of [
+    row.POD时间,row.podTime,row.podDate,row.podClosedAt,row.podAt,row.deliveredAt,row.deliveryCompletedAt,row.签收时间,row.signTime,row.signedTime
+  ])if(String(value||'').trim())return String(value).trim();
+  const truth=classifyShipmentStatus(row);
+  if(truth.pod){
+    const time=shipmentStatusTime(row);
+    if(time)return time;
+  }
+  return '';
+}
+function rowProvesPod(row={}) {
+  const truth=classifyShipmentStatus(row);
+  if(truth.pod)return true;
+  const state=String(row.currentState||row.scanNormalizedState||row.POD状态||'').trim().toUpperCase();
+  return row.是否POD==='是'||String(row.orderStatus||'').trim()==='85'||['POD','DELIVERED','SIGNED'].includes(state);
+}
+function persistPermanentBusinessPodTimes(db,type,state={},now='') {
+  const evidence=new Map();
+  const consider=(row,source)=>{
+    const bill=billOf(row);if(!bill||!rowProvesPod(row))return;
+    const podTime=explicitTrustedPodTime(row);if(!podTime)return;
+    if(!evidence.has(bill))evidence.set(bill,{podTime,source});
+  };
+  for(const row of state.scanResults||[])consider(row,'saved_scan_pod_time');
+  for(const row of state.shipmentTrackResults||[])consider(row,'shipment_status_60_time');
+  for(const row of state.finalRows||[])consider(row,'saved_final_pod_time');
+  if(!evidence.size)return 0;
+  const stmt=db.prepare(`INSERT INTO business_pod_locks(businessType,shipmentCode,podTime,source,createdAt,updatedAt)
+    VALUES(?,?,?,?,?,?)
+    ON CONFLICT(businessType,shipmentCode) DO UPDATE SET
+      podTime=CASE WHEN TRIM(COALESCE(business_pod_locks.podTime,''))<>'' THEN business_pod_locks.podTime ELSE excluded.podTime END,
+      source=CASE WHEN TRIM(COALESCE(business_pod_locks.podTime,''))<>'' THEN business_pod_locks.source ELSE excluded.source END,
+      updatedAt=excluded.updatedAt`);
+  for(const [bill,item] of evidence)stmt.run(type,bill,item.podTime,item.source,now,now);
+  return evidence.size;
 }
 
 function permanentEventTime(row={}) {
@@ -538,6 +579,7 @@ function mirrorBusinessTables(db, state, type, now) {
       podTime=CASE WHEN excluded.podTime<>'' THEN excluded.podTime ELSE business_pod_locks.podTime END,
       updatedAt=excluded.updatedAt`);
   for (const bill of state.podLocks) podStmt.run(type, bill, '', now, now);
+  persistPermanentBusinessPodTimes(db,type,state,now);
 
   const active = new Set(state.nextCarryBills.length ? state.nextCarryBills : state.carryBills);
   const podSet = new Set(state.podLocks);
