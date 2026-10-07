@@ -1334,7 +1334,7 @@ async function settingsBackupNow(){
 }
 async function ceLogin(){try{const r=await post('/api/ce-login',{tenantId:byId('v625CeTenant').value||'000000',username:byId('v625CeUser').value.trim(),password:byId('v625CePassword').value},30000);byId('v625CePassword').value='';setText('v625CeStatus','已连接');note('v625CeMessage','CE登录成功：'+(r.authStatus?.account||''),'success')}catch(e){note('v625CeMessage','登录失败：'+e.message,'error')}}
 async function ceLogout(){try{await post('/api/ce-logout',{},15000);setText('v625CeStatus','未连接');note('v625CeMessage','已退出CE系统。','success')}catch(e){note('v625CeMessage','退出失败：'+e.message,'error')}}
-async function importShop(){const file=byId('v625ShopFile').files?.[0];if(!file)return;const fd=new FormData();fd.append('file',file);try{await request('/api/import-shop-codes',{method:'POST',body:fd},60000);setText('v625ShopMeta','更新完成')}catch(e){setText('v625ShopMeta','更新失败')}}
+async function importShop(){const file=byId('v625ShopFile').files?.[0];if(!file)return;const fd=new FormData();fd.append('file',file);try{const r=await request('/api/import-shop-codes',{method:'POST',body:fd},60000);v748QualityRefreshKeys.clear();setText('v625ShopMeta','更新完成 · '+fmt(r.imported?.imported||0)+'个门店编码已生效');if(page==='business'&&v628BusinessReportDate)void refreshV748BusinessTrackQuality(v628BusinessReportDate)}catch(e){setText('v625ShopMeta','更新失败：'+e.message)}}
 
 async function loadLogs(){
   try{
