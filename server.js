@@ -545,7 +545,7 @@ app.post('/api/auth/logout', (req, res) => res.redirect(307, '/api/ce-logout'));
 
 const fastSqlDashboardCache = new Map();
 
-function fastDashboardBatch(snapshotId = '') {
+function fastDashboardBatch(snapshotId = '', reportDate = '') {
   const db = getDb();
   if (String(snapshotId || '').trim()) {
     return db.prepare(`
@@ -555,6 +555,17 @@ function fastDashboardBatch(snapshotId = '') {
       WHERE b.snapshotId=? AND b.status='VALID'
       LIMIT 1
     `).get(String(snapshotId).trim()) || null;
+  }
+  const requestedDate=String(reportDate||'').trim().slice(0,10);
+  if(/^\d{4}-\d{2}-\d{2}$/.test(requestedDate)){
+    return db.prepare(`
+      SELECT b.snapshotId,b.reportDate,s.status AS snapshotStatus
+      FROM unified_import_batches b
+      LEFT JOIN unified_snapshots s ON s.snapshotId=b.snapshotId
+      WHERE b.reportDate=? AND b.status='VALID'
+      ORDER BY b.createdAt DESC
+      LIMIT 1
+    `).get(requestedDate) || null;
   }
   return db.prepare(`
     SELECT b.snapshotId,b.reportDate,s.status AS snapshotStatus
@@ -593,10 +604,10 @@ function loadFastSqlAggregateState(scope) {
   };
 }
 
-function loadFastSqlBusinessState(businessType, snapshotId = '') {
+function loadFastSqlBusinessState(businessType, snapshotId = '', reportDate = '') {
   const type = String(businessType || '').toUpperCase();
   if (!['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN'].includes(type)) return null;
-  const batch = fastDashboardBatch(snapshotId);
+  const batch = fastDashboardBatch(snapshotId, reportDate);
   const range = cachedFastRange(batch);
   if (!range) return null;
   const source = range.states[type];
@@ -650,6 +661,12 @@ app.get('/api/home-quality-summary', async (req, res) => {
   try {
     const reportDate=String(req.query.reportDate||'');
     const snapshotId=String(req.query.snapshotId||'');
+    if(String(req.query.fast||'')==='1'){
+      const payload=buildHomeQualitySummary({reportDate,snapshotId});
+      res.setHeader('Cache-Control','private, max-age=3');
+      res.setHeader('X-CE-QC-Home-Summary','FAST_LOCAL_ONLY');
+      return res.json(payload);
+    }
     const payload=await buildHomeQualitySummaryWithArchive({reportDate,snapshotId});
     try{
       const diag=diagnoseSelectedDateTiming(payload?.reportDate||reportDate,snapshotId);
@@ -787,7 +804,27 @@ app.get('/api/shopee/state', async (req, res) => {
 app.get('/api/business-state/:businessType', async (req, res) => {
   try {
     const requestedSnapshotId = String(req.query.snapshotId || '');
+    const requestedReportDate = String(req.query.reportDate || '').slice(0,10);
     const requestedType = String(req.params.businessType || '').toUpperCase();
+    if (requestedType === 'WHPP' && req.query.compact === '1') {
+      const source = loadWhppState();
+      const sourceDate = String(source.reportDate || '').slice(0,10);
+      if (!requestedReportDate || requestedReportDate === sourceDate) {
+        const dashboard = buildWhppDashboard(source);
+        const accounting = buildCanonicalBusinessAccounting(source,'WHPP');
+        const state = compactDashboardState({
+          ...source,
+          viewBusinessType:'WHPP',
+          total:Number(dashboard.metrics?.total || source.pnhBills?.length || 0),
+          dashboard,
+          detailTabs:dashboard.detailTabs || {},
+          accounting,
+          historicalEvidenceRecovery:{state:'DEFERRED_FOR_FAST_NAVIGATION',readOnly:true}
+        });
+        res.setHeader('X-CE-QC-Business-State','FAST_WHPP_CURRENT');
+        return res.json({ok:true,businessType:'WHPP',reportDate:sourceDate,snapshotId:source.snapshotId||source.sourceSnapshotId||'',snapshotStatus:source.snapshotStatus||'',state});
+      }
+    }
     if (requestedType === 'WHPP') {
       const source = loadWhppState();
       const reportDate = String(source.reportDate || req.query.reportDate || '').trim();
@@ -831,7 +868,7 @@ app.get('/api/business-state/:businessType', async (req, res) => {
       });
     }
     if (req.query.compact === '1') {
-      const fast = loadFastSqlBusinessState(req.params.businessType, requestedSnapshotId);
+      const fast = loadFastSqlBusinessState(req.params.businessType, requestedSnapshotId, requestedReportDate);
       if (fast) return res.json({ ok: true, businessType: fast.viewBusinessType || fast.businessType, reportDate: fast.reportDate, snapshotId: fast.snapshotId, snapshotStatus: fast.snapshotStatus, state: fast });
     }
     const source = loadLightweightUnifiedBusinessState(req.params.businessType, requestedSnapshotId);
@@ -1596,13 +1633,27 @@ app.get('/api/tracking-workspace', async (req, res) => {
   const snapshotId = String(req.query.snapshotId || unified?.snapshotId || '');
   const reportDate = String(req.query.reportDate || unified?.reportDate || '');
   const scope = ['all', 'pod'].includes(String(req.query.scope || '')) ? String(req.query.scope) : 'actionable';
+  const requestedBusinessType=String(req.query.businessType||'').trim().toUpperCase();
+  const unifiedTypes=new Set(['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN']);
   let states = [];
   if (snapshotId) {
-    states = ['CE', 'CEAF', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN'].map(type => loadLightweightUnifiedBusinessState(type, snapshotId));
-    const whppState = loadWhppState();
-    if (!reportDate || String(whppState.reportDate || '') === reportDate) states.push(whppState);
+    if(unifiedTypes.has(requestedBusinessType)){
+      states=[loadLightweightUnifiedBusinessState(requestedBusinessType,snapshotId)];
+    }else if(requestedBusinessType==='WHPP'){
+      const whppState=loadWhppState();
+      if(!reportDate||String(whppState.reportDate||'')===reportDate)states=[whppState];
+    }else{
+      states = ['CE', 'CEAF', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN'].map(type => loadLightweightUnifiedBusinessState(type, snapshotId));
+      const whppState = loadWhppState();
+      if (!reportDate || String(whppState.reportDate || '') === reportDate) states.push(whppState);
+    }
   }
-  if (!states.some(state => state?.finalRows?.length)) states = [await loadState(), loadBusinessState(SHOPEE), loadWhppState()];
+  if (!states.some(state => state?.finalRows?.length)) {
+    if(requestedBusinessType==='WHPP')states=[loadWhppState()];
+    else if(requestedBusinessType.startsWith('SHOPEE'))states=[loadBusinessState(SHOPEE)];
+    else if(['CE','CEAF','TBKH','ALI1688'].includes(requestedBusinessType))states=[loadLightweightUnifiedBusinessState(requestedBusinessType,snapshotId)];
+    else states = [await loadState(), loadBusinessState(SHOPEE), loadWhppState()];
+  }
   const allRows = states.flatMap(state => workspaceRows(state, state.businessType || 'CCSL'));
   const priority = row => row.queryStatus === '待重试' ? 0 : row.isActionable ? 1 : 2;
   allRows.sort((a, b) => priority(a) - priority(b) || String(a.businessType).localeCompare(String(b.businessType)) || String(a.shipmentCode).localeCompare(String(b.shipmentCode)));
