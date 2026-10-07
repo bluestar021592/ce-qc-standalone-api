@@ -12,6 +12,7 @@ import { readV329ThreeBusinessDailyCache } from './v329ThreeBusinessDailyCache.j
 import { requestSelectedDateTimingRepair, inspectSelectedDateTimingRepair, selectedDatePodBills } from './selectedDateTimingEvidenceRepair.js';
 import { recoverV498SavedShopeePodDates, extractV498SavedShopeePodEvidence } from './v498SavedShopeePodEvidence.js';
 import { v495SavedTerminalEventPodDate } from './v419CanonicalExportLedgerTruth.js';
+import { extractDailyReportSigningEvidence } from './dailyReportSigningTiming.js';
 
 const TYPES = Object.freeze(['CE','CEAF','TBKH','ALI1688','WHPP','SHOPEECN','SHOPEEVN']);
 const TIMING_TYPES = Object.freeze(['TBKH','WHPP','SHOPEECN','SHOPEEVN']);
@@ -142,13 +143,14 @@ function summarizeTimingRows(rows = []) {
   const podRows = rows.filter(row=>row.isPod);
   const usable = podRows.filter(row=>row.evidence?.ok);
   const missing = podRows.filter(row=>!row.evidence?.ok);
+  const attemptNo=row=>Number(row.attemptEvidence?.attempt||row.evidence?.attempt||0);
   return {
     overall:{...average(usable),totalPodCount:podRows.length,missingEvidenceCount:missing.length},
     pp:{...average(usable.filter(row=>row.region==='PP')),totalPodCount:podRows.filter(row=>row.region==='PP').length},
     pv:{...average(usable.filter(row=>row.region==='PV')),totalPodCount:podRows.filter(row=>row.region==='PV').length},
-    attempt1:average(usable.filter(row=>row.evidence.attempt===1)),
-    attempt2:average(usable.filter(row=>row.evidence.attempt===2)),
-    attempt3:average(usable.filter(row=>row.evidence.attempt>=3)),
+    attempt1:average(usable.filter(row=>attemptNo(row)===1)),
+    attempt2:average(usable.filter(row=>attemptNo(row)===2)),
+    attempt3:average(usable.filter(row=>attemptNo(row)>=3)),
     evidence:{
       valid:usable.length,
       missing:missing.length,
@@ -207,6 +209,29 @@ function membershipFinalRows(snapshotId, reportDate, businessType) {
     ORDER BY u.rowNumber,u.shipmentCode
   `).all(storageType,storageType,storageType,snapshotId,reportDate,businessType);
 }
+function dailyReportSigningEvidenceForBills(snapshotId='',reportDate='',businessType='',bills=[]){
+  const result=new Map();
+  const values=[...new Set((bills||[]).map(value=>String(value||'').trim().toUpperCase()).filter(Boolean))];
+  if(!snapshotId||!reportDate||!businessType||!values.length)return result;
+  const db=getDb();
+  for(let i=0;i<values.length;i+=350){
+    const chunk=values.slice(i,i+350),marks=chunk.map(()=>'?').join(',');
+    let rows=[];
+    try{
+      rows=db.prepare(`SELECT shipmentCode,regionCode,rowJson FROM unified_import_rows
+        WHERE snapshotId=? AND reportDate=? AND UPPER(TRIM(businessType))=? AND UPPER(TRIM(shipmentCode)) IN (${marks})`)
+        .all(snapshotId,reportDate,String(businessType||'').toUpperCase(),...chunk);
+    }catch{}
+    for(const row of rows){
+      const bill=String(row.shipmentCode||'').trim().toUpperCase();if(!bill)continue;
+      const parsed=safeJson(row.rowJson),raw=parsed?.raw&&typeof parsed.raw==='object'?parsed.raw:parsed;
+      const evidence=extractDailyReportSigningEvidence(raw);
+      if(evidence?.ok)result.set(bill,{...evidence,region:String(row.regionCode||parsed?.regionCode||'').toUpperCase()});
+    }
+  }
+  return result;
+}
+
 function pushEvidenceRows(result, rows=[], source='') {
   for(const row of rows||[]){
     const bill=String(row.shipmentCode||'').trim().toUpperCase();
@@ -463,6 +488,7 @@ function timingRows(snapshotId,reportDate,businessType) {
     : membershipFinalRows(snapshotId,reportDate,businessType);
 
   const canonicalPodSet=new Set(selectedDatePodBills(businessType,reportDate,snapshotId));
+  const dailyReportTiming=dailyReportSigningEvidenceForBills(snapshotId,reportDate,businessType,[...canonicalPodSet]);
   const savedTerminalTiming=savedTerminalPodTimingEvidence(reportDate,businessType,canonicalPodSet);
   const snapshotTiming=completedSnapshotTimingEvidence(reportDate,businessType,canonicalPodSet);
   const rowMap=new Map();
@@ -513,11 +539,15 @@ function timingRows(snapshotId,reportDate,businessType) {
     const strictLedger=!direct.ok?strictLedgerTiming(ledger.get(shipmentCode)||{}):null;
     const savedTerminalFallback=!direct.ok&&!strictLedger?savedTerminalTiming.get(shipmentCode)||null:null;
     const snapshotFallback=!direct.ok&&!strictLedger&&!savedTerminalFallback?snapshotTiming.get(shipmentCode)||null:null;
+    const dailyReportFallback=dailyReportTiming.get(shipmentCode)||null;
+    const trackEvidence=direct.ok?{...direct,evidenceSource:(events.get(shipmentCode)||[]).some(x=>x.evidenceSource==='track_events')?'track_events':'business_track_events'}:(strictLedger||savedTerminalFallback||snapshotFallback||direct);
+    const attemptEvidence=direct.ok?direct:(strictLedger||((snapshotFallback?.attempt||0)>0?snapshotFallback:null));
     const ledgerRow=ledger.get(shipmentCode)||{};
     return {
-      shipmentCode,region:String(row.regionCode||'').toUpperCase(),
+      shipmentCode,region:String(row.regionCode||dailyReportFallback?.region||'').toUpperCase(),
       isPod:Boolean(canonicalPodSet.has(shipmentCode)||positivePodMembership(row,ledgerRow)),isReturned:isReturned(row),
-      evidence:direct.ok?{...direct,evidenceSource:(events.get(shipmentCode)||[]).some(x=>x.evidenceSource==='track_events')?'track_events':'business_track_events'}:(strictLedger||savedTerminalFallback||snapshotFallback||direct),
+      evidence:dailyReportFallback||trackEvidence,
+      attemptEvidence:attemptEvidence||null,
       membershipSource:canonicalPodSet.has(shipmentCode)?'canonical_pod_snapshot':(Number(row.isPod||0)===1?'final_rows':(String(ledgerRow.terminalReason||'').toUpperCase()==='POD'?'qc_tracking_ledger':'raw_terminal_proof'))
     };
   });
@@ -543,11 +573,14 @@ async function timingForBatchWithArchive(batch,businessType,recoveredOverride=nu
     const direct=timingEvidence(events.get(shipmentCode)||[]);
     const ledgerRow=ledger.get(shipmentCode)||{};
     const strictLedger=!direct.ok?strictLedgerTiming(ledgerRow):null;
-    const savedFallback=!direct.ok&&!strictLedger&&row.evidence?.ok?row.evidence:null;
+    const existingSigning=row.evidence?.ok?row.evidence:null;
+    const recoveredTrack=direct.ok?{...direct,evidenceSource:(events.get(shipmentCode)||[]).some(x=>x.evidenceSource==='historical_archive')?'historical_archive':(events.get(shipmentCode)||[]).some(x=>x.evidenceSource==='track_events')?'track_events':'business_track_events'}:(strictLedger||direct);
+    const attemptEvidence=direct.ok?direct:(strictLedger||row.attemptEvidence||null);
     return{
       ...row,
       isPod:Boolean(row.isPod||archivePod||positivePodMembership(row,ledgerRow)),
-      evidence:direct.ok?{...direct,evidenceSource:(events.get(shipmentCode)||[]).some(x=>x.evidenceSource==='historical_archive')?'historical_archive':(events.get(shipmentCode)||[]).some(x=>x.evidenceSource==='track_events')?'track_events':'business_track_events'}:(strictLedger||savedFallback||direct),
+      evidence:existingSigning||recoveredTrack,
+      attemptEvidence,
       membershipSource:archivePod?(recovered.podEvidenceByBill?.get?.(shipmentCode)?.source||'historical_archive'):(row.membershipSource||'current_truth')
     };
   });
@@ -776,9 +809,12 @@ export function buildHomeQualitySummary(options={}) {
     returns,
     timingEvidenceRepair:{active:timingRepairActive,failed:timingRepairFailed,exhausted:timingRepairExhausted,types:timingRepairTypes,readOnly:true},
     timingRule:{
-      start:'TRACK_70_DELIVERY_START',
-      fallback:'TRACK_60_ASSIGN_START_ONLY_WHEN_NO_70',
-      terminal:'TRACK_80_POD',
+      signingStart:'DAILY_REPORT_ORDER_TIME',
+      signingTerminal:'DAILY_REPORT_DELIVERY_TIME_WHEN_STATUS_Y',
+      signingFallback:'SAVED_POD_TIME_OR_TRACK_EVIDENCE',
+      attemptStart:'TRACK_70_DELIVERY_START',
+      attemptFallback:'TRACK_60_ASSIGN_START_ONLY_WHEN_NO_70',
+      attemptTerminal:'TRACK_80_POD',
       missingEvidence:'EXCLUDED_FROM_AVERAGE',
       dayMode:'CAMBODIA_NATURAL_DAY_INCLUSIVE'
     }
