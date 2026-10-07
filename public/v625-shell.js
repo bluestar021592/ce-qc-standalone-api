@@ -568,7 +568,7 @@ async function loadHome(options={}){
     if(!exhausted&&missingCount===0&&Number(data.overall?.podCount||0)>0)v700TimingAvailability[type]='AVAILABLE';
     setText(prefix+'Overall',showDays(data.overall?.avgDays));
     setText(prefix+'Pod',exhausted
-      ?('POD已确认 '+fmt(data.overall?.totalPodCount||0)+' 票 · 历史签收时间缺失')
+      ?('日报时效 '+fmt(data.overall?.podCount||0)+' / POD总数 '+fmt(data.overall?.totalPodCount||0)+' 票 · 待后续日报回补 '+fmt(missingCount))
       :('有效时效 '+fmt(data.overall?.podCount||0)+' / POD总数 '+fmt(data.overall?.totalPodCount||0)+' 票'));
     setText(prefix+'PP',showDays(data.pp?.avgDays));setText(prefix+'PPPod',fmt(data.pp?.podCount||0)+' / '+fmt(data.pp?.totalPodCount||0)+'票');
     setText(prefix+'PV',showDays(data.pv?.avgDays));setText(prefix+'PVPod',fmt(data.pv?.podCount||0)+' / '+fmt(data.pv?.totalPodCount||0)+'票');
@@ -580,8 +580,8 @@ async function loadHome(options={}){
     if(missingButton){
       const counter=byId('v626Timing'+type+'Missing');
       for(const node of [...missingButton.childNodes])if(node!==counter)node.remove();
-      missingButton.insertBefore(document.createTextNode(exhausted?'历史时间缺失 ':'待补轨迹 '),counter||null);
-      missingButton.title=exhausted?'POD状态已确认，但CE当前可用历史接口不再提供该批运单的真实签收时间；系统已停止重复补查。':'查看缺失轨迹明细';
+      missingButton.insertBefore(document.createTextNode(exhausted?'待后续日报回补 ':'待补轨迹 '),counter||null);
+      missingButton.title=exhausted?'POD状态已确认；当前已上传日报还没有最终派件时间，后续日报出现该运单最新Y/POD记录后会自动回补签收天数。':'查看缺失轨迹明细';
     }
     if(['WHPP','SHOPEECN','SHOPEEVN'].includes(type)){setText('v626Timing'+type+'Return',fmt(returns[type]?.count||0));setText('v626Timing'+type+'ReturnRate',pct(returns[type]?.rate||0))}
   }
@@ -593,7 +593,7 @@ async function loadHome(options={}){
     timingRepairBtn.style.setProperty('display',noMoreRepair?'none':'inline-flex','important');
   }
   setText('v625TimingPeriod',summary?.reportDate
-    ?('统计日报 '+summary.reportDate+(totalMissingCount===0?' · 日报下单时间→派件时间（含首日）':(noMoreRepair?' · POD已确认，历史签收时间证据已耗尽':' · 日报派件时间 / 轨迹补充证据')))
+    ?('统计日报 '+summary.reportDate+(totalMissingCount===0?' · 最新日报记录：下单时间→派件时间（含首日）':(noMoreRepair?' · 已读日报时效；缺失票等待后续日报自动回补':' · 日报派件时间 / 轨迹补充证据')))
     :'统计当前日报POD');
 
   const history=historyRows;
@@ -611,7 +611,7 @@ async function runTimingRepairNow(){
   if(missingTypes.length&&!repairable){
     if(btn){btn.disabled=true;btn.hidden=true;btn.style.setProperty('display','none','important')}
     const date=selectedReportDate()||v626LatestImport?.reportDate||'';
-    setText('v625TimingPeriod','统计日报 '+date+' · 当前无可补时效数据');
+    setText('v625TimingPeriod','统计日报 '+date+' · 当前无需重复查接口；缺失票等待后续日报自动回补');
     return;
   }
   const latest=v626LatestImport||await latestImportContext();
@@ -651,13 +651,13 @@ function renderTimingMissing(type){
   const historicalUnavailable=v700TimingAvailability?.[type]==='HISTORICAL_EVIDENCE_UNAVAILABLE';
   const repairState=v741TimingRepairStates?.[type]||{};
   const podConfirmedNoTime=historicalUnavailable&&Number(repairState.confirm85||0)>0&&Number(repairState.confirm85WithTime||0)===0;
-  setText('v631TimingMissingTitle',(type==='SHOPEECN'?'SHOPEE CN':type==='SHOPEEVN'?'SHOPEE VN':type)+(historicalUnavailable?' 历史签收时间缺失':' 待补轨迹'));
-  setText('v631TimingMissingMeta',(selectedReportDate()||byId('v625ToDate')?.value||'')+' · '+rows.length+' 票'+(historicalUnavailable?' · POD已确认，时效不可计算':''));
+  setText('v631TimingMissingTitle',(type==='SHOPEECN'?'SHOPEE CN':type==='SHOPEEVN'?'SHOPEE VN':type)+(historicalUnavailable?' 待后续日报回补':' 待补轨迹'));
+  setText('v631TimingMissingMeta',(selectedReportDate()||byId('v625ToDate')?.value||'')+' · '+rows.length+' 票'+(historicalUnavailable?' · POD已确认，等待后续日报最终派件时间':''));
   tbody.replaceChildren();
   if(!rows.length)tbody.innerHTML='<tr><td colspan="4">当前没有待补轨迹运单</td></tr>';
   else for(const row of rows){
     const tr=document.createElement('tr');
-    const exhaustedReason=podConfirmedNoTime?'POD已确认（orderStatus=85），但CE历史接口未提供真实签收时间，时效不可计算':'POD已确认，但当前可用历史证据缺少真实签收时间，时效不可计算';
+    const exhaustedReason=podConfirmedNoTime?'POD已确认（orderStatus=85），当前已上传日报尚无最终派件时间；后续日报更新后自动回补':'POD已确认，当前日报尚无最终派件时间；后续日报更新后自动回补';
     for(const value of [row.shipmentCode,type,historicalUnavailable?exhaustedReason:timingMissingReason(row.reason)]){const td=document.createElement('td');td.textContent=value||'—';tr.appendChild(td)}
     const td=document.createElement('td'),a=document.createElement('a');
     a.href='/tracking?auth=v625&code='+encodeURIComponent(row.shipmentCode||'')+'&reportDate='+encodeURIComponent(selectedReportDate()||byId('v625ToDate')?.value||'')+'&businessType='+encodeURIComponent(type);
