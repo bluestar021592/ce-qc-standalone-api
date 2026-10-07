@@ -62,7 +62,7 @@ async function readFamilyProgress(type,reportDate){
   return json('/api/v33/run-progress'+qs,15000);
 }
 function familyResumeEndpoint(type){return type==='SHOPEE'?'/api/shopee/run/resume':'/api/resume'}
-async function recoverFamilyTransport(type,reportDate){
+async function recoverFamilyTransport(type,reportDate,retryEndpoint){
   const label=type==='SHOPEE'?'SHOPEE':'CCSL';
   appendLiveLog(label+'连接短暂中断，正在等待本地后台恢复并核对已保存进度…');
   await waitBackendReady();
@@ -87,7 +87,7 @@ async function recoverFamilyTransport(type,reportDate){
       resubmitted=true;
       appendLiveLog(label+'后台已恢复但任务未运行，自动从已保存断点继续一次。');
       try{
-        await post(familyResumeEndpoint(type),{},0);
+        await post(retryEndpoint||familyResumeEndpoint(type),{},0);
         void refreshLiveProgress();
         return {ok:true,recoveredTransport:true,resubmitted:true};
       }catch(error){
@@ -110,7 +110,7 @@ async function runFamilyRequest(type,endpoint,reportDate){
   try{return await post(endpoint,{},0)}
   catch(error){
     if(!isTransportLoss(error))throw error;
-    return recoverFamilyTransport(type,reportDate);
+    return recoverFamilyTransport(type,reportDate,endpoint);
   }
 }
 const setText=(id,val)=>{const el=byId(id);if(el)el.textContent=val===undefined||val===null||val===''?'—':String(val)};
