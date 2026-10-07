@@ -1400,20 +1400,26 @@ async function executeShopeeRunRequest(req, res, options = {}) {
     }
     if (!(state.pnhBills || []).length) return res.status(400).json({ ok: false, code: 'EMPTY_DAILY_REPORT', error: 'SHOPEE日报有效运单数为0，请核对日报解析结果。' });
     if (!summarizeToken(await loadToken()).hasAccessToken) return res.status(400).json({ ok: false, error: '请先登录CE系统。' });
-    try {
-      const probeBills = state.pnhBills.slice(0, Math.min(5, state.pnhBills.length));
-      await client.confirmQuery(probeBills);
-      state.apiDiagnostic = { apiName: 'otwms-order-confirm-query', method: 'POST', endpoint: '/api/otwms/order/confirm-query', bodyShape: '{shipmentCodes:[...]}', shipmentCount: probeBills.length, preflight: 'passed', checkedAt: new Date().toISOString() };
-      saveBusinessState(state, SHOPEE);
-    } catch (error) {
-      const diagnostic = normalizeApiError(error);
-      const status = Number(diagnostic.ceStatus || 0);
-      const code = [401, 403].includes(status) ? 'AUTH_REQUIRED' : ([400, 422].includes(status) ? 'REQUEST_SCHEMA_INVALID' : (status === 404 ? 'ENDPOINT_INVALID' : 'CE_PREFLIGHT_FAILED'));
-      const message = code === 'AUTH_REQUIRED' ? 'CE系统登录已失效，请在系统设置重新登录后点击继续处理。' : (diagnostic.ceMsg || diagnostic.message || 'CE扫描预检失败');
-      state.apiDiagnostic = { apiName: 'otwms-order-confirm-query', method: 'POST', endpoint: '/api/otwms/order/confirm-query', bodyShape: '{shipmentCodes:[...]}', shipmentCount: Math.min(5, state.pnhBills.length), httpStatus: diagnostic.ceStatus || '', ceCode: diagnostic.ceCode || '', ceMsg: diagnostic.ceMsg || '', preflight: 'failed', checkedAt: new Date().toISOString() };
-      state.processing = { ...(state.processing || {}), running: false, paused: code === 'AUTH_REQUIRED', error: message };
-      saveBusinessState(state, SHOPEE);
-      return res.status(409).json({ ok: false, code, error: message, diagnostic: state.apiDiagnostic });
+    // Fresh starts keep a small connectivity/schema probe. A RESUME must not sit
+    // behind a second blocking probe: the bounded batch pipeline already owns retry
+    // and exact error reporting for unfinished work. Skipping the duplicate probe
+    // makes progress visible immediately after restart/recovery.
+    if (!options.resume) {
+      try {
+        const probeBills = state.pnhBills.slice(0, Math.min(5, state.pnhBills.length));
+        await client.confirmQuery(probeBills);
+        state.apiDiagnostic = { apiName: 'otwms-order-confirm-query', method: 'POST', endpoint: '/api/otwms/order/confirm-query', bodyShape: '{shipmentCodes:[...]}', shipmentCount: probeBills.length, preflight: 'passed', checkedAt: new Date().toISOString() };
+        saveBusinessState(state, SHOPEE);
+      } catch (error) {
+        const diagnostic = normalizeApiError(error);
+        const status = Number(diagnostic.ceStatus || 0);
+        const code = [401, 403].includes(status) ? 'AUTH_REQUIRED' : ([400, 422].includes(status) ? 'REQUEST_SCHEMA_INVALID' : (status === 404 ? 'ENDPOINT_INVALID' : 'CE_PREFLIGHT_FAILED'));
+        const message = code === 'AUTH_REQUIRED' ? 'CE系统登录已失效，请在系统设置重新登录后点击继续处理。' : (diagnostic.ceMsg || diagnostic.message || 'CE扫描预检失败');
+        state.apiDiagnostic = { apiName: 'otwms-order-confirm-query', method: 'POST', endpoint: '/api/otwms/order/confirm-query', bodyShape: '{shipmentCodes:[...]}', shipmentCount: Math.min(5, state.pnhBills.length), httpStatus: diagnostic.ceStatus || '', ceCode: diagnostic.ceCode || '', ceMsg: diagnostic.ceMsg || '', preflight: 'failed', checkedAt: new Date().toISOString() };
+        state.processing = { ...(state.processing || {}), running: false, paused: code === 'AUTH_REQUIRED', error: message };
+        saveBusinessState(state, SHOPEE);
+        return res.status(409).json({ ok: false, code, error: message, diagnostic: state.apiDiagnostic });
+      }
     }
     const before = getBusinessRunStatus(SHOPEE, reportDate).lock;
     if (options.resume && (!before || before.status === 'finished')) return res.status(409).json({ ok: false, code: 'RUN_NOT_RECOVERABLE', error: 'SHOPEE当前没有可恢复任务。' });
