@@ -372,6 +372,12 @@ function savedTerminalPodTimingEvidence(reportDate,businessType,canonicalPodSet=
         if(evidence)consider(bill,evidence,`local_${spec[0]}_pod_date`);
       }
     }
+    let locks=[];try{locks=db.prepare(`SELECT shipmentCode,podTime,source FROM business_pod_locks WHERE businessType=? AND UPPER(TRIM(shipmentCode)) IN (${marks}) AND TRIM(COALESCE(podTime,''))<>''`).all(owner,...chunk)}catch{}
+    for(const row of locks){
+      const bill=snapshotBill(row);if(result.has(bill))continue;
+      const podDate=normalizeDate(row.podTime);if(!podDate)continue;
+      consider(bill,{shipmentCode:bill,podDate,timestamp:row.podTime,field:'podTime',terminalProof:'PERSISTENT_POD_LOCK'},'business_pod_locks');
+    }
     let states=[];try{states=db.prepare(`SELECT shipmentCode,state,apiStatus,lastEventTime,stateJson FROM shipment_current_state WHERE shipmentCode IN (${marks})`).all(...chunk)}catch{}
     for(const row of states){
       const bill=snapshotBill(row);if(result.has(bill))continue;
