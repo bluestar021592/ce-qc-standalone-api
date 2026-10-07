@@ -306,8 +306,8 @@ async function fetchLiveProgress(reportDate=''){
   let whppPayload=whppR.status==='fulfilled'?whppR.value:null;
   const unifiedCompleted=Boolean(date&&String(v626LatestImport?.reportDate||'').slice(0,10)===date&&String(v626LatestImport?.snapshotStatus||'').toUpperCase()==='COMPLETED');
   if(whppPayload?.completionLock?.locked||familyComplete(whppPayload?.runtime||{}))v738WhppCompletionLatch.add(date);
-  if(!whppPayload&&(unifiedCompleted||v738WhppCompletionLatch.has(date))){
-    whppPayload={runtime:{active:false,reportDate:date,phase:'完成',outcome:'COMPLETED',lastMessage:'WHPP已完成（统一日报完成锁）'},completionLock:{locked:true,reportDate:date,reason:'V738_UNIFIED_COMPLETED_FALLBACK'},summary:{},log:[]};
+  if(unifiedCompleted||v738WhppCompletionLatch.has(date)){
+    whppPayload={...(whppPayload||{}),runtime:{...(whppPayload?.runtime||{}),active:false,reportDate:date,phase:'完成',outcome:'COMPLETED',lastMessage:'WHPP已完成（统一日报完成锁）'},completionLock:{...(whppPayload?.completionLock||{}),locked:true,finalized:true,reportDate:date,reason:'V739_UNIFIED_COMPLETED_OVERRIDE'},summary:whppPayload?.summary||{},log:whppPayload?.log||[]};
   }
   whppPayload=whppPayload||{};
   const whppLock=whppPayload.completionLock||{};
@@ -347,6 +347,7 @@ function renderLiveProgress(bundle={}){
   setText('v626StageScan',scanStage);setText('v626StageTrack',trackStage);setText('v626StageDone',doneStage);
   setText('v626ImportScan',scanStage);setText('v626ImportTrack',trackStage);setText('v626ImportDone',doneStage);
   const badge=byId('v626ProcessState');if(badge){badge.textContent=completeFamilies>=3?'已完成':allRunning?'处理中':'待处理';badge.className='v625-badge '+(completeFamilies>=3?'success':allRunning?'warning':'warning')}
+  const resumeBtn=byId('v625RunResume');if(resumeBtn){resumeBtn.disabled=allComplete;resumeBtn.hidden=allComplete;resumeBtn.style.setProperty('display',allComplete?'none':'inline-flex','important')}
   for(const item of [
     [ccsl.generatedAt||new Date().toISOString(),ccsl.phase||ccsl.lastMessage],
     [shopee.generatedAt||new Date().toISOString(),shopee.phase||shopee.lastMessage],
@@ -895,8 +896,10 @@ async function refreshImportCanonicalClassification(reportDate=''){
 async function loadImport(){
   try{
     const [latest,history]=await Promise.all([json('/api/import/unified-latest',7000),json('/api/unified-history?limit=15',7000)]);
-    v626LatestImport=latest.import||v626LatestImport;
-    if(latest.import){renderImport(latest.import);note('v625ImportMessage','已读取最近一次综合日报。','success')}
+    const latestImport=latest.import||v626LatestImport||null;
+    const exactHistory=(history.rows||[]).find(r=>String(r.reportDate||'').slice(0,10)===String(latestImport?.reportDate||'').slice(0,10))||null;
+    v626LatestImport=latestImport?{...latestImport,...(exactHistory?{snapshotStatus:exactHistory.snapshotStatus||exactHistory.status||latestImport.snapshotStatus||'IMPORTED',createdAt:exactHistory.createdAt||latestImport.createdAt}:{} )}:v626LatestImport;
+    if(v626LatestImport){renderImport(v626LatestImport);note('v625ImportMessage','已读取最近一次综合日报。','success')}
     const tbody=byId('v625ImportHistory');if(tbody){tbody.replaceChildren();
       for(const r of history.rows||[]){
         const tr=document.createElement('tr');
