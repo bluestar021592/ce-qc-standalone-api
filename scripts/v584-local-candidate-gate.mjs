@@ -116,6 +116,7 @@ const TASKS=[
   ['node',['scripts/v744-signing-ui-and-terminal-backfill-smoke.mjs']],
   ['node',['scripts/v745-whpp-timing-source-diagnostics-smoke.mjs']],
   ['node',['scripts/v746-whpp-canonical-daily-timing-smoke.mjs']],
+  ['node',['scripts/v747-offline-safe-dependency-gate-smoke.mjs']],
   ['node',['--test',
     'test/unified-import-v7.test.js',
     'test/unified-import-ceaf.test.js',
