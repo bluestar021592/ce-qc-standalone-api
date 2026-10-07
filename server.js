@@ -1686,6 +1686,7 @@ app.get('/api/tracking-workspace', async (req, res) => {
     trackSuccess: allRows.filter(row => row.queryStatus === '成功').length,
     trackFailed: allRows.filter(row => row.queryStatus === '失败').length,
     retryPending: allRows.filter(row => row.queryStatus === '待重试').length,
+    actionable: allRows.filter(row => row.isActionable).length,
     completed: allRows.filter(row => ['成功', 'POD跳过', '退回跳过', '特殊节点跳过', '正常分流跳过'].includes(row.queryStatus)).length
   };
   res.json({ ok: true, reportDate, batchId: unified?.batchId || '', snapshotId, scope, allRowCount: allRows.length, summary, qualitySignals, qualityRows, rows: rows.slice(0, 5000) });
