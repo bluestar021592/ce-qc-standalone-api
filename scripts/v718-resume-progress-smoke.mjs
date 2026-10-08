@@ -18,7 +18,9 @@ assert.match(shell,/if\(action==='RESUME'\)/,'interrupted run must resume, not r
 assert.match(shell,/if\(action==='WAIT'\)/,'existing running business must be awaited');
 assert.match(shell,/if\(action==='DONE'\|\|action==='ZERO_TICKET'\)/,'completed and 0-ticket families must never be rerun');
 assert.match(shell,/if\(familyComplete\(current\.whpp\)\)/,'completed WHPP must remain untouched');
-assert.doesNotMatch(shell,/\['RUN_ALREADY_COMPLETED','RUN_NOT_RECOVERABLE'\]\.includes\(code\)/,'no-run must not be silently ignored by resume');
+const resumeBody=shell.slice(shell.indexOf('const proof=await v761FamilyRecoveryProof(reportDate)'),shell.indexOf('const verified=await v760VerifyAllFamilies(reportDate,counts)'));
+assert.ok(resumeBody.length>0,'V761 resume branch must exist');
+assert.doesNotMatch(resumeBody,/RUN_NOT_RECOVERABLE/,'no-run must not be silently ignored by selected-date resume');
 assert.doesNotMatch(shell,/if\(e\.status===409\)return/,'resume UI must not swallow all 409 failures');
 assert.match(html,/<meta name="ce-qc-build" content="V\d+_[A-Z0-9_]+">/,'current shell build marker missing');
 assert.match(html,/v625-shell\.js\?v=\d{8}-v\d+-\d+/,'current shell cache bust missing');
