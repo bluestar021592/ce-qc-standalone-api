@@ -374,13 +374,21 @@ function v759RememberWhppProof(response,requestedDate=''){
   const total=Number(truth.canonicalTotal||0);
   // Snapshot + each exact member's scanned final terminal state must agree;
   // status='COMPLETED' from the aggregate import alone is never enough.
-  const complete=truth.locked===true&&truth.snapshotLocked===true
+  const fullTerminal=truth.locked===true&&truth.snapshotLocked===true
     &&truth.membershipMatches===true&&total>0
     &&Number(truth.canonicalResolved||0)===total
     &&Number(truth.finalCount||0)===total
     &&Number(evidence.scanRows||0)===total
     &&Number(evidence.finalRows||0)===total
     &&Number(evidence.podRows||0)+Number(evidence.returnedRows||0)===total;
+  // A complete WHPP scan/final job can legitimately contain open customer
+  // states. It is not necessary to invent POD/return outcomes to show 3/3.
+  const processingComplete=truth.locked===true&&truth.processingEvidenceVerified===true
+    &&truth.membershipMatches===true&&total>0
+    &&Number(truth.canonicalResolved||0)===total
+    &&Number(truth.finalCount||0)===total
+    &&Number(evidence.scanRows||0)===total&&Number(evidence.finalRows||0)===total;
+  const complete=fullTerminal||processingComplete;
   const proofKey=date+'|'+snapshotId;
   const terminalCount=Number(evidence.podRows||0)+Number(evidence.returnedRows||0);
   // V763: preserve negative, read-only evidence. A past "finished" runtime or
@@ -393,7 +401,7 @@ function v759RememberWhppProof(response,requestedDate=''){
       bills:(truth.terminalEvidenceGaps||[]).map(row=>String(row.shipmentCode||'')).filter(Boolean)
     });
   }else v763WhppEvidenceGaps.delete(proofKey);
-  if(!complete||truth.terminalEvidenceVerified===false)return false;
+  if(!complete||(truth.terminalEvidenceVerified===false&&!processingComplete))return false;
   v759WhppCompletionProofs.set(date+'|'+snapshotId,{
     locked:true,reportDate:date,snapshotId,
     reason:String(truth.reason||''),
@@ -659,15 +667,21 @@ async function fetchLiveProgress(reportDate=''){
   }
   const gap=v763WhppEvidenceGaps.get(date+'|'+String(v626LatestImport?.snapshotId||''));
   if(gap&&!zeroWhpp){
-    // The prior "finished" runtime and completion latch are not independent
-    // proof once actual status evidence has contradicted them.
-    v738WhppCompletionLatch.delete(date);
-    const incompletePhase='终态待核验（缺'+gap.missing+'票）';
-    whpp={...whpp,complete:false,active:false,running:false,
-      runStatus:'EVIDENCE_INCOMPLETE',outcome:'EVIDENCE_INCOMPLETE',phase:incompletePhase,
-      evidenceGap:gap,
-      completionLock:{...whpp.completionLock,locked:false,finalized:false,reason:'WHPP_TERMINAL_EVIDENCE_GAP'}
-    };
+    const processingProof=v759PinnedWhppProof(date);
+    if(processingProof){
+      // The job is complete. The remaining POD/return states stay separately
+      // visible and eligible for future tracking; never mutate their status.
+      whpp={...whpp,evidenceGap:gap,complete:true,active:false,running:false,
+        phase:'完成',runStatus:'finished',outcome:'COMPLETED'};
+    }else{
+      v738WhppCompletionLatch.delete(date);
+      const incompletePhase='处理证据待核验（'+gap.missing+'票未归类）';
+      whpp={...whpp,complete:false,active:false,running:false,
+        runStatus:'EVIDENCE_INCOMPLETE',outcome:'EVIDENCE_INCOMPLETE',phase:incompletePhase,
+        evidenceGap:gap,
+        completionLock:{...whpp.completionLock,locked:false,finalized:false,reason:'WHPP_TERMINAL_EVIDENCE_GAP'}
+      };
+    }
   }
   // The diagnostic is the authoritative owner for historical CCSL/SHOPEE.
   // While it is loading, do not conflate "not yet verified" with "not run".
@@ -705,10 +719,12 @@ function renderLiveProgress(bundle={}){
   for(const id of ['v626ProcessBar','v626ImportBar']){const el=byId(id);if(el)el.style.width=Math.max(0,Math.min(100,overall))+'%'}
   const activePhase=whpp.active?('WHPP · '+v756ProgressDescriptor('WHPP',whpp)):shopee.running?('SHOPEE · '+v756ProgressDescriptor('SHOPEE',shopee)):ccsl.running?('CCSL · '+v756ProgressDescriptor('CCSL',ccsl)):v752LaunchingFamily?(v752LaunchingFamily+'启动中'):'';
   const whppVerifying=String(familyLabels.whpp||'').includes('核验中');
-  const phase=allComplete?'全部处理完成':activePhase||(whpp.evidenceGap?'已完成2/3业务 · WHPP '+whpp.evidenceGap.total+'票中有'+whpp.evidenceGap.missing+'票终态待核验（无需重新上传）':whppVerifying?'WHPP完成状态核验中，请勿重复扫描':completeFamilies===2&&familyLabels.whpp!=='完成'?'已完成 2/3 业务 · WHPP待处理，请点击“继续未完成处理”':completeFamilies?('已完成 '+completeFamilies+'/3 业务，等待下一业务处理'):'等待开始处理');
+  const phase=allComplete
+    ?'全部处理完成'+(whpp.evidenceGap?' · WHPP '+whpp.evidenceGap.missing+'票状态待跟进':'')
+    :activePhase||(whpp.evidenceGap?'已完成'+completeFamilies+'/3业务 · WHPP '+whpp.evidenceGap.missing+'票状态待核验（无需重新上传）':whppVerifying?'WHPP完成状态核验中，请勿重复扫描':completeFamilies===2&&familyLabels.whpp!=='完成'?'已完成 2/3 业务 · WHPP待处理，请点击“继续未完成处理”':completeFamilies?('已完成 '+completeFamilies+'/3 业务，等待下一业务处理'):'等待开始处理');
   setText('v626ProcessText',phase);setText('v626ImportProgressText',phase);
   const progressCount=(scanTotal+trackTotal)>0?((scanDone+trackDone)+' / '+(scanTotal+trackTotal)):(completeFamilies+'/3 业务完成');
-  const reconciledCount=whpp.evidenceGap?progressCount+' · WHPP终态 '+whpp.evidenceGap.terminalCount+'/'+whpp.evidenceGap.total:progressCount;
+  const reconciledCount=whpp.evidenceGap?progressCount+' · WHPP已确认终态 '+whpp.evidenceGap.terminalCount+'/'+whpp.evidenceGap.total:progressCount;
   setText('v626ProcessCount',reconciledCount);setText('v626ImportProgressCount',reconciledCount);
   const scanStage=allComplete?'完成':(/轨迹|track/i.test(activePhase)?'完成':allRunning?'处理中':completeFamilies?('已完成 '+completeFamilies+'/3业务'):'等待');
   const trackStage=allComplete?'完成':(/轨迹|track/i.test(activePhase)?'处理中':allRunning?'等待扫描完成':completeFamilies?('已完成 '+completeFamilies+'/3业务'):'等待');
