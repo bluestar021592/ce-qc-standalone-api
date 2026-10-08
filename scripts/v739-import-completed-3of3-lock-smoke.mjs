@@ -37,7 +37,8 @@ assert.match(shell,/const verified=await v760VerifyAllFamilies\(reportDate,count
 assert.match(shell,/if\(!verified\.ok\)\{/,'unfinished family must veto green success');
 assert.match(shell,/return\{ok:false,error:reason\}/,'unfinished result must not be reported as successful');
 assert.match(shell,/await post\('\/api\/timing-repair\/start'/,'timing repair must still exist after successful verification');
-assert.ok(shell.indexOf('if(!verified.ok)')<shell.indexOf("post('/api/timing-repair/start'"),'timing repair may only start after 3-of-3 proof');
+const runTaskBody=shell.slice(shell.indexOf("async function runTask(mode,explicitReportDate"),shell.indexOf("function note(id,msg,tone"));
+assert.ok(runTaskBody.indexOf('if(!verified.ok)')>=0&&runTaskBody.indexOf('if(!verified.ok)')<runTaskBody.indexOf("post('/api/timing-repair/start'"),'timing repair may only start after 3-of-3 proof within runTask');
 assert.doesNotMatch(shell,/note\('v625RunMessage','7业务处理完成，签收时效补证已启动。','success'\)/,'unconditional green success must be retired');
 
 const predicateStart=shell.indexOf('function familyComplete(value={})');
