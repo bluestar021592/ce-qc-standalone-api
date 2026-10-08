@@ -43,6 +43,13 @@ assert.match(shell,/Date\.now\(\)-cached\.at<20000/,'nonterminal 20-second works
 assert.match(shell,/qualityKey='CE_QC_V765_TRACK_'\+targetBusiness\+'\|'\+reportDate\+'\|'\+snapshotId/,'track refresh needs snapshot-keyed throttling');
 assert.match(shell,/const historyPromise=json\('\/api\/unified-history\?limit=7'/,'history metadata must be supplemental');
 assert.match(shell,/v765InvalidateAllProofCache\(\)/,'new import/purge must invalidate verified completion cache');
+assert.match(server,/const v765WorkspaceReadCache=new Map\(\)/,'heavy tracking workspace must have bounded short-lived server cache');
+assert.match(server,/const V765_WORKSPACE_TTL_MS=20000/,'server cache must never keep dynamic status indefinitely');
+assert.match(server,/const cacheEligible=Boolean\(identity&&explicitSnapshotId&&explicitReportDate&&requestedBusinessType&&scope==='all'\)/,'cache must be bound to user+snapshot+date+business');
+assert.match(server,/req\.query\.fresh\|\|''/,'explicit manual refresh must bypass memoized workspace');
+assert.match(server,/while\(v765WorkspaceReadCache\.size>2\)/,'server workspace cache must be memory bounded');
+assert.match(shell,/if\(options\.skipQualityRefresh\)workspaceQuery\.set\('fresh','1'\)/,'manual/CE completed refresh must bypass stale business workspace response');
+
 
 const cacheSlice=shell.slice(shell.indexOf('const V765_PROOF_CACHE_PREFIX='),shell.indexOf('const v762FamilyTerminalProofs=new Map();'));
 const saved=new Map();
