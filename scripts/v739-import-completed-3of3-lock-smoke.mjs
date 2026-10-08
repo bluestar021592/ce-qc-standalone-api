@@ -80,6 +80,9 @@ const projectEnd=shell.indexOf('const v759WhppCompletionProofs=new Map();');
 assert.ok(proofStart>=0&&verifyStart>proofStart&&projectEnd>projectStart,'V762 terminal proof owner functions missing');
 const realDate='2026-07-04',snap='JULY04-IMMUTABLE';
 const simulateProof=new Function('proof','reportDate','snapshotId',`
+ // V765: sessionStorage is a presentation-only cache, never the owner of a
+ // durable status. Keep V762's business-evidence simulation isolated.
+ const v765RememberVerifiedFamilies=()=>{};
  ${shell.slice(proofStart,verifyStart)}
  ${shell.slice(projectStart,projectEnd)}
  const accepted=v762RememberFamilyCompletionProof(proof,reportDate,snapshotId);
