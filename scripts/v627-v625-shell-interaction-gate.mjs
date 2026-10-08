@@ -80,5 +80,12 @@ assert.match(js,/status===401\?'登录会话失效/,'account management must dis
 assert.match(js,/status===403\?'当前会话没有管理员权限/,'account management must distinguish actual role failure');
 assert.doesNotMatch(js,/需要管理员权限或读取失败/,'generic account error must be removed');
 assert.match(html,/id="v758WhppDiagnosticResult"/,'WHPP diagnostic must render on the already-authenticated import page');
+assert.match(js,/let settingsUsers=\[\];/,'account-list state must be defined before loadSettingsUsers writes it');
+assert.match(js,/settingsUsers=Array\.isArray\(r\.rows\)\?r\.rows:\[\]/,'successful admin read must keep an array of users');
+assert.match(server,/app\.get\('\/api\/whpp\/completion-proof'/,'lightweight WHPP completion read must have its own protected same-origin endpoint');
+assert.match(server,/snapshotId:String\(batch\.snapshotId\),whppCompletion:persistentWhppCompletionTruth\(getDb\(\),reportDate\)/,'completion proof must be pinned to real selected-date immutable snapshot');
+assert.match(js,/json\('\/api\/whpp\/completion-proof\?reportDate='/,'WHPP selected-date proof must use the lightweight protected endpoint');
+assert.match(js,/WHPP完成状态核验中，请勿重复扫描/,'unavailable WHPP progress must not encourage duplicate scanning');
 
-console.log('[V758/V627] shell interaction passed · same-origin WHPP diagnostic wired · admin user errors reveal HTTP status · navigation and data-management unchanged');
+
+console.log('[V759/V627] fixed account-list declaration, lightweight selected-date WHPP proof, and fail-safe progress UI · shell interaction passed · same-origin WHPP diagnostic wired · admin user errors reveal HTTP status · navigation and data-management unchanged');
