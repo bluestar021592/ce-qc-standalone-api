@@ -1596,11 +1596,76 @@ function renderSettingsUsers(){
 async function loadSettingsUsers(){
   const tbody=byId('v625SettingsUserRows');if(tbody)tbody.innerHTML='<tr><td colspan="7">正在读取…</td></tr>';
   try{
-    const r=await json('/api/admin/users',7000);
-    settingsUsers=r.rows||[];
+    const r=await json('/api/admin/users',15000);
+    settingsUsers=Array.isArray(r.rows)?r.rows:[];
     renderSettingsUsers();
   }catch(e){
-    if(tbody)tbody.innerHTML='<tr><td colspan="7">需要管理员权限或读取失败</td></tr>';
+    const status=Number(e?.status||0);
+    const code=String(e?.payload?.code||e?.code||'').trim();
+    const reason=status===401?'登录会话失效，请在当前系统地址重新登录。'
+      :status===403?'当前会话没有管理员权限，请核对登录账号。'
+      :e?.code==='CLIENT_WAIT_TIMEOUT'?'账号列表读取超过15秒，可能是数据库繁忙；请稍后重试。'
+      :e?.message||'账号列表读取失败。';
+    if(tbody){
+      tbody.replaceChildren();
+      const tr=document.createElement('tr'),td=document.createElement('td');
+      td.colSpan=7;
+      td.textContent='读取失败：'+reason+(status?'（HTTP '+status+(code?', '+code:'')+'）':code?'（'+code+'）':'');
+      tr.appendChild(td);tbody.appendChild(tr);
+    }
+    console.warn('[CE-QC][V758] admin users list fetch failed',{status,code,message:reason});
+  }
+}
+async function runV758WhppReadOnlyDiagnostic(){
+  const view=byId('v758WhppDiagnosticResult'),button=byId('v758WhppReadOnlyDiagnostic');
+  if(!view)return;
+  const displayed=String(byId('v626ImportProgressDate')?.textContent||'').trim();
+  const params=currentParams();
+  const date=String((/^\d{4}-\d{2}-\d{2}$/.test(displayed)?displayed:'')||v626LatestImport?.reportDate||params.get('reportDate')||'').slice(0,10);
+  view.hidden=false;
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(date)){view.textContent='未找到有效日报日期。请先打开对应日期的导入记录。';return}
+  if(button){button.disabled=true;button.textContent='读取诊断中…'}
+  view.textContent='正在通过当前登录会话读取 '+date+' 的WHPP持久证据（只读，不扫描、不修改数据）…';
+  try{
+    // Relative URL and same-origin credentials ensure the session used by the open
+    // application is also used by this diagnostic, without bypassing accessIdentity.
+    const response=await json('/api/selected-date-truth?reportDate='+encodeURIComponent(date),20000);
+    const truth=response?.whppCompletion||{};
+    const coverage=truth.terminalEvidenceCoverage||{};
+    const report={
+      reportDate:date,
+      unifiedStatus:response?.unified?.status||'',
+      whppCompletion:{
+        locked:truth.locked===true,
+        reason:truth.reason||'',
+        completionSource:truth.completionSource||'',
+        sourceCount:Number(truth.sourceCount||0),
+        finalCount:Number(truth.finalCount||0),
+        canonicalTotal:Number(truth.canonicalTotal||0),
+        canonicalResolved:Number(truth.canonicalResolved||0),
+        membershipMatches:truth.membershipMatches===true,
+        terminalEvidenceVerified:truth.terminalEvidenceVerified===true,
+        terminalEvidenceCoverage:coverage,
+        snapshotLocked:truth.snapshotLocked===true,
+        dailyLocked:truth.dailyLocked===true,
+        historyLocked:truth.historyLocked===true,
+        unifiedWhppCompleted:truth.unifiedWhppCompleted===true
+      }
+    };
+    const summary='WHPP '+(truth.locked===true?'证据校验完成':'仍缺完成证据')+
+      ' · 原始 '+Number(truth.sourceCount||0)+'票 · 扫描 '+Number(coverage.scanRows||0)+
+      '票 · 最终记录 '+Number(coverage.finalRows||0)+'票 · POD '+Number(coverage.podRows||0)+
+      '票 · 退回 '+Number(coverage.returnedRows||0)+'票\n原因：'+String(truth.reason||'未知')+
+      '\n完成依据：'+String(truth.completionSource||'无')+'\n\n';
+    view.textContent=summary+JSON.stringify(report,null,2);
+  }catch(error){
+    const status=Number(error?.status||0),code=String(error?.payload?.code||error?.code||'');
+    const reason=status===401?'本页面的登录会话已失效；请使用同一系统地址重新登录。'
+      :status===403?'本会话没有诊断读取权限。'
+      :error?.message||'诊断服务读取失败。';
+    view.textContent='诊断未能读取（业务数据未修改）：'+reason+(status?'\nHTTP '+status:'')+(code?' · '+code:'');
+  }finally{
+    if(button){button.disabled=false;button.textContent='诊断WHPP完成状态（只读）'}
   }
 }
 async function loadSettingsBackups(){
@@ -1733,6 +1798,8 @@ function bind(){
   byId('v625ImportButton')?.addEventListener('click',doImport);
   byId('v625RunStart')?.addEventListener('click',()=>runTask('start'));
   byId('v625RunResume')?.addEventListener('click',()=>runTask('resume'));
+  byId('v758WhppReadOnlyDiagnostic')?.addEventListener('click',runV758WhppReadOnlyDiagnostic);
+  byId('v758ReloadUsers')?.addEventListener('click',()=>void loadSettingsUsers());
   byId('v734TimingRepairNow')?.addEventListener('click',runTimingRepairNow);
   byId('v626RefreshOpenPod')?.addEventListener('click',refreshOpenPodNow);
   byId('v641WhppScanPending')?.addEventListener('click',scanWhppPending);
