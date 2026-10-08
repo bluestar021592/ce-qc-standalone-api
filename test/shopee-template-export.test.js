@@ -6,9 +6,10 @@ import test from 'node:test';
 import ExcelJS from 'exceljs';
 import { createShopeeTemplateWorkbook } from '../src/shopeeTemplateExporter.js';
 
-const EXPECTED = ['看板首页', '每日汇总', '全部明细', '金边明细', '外省明细', '门店明细', 'POD明细', '未POD明细', '分配派送中明细', 'Pending明细', '退回明细'];
+// V650 is the approved active master: 1 daily dashboard + 9 detail sheets.
+const EXPECTED = ['每日看板', '全部明细', '金边明细', '外省明细', '门店明细', 'POD明细', '未POD明细', '分配派送中明细', 'Pending明细', '退回明细'];
 
-test('SHOPEE daily weekly and monthly exports copy the locked 11-sheet master', async () => {
+test('SHOPEE daily weekly and monthly exports preserve the active locked 10-sheet master', async () => {
   const outputDir = await fs.mkdtemp(path.join(os.tmpdir(), 'shopee-master-'));
   const snapshots = [
     { snapshotId: 's1', reportDate: '2026-08-01', payload: { finalRows: [{ shipmentCode: 'SPE1', businessType: 'SHOPEECN', regionCode: 'PP', currentState: 'POD', orderStatus: 85 }] } },
@@ -18,15 +19,21 @@ test('SHOPEE daily weekly and monthly exports copy the locked 11-sheet master', 
     const result = await createShopeeTemplateWorkbook({ type: 'SHOPEECN', periodType, range: { from: '2026-08-01', to: '2026-08-02' }, snapshots, outputDir });
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.readFile(result.file);
-    assert.deepEqual(workbook.worksheets.slice(0, 11).map(sheet => sheet.name), EXPECTED);
-    assert.equal(workbook.worksheets[0].getCell('A5').value.result, 2);
-    assert.equal(workbook.worksheets[0].getCell('O5').value.result, 1);
+    assert.deepEqual(workbook.worksheets.map(sheet => sheet.name), EXPECTED);
+    assert.deepEqual(result.audit.sheetNames, EXPECTED, 'export audit must match actual worksheet order');
+    const dashboard=workbook.getWorksheet('每日看板');
+    assert.equal(dashboard.getCell('A5').value.result, 2, 'all source shipments must remain counted');
+    assert.equal(dashboard.getCell('O5').value.result, 1, 'returned count must remain linked to returned detail');
+    assert.match(dashboard.getCell('N5').value.formula, /退回明细!A1/, 'returned dashboard card must open returned detail');
+    assert.equal(workbook.getWorksheet('退回明细').getCell('B2').value, 'SPE2', 'returned waybill must appear on the returned sheet');
+    assert.equal(workbook.getWorksheet('全部明细').getCell('B3').value, 'SPE2', 'complete ledger must contain second day member');
+    assert.equal(dashboard.getCell('A11').value, '2026-08-01', 'daily trend must preserve first source date');
+    assert.equal(dashboard.getCell('A12').value, '2026-08-02', 'daily trend must preserve second source date');
     let brokenLinks = 0;
     workbook.eachSheet(sheet => sheet.eachRow(row => row.eachCell(cell => {
       if (cell.value?.formula?.includes('R退回明细')) brokenLinks += 1;
     })));
-    assert.equal(brokenLinks, 0);
-    assert.match(workbook.getWorksheet('退回明细').getCell('O1').value.formula, /看板首页/);
+    assert.equal(brokenLinks, 0, 'broken return hyperlinks must be repaired');
   }
 });
 
