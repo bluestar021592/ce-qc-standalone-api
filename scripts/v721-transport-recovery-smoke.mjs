@@ -11,9 +11,9 @@ assert.match(shell,/async function recoverFamilyTransport\(type,reportDate,retry
 assert.match(shell,/await readFamilyProgress\(type,reportDate\)/,'transport recovery must inspect persisted selected-date progress before retry');
 assert.match(shell,/if\(progress\?\.running\)/,'active background work must be waited rather than duplicated');
 assert.match(shell,/await post\(retryEndpoint\|\|familyResumeEndpoint\(type\),\{\},0\)/,'only one exact endpoint retry is allowed after backend recovery');
-assert.match(shell,/runFamilyRequest\('CCSL','\/api\/resume',reportDate\)/,'CCSL resume must use transport recovery owner');
-assert.match(shell,/runFamilyRequest\('SHOPEE','\/api\/shopee\/run\/resume',reportDate\)/,'SHOPEE resume must use transport recovery owner');
+assert.match(shell,/const endpoint=type==='SHOPEE'\?'\/api\/shopee\/run\/resume':'\/api\/resume'/,'exact CCSL/SHOPEE resume endpoints must remain selected');
+assert.match(shell,/await runFamilyRequest\(type,endpoint,date\)/,'CCSL/SHOPEE resumed tasks must use the transport recovery owner');
 assert.match(html,/<meta name="ce-qc-build" content="V\d+_[A-Z0-9_]+">/,'current shell build marker missing');
 assert.match(html,/v625-shell\.js\?v=\d{8}-v\d+-\d+/,'current shell cache bust missing');
 
-console.log('[V721] CCSL/SHOPEE local fetch disconnects reconnect, inspect persisted progress, and resume once without raw Failed to fetch');
+console.log('[V761/V721] CCSL/SHOPEE local fetch disconnects reconnect, inspect persisted progress, and resume once without raw Failed to fetch');
