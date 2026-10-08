@@ -23,10 +23,13 @@ assert.match(helper,/recoveredFromEmptySnapshot:true/,'CN recovery must be expli
 assert.match(fixture,/assert\.equal\(whpp\.bills\.length,166\)/,'fixture must require WHPP POD=166');
 assert.match(fixture,/assert\.equal\(completion\.completionSource,'UNIFIED_VERIFIED_WHPP_CHILD'\)/,'fixture must require verified unified WHPP child receipt');
 assert.match(fixture,/assert\.equal\(falseCompletion\.locked,false\)/,'fixture must reject aggregate unified completion without a real WHPP child');
+assert.match(helper,/terminalEvidenceVerified/,'WHPP historical recovery requires all exact members to carry scan/final terminal evidence');
+assert.match(fixture,/assert\.equal\(recoveredCompletion\.locked,true\)/,'full terminal evidence must recover 3-of-3 after a reimport displaced the completed snapshot');
+assert.match(fixture,/API_PENDING_RETRY/,'terminal recovery must reject unresolved CE status');
 
 assert.match(shell,/ce-qc-build" content="V\d{3,}_[A-Z0-9_]+"/,'V625 shell must publish V681+ build marker');
 assert.match(shell,/v625-shell\.js\?v=\d{8}-v\d{3,}-1/,'V625 shell must force-refresh V681+ JavaScript');
 assert.match(server,/\/api\/selected-date-truth/,'read-only selected-date runtime truth endpoint must exist');
 assert.match(server,/build:'V681_SELECTED_DATE_TRUTH'/,'runtime truth endpoint must retain selected-date truth owner identity');
 
-console.log('[V754/V751] selected-date acceptance: verified WHPP child completion only + false aggregate completion rejected + VN/CN timing truth retained');
+console.log('[V754/V751] selected-date acceptance: verified WHPP child or complete terminal evidence + false aggregate completion rejected + VN/CN timing truth retained');
