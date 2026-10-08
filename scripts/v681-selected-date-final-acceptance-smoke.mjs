@@ -17,6 +17,9 @@ assert.match(helper,/sameBills\(sourceBills,allBills\)/,'Shopee completed snapsh
 assert.match(helper,/IMMUTABLE_SHOPEE_COMPLETED_SNAPSHOT/,'exact completed Shopee snapshot must be an explicit truth source');
 assert.match(fixture,/Current normalized tables deliberately contain ZERO POD evidence/,'fixture must reproduce live zero-denominator symptom');
 assert.match(fixture,/assert\.equal\(vn\.bills\.length,545\)/,'fixture must require VN POD=545');
+assert.match(fixture,/assert\.equal\(cn\.bills\.length,4\)/,'fixture must require CN POD recovery from later VALID daily report');
+assert.match(helper,/latestDailyPodBillsForSource/,'selected-date Shopee truth must recover exact source members from later daily POD evidence when completed snapshot POD is empty');
+assert.match(helper,/recoveredFromEmptySnapshot:true/,'CN recovery must be explicitly diagnosed instead of silently replacing snapshot truth');
 assert.match(fixture,/assert\.equal\(whpp\.bills\.length,166\)/,'fixture must require WHPP POD=166');
 assert.match(fixture,/assert\.equal\(completion\.completionSource,'UNIFIED_COMPLETED'\)/,'fixture must require unified WHPP completion receipt');
 
@@ -25,4 +28,4 @@ assert.match(shell,/v625-shell\.js\?v=\d{8}-v\d{3,}-1/,'V625 shell must force-re
 assert.match(server,/\/api\/selected-date-truth/,'read-only selected-date runtime truth endpoint must exist');
 assert.match(server,/build:'V681_SELECTED_DATE_TRUTH'/,'runtime truth endpoint must retain selected-date truth owner identity');
 
-console.log('[V681] selected-date acceptance: unified WHPP completion + exact Shopee snapshot POD + forced V625 asset refresh + live diagnostics');
+console.log('[V751] selected-date acceptance: WHPP completion + VN immutable snapshot POD + CN empty-snapshot recovery from later VALID daily POD + live diagnostics');
