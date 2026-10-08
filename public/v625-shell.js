@@ -289,6 +289,71 @@ async function loadSession(){
 
 let v626LatestImport=null;
 let settingsUsers=[];
+// V762: the exact saved run-lock and 1:1 scan/final ledgers are the durable
+// CCSL/SHOPEE completion owners, even if the 7-second light progress request
+// returns stale/empty during local SQLite load.
+const v762FamilyTerminalProofs=new Map();
+const v762FamilyProofInflight=new Map();
+const v762FamilyProofNextRead=new Map();
+function v762RememberFamilyCompletionProof(proof,reportDate='',snapshotId=''){
+  const date=String(reportDate||'').slice(0,10);
+  const snapshot=String(snapshotId||'');
+  if(!date||!snapshot||date!==String(proof?.reportDate||'').slice(0,10)
+      ||snapshot!==String(proof?.snapshotId||''))return null;
+  const accepted={};
+  for(const name of ['CCSL','SHOPEE']){
+    const record=proof?.businesses?.[name]||{};
+    const total=Number(record.sourceCount||0),scan=Number(record.scanCount||0),final=Number(record.finalCount||0);
+    const savedStatus=String(record.runStatus||'').trim().toLowerCase();
+    const currentDate=String(record.currentDate||'').slice(0,10);
+    if(record.action!=='DONE'||!['finished','completed'].includes(savedStatus)
+       ||record.error||total<=0||scan!==total||final!==total
+       ||currentDate!==date||!record.runId)continue;
+    accepted[name]={reportDate:date,snapshotId:snapshot,sourceCount:total,scanCount:scan,finalCount:final,
+      runId:String(record.runId),runStatus:savedStatus};
+  }
+  if(!Object.keys(accepted).length)return null;
+  const key=date+'|'+snapshot;
+  v762FamilyTerminalProofs.set(key,{...(v762FamilyTerminalProofs.get(key)||{}),...accepted});
+  return accepted;
+}
+function v762VerifiedFamilyTruth(reportDate=''){
+  const date=String(reportDate||'').slice(0,10);
+  if(date!==String(v626LatestImport?.reportDate||'').slice(0,10))return null;
+  const snapshotId=String(v626LatestImport?.snapshotId||'');
+  return snapshotId?v762FamilyTerminalProofs.get(date+'|'+snapshotId)||null:null;
+}
+async function v762LoadFamilyTerminalTruth(reportDate=''){
+  const date=String(reportDate||'').slice(0,10);
+  const snapshot=String(v626LatestImport?.snapshotId||'');
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(date)||!snapshot
+     ||date!==String(v626LatestImport?.reportDate||'').slice(0,10))return null;
+  const verified=v762VerifiedFamilyTruth(date);
+  if(verified?.CCSL&&verified?.SHOPEE)return verified;
+  const key=date+'|'+snapshot;
+  if(v762FamilyProofInflight.has(key))return v762FamilyProofInflight.get(key);
+  if(Date.now()<Number(v762FamilyProofNextRead.get(key)||0))return verified;
+  v762FamilyProofNextRead.set(key,Date.now()+30000);
+  const promise=(async()=>{
+    try{
+      const response=await json('/api/family-recovery-proof?reportDate='+encodeURIComponent(date),20000);
+      const saved=v762RememberFamilyCompletionProof(response,date,snapshot);
+      return saved? v762FamilyTerminalProofs.get(key):null;
+    }catch(error){
+      console.warn('[CE-QC][V762] stored completion proof unavailable',date,error?.code||error?.message||error);
+      return null;
+    }finally{v762FamilyProofInflight.delete(key)}
+  })();
+  v762FamilyProofInflight.set(key,promise);
+  return promise;
+}
+function v762ProjectSavedCompletion(existing,proof,date){
+  if(!proof||proof.reportDate!==date)return existing;
+  return {...existing,reportDate:date,runId:proof.runId,running:false,active:false,paused:false,
+    complete:true,runStatus:'finished',outcome:'COMPLETED',phase:'完成',
+    scanDone:proof.scanCount,scanTotal:proof.sourceCount,
+    completionProjection:'V762_EXACT_SNAPSHOT_PERSISTED_RUN_AND_ROWS'};
+}
 const v759WhppCompletionProofs=new Map();
 const v759WhppProofRequests=new Map();
 function v759RememberWhppProof(response,requestedDate=''){
@@ -506,14 +571,18 @@ function familyProgressLabel(value={}){
 const v738WhppCompletionLatch=new Set();
 async function fetchLiveProgress(reportDate=''){
   const date=reportDate||v626LatestImport?.reportDate||'';
-  const [ccslR,shopeeR,whppR]=await Promise.allSettled([
+  const [ccslR,shopeeR,whppR,familyProofR]=await Promise.allSettled([
     json('/api/v33/run-progress?businessType=CCSL'+(date?'&reportDate='+encodeURIComponent(date):''),7000),
     json('/api/v33/run-progress?businessType=SHOPEE'+(date?'&reportDate='+encodeURIComponent(date):''),7000),
-    json('/api/whpp/progress'+(date?'?reportDate='+encodeURIComponent(date):''),7000)
+    json('/api/whpp/progress'+(date?'?reportDate='+encodeURIComponent(date):''),7000),
+    v762LoadFamilyTerminalTruth(date)
   ]);
   let ccsl=ccslR.status==='fulfilled'?ccslR.value:{};
   let shopee=shopeeR.status==='fulfilled'?shopeeR.value:{};
   let whppPayload=whppR.status==='fulfilled'?whppR.value:null;
+  const familyProof=familyProofR.status==='fulfilled'?familyProofR.value:v762VerifiedFamilyTruth(date);
+  if(familyProof?.CCSL)ccsl=v762ProjectSavedCompletion(ccsl,familyProof.CCSL,date);
+  if(familyProof?.SHOPEE)shopee=v762ProjectSavedCompletion(shopee,familyProof.SHOPEE,date);
   const sameLatestDate=Boolean(date&&String(v626LatestImport?.reportDate||'').slice(0,10)===date);
   const countTruth=v755ImportCountTruth.get(date)||null;
   const latestCounts=countTruth?.counts||{};
@@ -1406,6 +1475,8 @@ async function v761DiagnoseFamilyRecovery(){
   if(button){button.disabled=true;button.textContent='正在诊断…'}
   try{
     const proof=await v761FamilyRecoveryProof(date);
+    v762RememberFamilyCompletionProof(proof,date,String(v626LatestImport?.snapshotId||''));
+    void refreshLiveProgress();
     const lines=['日报日期：'+proof.reportDate,'业务完成状态诊断（只读；不会触发扫描）'];
     for(const type of ['CCSL','SHOPEE']){
       const b=proof.businesses?.[type]||{};
