@@ -232,6 +232,28 @@ export function persistentWhppCompletionTruth(db,reportDate=''){
   const membershipMatches=(canonicalTotal>0&&canonicalResolved===canonicalTotal)
     ||(finalCount>0&&(!sourceCount||finalCount===sourceCount));
 
+  // V757: a reimport may invalidate the old WHPP child snapshot even though
+  // every exact selected-date source member still has both persisted scan and
+  // final evidence. This is stronger than merely balancing a dashboard: all
+  // members must be individually terminal (POD or returned), none can be an
+  // unresolved API retry, and the source/member sets must agree. Read-only:
+  // never invent a WHPP child snapshot or mutate a run lock.
+  const exactTerminalRows=Array.isArray(canonical?.rows)?canonical.rows:[];
+  const terminalEvidenceVerified=Boolean(
+    batch&&sourceCount>0&&canonicalTotal===sourceCount&&canonicalResolved===sourceCount
+    &&Number(canonical?.evidence?.scanRows||0)===sourceCount
+    &&Number(canonical?.evidence?.finalRows||0)===sourceCount
+    &&exactTerminalRows.every(row=>{
+      const evidence=row?.truthEvidence||{};
+      const terminal=Boolean(evidence.pod)!==Boolean(evidence.returned);
+      const status=String(row?.apiStatus||row?.API状态||'').trim().toUpperCase();
+      const carry=String(row?.carryStatus||'').trim().toUpperCase();
+      return evidence.scan===true&&evidence.final===true&&terminal
+        &&status!=='API_PENDING_RETRY'&&status!=='FAILED'
+        &&carry!=='OPEN';
+    })
+  );
+
   const snapshotLocked=Boolean(snapshot?.snapshotId);
   const dailyLocked=Boolean(dailySummary.completed===true&&['COMPLETED','COMPLETED_WITH_RETRY'].includes(String(dailySummary.snapshotStatus||dailySummary.reconciliationStatus||'').toUpperCase()));
   const historyBalanced=Boolean(history&&(historySummary.accounting?.balanced===true||Number(historySummary.total||historySummary.accounting?.total||0)>0));
@@ -252,8 +274,9 @@ export function persistentWhppCompletionTruth(db,reportDate=''){
   }
   const unifiedWhppCompleted=unifiedCompleted&&unifiedChildStatus==='COMPLETED'&&unifiedWhppSnapshotVerified;
 
-  const locked=unifiedWhppCompleted||membershipMatches&&(snapshotLocked||dailyLocked||historyLocked);
+  const locked=unifiedWhppCompleted||terminalEvidenceVerified||membershipMatches&&(snapshotLocked||dailyLocked||historyLocked);
   const completionSource=unifiedWhppCompleted?'UNIFIED_VERIFIED_WHPP_CHILD'
+    :terminalEvidenceVerified?'EXACT_WHPP_TERMINAL_SCAN_FINAL_EVIDENCE'
     :snapshotLocked?'IMMUTABLE_EXPORT_SNAPSHOT'
     :dailyLocked?'DAILY_SUMMARY'
     :historyLocked?'FINAL_ROWS_HISTORY':'';
@@ -262,6 +285,8 @@ export function persistentWhppCompletionTruth(db,reportDate=''){
     locked,finalized:locked,reportDate:date,sourceCount,finalCount,
     canonicalTotal,canonicalResolved,unifiedCompleted,unifiedWhppCompleted,
     snapshotLocked,dailyLocked,historyLocked,membershipMatches,
+    terminalEvidenceVerified,
+    terminalEvidenceCoverage:{sourceCount,scanRows:Number(canonical?.evidence?.scanRows||0),finalRows:Number(canonical?.evidence?.finalRows||0),podRows:Number(canonical?.evidence?.podRows||0),returnedRows:Number(canonical?.evidence?.returnedRows||0)},
     snapshotId:String(snapshot?.snapshotId||dailySummary.finalizedSnapshotId||historySummary.snapshotId||batch?.snapshotId||''),
     finalizedAt:String(dailySummary.finalizedAt||snapshot?.generatedAt||snapshot?.createdAt||unifiedSnapshot?.createdAt||history?.updatedAt||''),
     completionSource,
