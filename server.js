@@ -1927,6 +1927,22 @@ app.get('/api/family-recovery-proof', (req,res)=>{
       }
     }catch{evidenceReadable=false}
     const status=String(lock?.status||'').toLowerCase();
+    // V762: matching quantities alone cannot prove matching shipment identity.
+    // Validate exact July-04 source membership against both independently saved
+    // ledgers before allowing a historical completed run to repair UI progress.
+    let exactMemberVerified=false,scanMissing=-1,finalMissing=-1;
+    if(sourceCount>0&&scanCount===sourceCount&&finalCount===sourceCount&&['finished','completed'].includes(status)){
+      try{
+        const source=`SELECT DISTINCT UPPER(TRIM(shipmentCode)) AS code FROM unified_import_rows WHERE snapshotId=? AND reportDate=? AND businessType IN (${markers})`;
+        const scanWhere=group.name==='SHOPEE'?"businessType='SHOPEE' AND reportDate=?":"reportDate=?";
+        const scanSet=`SELECT DISTINCT UPPER(TRIM(shipmentCode)) AS code FROM ${group.scanTable} WHERE ${scanWhere}`;
+        const finalSet=`SELECT DISTINCT UPPER(TRIM(shipmentCode)) AS code FROM ${group.finalTable} WHERE ${scanWhere}`;
+        const missingQuery=part=>`SELECT COUNT(*) AS count FROM (${source} EXCEPT ${part})`;
+        scanMissing=Number(db.prepare(missingQuery(scanSet)).get(snapshotId,date,...group.types,date)?.count??-1);
+        finalMissing=Number(db.prepare(missingQuery(finalSet)).get(snapshotId,date,...group.types,date)?.count??-1);
+        exactMemberVerified=scanMissing===0&&finalMissing===0;
+      }catch(error){console.warn('[CE-QC][V762] read-only exact completion membership unavailable',date,group.name,error?.message||error)}
+    }
     let action='BLOCKED',reason='';
     if(sourceCount===0){action='ZERO_TICKET';reason='该日期该业务确实0票'}
     else if(status==='finished'||status==='completed'){action='DONE';reason='存在业务完成锁；不重复扫描'}
@@ -1935,7 +1951,7 @@ app.get('/api/family-recovery-proof', (req,res)=>{
     else if(['paused','failed'].includes(status)&&lock?.runId){action='RESUME';reason='存在中断任务，允许从断点恢复'}
     else if(evidenceReadable&&!lock?.runId&&scanCount===0&&finalCount===0&&trackCount===0){action='START';reason='没有运行锁且无已保存扫描/最终记录，可首次启动'}
     else {action='BLOCKED';reason='存在扫描、轨迹、最终记录、读取失败或不可辨识运行锁，需要保留历史证据并人工排查'}
-    result[group.name]={sourceCount,scanCount,finalCount,trackCount,evidenceReadable,runId:String(lock?.runId||''),runStatus:status||'NOT_STARTED',phase:String(lock?.currentStage||''),error:String(lock?.errorMessage||''),currentDate:group.currentDate,action,reason};
+    result[group.name]={sourceCount,scanCount,finalCount,scanMissing,finalMissing,exactMemberVerified,trackCount,evidenceReadable,runId:String(lock?.runId||''),runStatus:status||'NOT_STARTED',phase:String(lock?.currentStage||''),error:String(lock?.errorMessage||''),currentDate:group.currentDate,action,reason};
   }
   res.setHeader('Cache-Control','no-store');
   return res.json({ok:true,reportDate:date,snapshotId,businesses:result});
