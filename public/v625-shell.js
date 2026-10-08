@@ -1304,9 +1304,25 @@ async function runTask(mode,explicitReportDate='',explicitImportData=null){
       if(counts.WHPP>0){appendLiveLog('SHOPEE处理完成，开始WHPP本土');await safeWhppRun('start',reportDate)}
       else appendLiveLog('WHPP 当日日报0票，自动跳过');
     }else{
-      appendLiveLog('继续CCSL未完成批次');await runFamilyRequest('CCSL','/api/resume',reportDate).catch(async e=>{const code=String(e.payload?.code||'');if(e.status===409&&['RUN_ALREADY_COMPLETED','RUN_NOT_RECOVERABLE'].includes(code))return;throw e});
-      appendLiveLog('继续SHOPEE未完成批次');await runFamilyRequest('SHOPEE','/api/shopee/run/resume',reportDate).catch(async e=>{const code=String(e.payload?.code||'');if(e.status===409&&['RUN_ALREADY_COMPLETED','RUN_NOT_RECOVERABLE'].includes(code))return;throw e});
-      appendLiveLog('继续WHPP未完成批次');await safeWhppRun('resume',reportDate);
+      const beforeResume=await fetchLiveProgress(reportDate).catch(()=>({ccsl:{},shopee:{},whpp:{}}));
+      if(familyComplete(beforeResume.ccsl)){
+        appendLiveLog('CCSL已完成，继续处理时自动跳过');
+      }else{
+        appendLiveLog('继续CCSL未完成批次');
+        await runFamilyRequest('CCSL','/api/resume',reportDate).catch(async e=>{const code=String(e.payload?.code||'');if(e.status===409&&['RUN_ALREADY_COMPLETED','RUN_NOT_RECOVERABLE'].includes(code))return;throw e});
+      }
+      if(familyComplete(beforeResume.shopee)){
+        appendLiveLog('SHOPEE已完成，继续处理时自动跳过');
+      }else{
+        appendLiveLog('继续SHOPEE未完成批次');
+        await runFamilyRequest('SHOPEE','/api/shopee/run/resume',reportDate).catch(async e=>{const code=String(e.payload?.code||'');if(e.status===409&&['RUN_ALREADY_COMPLETED','RUN_NOT_RECOVERABLE'].includes(code))return;throw e});
+      }
+      if(familyComplete(beforeResume.whpp)){
+        appendLiveLog('WHPP已完成，继续处理时自动跳过');
+      }else{
+        appendLiveLog('继续WHPP未完成批次');
+        await safeWhppRun('resume',reportDate);
+      }
     }
     appendLiveLog('7业务处理完成，开始补齐签收时效60/70→80证据');
     await post('/api/timing-repair/start',{reportDate},15000).catch(error=>appendLiveLog('签收时效补证启动失败：'+error.message));
