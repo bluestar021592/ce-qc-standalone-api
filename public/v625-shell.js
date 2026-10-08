@@ -190,7 +190,25 @@ else if(page==='not-found')showOnly('v625404');
 else showOnly('v625404');
 
 if(!business&& !['home'].includes(page))q('[data-dashboard-actions]')?.setAttribute('hidden','');
-const boardJump=byId('v625BoardJump');if(boardJump)boardJump.addEventListener('change',()=>location.href=boardJump.value);
+function dashboardContextUrl(rawTarget,reportDate='',snapshotId=''){
+  const target=new URL(rawTarget,location.origin);
+  target.searchParams.set('auth','v625');
+  const date=String(reportDate||selectedReportDate()||v626LatestImport?.reportDate||'').slice(0,10);
+  const snapshot=String(snapshotId||currentParams().get('snapshotId')||v626LatestImport?.snapshotId||'');
+  if(date)target.searchParams.set('reportDate',date);
+  if(snapshot)target.searchParams.set('snapshotId',snapshot);
+  return target.pathname+'?'+target.searchParams.toString();
+}
+function syncDashboardNavigationContext(reportDate='',snapshotId=''){
+  const date=String(reportDate||selectedReportDate()||v626LatestImport?.reportDate||'').slice(0,10);
+  const snapshot=String(snapshotId||currentParams().get('snapshotId')||v626LatestImport?.snapshotId||'');
+  const businessKeys=new Set(['ce','ceaf','tbkh','ali1688','whpp','shopeecn','shopeevn']);
+  qa('.v625-nav a[data-key]').forEach(a=>{
+    if(!businessKeys.has(a.dataset.key))return;
+    a.href=dashboardContextUrl(a.getAttribute('href')||'/',date,snapshot);
+  });
+}
+const boardJump=byId('v625BoardJump');if(boardJump)boardJump.addEventListener('change',()=>location.href=dashboardContextUrl(boardJump.value));
 const initialDashboardDate=selectedReportDate()||today();
 byId('v625FromDate')&&(byId('v625FromDate').value=initialDashboardDate);
 byId('v625ToDate')&&(byId('v625ToDate').value=initialDashboardDate);
@@ -279,6 +297,36 @@ let v626ProgressTimer=null;
 let v626TrackingJobId='';
 let v752LaunchingFamily='';
 const v752TerminalProgressLogs=new Set();
+const v756ProgressSnapshots=new Map();
+function v756ProgressDescriptor(family,value={}){
+  const label=familyProgressLabel(value);
+  const scanDone=Number(value.scanDone||0),scanTotal=Number(value.scanTotal||0);
+  const trackDone=Number(value.trackDone||0),trackTotal=Number(value.trackTotal||0);
+  if(familyComplete(value))return '完成';
+  if(value.running||value.active){
+    if(/轨迹/.test(label))return label;
+    if(scanTotal>0)return '扫描 '+scanDone+'/'+scanTotal;
+    if(trackTotal>0&&scanDone>=scanTotal)return '轨迹 '+trackDone+'/'+trackTotal;
+    return label||'处理中';
+  }
+  return label||'待处理';
+}
+function v756LogProgressChange(reportDate,family,value={}){
+  if(!(value.running||value.active)||familyComplete(value))return;
+  const descriptor=v756ProgressDescriptor(family,value);
+  const key=String(reportDate||'')+'|'+family;
+  const signature=[descriptor,Number(value.scanDone||0),Number(value.scanTotal||0),Number(value.trackDone||0),Number(value.trackTotal||0)].join('|');
+  const previous=v756ProgressSnapshots.get(key);
+  if(!previous||previous.signature!==signature){
+    v756ProgressSnapshots.set(key,{signature,changedAt:Date.now(),warnedAt:0});
+    appendLiveLog(family+' · '+descriptor,new Date().toISOString());
+    return;
+  }
+  if(Date.now()-previous.changedAt>=90000&&Date.now()-Number(previous.warnedAt||0)>=90000){
+    previous.warnedAt=Date.now();
+    appendLiveLog(family+' · '+descriptor+' · 进度90秒未变化，后台仍在运行',new Date().toISOString());
+  }
+}
 const V755_BUSINESS_COUNT_TYPES=['CE','CEAF','TBKH','ALI1688','WHPP','SHOPEECN','SHOPEEVN'];
 const v755ImportCountTruth=new Map();
 function rememberV755ImportCounts(data={},source=''){
@@ -451,7 +499,7 @@ function renderLiveProgress(bundle={}){
   const whppPct=allComplete?100:progressPercent(whppBatch,whppBatches);
   const overall=allComplete?100:Math.round((scanPct+trackPct+(whppBatches?whppPct:(completeFamilies/3*100)))/3);
   for(const id of ['v626ProcessBar','v626ImportBar']){const el=byId(id);if(el)el.style.width=Math.max(0,Math.min(100,overall))+'%'}
-  const activePhase=whpp.active?String(whpp.phase||'WHPP处理中'):shopee.running?String(shopee.phase||'SHOPEE处理中'):ccsl.running?String(ccsl.phase||'CCSL处理中'):v752LaunchingFamily?(v752LaunchingFamily+'启动中'):'';
+  const activePhase=whpp.active?('WHPP · '+v756ProgressDescriptor('WHPP',whpp)):shopee.running?('SHOPEE · '+v756ProgressDescriptor('SHOPEE',shopee)):ccsl.running?('CCSL · '+v756ProgressDescriptor('CCSL',ccsl)):v752LaunchingFamily?(v752LaunchingFamily+'启动中'):'';
   const phase=allComplete?'全部处理完成':activePhase||(completeFamilies===2&&familyLabels.whpp!=='完成'?'已完成 2/3 业务 · WHPP待处理，请点击“继续未完成处理”':completeFamilies?('已完成 '+completeFamilies+'/3 业务，等待下一业务处理'):'等待开始处理');
   setText('v626ProcessText',phase);setText('v626ImportProgressText',phase);
   const progressCount=(scanTotal+trackTotal)>0?((scanDone+trackDone)+' / '+(scanTotal+trackTotal)):(completeFamilies+'/3 业务完成');
@@ -469,6 +517,10 @@ function renderLiveProgress(bundle={}){
     ['WHPP',whpp,whpp.heartbeatAt||whpp.finishedAt||new Date().toISOString(),whpp.lastMessage||whpp.phase]
   ];
   for(const [family,value,at,message] of progressLogs){
+    if(value.running||value.active){
+      v756LogProgressChange(bundle.reportDate||value.reportDate||'',family,value);
+      continue;
+    }
     if(!message)continue;
     if(familyComplete(value)){
       const key=[bundle.reportDate||value.reportDate||'',family,String(message)].join('|');
@@ -603,6 +655,7 @@ async function loadHome(options={}){
   }else if(summary?.snapshotId||summary?.reportDate){
     v626LatestImport={...(v626LatestImport||{}),snapshotId:summary.snapshotId,reportDate:summary.reportDate};
   }
+  syncDashboardNavigationContext(summary?.reportDate||requestedDate||'',summary?.snapshotId||selectedBatch?.snapshotId||'');
   const historicalRunning=summary?.historicalEvidenceRecovery?.state==='RUNNING';
   const timingRepairRunning=Boolean(summary?.timingEvidenceRepair?.active);
   if(historicalRunning||timingRepairRunning)scheduleHistoricalEvidenceRefresh('home');
@@ -979,15 +1032,15 @@ async function refreshV748BusinessTrackQuality(reportDate=''){
   }
 }
 async function loadBusiness(options={}){
-  // Navigation first: the visible KPI shell reads only compact/current-day state.
-  // Archive evidence, integrity and row-level workspace hydrate after first paint.
+  // V756 navigation-first: URL context is authoritative for first paint.
+  // Never block a board switch on /api/import/unified-latest before asking for its compact state.
   const whppOnlyAction=byId('v641WhppScanPending');
   if(whppOnlyAction){whppOnlyAction.hidden=true;whppOnlyAction.style.setProperty('display','none','important');}
   try{
     const params=new URLSearchParams(location.search);
-    const latest=v626LatestImport||await latestImportContext();
     const requestedDate=params.get('reportDate')||params.get('toDate')||params.get('fromDate')||'';
     const requestedSnapshot=params.get('snapshotId')||'';
+    const latest=v626LatestImport||null;
     const baseReportDate=requestedDate||latest?.reportDate||'';
     const stateQuery=new URLSearchParams({compact:'1'});
     if(requestedSnapshot)stateQuery.set('snapshotId',requestedSnapshot);
@@ -1001,6 +1054,8 @@ async function loadBusiness(options={}){
     const state=r.state||{},m=metricState(state);
     const snapshotId=r.snapshotId||requestedSnapshot||latest?.snapshotId||'';
     const reportDate=r.reportDate||baseReportDate||latest?.reportDate||'';
+    v626LatestImport={...(v626LatestImport||{}),reportDate,snapshotId};
+    syncDashboardNavigationContext(reportDate,snapshotId);
     v630BusinessDetailTabs=state.detailTabs||state?.dashboard?.detailTabs||{};
     v631BusinessAccounting=state.accounting?.rowsByKind
       ? state.accounting
@@ -1684,12 +1739,12 @@ function bind(){
 async function init(){
   bind();void loadSession();
   if(page==='home'){
-    await latestImportContext();
     await loadHome();
+    void latestImportContext();
   }
   else if(business){
-    await latestImportContext();
     await loadBusiness();
+    void latestImportContext();
   }
   else if(page==='import'){await loadImport()}
   else if(page==='exceptions')await loadExceptions();
