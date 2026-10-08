@@ -365,17 +365,11 @@ async function fetchLiveProgress(reportDate=''){
   if(zeroCcsl)ccsl=zeroComplete(ccsl,'CCSL');
   if(zeroShopee)shopee=zeroComplete(shopee,'SHOPEE');
   if(zeroWhpp)whppPayload={...(whppPayload||{}),runtime:zeroComplete(whppPayload?.runtime||{},'WHPP'),completionLock:{...(whppPayload?.completionLock||{}),locked:true,finalized:true,reportDate:date,reason:'ZERO_TICKET'}};
-  const unifiedCompleted=Boolean(sameLatestDate&&String(v626LatestImport?.snapshotStatus||'').toUpperCase()==='COMPLETED');
+  // V754: import/unified snapshot lifecycle is not a substitute for real business execution.
+  // Only each family's own persisted run/progress truth may mark that family complete.
   if(whppPayload?.completionLock?.locked||familyComplete(whppPayload?.runtime||{}))v738WhppCompletionLatch.add(date);
-  if(unifiedCompleted){
-    const projectComplete=(value,type)=>({...value,businessType:type,reportDate:date,running:false,active:false,complete:true,phase:'完成',runStatus:'completed',outcome:'COMPLETED',lastMessage:type+'已完成（统一日报完成锁）',completionProjection:'UNIFIED_COMPLETED'});
-    ccsl=projectComplete(ccsl,'CCSL');
-    shopee=projectComplete(shopee,'SHOPEE');
-  }
-  if(unifiedCompleted||v738WhppCompletionLatch.has(date)){
-    const reason=unifiedCompleted?'V752_UNIFIED_COMPLETED_3OF3':'V752_WHPP_DURABLE_COMPLETION';
-    const message=unifiedCompleted?'WHPP已完成（统一日报完成锁）':'WHPP已完成（WHPP持久完成锁）';
-    whppPayload={...(whppPayload||{}),runtime:{...(whppPayload?.runtime||{}),active:false,reportDate:date,phase:'完成',outcome:'COMPLETED',lastMessage:message},completionLock:{...(whppPayload?.completionLock||{}),locked:true,finalized:true,reportDate:date,reason},summary:whppPayload?.summary||{},log:whppPayload?.log||[]};
+  if(v738WhppCompletionLatch.has(date)&&!whppPayload?.completionLock?.locked){
+    whppPayload={...(whppPayload||{}),runtime:{...(whppPayload?.runtime||{}),active:false,reportDate:date,phase:'完成',outcome:'COMPLETED',lastMessage:'WHPP已完成（WHPP持久完成锁）'},completionLock:{...(whppPayload?.completionLock||{}),locked:true,finalized:true,reportDate:date,reason:'V754_WHPP_VERIFIED_DURABLE_COMPLETION'},summary:whppPayload?.summary||{},log:whppPayload?.log||[]};
   }
   whppPayload=whppPayload||{};
   const whppLock=whppPayload.completionLock||{};
