@@ -1893,6 +1893,45 @@ app.get('/api/whpp/completion-proof', (req,res)=>{
   res.setHeader('Cache-Control','no-store');
   return res.json({ok:true,reportDate,snapshotId:String(batch.snapshotId),whppCompletion:persistentWhppCompletionTruth(getDb(),reportDate)});
 });
+// V761: read-only selected-date CCSL/SHOPEE recovery disposition.
+// No remote CE calls, run mutations, date switching, or inferred completion.
+app.get('/api/family-recovery-proof', (req,res)=>{
+  const date=String(req.query?.reportDate||'').slice(0,10);
+  if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(date))
+    return res.status(400).json({ok:false,code:'REPORT_DATE_INVALID',error:'缺少有效日报日期'});
+  const db=getDb();
+  const batch=db.prepare("SELECT snapshotId, batchId FROM unified_import_batches WHERE reportDate=? AND status='VALID' ORDER BY createdAt DESC,batchId DESC LIMIT 1").get(date);
+  if(!batch)return res.status(404).json({ok:false,code:'VALID_BATCH_MISSING',error:'该日期缺少有效的综合日报'});
+  const snapshotId=String(batch.snapshotId||'');
+  const currentCcsl=String(getCurrentReportDate()||'').slice(0,10);
+  const currentShopee=String(getBusinessCurrentReportDate(SHOPEE)||'').slice(0,10);
+  const groups=[
+    {name:'CCSL',types:['CE','CEAF','TBKH','ALI1688'],lockTable:'run_locks',scanTable:'scan_results',finalTable:'final_rows',currentDate:currentCcsl},
+    {name:'SHOPEE',types:['SHOPEECN','SHOPEEVN'],lockTable:'business_run_locks',scanTable:'business_scan_results',finalTable:'business_final_rows',currentDate:currentShopee}
+  ];
+  const result={};
+  for(const group of groups){
+    const markers=group.types.map(()=>'?').join(',');
+    const sourceCount=Number(db.prepare(`SELECT COUNT(DISTINCT UPPER(TRIM(shipmentCode))) AS count FROM unified_import_rows WHERE snapshotId=? AND reportDate=? AND businessType IN (${markers})`).get(snapshotId,date,...group.types)?.count||0);
+    const where=group.name==='SHOPEE'?'businessType=? AND reportDate=?':'reportDate=?';
+    const args=group.name==='SHOPEE'?['SHOPEE',date]:[date];
+    const lock=db.prepare(`SELECT runId,status,currentStage,errorMessage,completedAt,updatedAt FROM ${group.lockTable} WHERE ${where} LIMIT 1`).get(...args)||null;
+    const scanCount=Number(db.prepare(`SELECT COUNT(DISTINCT shipmentCode) AS count FROM ${group.scanTable} WHERE ${where}`).get(...args)?.count||0);
+    const finalCount=Number(db.prepare(`SELECT COUNT(DISTINCT shipmentCode) AS count FROM ${group.finalTable} WHERE ${where}`).get(...args)?.count||0);
+    const status=String(lock?.status||'').toLowerCase();
+    let action='BLOCKED',reason='';
+    if(sourceCount===0){action='ZERO_TICKET';reason='该日期该业务确实0票'}
+    else if(status==='finished'||status==='completed'){action='DONE';reason='存在业务完成锁；不重复扫描'}
+    else if(status==='running'){action='WAIT';reason='已有运行任务；不重复启动'}
+    else if(group.currentDate!==date){action='BLOCKED';reason='后台当前业务日期与诊断日期不一致'}
+    else if(['paused','failed'].includes(status)&&lock?.runId){action='RESUME';reason='存在中断任务，允许从断点恢复'}
+    else if(!lock?.runId&&scanCount===0&&finalCount===0){action='START';reason='没有运行锁且无已保存扫描/最终记录，可首次启动'}
+    else {action='BLOCKED';reason='存在扫描、最终记录或不可辨识运行锁，需要保留历史证据并人工排查'}
+    result[group.name]={sourceCount,scanCount,finalCount,runId:String(lock?.runId||''),runStatus:status||'NOT_STARTED',phase:String(lock?.currentStage||''),error:String(lock?.errorMessage||''),currentDate:group.currentDate,action,reason};
+  }
+  res.setHeader('Cache-Control','no-store');
+  return res.json({ok:true,reportDate:date,snapshotId,businesses:result});
+});
 app.post('/api/timing-repair/start', (req,res)=>{
   const reportDate=String(req.body?.reportDate||'').slice(0,10);
   if(!/^\d{4}-\d{2}-\d{2}$/.test(reportDate))return res.status(400).json({ok:false,error:'缺少有效日报日期。'});
