@@ -36,6 +36,9 @@ test('SHOPEE daily weekly and monthly exports preserve the active locked 10-shee
     assert.equal(workbook.getWorksheet('全部明细').getCell('B3').value.text, 'SPE2', 'complete ledger must link second day member');
     assert.equal(dashboard.getCell('A11').value, '2026-08-01', 'daily trend must preserve first source date');
     assert.equal(dashboard.getCell('A12').value, '2026-08-02', 'daily trend must preserve second source date');
+    assert.match(dashboard.getCell('E5').value.formula, /外省明细!A1/, 'PP/PV top cards must not be overwritten by a store card');
+    assert.match(dashboard.getCell('E11').value.formula, /门店明细!A1/, 'store membership must remain accessible from daily rows');
+
     let brokenLinks = 0;
     workbook.eachSheet(sheet => sheet.eachRow(row => row.eachCell(cell => {
       if (cell.value?.formula?.includes('R退回明细')) brokenLinks += 1;
