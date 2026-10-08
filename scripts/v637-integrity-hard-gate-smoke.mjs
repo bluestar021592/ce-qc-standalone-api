@@ -33,7 +33,7 @@ assert.match(js,/new URLSearchParams\(\{businessType:targetBusiness\}\)/,'deferr
 assert.match(js,/json\('\/api\/data-integrity\?'\+integrityQuery\.toString\(\),10000\)/,'business board must hydrate integrity after compact first paint');
 assert.match(js,/待扫描/,'visible waiting-scan signal missing');
 assert.match(js,/const dataHealthy=Boolean\(classification\.balanced\)/,'home first paint must use classification conservation only and defer full integrity checks');
-assert.match(js,/完整性明细进入对应业务看板后按需读取/,'home must explain that detailed integrity is hydrated on demand');
+assert.match(js,/明细在对应业务看板按需读取/,'home must explain that exact integrity is hydrated only inside selected business board');
 assert.match(js,/v628BusinessWorkspaceRows\.length[\s\S]*buildBusinessAccounting\(\{finalRows:v628BusinessWorkspaceRows\},m\)/,'fallback accounting must hydrate from the selected-business workspace only');
 
 assert.match(html,/id="v637HomeIntegrity"/,'home integrity ledger UI missing');
