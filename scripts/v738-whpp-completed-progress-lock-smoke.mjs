@@ -13,6 +13,9 @@ assert.match(truth,/Number\(canonical\?\.evidence\?\.scanRows\|\|0\)===sourceCou
 assert.match(truth,/Number\(canonical\?\.evidence\?\.finalRows\|\|0\)===sourceCount/,'every WHPP source member requires persisted final evidence');
 assert.match(truth,/Boolean\(evidence\.pod\)!==Boolean\(evidence\.returned\)/,'WHPP terminal truth must be exclusive POD or returned');
 assert.match(truth,/terminalEvidenceVerified/,'historical WHPP exact terminal evidence must be an observable completion owner');
+assert.match(truth,/const locked=unifiedWhppCompleted\|\|terminalEvidenceVerified;/,'a mere WHPP immutable snapshot must not override nonterminal members');
+assert.match(truth,/terminalEvidenceGaps:terminalEvidenceGaps\.slice\(0,50\)/,'read-only WHPP diagnostic must show exact unresolved members');
+assert.match(shell,/v763WhppEvidenceGaps\.get\(date\+'\|'\+String\(v626LatestImport\?\.snapshotId\|\|''\)\)/,'live WHPP must veto historical finished state on negative evidence');
 
 assert.match(shell,/const v738WhppCompletionLatch=new Set\(\)/,'browser completion latch missing');
 assert.match(shell,/if\(v738WhppCompletionLatch\.has\(date\)&&!whppPayload\?\.completionLock\?\.locked\)/,'browser may retain only a previously verified WHPP completion lock');
@@ -20,7 +23,7 @@ assert.doesNotMatch(shell,/ccsl=projectComplete\(ccsl,'CCSL'\)/,'unified snapsho
 assert.doesNotMatch(shell,/shopee=projectComplete\(shopee,'SHOPEE'\)/,'unified snapshot status must not fabricate SHOPEE completion');
 assert.doesNotMatch(shell,/V752_UNIFIED_COMPLETED_3OF3/,'retired aggregate 3-of-3 projection must stay removed');
 assert.match(shell,/v752TerminalProgressLogs/,'terminal progress logs must remain deduplicated across polling ticks');
-assert.match(html,/v625-shell\.js\?v=20261007-v750-1&patch=762/,'V762 shell cache bust missing');
+assert.match(html,/v625-shell\.js\?v=20261007-v750-1&patch=763/,'V763 WHPP shell cache bust missing');
 
 
 assert.match(shell,/function v759RememberWhppProof\(/,'WHPP exact selected-date proof owner must exist');
