@@ -30,6 +30,13 @@ db.prepare('INSERT INTO unified_snapshots VALUES(?,?,?,?)').run(
   JSON.stringify({parentRun:{children:{WHPP:{status:'COMPLETED'}}},sourceSnapshots:{WHPP:'WHPP-SNAP'},validationStatus:'VALID_COMPLETED',reconciliationStatus:'PASSED'}),
   '2026-07-01T03:00:00Z'
 );
+db.prepare(`INSERT INTO business_export_snapshots(
+  businessType,reportDate,snapshotId,status,reconciliationStatus,invalidReason,payloadJson,generatedAt,createdAt
+) VALUES(?,?,?,?,?,?,?,?,?)`).run(
+  'WHPP',date,'WHPP-SNAP','VALID','COMPLETED','',
+  JSON.stringify({snapshotId:'WHPP-SNAP',reportDate:date}),
+  '2026-07-01T02:55:00Z','2026-07-01T02:55:00Z'
+);
 db.prepare('INSERT INTO unified_import_batches VALUES(?,?,?,?,?)').run('BATCH-OLD','SNAP-OLD',date,'SUPERSEDED','2026-07-01T00:00:00Z');
 db.prepare('INSERT INTO unified_import_batches VALUES(?,?,?,?,?)').run('BATCH-LATER','SNAP-LATER','2026-07-02','VALID','2026-07-02T01:00:00Z');
 db.prepare('INSERT INTO unified_import_rows VALUES(?,?,?,?,?,?,?,?)').run('BATCH-OLD','SNAP-OLD',date,'WHPP','OLD-BATCH-ONLY','PP',JSON.stringify({shipmentCode:'OLD-BATCH-ONLY'}),1);
@@ -105,7 +112,7 @@ const completion=persistentWhppCompletionTruth(db,date);
 assert.equal(completion.locked,true);
 assert.equal(completion.unifiedCompleted,true);
 assert.equal(completion.unifiedWhppCompleted,true);
-assert.equal(completion.completionSource,'UNIFIED_COMPLETED');
+assert.equal(completion.completionSource,'UNIFIED_VERIFIED_WHPP_CHILD');
 assert.equal(completion.sourceCount,190);
 assert.equal(completion.canonicalTotal,190);
 
@@ -136,6 +143,30 @@ assert.equal(vn.bills.includes('OLD-CARRY-POD'),false);
 db.prepare("DELETE FROM business_final_rows WHERE businessType='WHPP' AND reportDate=?").run(date);
 const completionAfterLossyFinalRows=persistentWhppCompletionTruth(db,date);
 assert.equal(completionAfterLossyFinalRows.locked,true);
-assert.equal(completionAfterLossyFinalRows.completionSource,'UNIFIED_COMPLETED');
+assert.equal(completionAfterLossyFinalRows.completionSource,'UNIFIED_VERIFIED_WHPP_CHILD');
 
-console.log('[V751] real SQLite truth passed · WHPP 190/166 · VN 588/545 exact completed snapshot · CN stale empty POD snapshot recovers 4/5 from later VALID daily report · membership frozen');
+
+// V754 regression: an aggregate unified COMPLETED receipt without a real persisted WHPP child
+// must not lock WHPP. This is the live failure that produced "3/3 complete" while 190 WHPP
+// members were still PENDING_SCAN.
+const falseDate='2026-07-03';
+db.prepare('INSERT INTO unified_import_batches VALUES(?,?,?,?,?)').run('BATCH-FALSE','SNAP-FALSE',falseDate,'VALID','2026-07-03T01:00:00Z');
+db.prepare('INSERT INTO unified_snapshots VALUES(?,?,?,?)').run(
+  'SNAP-FALSE','COMPLETED',
+  JSON.stringify({
+    parentRun:{children:{WHPP:{status:'COMPLETED'}}},
+    sourceSnapshots:{WHPP:'WHPP-SNAPSHOT-DOES-NOT-EXIST'},
+    validationStatus:'VALID_COMPLETED',
+    reconciliationStatus:'PASSED'
+  }),
+  '2026-07-03T02:00:00Z'
+);
+for(let i=1;i<=3;i++){
+  insertSource.run('BATCH-FALSE','SNAP-FALSE',falseDate,'WHPP','WF'+i,'PP',JSON.stringify({shipmentCode:'WF'+i}),i);
+}
+const falseCompletion=persistentWhppCompletionTruth(db,falseDate);
+assert.equal(falseCompletion.unifiedCompleted,true);
+assert.equal(falseCompletion.unifiedWhppCompleted,false);
+assert.equal(falseCompletion.locked,false);
+
+console.log('[V754/V751] real SQLite truth passed · verified WHPP child snapshot locks true completion · aggregate unified COMPLETED without a real WHPP child stays unlocked · VN/CN timing truth retained');
