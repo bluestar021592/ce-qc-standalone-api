@@ -30,6 +30,7 @@ const bindings=[
   ['v625RunStart',"runTask('start')"],
   ['v625RunResume',"runTask('resume')"],
   ['v758WhppReadOnlyDiagnostic','runV758WhppReadOnlyDiagnostic'],
+  ['v761FamilyRecoveryDiagnostic','v761DiagnoseFamilyRecovery'],
   ['v758ReloadUsers','loadSettingsUsers'],
   ['v626RefreshOpenPod','refreshOpenPodNow'],
   ['v626ImportRefreshOpen','refreshOpenPodNow'],
@@ -88,4 +89,12 @@ assert.match(js,/json\('\/api\/whpp\/completion-proof\?reportDate='/,'WHPP selec
 assert.match(js,/WHPP完成状态核验中，请勿重复扫描/,'unavailable WHPP progress must not encourage duplicate scanning');
 
 
-console.log('[V759/V627] fixed account-list declaration, lightweight selected-date WHPP proof, and fail-safe progress UI · shell interaction passed · same-origin WHPP diagnostic wired · admin user errors reveal HTTP status · navigation and data-management unchanged');
+
+assert.match(server,/app\.get\('\/api\/family-recovery-proof'/,'safe read-only CCSL+SHOPEE recovery proof must be same-origin and protected');
+assert.match(server,/group\.currentDate!==date/,'family first start must not run for a different daily-report date');
+assert.match(server,/!lock\?\.runId&&scanCount===0&&finalCount===0&&trackCount===0/,'first start requires no run, no scan, no final and no archived trajectory');
+assert.match(server,/evidenceReadable/,'read-error must fail closed instead of admitting new scan');
+assert.match(js,/response\?\.snapshotId\|\|'?'/,'recovery proof must bind immutable snapshot context');
+assert.match(html,/id="v761FamilyRecoveryResult"/,'CCSL/SHOPEE read-only diagnosis must be visible in authenticated import view');
+
+console.log('[V761/V759/V627] fixed account-list declaration, lightweight selected-date WHPP proof, and fail-safe progress UI · shell interaction passed · same-origin WHPP diagnostic wired · admin user errors reveal HTTP status · navigation and data-management unchanged');
