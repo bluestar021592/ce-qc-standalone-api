@@ -16,6 +16,6 @@ assert.doesNotMatch(shell,/ccsl=projectComplete\(ccsl,'CCSL'\)/,'unified snapsho
 assert.doesNotMatch(shell,/shopee=projectComplete\(shopee,'SHOPEE'\)/,'unified snapshot status must not fabricate SHOPEE completion');
 assert.doesNotMatch(shell,/V752_UNIFIED_COMPLETED_3OF3/,'retired aggregate 3-of-3 projection must stay removed');
 assert.match(shell,/v752TerminalProgressLogs/,'terminal progress logs must remain deduplicated across polling ticks');
-assert.match(html,/v625-shell\.js\?v=20261007-v750-1&patch=755/,'V755 shell cache bust missing');
+assert.match(html,/v625-shell\.js\?v=20261007-v750-1&patch=756/,'V756 shell cache bust missing');
 
 console.log('[V754/V738] unified COMPLETED alone cannot finalize WHPP; only an exact persisted WHPP child snapshot can lock completion; browser aggregate 3-of-3 projection stays removed');
