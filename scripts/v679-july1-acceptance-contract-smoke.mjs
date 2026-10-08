@@ -19,7 +19,7 @@ assert.match(sqliteFixture,/OLD-CARRY-POD/,'historical carry POD exclusion must 
 assert.match(sqliteFixture,/BATCH-OLD.*SUPERSEDED/s,'superseded same-date batch exclusion must be exercised');
 assert.match(sqliteFixture,/completion\.completionSource,'UNIFIED_VERIFIED_WHPP_CHILD'/,'verified WHPP child snapshot must be the terminal WHPP receipt');
 assert.match(sqliteFixture,/vn\.bills\.length,545/,'VN formal truth must prove 545 POD');
-assert.match(sqliteFixture,/CN stale empty POD snapshot recovers 4\/5/,'CN fixture must cover stale empty completed-snapshot POD recovery');
+assert.match(sqliteFixture,/const cnAllRows=\[\],cnPodRows=\[\]/,'CN fixture must cover stale empty completed-snapshot POD recovery');
 assert.match(sqliteFixture,/cn\.bills\.length,4/,'CN formal truth must recover later daily-report POD members without changing selected-date membership');
 assert.match(helper,/IMMUTABLE_SHOPEE_COMPLETED_SNAPSHOT_RECOVERED_BY_LATEST_DAILY_POD/,'empty Shopee snapshot POD must recover from later VALID daily reports for exact source members');
 assert.match(helper,/dailyReportProvesPod/,'CN recovery must use canonical daily-report POD semantics');
