@@ -19,8 +19,8 @@ assert.match(js,/const selectedReportDate=\(\)=>\{[\s\S]*p\.get\('reportDate'\)/
 assert.match(js,/summaryUrl='\/api\/home-quality-summary\?fast=1'[\s\S]*reportDate=/,'home must request selected date through the fast local summary');
 assert.match(js,/p\.set\('reportDate',reportDate\)/,'query button must persist selected report date');
 assert.match(js,/p\.delete\('snapshotId'\)/,'changing date must not retain stale snapshot');
-assert.match(js,/const summaryPromise=json\('\/api\/home-quality-summary\?'\+summaryQuery\.toString\(\),10000\)/,'business board must resolve selected date through the non-blocking fast summary');
-assert.match(js,/new URLSearchParams\(\{scope:'all',businessType:business\}\)/,'business KPI drilldown must load only the selected business membership rows');
+assert.match(js,/const summaryPromise=new Promise\(resolve=>setTimeout\(resolve,900\)\)/,'selected-date timing summary must remain non-blocking and deferred after fast KPI first paint');
+assert.match(js,/new URLSearchParams\(\{scope:'all',businessType:targetBusiness\}\)/,'business KPI drilldown must load only the captured selected business membership rows');
 assert.match(js,/function renderKpiDetail\(kind\)/,'business KPI drilldown renderer missing');
 assert.match(js,/function buildBusinessAccounting\(state=\{\},fallback=\{\}\)/,'delivery drilldown must use exclusive same-state accounting');
 assert.match(js,/rowsByKind\.delivery\.push\(row\)/,'delivery detail must come from the same exclusive accounting bucket');
