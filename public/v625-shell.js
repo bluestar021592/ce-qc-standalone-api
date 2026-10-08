@@ -308,7 +308,7 @@ function v762RememberFamilyCompletionProof(proof,reportDate='',snapshotId=''){
     // The run lock is already queried for this exact historical date; the active
     // application date may have moved since that old completed batch.
     if(record.action!=='DONE'||!['finished','completed'].includes(savedStatus)
-       ||total<=0||scan!==total||final!==total)continue;
+       ||record.exactMemberVerified!==true||total<=0||scan!==total||final!==total)continue;
     accepted[name]={reportDate:date,snapshotId:snapshot,sourceCount:total,scanCount:scan,finalCount:final,
       runId:String(record.runId),runStatus:savedStatus};
   }
@@ -1485,6 +1485,8 @@ async function v761DiagnoseFamilyRecovery(){
         ' · 日报 '+Number(b.sourceCount||0)+'票 · 已扫描 '+Number(b.scanCount||0)+
         '票 · 最终记录 '+Number(b.finalCount||0)+'票 · 任务 '+(b.runStatus||'UNKNOWN'));
       lines.push('原因：'+(b.reason||'未确认')+(b.error?'；错误：'+b.error:''));
+      if(b.action==='DONE')lines.push('扫描/最终记录与日报运单逐票一致：'+(b.exactMemberVerified===true?'是':'否或未核实')+
+        '；缺扫描成员 '+Number(b.scanMissing||0)+'；缺最终成员 '+Number(b.finalMissing||0));
     }
     view.textContent=lines.join('\n');
   }catch(error){view.textContent='读取失败（数据未修改）：'+String(error?.message||error)}
