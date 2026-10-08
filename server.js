@@ -1883,6 +1883,16 @@ app.get('/api/selected-date-truth', (req,res)=>{
     timing
   });
 });
+// V759: scoped read-only WHPP completion proof. Do not run timing diagnostics or
+// start a business job just to determine whether a persisted selected date is done.
+app.get('/api/whpp/completion-proof', (req,res)=>{
+  const reportDate=String(req.query?.reportDate||'').slice(0,10);
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(reportDate))return res.status(400).json({ok:false,code:'REPORT_DATE_INVALID',error:'缺少有效日报日期。'});
+  const batch=selectUnifiedImportForDiagnostics(reportDate);
+  if(!batch?.snapshotId)return res.status(404).json({ok:false,code:'UNIFIED_BATCH_MISSING',error:'未找到该日期的日报快照。'});
+  res.setHeader('Cache-Control','no-store');
+  return res.json({ok:true,reportDate,snapshotId:String(batch.snapshotId),whppCompletion:persistentWhppCompletionTruth(getDb(),reportDate)});
+});
 app.post('/api/timing-repair/start', (req,res)=>{
   const reportDate=String(req.body?.reportDate||'').slice(0,10);
   if(!/^\d{4}-\d{2}-\d{2}$/.test(reportDate))return res.status(400).json({ok:false,error:'缺少有效日报日期。'});
