@@ -67,6 +67,7 @@ assert.match(shell,/v762ProjectSavedCompletion\(ccsl,familyProof.CCSL,date\)/,'C
 assert.match(shell,/v762ProjectSavedCompletion\(shopee,familyProof.SHOPEE,date\)/,'SHOPEE completed snapshot proof must project into the live bar');
 assert.match(shell,/v762RememberFamilyCompletionProof\(proof,date,String\(v626LatestImport\?\.snapshotId\|\|''\)\)/,'read-only diagnostic must update the same authoritative UI owner');
 assert.match(shell,/scan!==total\|\|final!==total/,'completed fallback must require every original member scanned and finalized');
+assert.match(shell,/record.exactMemberVerified!==true/,'completed fallback must require exact shipment membership rather than count-only equality');
 assert.match(shell,/record.action!=='DONE'/,'unified COMPLETED alone must never project family terminal completion');
 const proofStart=shell.indexOf('const v762FamilyTerminalProofs=new Map();');
 const verifyStart=shell.indexOf('function v762VerifiedFamilyTruth(');
@@ -85,8 +86,8 @@ const simulateProof=new Function('proof','reportDate','snapshotId',`
 `);
 const observed={ok:true,reportDate:realDate,snapshotId:snap,unifiedStatus:'COMPLETED',
  businesses:{
-  CCSL:{action:'DONE',runStatus:'finished',runId:'CCSL-VALID',sourceCount:6857,scanCount:6857,finalCount:6857,currentDate:'2026-07-01'},
-  SHOPEE:{action:'DONE',runStatus:'finished',runId:'SPE-VALID',sourceCount:1346,scanCount:1346,finalCount:1346,currentDate:'2026-07-01'}
+  CCSL:{action:'DONE',runStatus:'finished',runId:'CCSL-VALID',exactMemberVerified:true,sourceCount:6857,scanCount:6857,finalCount:6857,currentDate:'2026-07-01'},
+  SHOPEE:{action:'DONE',runStatus:'finished',runId:'SPE-VALID',exactMemberVerified:true,sourceCount:1346,scanCount:1346,finalCount:1346,currentDate:'2026-07-01'}
  }};
 const recovered=simulateProof(observed,realDate,snap);
 assert.equal(recovered.ccsl.complete,true,'6857/6857 locked CCSL rows must recover completed progress');
@@ -100,5 +101,7 @@ assert.equal(simulateProof({...observed,businesses:{...observed.businesses,CCSL:
 assert.equal(simulateProof({...observed,businesses:{...observed.businesses,SHOPEE:{...observed.businesses.SHOPEE,finalCount:1345}}},realDate,snap).saved.SHOPEE,undefined,'1345/1346 Shopee finals cannot be called complete');
 assert.equal(simulateProof({...observed,businesses:{...observed.businesses,SHOPEE:{...observed.businesses.SHOPEE,action:'WAIT',runStatus:'running'}}},realDate,snap).saved.SHOPEE,undefined,'still-running family must not become 3/3');
 assert.equal(simulateProof({...observed,businesses:{}},realDate,snap).accepted,null,'unified completed flag without business proofs must not imply 3/3');
+assert.equal(simulateProof({...observed,businesses:{...observed.businesses,CCSL:{...observed.businesses.CCSL,exactMemberVerified:false}}},realDate,snap).saved.CCSL,undefined,'matching counts without exact identities cannot complete CCSL');
 
-console.log('[V762/V760/V755] July-04 6857 CCSL + 1346 Shopee persisted run locks recover 3/3 from strict snapshot and membership proof;  true selected-date 3-of-3 required before timing repair; 1-of-3 success banner prohibited;  single-click auto-process uses reconciled per-date counts · missing count fields cannot become zero-ticket · actual family run truth owns 3-of-3 completion');
+
+console.log('[V762/V760/V755] exact member IDs and  July-04 6857 CCSL + 1346 Shopee persisted run locks recover 3/3 from strict snapshot and membership proof;  true selected-date 3-of-3 required before timing repair; 1-of-3 success banner prohibited;  single-click auto-process uses reconciled per-date counts · missing count fields cannot become zero-ticket · actual family run truth owns 3-of-3 completion');
