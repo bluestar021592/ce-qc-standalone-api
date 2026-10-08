@@ -42,7 +42,6 @@ test('V13 locked Shopee export does not count UNKNOWN as PV and waybill cells op
     assert.equal(dashboard.getCell('A5').value.result, 3);
     assert.equal(dashboard.getCell('C5').value.result, 1);
     const pvLinks=[];
-    console.log('[V767][SHEET5_DIAG]',JSON.stringify(dashboard.getRow(5).values.map((v,i)=>({column:i,formula:v?.formula||'',value:v?.result??v??null})).filter(x=>x.formula||x.value!==null)));
     dashboard.getRow(5).eachCell(cell=>{
       if (typeof cell.value?.formula==='string'&&cell.value.formula.includes('外省明细!A1'))pvLinks.push(cell.value);
     });
