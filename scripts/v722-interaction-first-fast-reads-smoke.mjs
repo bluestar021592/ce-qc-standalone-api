@@ -13,6 +13,14 @@ assert.doesNotMatch(shell,/selected-date-truth\?reportDate=.*fetchLiveProgress/s
 assert.match(shell,/setInterval\(\(\)=>\{void refreshLiveProgress\(\)\},3000\)/,'live progress polling must be throttled to 3 seconds');
 assert.match(shell,/home-quality-summary\?fast=1/,'home/import reads must use local-only fast summary');
 assert.match(shell,/new URLSearchParams\(\{compact:'1'\}\)/,'business boards must request compact state first');
+assert.match(shell,/Never block a board switch on \/api\/import\/unified-latest/,'business first paint must explicitly avoid the latest-import prerequisite');
+assert.match(shell,/const latest=v626LatestImport\|\|null;[\s\S]*?const baseReportDate=requestedDate\|\|latest\?\.reportDate\|\|'';/,'business compact read must use URL context immediately');
+assert.doesNotMatch(shell,/else if\(business\)\{\s*await latestImportContext\(\);\s*await loadBusiness\(\);/,'business navigation must not serially await latest-import before compact board state');
+assert.match(shell,/else if\(business\)\{\s*await loadBusiness\(\);\s*void latestImportContext\(\);/,'business navigation must paint first and refresh latest context in background');
+assert.match(shell,/dashboardContextUrl\(boardJump\.value\)/,'board dropdown must preserve reportDate and snapshotId across business switches');
+assert.match(shell,/syncDashboardNavigationContext\(reportDate,snapshotId\)/,'resolved board context must be propagated to subsequent business navigation');
+assert.match(shell,/v756ProgressDescriptor/,'live progress headline must derive from actual running counters rather than stale raw phase text');
+assert.match(shell,/进度90秒未变化，后台仍在运行/,'unchanged long-running progress must be observable without being mislabeled complete');
 assert.match(shell,/new URLSearchParams\(\{businessType:business\}\)/,'business integrity reads must be scoped');
 assert.match(shell,/new URLSearchParams\(\{scope:'all',businessType:business\}\)/,'business workspace reads must be scoped');
 assert.match(server,/if\(String\(req\.query\.fast\|\|''\)==='1'\)/,'server must expose local-only fast home summary');
@@ -24,4 +32,4 @@ assert.match(integrity,/selectedTypes=TYPES\.includes\(requestedType\)\?\[reques
 assert.match(html,/<meta name="ce-qc-build" content="V\d+_[A-Z0-9_]+">/,'current shell build marker missing');
 assert.match(html,/v625-shell\.js\?v=\d{8}-v\d+-\d+/,'current shell cache bust missing');
 
-console.log('[V722] interaction-first fast reads passed: no heavy truth in live polling, compact selected-date boards, scoped workspace/integrity, fast local home summary');
+console.log('[V756/V722] interaction-first navigation passed · board switches preserve date/snapshot · no serial latest-import blocker · running progress follows counters and exposes 90s no-change state');
