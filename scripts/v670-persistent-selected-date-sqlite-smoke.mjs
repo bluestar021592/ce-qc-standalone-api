@@ -206,7 +206,8 @@ assert.equal(persistentWhppCompletionTruth(db,falseDate).locked,true);
 
 // V763: reproduce the July-04 historical WHPP screenshot:
 // legacy sourceCount=0, all four scan/final rows exist, but two neither POD
-// nor returned. A "VALID/COMPLETED" snapshot can prove 4/4 scan/final processing\n// without fabricating POD/return closure for the two unknown customer statuses.
+// nor returned. A "VALID/COMPLETED" snapshot can prove 4/4 scan/final processing
+// without fabricating POD/return closure for the two unknown customer statuses.
 const whppStaleDate='2026-07-04';
 db.prepare('INSERT INTO unified_import_batches VALUES(?,?,?,?,?)').run('BATCH-V763','SNAP-V763',whppStaleDate,'VALID','2026-07-04T01:00:00Z');
 db.prepare('INSERT INTO unified_snapshots VALUES(?,?,?,?)').run('SNAP-V763','COMPLETED',JSON.stringify({parentRun:{children:{WHPP:{status:'WAIT'}}}}),'2026-07-04T02:00:00Z');
