@@ -285,7 +285,7 @@
           <section class="v625-panel">
             <div class="v625-section-head"><h2>综合日报上传与处理</h2><span id="v625ImportState">未导入</span></div>
             <div class="v626-import-top">
-              <label class="v625-dropzone"><input id="v625ImportFile" type="file" accept=".xlsx,.xls"><svg><use href="/assets/ui-icons-v625.svg#icon-file-up"/></svg><b>点击或拖拽综合日报Excel</b><small>系统自动识别日报日期并完成7业务分类；仅识别失败时才需要人工处理</small><em id="v625ImportFileName">选择文件</em></label>
+              <label class="v625-dropzone"><input id="v625ImportFile" type="file" accept=".xlsx,.xls"><svg><use href="/assets/ui-icons-v625.svg#icon-file-up"/></svg><b>点击或拖拽综合日报Excel</b><small>系统自动识别日报日期、完成7业务分类，并在上传成功后自动开始扫描与轨迹处理；仅识别失败时才需要人工处理</small><em id="v625ImportFileName">选择文件</em></label>
               <div class="v626-date-detect-card">
                 <span>系统识别日报日期</span><strong id="v626DetectedReportDate">—</strong>
                 <small id="v626DetectedDateSource">等待上传日报</small>
@@ -294,8 +294,8 @@
               </div>
             </div>
             <div class="v625-import-actions">
-              <button id="v625ImportButton" class="v625-btn primary" type="button">上传并自动分类</button>
-              <button id="v625RunStart" class="v625-btn primary" type="button">开始7业务自动处理</button>
+              <button id="v625ImportButton" class="v625-btn primary" type="button">上传并自动处理</button>
+              <button id="v625RunStart" class="v625-btn primary" type="button" hidden style="display:none">手动开始处理</button>
               <button id="v625RunResume" class="v625-btn outline" type="button">继续未完成处理</button>
             </div>
             <div id="v625ImportMessage" class="v625-inline-note">请选择综合日报文件。</div>
@@ -318,7 +318,7 @@
                 <span>SHOPEE <b id="v626ImportShopee">—</b></span>
                 <span>WHPP <b id="v626ImportWhpp">—</b></span>
               </div>
-              <div id="v625RunMessage" class="v625-inline-note">导入日报后可开始处理。</div>
+              <div id="v625RunMessage" class="v625-inline-note">上传日报后系统将自动开始处理。</div>
             </section>
 
             <section class="v625-panel">
@@ -652,6 +652,6 @@
       </main>
     </div>
   </div>
-  <script src="/v625-shell.js?v=20261007-v750-1&patch=752" defer></script>
+  <script src="/v625-shell.js?v=20261007-v750-1&patch=753" defer></script>
 </body>
 </html>
