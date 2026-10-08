@@ -292,6 +292,43 @@ let settingsUsers=[];
 // V762: the exact saved run-lock and 1:1 scan/final ledgers are the durable
 // CCSL/SHOPEE completion owners, even if the 7-second light progress request
 // returns stale/empty during local SQLite load.
+// V765: small, bounded browser-session cache of *verified* completed run
+// projections. Keyed by exact date + snapshot, never used for business actions.
+const V765_PROOF_CACHE_PREFIX='CE_QC_V765_VERIFIED_';
+const V765_PROOF_MAX_AGE_MS=10*60*1000;
+function v765ProofCacheKey(date,snapshot){return V765_PROOF_CACHE_PREFIX+date+'|'+snapshot}
+function v765RememberVerifiedFamilies(date,snapshot,proofs){
+  if(!proofs?.CCSL||!proofs?.SHOPEE)return;
+  try{sessionStorage.setItem(v765ProofCacheKey(date,snapshot),
+    JSON.stringify({date,snapshot,verifiedAt:Date.now(),proofs}))}catch{}
+}
+function v765RestoreVerifiedFamilies(date,snapshot){
+  try{
+    const raw=sessionStorage.getItem(v765ProofCacheKey(date,snapshot));
+    if(!raw)return null;
+    const entry=JSON.parse(raw);
+    const valid=entry?.date===date&&entry?.snapshot===snapshot
+      &&Date.now()-Number(entry.verifiedAt||0)>=0
+      &&Date.now()-Number(entry.verifiedAt||0)<V765_PROOF_MAX_AGE_MS
+      &&['CCSL','SHOPEE'].every(type=>{
+        const p=entry.proofs?.[type];
+        return p?.reportDate===date&&p?.snapshotId===snapshot
+          &&Number(p.sourceCount)>0&&Number(p.scanCount)===Number(p.sourceCount)
+          &&Number(p.finalCount)===Number(p.sourceCount)
+          &&['finished','completed'].includes(String(p.runStatus||''));
+      });
+    if(valid)return entry.proofs;
+    sessionStorage.removeItem(v765ProofCacheKey(date,snapshot));
+  }catch{}
+  return null;
+}
+function v765InvalidateAllProofCache(){
+  try{for(let i=sessionStorage.length-1;i>=0;i--){
+    const key=sessionStorage.key(i);
+    if(key?.startsWith(V765_PROOF_CACHE_PREFIX))sessionStorage.removeItem(key)
+  }}catch{}
+  v762FamilyTerminalProofs.clear();v762FamilyProofNextRead.clear();
+}
 const v762FamilyTerminalProofs=new Map();
 const v762FamilyProofInflight=new Map();
 const v762FamilyProofNextRead=new Map();
@@ -314,14 +351,21 @@ function v762RememberFamilyCompletionProof(proof,reportDate='',snapshotId=''){
   }
   if(!Object.keys(accepted).length)return null;
   const key=date+'|'+snapshot;
-  v762FamilyTerminalProofs.set(key,{...(v762FamilyTerminalProofs.get(key)||{}),...accepted});
+  const merged={...(v762FamilyTerminalProofs.get(key)||{}),...accepted};
+  v762FamilyTerminalProofs.set(key,merged);
+  v765RememberVerifiedFamilies(date,snapshot,merged);
   return accepted;
 }
 function v762VerifiedFamilyTruth(reportDate=''){
   const date=String(reportDate||'').slice(0,10);
   if(date!==String(v626LatestImport?.reportDate||'').slice(0,10))return null;
   const snapshotId=String(v626LatestImport?.snapshotId||'');
-  return snapshotId?v762FamilyTerminalProofs.get(date+'|'+snapshotId)||null:null;
+  if(!snapshotId)return null;
+  const key=date+'|'+snapshotId;
+  if(v762FamilyTerminalProofs.has(key))return v762FamilyTerminalProofs.get(key);
+  const restored=v765RestoreVerifiedFamilies(date,snapshotId);
+  if(restored)v762FamilyTerminalProofs.set(key,restored);
+  return restored;
 }
 async function v762LoadFamilyTerminalTruth(reportDate=''){
   const date=String(reportDate||'').slice(0,10);
@@ -1445,6 +1489,9 @@ async function doImport(){
   if(runBusy){note('v625ImportMessage','当前日报仍在处理中，请等待完成后再上传下一份日报。','error');return}
   const button=byId('v625ImportButton');
   if(button){button.disabled=true;button.textContent='上传中…'}
+  // A new import creates a new business lifecycle; cached historical run
+  // projections must never be trusted across an import or purge.
+  v765InvalidateAllProofCache();
   const fd=new FormData();fd.append('file',file);
   const manualWrap=byId('v626ManualDateWrap');
   if(manualWrap&&!manualWrap.hidden&&byId('v626ManualReportDate')?.value)fd.append('reportDate',byId('v626ManualReportDate').value);
@@ -2100,6 +2147,8 @@ async function clearAllBusinessData(){
     const r=await post('/api/admin/data-purge/direct',{phrase:'永久清除全部业务数据'},30000);
     const result=await pollDirectPurge(r.jobId);
     note('v626ClearStatus','业务数据已全部清空；已有备份已保留。共删除 '+fmt(result.deletedRows||0)+' 行。','success');
+    v765InvalidateAllProofCache();
+    v765BoardDetailCache.clear();
     v626LatestImport=null;v626OpenRows=[];renderOpenPodRows();await loadBackups();
   }catch(e){note('v626ClearStatus','清空失败：'+e.message,'error')}
 }
