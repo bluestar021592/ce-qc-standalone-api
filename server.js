@@ -723,6 +723,12 @@ app.get('/api/home-quality-summary', async (req, res) => {
     res.json(payload);
   } catch (error) {
     console.warn('[CE-QC][HOME_SUMMARY_ARCHIVE_FALLBACK]',error?.message||String(error));
+    // A failed worker is NOT permission to run 30-day SQLite timing scans
+    // on the HTTP event loop: respond and keep all menu clicks responsive.
+    if(String(req.query.fast||'')==='1')return res.status(503).json({
+      ok:false,code:'V766_ASYNC_HOME_UNAVAILABLE',
+      error:'源票概览仍可查询；签收时效后台统计暂时不可用，请稍后刷新。'
+    });
     try{
       res.json(buildHomeQualitySummary({
         reportDate:String(req.query.reportDate||''),
