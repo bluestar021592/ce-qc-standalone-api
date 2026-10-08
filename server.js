@@ -1652,20 +1652,24 @@ app.post('/api/track-query', async (req, res) => {
 const v765WorkspaceReadCache=new Map();
 const V765_WORKSPACE_TTL_MS=20000;
 app.get('/api/tracking-workspace', async (req, res) => {
-  const unified = getLatestUnifiedImport();
-  const snapshotId = String(req.query.snapshotId || unified?.snapshotId || '');
-  const reportDate = String(req.query.reportDate || unified?.reportDate || '');
+  // Resolve an authenticated, explicit date/snapshot cache hit BEFORE reading
+  // the latest import. Incomplete URL contexts never enter the cache.
+  const explicitSnapshotId=String(req.query.snapshotId||'');
+  const explicitReportDate=String(req.query.reportDate||'');
   const scope = ['all', 'pod'].includes(String(req.query.scope || '')) ? String(req.query.scope) : 'actionable';
   const requestedBusinessType=String(req.query.businessType||'').trim().toUpperCase();
   const identity=String(req.user?.id||req.user?.email||req.user?.username||'').trim();
-  const cacheEligible=Boolean(identity&&snapshotId&&reportDate&&requestedBusinessType&&scope==='all');
-  const cacheKey=cacheEligible?[identity,requestedBusinessType,reportDate,snapshotId,scope].join('|'):'';
+  const cacheEligible=Boolean(identity&&explicitSnapshotId&&explicitReportDate&&requestedBusinessType&&scope==='all');
+  const cacheKey=cacheEligible?[identity,requestedBusinessType,explicitReportDate,explicitSnapshotId,scope].join('|'):'';
   const previous=cacheEligible&&String(req.query.fresh||'')!=='1'?v765WorkspaceReadCache.get(cacheKey):null;
   if(previous&&Date.now()-previous.at<V765_WORKSPACE_TTL_MS){
     res.setHeader('Cache-Control','no-store');
     res.setHeader('X-CE-QC-Workspace-Cache','HIT');
     return res.json(previous.payload);
   }
+  const unified=getLatestUnifiedImport();
+  const snapshotId=explicitSnapshotId||String(unified?.snapshotId||'');
+  const reportDate=explicitReportDate||String(unified?.reportDate||'');
   const unifiedTypes=new Set(['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN']);
   let states = [];
   if (snapshotId) {
