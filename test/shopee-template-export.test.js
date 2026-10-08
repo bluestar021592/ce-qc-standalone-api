@@ -23,8 +23,14 @@ test('SHOPEE daily weekly and monthly exports preserve the active locked 10-shee
     assert.deepEqual(result.audit.sheetNames, EXPECTED, 'export audit must match actual worksheet order');
     const dashboard=workbook.getWorksheet('每日看板');
     assert.equal(dashboard.getCell('A5').value.result, 2, 'all source shipments must remain counted');
-    assert.equal(dashboard.getCell('O5').value.result, 1, 'returned count must remain linked to returned detail');
-    assert.match(dashboard.getCell('N5').value.formula, /退回明细!A1/, 'returned dashboard card must open returned detail');
+    const returnLinks=[];
+    dashboard.getRow(5).eachCell(cell=>{
+      if (typeof cell.value?.formula === 'string' && cell.value.formula.includes('退回明细!A1')) {
+        returnLinks.push(cell.value);
+      }
+    });
+    assert.ok(returnLinks.length>0, 'returned dashboard card must link to the correct detail sheet');
+    assert.ok(returnLinks.some(link=>Number(link.result)===1), 'returned detail link must display the actual one returned waybill');
     assert.equal(workbook.getWorksheet('退回明细').getCell('B2').value, 'SPE2', 'returned waybill must appear on the returned sheet');
     assert.equal(workbook.getWorksheet('全部明细').getCell('B3').value, 'SPE2', 'complete ledger must contain second day member');
     assert.equal(dashboard.getCell('A11').value, '2026-08-01', 'daily trend must preserve first source date');
