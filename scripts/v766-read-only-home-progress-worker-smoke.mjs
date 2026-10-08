@@ -51,6 +51,39 @@ try{
   assert.equal(blank.result.selectionMatched,false,'no source report must never be represented as imported');
   const repeat=await v766ReadJob('HOME_FULL',{reportDate:'2099-01-01',snapshotId:''});
   assert.equal(repeat.cache,'HIT','safe exact-date full summary should be short cached');
+  // Exact July-04-like persisted source/scan/final proof must also succeed
+  // inside a read-only worker; this is NOT merely a static syntax fixture.
+  const date='2026-07-04',snapshot='S-V766',batch='B-V766';
+  const createdAt='2026-07-04T00:00:00Z';
+  db.getDb().prepare("INSERT INTO unified_import_batches(batchId,snapshotId,reportDate,sourceName,fileHash,status,summaryJson,warningsJson,createdAt) VALUES(?,?,?,?,?,?,?,?,?)")
+    .run(batch,snapshot,date,'fixture.xls','HASH-V766','VALID','{}','[]',createdAt);
+  for(const [type,bill] of [['CE','CE7660001'],['SHOPEECN','SPE7660001']]){
+    db.getDb().prepare("INSERT INTO unified_import_rows(batchId,snapshotId,reportDate,businessType,shipmentCode,rowJson,createdAt) VALUES(?,?,?,?,?,?,?)")
+      .run(batch,snapshot,date,type,bill,'{}',createdAt);
+  }
+  db.getDb().prepare("INSERT INTO run_locks(reportDate,runId,status,currentStage,completedAt) VALUES(?,?,?,?,?)")
+    .run(date,'RUN-CCSL-766','finished','FINISHED',createdAt);
+  db.getDb().prepare("INSERT INTO business_run_locks(businessType,reportDate,runId,status,currentStage,completedAt) VALUES(?,?,?,?,?,?)")
+    .run('SHOPEE',date,'RUN-SPE-766','finished','FINISHED',createdAt);
+  db.getDb().prepare("INSERT INTO scan_results(shipmentCode,reportDate) VALUES(?,?)").run('CE7660001',date);
+  db.getDb().prepare("INSERT INTO final_rows(shipmentCode,reportDate) VALUES(?,?)").run('CE7660001',date);
+  db.getDb().prepare("INSERT INTO business_scan_results(businessType,shipmentCode,reportDate) VALUES(?,?,?)")
+    .run('SHOPEE','SPE7660001',date);
+  db.getDb().prepare("INSERT INTO business_final_rows(businessType,shipmentCode,reportDate) VALUES(?,?,?)")
+    .run('SHOPEE','SPE7660001',date);
+  const verified=await v766ReadJob('FAMILY_PROOF',{reportDate:date,snapshotId:snapshot});
+  assert.equal(verified.result.snapshotId,snapshot);
+  for(const type of ['CCSL','SHOPEE']){
+    assert.equal(verified.result.businesses[type]?.action,'DONE');
+    assert.equal(verified.result.businesses[type]?.exactMemberVerified,true);
+    assert.equal(verified.result.businesses[type]?.sourceCount,1);
+  }
+  const verifiedAgain=await v766ReadJob('FAMILY_PROOF',{reportDate:date,snapshotId:snapshot});
+  assert.equal(verifiedAgain.cache,'HIT','the exact persisted 2/2 completed proof must be reused');
+  const replaced=await v766ReadJob('FAMILY_PROOF',{reportDate:date,snapshotId:'WRONG-SNAPSHOT'})
+    .then(()=>null,error=>String(error?.message||error));
+  assert.match(replaced,/V766_SNAPSHOT_MISMATCH/,'a replaced same-day batch must never inherit an older completed proof');
+
   console.log('[V766] isolated read-only worker, 7/4 snapshot identity gate, fast source-count paint, empty-day honesty, shared worker cache passed');
 }finally{
   try{close()}catch{}
