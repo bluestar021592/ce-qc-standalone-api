@@ -312,7 +312,7 @@ export function persistentWhppCompletionTruth(db,reportDate=''){
     finalizedAt:String(dailySummary.finalizedAt||snapshot?.generatedAt||snapshot?.createdAt||unifiedSnapshot?.createdAt||history?.updatedAt||''),
     completionSource,
     reason:locked?'PERSISTED_WHPP_COMPLETED'
-      :terminalEvidenceGaps.length?'WHPP_TERMINAL_EVIDENCE_GAP'
+      :terminalEvidenceGaps.length&&(snapshotLocked||dailyLocked||historyLocked)?'WHPP_TERMINAL_EVIDENCE_GAP'
       :sourceCount&&finalCount!==sourceCount?'SOURCE_FINAL_MEMBERSHIP_MISMATCH'
       :'PERSISTED_WHPP_INCOMPLETE'
   };
