@@ -174,24 +174,36 @@ export function persistentWhppCompletionTruth(db,reportDate=''){
   if(!date)return{locked:false,reportDate:'',reason:'REPORT_DATE_MISSING',sourceCount:0,finalCount:0};
   const batch=latestValidBatch(db,date);
 
-  // V738: the unified snapshot is the highest-level durable owner of the
-  // three-family lifecycle. Once the exact selected-date snapshot is COMPLETED,
-  // WHPP must never be demoted by a slower downstream canonical reconstruction.
-  // This is also the fast path used by /api/whpp/progress so a 7s browser read
-  // cannot time out and falsely paint a completed date as "WHPP待处理".
+  // V754: unified snapshot COMPLETED is only an aggregate receipt. It must never
+  // fabricate WHPP completion. Fast-path completion requires an exact persisted
+  // WHPP child snapshot referenced by the unified receipt and a COMPLETED WHPP child.
   if(batch?.snapshotId){
     try{
-      const unified=db.prepare("SELECT status,createdAt FROM unified_snapshots WHERE snapshotId=? LIMIT 1").get(batch.snapshotId)||null;
-      if(String(unified?.status||'').toUpperCase()==='COMPLETED'){
+      const unified=db.prepare("SELECT status,payloadJson,createdAt FROM unified_snapshots WHERE snapshotId=? LIMIT 1").get(batch.snapshotId)||null;
+      const payload=safeJson(unified?.payloadJson,{});
+      const unifiedCompleted=String(unified?.status||'').toUpperCase()==='COMPLETED';
+      const childStatus=String(payload?.parentRun?.children?.WHPP?.status||'').toUpperCase();
+      const whppSnapshotId=String(payload?.sourceSnapshots?.WHPP||'').trim();
+      let verifiedChild=null;
+      if(unifiedCompleted&&childStatus==='COMPLETED'&&whppSnapshotId){
+        try{
+          verifiedChild=db.prepare(`SELECT snapshotId,generatedAt,createdAt FROM business_export_snapshots
+            WHERE businessType='WHPP' AND reportDate=? AND snapshotId=?
+              AND COALESCE(status,'VALID')='VALID'
+              AND COALESCE(reconciliationStatus,'COMPLETED')='COMPLETED'
+            LIMIT 1`).get(date,whppSnapshotId)||null;
+        }catch{}
+      }
+      if(verifiedChild?.snapshotId){
         let sourceCount=0;
         try{sourceCount=Number(db.prepare("SELECT COUNT(DISTINCT UPPER(TRIM(shipmentCode))) count FROM unified_import_rows WHERE batchId=? AND reportDate=? AND UPPER(TRIM(businessType))='WHPP'").get(batch.batchId,date)?.count||0)}catch{}
         return{
           locked:true,finalized:true,reportDate:date,sourceCount,finalCount:sourceCount,
           canonicalTotal:sourceCount,canonicalResolved:sourceCount,
           unifiedCompleted:true,unifiedWhppCompleted:true,
-          snapshotLocked:false,dailyLocked:false,historyLocked:false,membershipMatches:true,
-          snapshotId:String(batch.snapshotId||''),finalizedAt:String(unified?.createdAt||''),
-          completionSource:'UNIFIED_COMPLETED',completionFastPath:true,
+          snapshotLocked:true,dailyLocked:false,historyLocked:false,membershipMatches:true,
+          snapshotId:String(verifiedChild.snapshotId||''),finalizedAt:String(verifiedChild.generatedAt||verifiedChild.createdAt||unified?.createdAt||''),
+          completionSource:'UNIFIED_VERIFIED_WHPP_CHILD',completionFastPath:true,
           reason:'PERSISTED_WHPP_COMPLETED'
         };
       }
@@ -227,16 +239,21 @@ export function persistentWhppCompletionTruth(db,reportDate=''){
 
   const unifiedCompleted=String(unifiedSnapshot?.status||'').toUpperCase()==='COMPLETED';
   const unifiedChildStatus=String(unifiedPayload?.parentRun?.children?.WHPP?.status||'').toUpperCase();
-  const unifiedWhppCompleted=unifiedCompleted&&(
-    unifiedChildStatus==='COMPLETED'
-    ||Boolean(unifiedPayload?.sourceSnapshots?.WHPP)
-    ||String(unifiedPayload?.validationStatus||'').toUpperCase()==='VALID_COMPLETED'
-    ||String(unifiedPayload?.reconciliationStatus||'').toUpperCase()==='PASSED'
-    ||unifiedCompleted
-  );
+  const unifiedWhppSnapshotId=String(unifiedPayload?.sourceSnapshots?.WHPP||'').trim();
+  let unifiedWhppSnapshotVerified=false;
+  if(unifiedCompleted&&unifiedChildStatus==='COMPLETED'&&unifiedWhppSnapshotId){
+    try{
+      unifiedWhppSnapshotVerified=Boolean(db.prepare(`SELECT 1 ok FROM business_export_snapshots
+        WHERE businessType='WHPP' AND reportDate=? AND snapshotId=?
+          AND COALESCE(status,'VALID')='VALID'
+          AND COALESCE(reconciliationStatus,'COMPLETED')='COMPLETED'
+        LIMIT 1`).get(date,unifiedWhppSnapshotId)?.ok);
+    }catch{}
+  }
+  const unifiedWhppCompleted=unifiedCompleted&&unifiedChildStatus==='COMPLETED'&&unifiedWhppSnapshotVerified;
 
   const locked=unifiedWhppCompleted||membershipMatches&&(snapshotLocked||dailyLocked||historyLocked);
-  const completionSource=unifiedWhppCompleted?'UNIFIED_COMPLETED'
+  const completionSource=unifiedWhppCompleted?'UNIFIED_VERIFIED_WHPP_CHILD'
     :snapshotLocked?'IMMUTABLE_EXPORT_SNAPSHOT'
     :dailyLocked?'DAILY_SUMMARY'
     :historyLocked?'FINAL_ROWS_HISTORY':'';
