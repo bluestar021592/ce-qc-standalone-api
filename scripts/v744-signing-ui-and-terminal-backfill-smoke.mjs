@@ -48,5 +48,7 @@ assert.match(shell,/source=timing-backfill/,'timing backfill detail must tag tra
 assert.match(shell,/orderStatus=85；这是终态状态证据/,'empty-track page must surface WHPP confirm-query POD status');
 assert.match(shell,/状态证据（不等同于轨迹时间）/,'tracking page must distinguish terminal status evidence from real trajectory time');
 assert.match(shell,/currentParams\(\)\.get\('source'\)/,'tracking page must retain timing-backfill context');
+assert.match(shell,/strongTerminalPod/,'terminal POD status must outrank stale open retry ledger state in track view');
+assert.match(shell,/API_PENDING_RETRY\|PENDING_RETRY\|待重试/,'stale retry ledger evidence must be suppressed once terminal POD is proven');
 
 console.log('[V744/V745/V746/V747/V748] signing UI + WHPP canonical timing + offline-safe updater + per-board store/Pending-gap/OC2+ trajectory quality passed');
