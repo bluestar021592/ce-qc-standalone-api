@@ -32,4 +32,37 @@ assert.match(integrity,/selectedTypes=TYPES\.includes\(requestedType\)\?\[reques
 assert.match(html,/<meta name="ce-qc-build" content="V\d+_[A-Z0-9_]+">/,'current shell build marker missing');
 assert.match(html,/v625-shell\.js\?v=\d{8}-v\d+-\d+/,'current shell cache bust missing');
 
+// V765 actual browser-session read cache: only full saved exact-member proofs
+// are reusable, and a new snapshot or a purge must invalidate them.
+assert.match(shell,/async function v765LoadBusinessDetailLane/,'large workspace/details must be off KPI critical path');
+const businessLane=shell.slice(shell.indexOf('async function loadBusiness(options={})'),shell.indexOf('function rowTr(values)'));
+assert.doesNotMatch(businessLane,/await Promise\.allSettled\(\[\s*json\('\/api\/data-integrity/,'large integrity read must not block initial metrics');
+assert.match(businessLane,/void v765LoadBusinessDetailLane\(/,'background scoped detail lane must begin after the compact metrics paint');
+assert.match(shell,/v765BoardDetailInflight\.get\(cacheKey\)/,'identical detail reads should join the same in-flight request');
+assert.match(shell,/Date\.now\(\)-cached\.at<20000/,'nonterminal 20-second workspace cache is bounded');
+assert.match(shell,/qualityKey='CE_QC_V765_TRACK_'\+targetBusiness\+'\|'\+reportDate\+'\|'\+snapshotId/,'track refresh needs snapshot-keyed throttling');
+assert.match(shell,/const historyPromise=json\('\/api\/unified-history\?limit=7'/,'history metadata must be supplemental');
+assert.match(shell,/v765InvalidateAllProofCache\(\)/,'new import/purge must invalidate verified completion cache');
+
+const cacheSlice=shell.slice(shell.indexOf('const V765_PROOF_CACHE_PREFIX='),shell.indexOf('const v762FamilyTerminalProofs=new Map();'));
+const saved=new Map();
+const mockedStorage={setItem:(k,v)=>saved.set(k,v),getItem:k=>saved.get(k)||null,
+  removeItem:k=>saved.delete(k),get length(){return saved.size},key:i=>[...saved.keys()][i]};
+const now={now:()=>1700000000000};
+const cacheHarness=new Function('sessionStorage','Date',cacheSlice+
+  'const v762FamilyTerminalProofs=new Map(),v762FamilyProofNextRead=new Map(); return {save:v765RememberVerifiedFamilies,read:v765RestoreVerifiedFamilies,clear:v765InvalidateAllProofCache};');
+const cache=cacheHarness(mockedStorage,now);
+const date='2026-07-04',snap='S-765',valid={
+  CCSL:{reportDate:date,snapshotId:snap,sourceCount:6857,scanCount:6857,finalCount:6857,runStatus:'finished'},
+  SHOPEE:{reportDate:date,snapshotId:snap,sourceCount:1346,scanCount:1346,finalCount:1346,runStatus:'finished'}
+};
+cache.save(date,snap,valid);
+assert.equal(cache.read(date,snap)?.CCSL?.sourceCount,6857);
+assert.equal(cache.read(date,snap)?.SHOPEE?.sourceCount,1346);
+assert.equal(cache.read(date,'DIFFERENT'),null,'new upload snapshot cannot reuse old 3/3 proof');
+cache.clear();
+assert.equal(cache.read(date,snap),null,'purge/reset must drop all verified browser proofs');
+cache.save(date,snap,{...valid,SHOPEE:{...valid.SHOPEE,finalCount:1345}});
+assert.equal(cache.read(date,snap),null,'incomplete 1345/1346 proof cannot recover 3/3');
+
 console.log('[V756/V722] interaction-first navigation passed · board switches preserve date/snapshot · no serial latest-import blocker · running progress follows counters and exposes 90s no-change state');
