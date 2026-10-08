@@ -1897,7 +1897,7 @@ app.get('/api/whpp/completion-proof', (req,res)=>{
 // No remote CE calls, run mutations, date switching, or inferred completion.
 app.get('/api/family-recovery-proof', (req,res)=>{
   const date=String(req.query?.reportDate||'').slice(0,10);
-  if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(date))
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(date))
     return res.status(400).json({ok:false,code:'REPORT_DATE_INVALID',error:'缺少有效日报日期'});
   const db=getDb();
   const batch=db.prepare("SELECT snapshotId, batchId FROM unified_import_batches WHERE reportDate=? AND status='VALID' ORDER BY createdAt DESC,batchId DESC LIMIT 1").get(date);
