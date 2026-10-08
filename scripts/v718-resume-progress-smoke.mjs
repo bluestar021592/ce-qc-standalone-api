@@ -10,11 +10,15 @@ assert.match(progress,/function shopeeProgress\(db, requestedReportDate = ''\)/,
 assert.match(progress,/const requested = normalizeReportDate\(requestedReportDate\)/,'SHOPEE progress must normalize the requested date');
 assert.match(progress,/shopeeProgress\(db, req\.query\.reportDate\)/,'progress endpoint must forward the selected date to SHOPEE');
 assert.match(server,/if \(!options\.resume\) \{[\s\S]*?const probeBills = state\.pnhBills\.slice/,'SHOPEE duplicate preflight must run only on fresh start');
-assert.match(shell,/\['RUN_ALREADY_COMPLETED','RUN_NOT_RECOVERABLE'\]\.includes\(code\)/,'resume UI may swallow only terminal no-work 409 responses');
-assert.match(shell,/const beforeResume=await fetchLiveProgress\(reportDate\)/,'resume must read the exact three-family truth before starting any family');
-assert.match(shell,/if\(familyComplete\(beforeResume\.ccsl\)\)[\s\S]*?CCSL已完成，继续处理时自动跳过/,'completed CCSL must not be resumed');
-assert.match(shell,/if\(familyComplete\(beforeResume\.shopee\)\)[\s\S]*?SHOPEE已完成，继续处理时自动跳过/,'completed SHOPEE must not be resumed');
-assert.match(shell,/if\(familyComplete\(beforeResume\.whpp\)\)[\s\S]*?WHPP已完成，继续处理时自动跳过/,'completed WHPP must not be resumed');
+assert.match(shell,/const proof=await v761FamilyRecoveryProof\(reportDate\)/,'resume must load exact selected-date business disposition before any run');
+assert.match(shell,/for\(const type of \['CCSL','SHOPEE'\]\)/,'resume must consider each family separately');
+assert.match(shell,/await v761ContinueFamily\(type,proof\?\.businesses\?\.\[type\],reportDate\)/,'resume must dispatch each family against its persisted facts');
+assert.match(shell,/if\(action==='START'\)/,'missing run may be first started only after exact evidence proof');
+assert.match(shell,/if\(action==='RESUME'\)/,'interrupted run must resume, not restart');
+assert.match(shell,/if\(action==='WAIT'\)/,'existing running business must be awaited');
+assert.match(shell,/if\(action==='DONE'\|\|action==='ZERO_TICKET'\)/,'completed and 0-ticket families must never be rerun');
+assert.match(shell,/if\(familyComplete\(current\.whpp\)\)/,'completed WHPP must remain untouched');
+assert.doesNotMatch(shell,/\['RUN_ALREADY_COMPLETED','RUN_NOT_RECOVERABLE'\]\.includes\(code\)/,'no-run must not be silently ignored by resume');
 assert.doesNotMatch(shell,/if\(e\.status===409\)return/,'resume UI must not swallow all 409 failures');
 assert.match(html,/<meta name="ce-qc-build" content="V\d+_[A-Z0-9_]+">/,'current shell build marker missing');
 assert.match(html,/v625-shell\.js\?v=\d{8}-v\d+-\d+/,'current shell cache bust missing');
@@ -22,4 +26,4 @@ assert.match(html,/v625-shell\.js\?v=\d{8}-v\d+-\d+/,'current shell cache bust m
 assert.match(progress,/const lockStatus=String\(lock.status\|\|''\)/,'V760 status priority uses persisted run lock');
 assert.match(shell,/const verified=await v760VerifyAllFamilies\(reportDate,counts\)/,'V760 must verify live selected-date family completion after resume');
 
-console.log('[V756/V718] selected-date progress + resume-only-unfinished families + exact 409 handling passed');
+console.log('[V761/V718] selected-date resume dispatcher distinguishes never-started, paused, running, completed and blocked evidence without silent no-run 409');
