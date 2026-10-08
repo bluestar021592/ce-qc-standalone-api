@@ -21,8 +21,8 @@ assert.match(shell,/dashboardContextUrl\(boardJump\.value\)/,'board dropdown mus
 assert.match(shell,/syncDashboardNavigationContext\(reportDate,snapshotId\)/,'resolved board context must be propagated to subsequent business navigation');
 assert.match(shell,/v756ProgressDescriptor/,'live progress headline must derive from actual running counters rather than stale raw phase text');
 assert.match(shell,/进度90秒未变化，后台仍在运行/,'unchanged long-running progress must be observable without being mislabeled complete');
-assert.match(shell,/new URLSearchParams\(\{businessType:business\}\)/,'business integrity reads must be scoped');
-assert.match(shell,/new URLSearchParams\(\{scope:'all',businessType:business\}\)/,'business workspace reads must be scoped');
+assert.match(shell,/new URLSearchParams\(\{businessType:targetBusiness\}\)/,'business integrity reads must be scoped');
+assert.match(shell,/new URLSearchParams\(\{scope:'all',businessType:targetBusiness\}\)/,'business workspace reads must be scoped');
 assert.match(server,/if\(String\(req\.query\.fast\|\|''\)==='1'\)/,'server must expose local-only fast home summary');
 assert.match(server,/requestedType === 'WHPP' && req\.query\.compact === '1'/,'WHPP current board must have a compact first-paint path');
 assert.match(server,/loadFastSqlBusinessState\(req\.params\.businessType, requestedSnapshotId, requestedReportDate\)/,'selected date must stay on fast SQL board path');
