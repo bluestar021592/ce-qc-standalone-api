@@ -306,7 +306,8 @@ function v762RememberFamilyCompletionProof(proof,reportDate='',snapshotId=''){
     const total=Number(record.sourceCount||0),scan=Number(record.scanCount||0),final=Number(record.finalCount||0);
     const savedStatus=String(record.runStatus||'').trim().toLowerCase();
     // The run lock is already queried for this exact historical date; the active
-    // application date may have moved since that old completed batch.\n    if(record.action!=='DONE'||!['finished','completed'].includes(savedStatus)
+    // application date may have moved since that old completed batch.
+    if(record.action!=='DONE'||!['finished','completed'].includes(savedStatus)
        ||total<=0||scan!==total||final!==total)continue;
     accepted[name]={reportDate:date,snapshotId:snapshot,sourceCount:total,scanCount:scan,finalCount:final,
       runId:String(record.runId),runStatus:savedStatus};
