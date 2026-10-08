@@ -574,7 +574,7 @@ async function resolveV755FamilyCounts(reportDate='',explicitData=null){
   }
   if(!truth){
     try{
-      const summary=await json('/api/home-quality-summary?fast=1&reportDate='+encodeURIComponent(date),10000);
+      const summary=await json('/api/home-quality-summary?fast=1&quick=1&reportDate='+encodeURIComponent(date),10000);
       const counts=summary?.classification?.counts||null;
       truth=rememberV755ImportCounts({
         reportDate:date,
@@ -1552,7 +1552,7 @@ async function refreshImportCanonicalClassification(reportDate=''){
   const date=reportDate||v626LatestImport?.reportDate||'';
   if(!date)return null;
   try{
-    const summary=await json('/api/home-quality-summary?fast=1&reportDate='+encodeURIComponent(date),10000);
+    const summary=await json('/api/home-quality-summary?fast=1&quick=1&reportDate='+encodeURIComponent(date),10000);
     const counts=summary?.classification?.counts||{};
     let changed=false;
     for(const type of ['CE','CEAF','TBKH','ALI1688','WHPP','SHOPEECN','SHOPEEVN']){
