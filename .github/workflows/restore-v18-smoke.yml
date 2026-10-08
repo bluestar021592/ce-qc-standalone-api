@@ -53,12 +53,20 @@ jobs:
           $updateLauncher = Get-Content -Raw tools/CE_QC_Start.ps1
           if (-not $updateLauncher.Contains('Start_CE_QC.ps1')) { throw 'Verified updater no longer hands off to protected Start_CE_QC.ps1 runtime' }
 
-      - name: Verify locked UI signature
+      - name: Verify legacy assets and active seven-business UI
         shell: pwsh
         run: |
-          $html = Get-Content -Raw public/index.html
-          foreach ($needle in @('homeBusinessCards','homeCoreMetrics','homeShopeeSpecial','homeDispatchDistribution','综合日报导入','管理汇总 + 五业务')) {
-            if (-not $html.Contains($needle)) { throw "Missing V18 UI signature: $needle" }
+          $legacy = Get-Content -Raw public/index.html
+          $shell = Get-Content -Raw public/v625-shell.html
+          foreach ($needle in @('homeNativeBusinessGrid','homeDashboardDynamic','dashboard-v18.css')) {
+            if (-not $legacy.Contains($needle)) { throw "Legacy V18 UI mount or asset missing: $needle" }
+          }
+          foreach ($needle in @('v625-business-grid','data-card="TOTAL"','v625-sidebar')) {
+            if (-not $shell.Contains($needle)) { throw "Active V625 UI signature missing: $needle" }
+          }
+          foreach ($type in @('CE','CEAF','TBKH','ALI1688','WHPP','SHOPEECN','SHOPEEVN')) {
+            if (-not $shell.Contains('data-card="'+$type+'"')) { throw "Active seven-business card missing: $type" }
+            if (-not $legacy.Contains('data-business-key="'+$type.ToLowerInvariant()+'"')) { throw "Legacy business route missing: $type" }
           }
           foreach ($file in @('public/dashboard-v18.js','public/dashboard-v18.css','public/v16-blue-white-colors.css','public/v17-page-lock.css')) {
             if (-not (Test-Path $file)) { throw "Missing locked UI file: $file" }
@@ -70,6 +78,8 @@ jobs:
         shell: pwsh
         run: |
           $tests = @(
+            'test/shopee-template-export.test.js',
+            'test/v13-export-link-region-hardening.test.js',
             'test/dashboard-v18.test.js',
             'test/data-purge-large-backup.test.js',
             'test/filename-date-detection.test.js',
@@ -78,7 +88,6 @@ jobs:
             'test/shopee-cnvn.test.js',
             'test/shopee-latest-track-classification.test.js',
             'test/shopee-pv-open-disposition.test.js',
-            'test/shopee-template-export.test.js',
             'test/store-flow.test.js',
             'test/store-load-detail.test.js',
             'test/unified-snapshot-membership.test.js',
@@ -87,7 +96,6 @@ jobs:
             'test/v11-terminal-isolation-return.test.js',
             'test/v12-business-rule-hardening.test.js',
             'test/v13-unified-import-hardening.test.js',
-            'test/v13-export-link-region-hardening.test.js',
             'test/v14-pod-lock-carryover.test.js',
             'test/v9-period-range.test.js',
             'test/v9-special-nodes.test.js'

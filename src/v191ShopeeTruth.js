@@ -199,7 +199,7 @@ function queryShipment(db,bills){
     const marks=chunk.map(()=>'?').join(',');
     const rows=db.prepare(`SELECT shipmentCode,reportDate,shipmentStatus,statusText,apiStatus,rawJson,updatedAt
       FROM business_shipment_tracks WHERE businessType='SHOPEE' AND shipmentCode IN (${marks})
-      ORDER BY shipmentCode ASC, updatedAt DESC, id DESC`).all(...chunk);
+      ORDER BY shipmentCode ASC, updatedAt DESC, reportDate DESC`).all(...chunk);
     for(const row of rows){
       const bill=billOf(row.shipmentCode);
       if(!bill||out.has(bill))continue;

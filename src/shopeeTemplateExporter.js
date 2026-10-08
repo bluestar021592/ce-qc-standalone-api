@@ -98,15 +98,19 @@ function repairReturnLinks(workbook) {
 function fillDashboard(sheet, type, range, total, daily) {
   sheet.getCell('A1').value = `${BUSINESS_LABELS[type] || type}每日数据看板`;
 
+  // V767: the 10-sheet master has seven TWO-column merged KPI slots
+  // (A:B, C:D, E:F, G:H, I:J, K:L, M:N). V650 placed the store
+  // card at F5, which silently overwrote the E:F province (PV) slot.
+  // Keep PP+PV separately visible; stores remain linked on each date's
+  // row and on the independent 门店明细 worksheet.
   const topSpecs=[
     ['A5','全部明细',total.all,1],
     ['C5','金边明细',total.pp,total.all],
     ['E5','外省明细',total.pv,total.all],
-    ['F5','门店明细',total.store,total.all],
-    ['H5','POD明细',total.pod,total.all],
-    ['J5','未POD明细',total.notPod,total.all],
-    ['L5','分配派送中明细',total.delivery,total.all],
-    ['N5','退回明细',total.returned,total.all]
+    ['G5','POD明细',total.pod,total.all],
+    ['I5','未POD明细',total.notPod,total.all],
+    ['K5','分配派送中明细',total.delivery,total.all],
+    ['M5','退回明细',total.returned,total.all]
   ];
   for(const [address,target,count,denominator] of topSpecs){
     const col=sheet.getCell(address).col;
@@ -173,7 +177,10 @@ function fillDetailPrepared(sheet, range, prepared, bucketKey) {
     const shipmentCode=bill(row);
     if(shipmentCode){
       const billCell=dataRow.getCell(2);
-      billCell.value=shipmentCode;
+      // V767: retain the user's exact 10-sheet master, and restore the
+      // shipment-specific CE-QC detail hyperlink (not an Excel formula).
+      // Explicit businessType keeps CN/VN scope separate on app drilldown.
+      billCell.value={text:shipmentCode,hyperlink:detailUrl(row)};
       billCell.numFmt='@';
     }
   });

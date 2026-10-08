@@ -133,13 +133,18 @@ test('V18 trend renderer tolerates series without tooltip numerator metadata', (
   assert.match(chart,/dates:\s*Array\.isArray\(chart\?\.dates\)/);
 });
 
-test('V29 does not replace locked V18 dashboard HTML/CSS files', () => {
-  const html=fs.readFileSync('public/index.html','utf8');
-  assert.match(html,/homeBusinessCards/);
-  assert.match(html,/homeCoreMetrics/);
-  assert.match(html,/homeShopeeSpecial/);
-  assert.match(html,/homeDispatchDistribution/);
-  assert.ok(fs.existsSync('public/dashboard-v18.css'));
-  assert.ok(fs.existsSync('public/v16-blue-white-colors.css'));
-  assert.ok(fs.existsSync('public/v17-page-lock.css'));
+test('V29 retains the legacy V18 assets and current seven-business navigation', () => {
+  const legacy=fs.readFileSync('public/index.html','utf8');
+  const shell=fs.readFileSync('public/v625-shell.html','utf8');
+  assert.match(legacy,/id="homeNativeBusinessGrid"/,'legacy homepage must retain business navigation');
+  assert.match(legacy,/id="homeDashboardDynamic"/,'legacy homepage retains its dynamic dashboard mount');
+  assert.match(shell,/class="v625-business-grid"/,'current homepage must have active business cards');
+  for (const type of ['CE','CEAF','TBKH','ALI1688','WHPP','SHOPEECN','SHOPEEVN']) {
+    assert.ok(legacy.includes('data-business-key="'+type.toLowerCase()+'"'),'legacy route must remain: '+type);
+    assert.ok(shell.includes('data-card="'+type+'"'),'current route must remain: '+type);
+  }
+  for (const file of ['public/dashboard-v18.js','public/dashboard-v18.css',
+    'public/v16-blue-white-colors.css','public/v17-page-lock.css']) {
+    assert.ok(fs.existsSync(file),'preserved V18 asset missing: '+file);
+  }
 });

@@ -38,10 +38,15 @@ test('V13 locked Shopee export does not count UNKNOWN as PV and waybill cells op
     });
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.readFile(result.file);
-    const dashboard = workbook.getWorksheet('看板首页');
+    const dashboard = workbook.getWorksheet('每日看板');
     assert.equal(dashboard.getCell('A5').value.result, 3);
     assert.equal(dashboard.getCell('C5').value.result, 1);
-    assert.equal(dashboard.getCell('E5').value.result, 1);
+    const pvLinks=[];
+    dashboard.getRow(5).eachCell(cell=>{
+      if (typeof cell.value?.formula==='string'&&cell.value.formula.includes('外省明细!A1'))pvLinks.push(cell.value);
+    });
+    assert.ok(pvLinks.some(cell=>Number(cell.result)===1),
+      'dashboard must link exactly one confirmed PV waybill, with unknown region excluded');
 
     const detail = workbook.getWorksheet('全部明细');
     const rows = [];
@@ -53,9 +58,11 @@ test('V13 locked Shopee export does not count UNKNOWN as PV and waybill cells op
     const pp = rows.find(row => row.getCell(2).value.text === 'CNPP00000001');
     const pv = rows.find(row => row.getCell(2).value.text === 'CNPV00000001');
     const unknown = rows.find(row => row.getCell(2).value.text === 'CNUN00000001');
-    assert.equal(pp.getCell(8).value, '金边');
-    assert.equal(pv.getCell(8).value, '外省');
-    assert.equal(unknown.getCell(8).value, '未识别');
+    // V650 active 10-sheet detail uses column G for 区域分类;
+    // column H is 当前门店 and must not be read as the province.
+    assert.equal(pp.getCell(7).value, '金边');
+    assert.equal(pv.getCell(7).value, '外省');
+    assert.equal(unknown.getCell(7).value, '未识别');
     assert.match(pp.getCell(2).value.hyperlink, /^http:\/\/127\.0\.0\.1:5177\/detail\?/);
     assert.match(pp.getCell(2).value.hyperlink, /shipmentCode=CNPP00000001/);
     assert.match(pp.getCell(2).value.hyperlink, /businessType=SHOPEECN/);
