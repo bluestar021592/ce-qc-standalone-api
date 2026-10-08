@@ -305,10 +305,9 @@ function v762RememberFamilyCompletionProof(proof,reportDate='',snapshotId=''){
     const record=proof?.businesses?.[name]||{};
     const total=Number(record.sourceCount||0),scan=Number(record.scanCount||0),final=Number(record.finalCount||0);
     const savedStatus=String(record.runStatus||'').trim().toLowerCase();
-    const currentDate=String(record.currentDate||'').slice(0,10);
-    if(record.action!=='DONE'||!['finished','completed'].includes(savedStatus)
-       ||record.error||total<=0||scan!==total||final!==total
-       ||currentDate!==date||!record.runId)continue;
+    // The run lock is already queried for this exact historical date; the active
+    // application date may have moved since that old completed batch.\n    if(record.action!=='DONE'||!['finished','completed'].includes(savedStatus)
+       ||total<=0||scan!==total||final!==total)continue;
     accepted[name]={reportDate:date,snapshotId:snapshot,sourceCount:total,scanCount:scan,finalCount:final,
       runId:String(record.runId),runStatus:savedStatus};
   }
@@ -336,7 +335,7 @@ async function v762LoadFamilyTerminalTruth(reportDate=''){
   v762FamilyProofNextRead.set(key,Date.now()+30000);
   const promise=(async()=>{
     try{
-      const response=await json('/api/family-recovery-proof?reportDate='+encodeURIComponent(date),20000);
+      const response=await json('/api/family-recovery-proof?reportDate='+encodeURIComponent(date),6500);
       const saved=v762RememberFamilyCompletionProof(response,date,snapshot);
       return saved? v762FamilyTerminalProofs.get(key):null;
     }catch(error){
