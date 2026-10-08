@@ -768,6 +768,7 @@ function renderLiveProgress(bundle={}){
   const allRunning=Boolean(ccsl.running||shopee.running||whpp.active||v752LaunchingFamily);
   const completeFamilies=Object.values(familyLabels).filter(label=>label==='完成').length;
   const allComplete=completeFamilies===3;
+  const historyVerifying=[familyLabels.ccsl,familyLabels.shopee].some(label=>String(label).includes('历史证据核验中'));
   const scanPct=allComplete?100:progressPercent(scanDone,scanTotal),trackPct=allComplete?100:progressPercent(trackDone,trackTotal);
   const whppPct=allComplete?100:progressPercent(whppBatch,whppBatches);
   const overall=allComplete?100:Math.round((scanPct+trackPct+(whppBatches?whppPct:(completeFamilies/3*100)))/3);
@@ -776,18 +777,19 @@ function renderLiveProgress(bundle={}){
   const whppVerifying=String(familyLabels.whpp||'').includes('核验中');
   const phase=allComplete
     ?'全部处理完成'+(whpp.evidenceGap?' · WHPP '+whpp.evidenceGap.missing+'票状态待跟进':'')
-    :activePhase||(whpp.evidenceGap?'已完成'+completeFamilies+'/3业务 · WHPP '+whpp.evidenceGap.missing+'票状态待核验（无需重新上传）':whppVerifying?'WHPP完成状态核验中，请勿重复扫描':completeFamilies===2&&familyLabels.whpp!=='完成'?'已完成 2/3 业务 · WHPP待处理，请点击“继续未完成处理”':completeFamilies?('已完成 '+completeFamilies+'/3 业务，等待下一业务处理'):'等待开始处理');
+    :activePhase||(historyVerifying?'CCSL/SHOPEE历史证据核验中；无需重新上传或扫描，可正常切换看板':whpp.evidenceGap?'已完成'+completeFamilies+'/3业务 · WHPP '+whpp.evidenceGap.missing+'票状态待核验（无需重新上传）':whppVerifying?'WHPP完成状态核验中，请勿重复扫描':completeFamilies===2&&familyLabels.whpp!=='完成'?'已完成 2/3 业务 · WHPP待处理，请点击“继续未完成处理”':completeFamilies?('已完成 '+completeFamilies+'/3 业务，等待下一业务处理'):'等待开始处理');
   setText('v626ProcessText',phase);setText('v626ImportProgressText',phase);
-  const progressCount=(scanTotal+trackTotal)>0?((scanDone+trackDone)+' / '+(scanTotal+trackTotal)):(completeFamilies+'/3 业务完成');
+  const progressCount=historyVerifying?'历史核验中（当前已确认 '+completeFamilies+'/3 业务）'
+    :(scanTotal+trackTotal)>0?((scanDone+trackDone)+' / '+(scanTotal+trackTotal)):(completeFamilies+'/3 业务完成');
   const reconciledCount=whpp.evidenceGap?progressCount+' · WHPP已确认终态 '+whpp.evidenceGap.terminalCount+'/'+whpp.evidenceGap.total:progressCount;
   setText('v626ProcessCount',reconciledCount);setText('v626ImportProgressCount',reconciledCount);
-  const scanStage=allComplete?'完成':(/轨迹|track/i.test(activePhase)?'完成':allRunning?'处理中':completeFamilies?('已完成 '+completeFamilies+'/3业务'):'等待');
-  const trackStage=allComplete?'完成':(/轨迹|track/i.test(activePhase)?'处理中':allRunning?'等待扫描完成':completeFamilies?('已完成 '+completeFamilies+'/3业务'):'等待');
-  const doneStage=allComplete?'完成':allRunning?'处理中':completeFamilies?('已完成 '+completeFamilies+'/3业务'):'等待';
+  const scanStage=allComplete?'完成':historyVerifying?'历史核验中':(/轨迹|track/i.test(activePhase)?'完成':allRunning?'处理中':completeFamilies?('已完成 '+completeFamilies+'/3业务'):'等待');
+  const trackStage=allComplete?'完成':historyVerifying?'历史核验中':(/轨迹|track/i.test(activePhase)?'处理中':allRunning?'等待扫描完成':completeFamilies?('已完成 '+completeFamilies+'/3业务'):'等待');
+  const doneStage=allComplete?'完成':historyVerifying?'历史核验中':allRunning?'处理中':completeFamilies?('已完成 '+completeFamilies+'/3业务'):'等待';
   setText('v626StageScan',scanStage);setText('v626StageTrack',trackStage);setText('v626StageDone',doneStage);
   setText('v626ImportScan',scanStage);setText('v626ImportTrack',trackStage);setText('v626ImportDone',doneStage);
-  const badge=byId('v626ProcessState');if(badge){badge.textContent=completeFamilies>=3?'已完成':allRunning?'处理中':'待处理';badge.className='v625-badge '+(completeFamilies>=3?'success':allRunning?'warning':'warning')}
-  const resumeBtn=byId('v625RunResume');if(resumeBtn){resumeBtn.disabled=allComplete;resumeBtn.hidden=allComplete;resumeBtn.style.setProperty('display',allComplete?'none':'inline-flex','important')}
+  const badge=byId('v626ProcessState');if(badge){badge.textContent=completeFamilies>=3?'已完成':historyVerifying?'核验中':allRunning?'处理中':'待处理';badge.className='v625-badge '+(completeFamilies>=3?'success':allRunning?'warning':'warning')}
+  const resumeBtn=byId('v625RunResume');if(resumeBtn){resumeBtn.disabled=allComplete||historyVerifying;resumeBtn.hidden=allComplete||historyVerifying;resumeBtn.style.setProperty('display',allComplete||historyVerifying?'none':'inline-flex','important')}
   const progressLogs=[
     ['CCSL',ccsl,ccsl.generatedAt||new Date().toISOString(),ccsl.phase||ccsl.lastMessage],
     ['SHOPEE',shopee,shopee.generatedAt||new Date().toISOString(),shopee.phase||shopee.lastMessage],
