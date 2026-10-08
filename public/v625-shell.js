@@ -327,6 +327,10 @@ function v765InvalidateAllProofCache(){
     const key=sessionStorage.key(i);
     if(key?.startsWith(V765_PROOF_CACHE_PREFIX))sessionStorage.removeItem(key)
   }}catch{}
+  try{for(let i=sessionStorage.length-1;i>=0;i--){
+    const key=sessionStorage.key(i);
+    if(key?.startsWith('CE_QC_V765_TRACK_'))sessionStorage.removeItem(key)
+  }}catch{}
   v762FamilyTerminalProofs.clear();v762FamilyProofNextRead.clear();
 }
 const v762FamilyTerminalProofs=new Map();
@@ -907,12 +911,23 @@ async function scanWhppPending(){
 async function loadHome(options={}){
   const requestedDate=selectedReportDate();
   const summaryUrl='/api/home-quality-summary?fast=1'+(requestedDate?'&reportDate='+encodeURIComponent(requestedDate):'');
-  const [summaryR,historyR]=await Promise.allSettled([
-    json(summaryUrl,10000),
-    json('/api/unified-history?limit=7',7000)
-  ]);
-  const summary=summaryR.status==='fulfilled'?summaryR.value:null;
-  const historyRows=(historyR.status==='fulfilled'?historyR.value?.rows:[])||[];
+  // V765: summary is the first paint authority. History metadata is
+  // decorative and must not hold the home view for up to seven seconds.
+  const historyPromise=json('/api/unified-history?limit=7',7000).catch(()=>null);
+  const summary=await json(summaryUrl,10000).catch(()=>null);
+  const historyRows=[];
+  void historyPromise.then(history=>{
+    if(page!=='home')return;
+    const date=String(summary?.reportDate||requestedDate||'').slice(0,10);
+    const item=(history?.rows||[]).find(row=>String(row.reportDate||'').slice(0,10)===date);
+    if(!item||date!==String(v626LatestImport?.reportDate||'').slice(0,10))return;
+    // Never override an active/newer snapshot with old history metadata.
+    if(summary?.snapshotId&&item.snapshotId&&String(summary.snapshotId)!==String(item.snapshotId))return;
+    v626LatestImport={...(v626LatestImport||{}),snapshotStatus:item.snapshotStatus||item.status||'',
+      sourceName:item.sourceName||v626LatestImport?.sourceName};
+    setText('v626ProcessDateSource','当前查看日报：'+date+
+      (v626LatestImport.snapshotStatus?' · '+v626LatestImport.snapshotStatus:''));
+  });
   const integrity=null;
   const activeReportDate=summary?.reportDate||requestedDate||'';
   const selectedBatch=historyRows.find(row=>String(row.reportDate||'').slice(0,10)===String(activeReportDate||'').slice(0,10))||null;
@@ -1378,7 +1393,7 @@ async function v765LoadBusinessDetailLane({reportDate,snapshotId,m,options,gener
         // Track reconciliation is a background update, not navigation work.
         // Repeated routes in a single browsing session reuse their 2h refresh
         // window; manual "更新未完成POD" always remains available.
-        const qualityKey='CE_QC_V765_TRACK_'+targetBusiness+'|'+reportDate;
+        const qualityKey='CE_QC_V765_TRACK_'+targetBusiness+'|'+reportDate+'|'+snapshotId;
         let recent=0;
         try{recent=Number(sessionStorage.getItem(qualityKey)||0)}catch{}
         if(Date.now()-recent>=2*60*60*1000){
@@ -1415,7 +1430,9 @@ async function loadBusiness(options={}){
     const summaryQuery=new URLSearchParams({fast:'1'});
     if(baseReportDate)summaryQuery.set('reportDate',baseReportDate);
     if(requestedSnapshot)summaryQuery.set('snapshotId',requestedSnapshot);
-    const summaryPromise=json('/api/home-quality-summary?'+summaryQuery.toString(),10000).catch(()=>null);
+    // Keep expensive historical timing away from compact KPI first paint.
+    const summaryPromise=new Promise(resolve=>setTimeout(resolve,900))
+      .then(()=>json('/api/home-quality-summary?'+summaryQuery.toString(),10000).catch(()=>null));
 
     const r=await json('/api/business-state/'+business+'?'+stateQuery.toString(),10000);
     const state=r.state||{},m=metricState(state);
@@ -1554,6 +1571,7 @@ async function doImport(){
   // A new import creates a new business lifecycle; cached historical run
   // projections must never be trusted across an import or purge.
   v765InvalidateAllProofCache();
+  v765BoardDetailCache.clear();
   const fd=new FormData();fd.append('file',file);
   const manualWrap=byId('v626ManualDateWrap');
   if(manualWrap&&!manualWrap.hidden&&byId('v626ManualReportDate')?.value)fd.append('reportDate',byId('v626ManualReportDate').value);
