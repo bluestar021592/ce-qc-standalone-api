@@ -43,7 +43,7 @@ function start(entry){
   try{
     worker=new Worker(new URL('./v766HeavyReadWorker.mjs',import.meta.url),{
       env:{...process.env,CE_QC_DASHBOARD_READ_WORKER:'1'},
-      workerData:{dbFile:getRuntimeConfig().dbFile}
+      workerData:{dbFile:getRuntimeConfig().dbFile,expectedSnapshot:String(args.snapshotId||'')}
     });
     timer=setTimeout(()=>finish(new Error('V766_READ_JOB_TIMEOUT')),MAX_RUN_MS);
     timer.unref?.();
