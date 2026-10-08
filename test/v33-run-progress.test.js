@@ -90,3 +90,26 @@ test('V33 completed state is not falsely reported as actively running', () => {
   assert.equal(progress.trackTotal, 288);
   assert.equal(progress.runStatus, 'finished');
 });
+
+test('V760 persisted finished run lock wins over a stale running checkpoint',()=>{
+  const progress=progressShape({
+    businessType:'CCSL',reportDate:'2026-07-04',
+    lock:{status:'finished',currentStage:'完成',runId:'finished-run'},
+    checkpoint:{status:'running',stage:'订单扫描'},
+    payload:{runStatus:'running',scanDone:20,scanTotal:20},
+    sourceTotal:20
+  });
+  assert.equal(progress.runStatus,'finished');
+  assert.equal(progress.running,false);
+});
+test('V760 real running lock wins over stale finished checkpoint',()=>{
+  const progress=progressShape({
+    businessType:'SHOPEE',reportDate:'2026-07-04',
+    lock:{status:'running',currentStage:'订单扫描',runId:'active-run'},
+    checkpoint:{status:'finished',stage:'完成'},
+    payload:{runStatus:'finished',scanDone:1,scanTotal:20},
+    sourceTotal:20
+  });
+  assert.equal(progress.runStatus,'running');
+  assert.equal(progress.running,true);
+});
