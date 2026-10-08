@@ -169,4 +169,39 @@ assert.equal(falseCompletion.unifiedCompleted,true);
 assert.equal(falseCompletion.unifiedWhppCompleted,false);
 assert.equal(falseCompletion.locked,false);
 
-console.log('[V754/V751] real SQLite truth passed · verified WHPP child snapshot locks true completion · aggregate unified COMPLETED without a real WHPP child stays unlocked · VN/CN timing truth retained');
+// V757: an invalidated/no-longer-referenceable WHPP child must not force a
+// second remote scan when all exact daily members retain full terminal
+// scan+final evidence. Mere 190/190 classification is insufficient.
+for(let i=1;i<=3;i++){
+  const bill='WF'+i,returned=i===3;
+  insertFinal.run('WHPP',bill,falseDate,returned?0:1,returned?'退回':'POD',
+    'SUCCESS','CLOSED',falseDate+'T08:00:00','','','WHPP',
+    JSON.stringify({shipmentCode:bill,currentState:returned?'RETURN_COMPLETED':'POD'}));
+  insertCurrent.run(bill,'WHPP',falseDate,returned?'RETURN_COMPLETED':'POD',
+    'SUCCESS',falseDate+'T08:00:00',JSON.stringify({shipmentCode:bill,currentState:returned?'RETURN_COMPLETED':'POD'}));
+  insertScan.run('WHPP',bill,falseDate,returned?0:1,returned?'R':'85',
+    JSON.stringify({shipmentCode:bill,orderStatus:returned?'R':'85'}));
+}
+const recoveredCompletion=persistentWhppCompletionTruth(db,falseDate);
+assert.equal(recoveredCompletion.locked,true);
+assert.equal(recoveredCompletion.unifiedWhppCompleted,false);
+assert.equal(recoveredCompletion.terminalEvidenceVerified,true);
+assert.equal(recoveredCompletion.completionSource,'EXACT_WHPP_TERMINAL_SCAN_FINAL_EVIDENCE');
+assert.equal(recoveredCompletion.terminalEvidenceCoverage.scanRows,3);
+assert.equal(recoveredCompletion.terminalEvidenceCoverage.finalRows,3);
+assert.equal(recoveredCompletion.terminalEvidenceCoverage.podRows,2);
+assert.equal(recoveredCompletion.terminalEvidenceCoverage.returnedRows,1);
+
+// A missing scan, a live API retry, or an open/nonterminal member each prevent
+// false 3-of-3 completion, even when source membership still balances.
+db.prepare("DELETE FROM business_scan_results WHERE businessType='WHPP' AND reportDate=? AND shipmentCode='WF3'").run(falseDate);
+assert.equal(persistentWhppCompletionTruth(db,falseDate).locked,false);
+insertScan.run('WHPP','WF3',falseDate,0,'R',JSON.stringify({shipmentCode:'WF3',orderStatus:'R'}));
+db.prepare("UPDATE business_final_rows SET apiStatus='API_PENDING_RETRY' WHERE businessType='WHPP' AND reportDate=? AND shipmentCode='WF3'").run(falseDate);
+assert.equal(persistentWhppCompletionTruth(db,falseDate).locked,false);
+db.prepare("UPDATE business_final_rows SET apiStatus='SUCCESS',carryStatus='OPEN' WHERE businessType='WHPP' AND reportDate=? AND shipmentCode='WF3'").run(falseDate);
+assert.equal(persistentWhppCompletionTruth(db,falseDate).locked,false);
+db.prepare("UPDATE business_final_rows SET carryStatus='CLOSED' WHERE businessType='WHPP' AND reportDate=? AND shipmentCode='WF3'").run(falseDate);
+assert.equal(persistentWhppCompletionTruth(db,falseDate).locked,true);
+
+console.log('[V757/V754/V751] exact WHPP terminal scan/final evidence closes reimport-displaced completion · missing scan/retry/open member cannot fake 3/3 · verified WHPP child snapshot remains authoritative · VN/CN timing truth retained');
