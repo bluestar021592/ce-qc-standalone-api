@@ -32,4 +32,32 @@ assert.match(shell,/resumeBtn\.hidden=allComplete/,'resume button must be hidden
 assert.match(html,/V750_TIMING_EVIDENCE_TRACK_VIEW|V748_PER_BOARD_TRACK_QUALITY_SIGNALS|V744_SIGNING_UI_SIMPLIFIED_AND_TERMINAL_BACKFILL|V743_LATEST_DAILY_REPORT_SIGNING_BACKFILL|V742_DAILY_REPORT_SIGNING_TIME|V741_HISTORICAL_TIMING_CLOSED_LOOP|V739_IMPORT_COMPLETED_3OF3_LOCK/,'V739+ shell build marker missing');
 assert.match(html,/v625-shell\.js\?v=20261007-v(?:739|741|742|743|744|748|750)-1/,'V739+ JS cache bust missing');
 
-console.log('[V755/V754] single-click auto-process uses reconciled per-date counts · missing count fields cannot become zero-ticket · actual family run truth owns 3-of-3 completion');
+
+assert.match(shell,/const verified=await v760VerifyAllFamilies\(reportDate,counts\)/,'HTTP success must be followed by selected-date 3-of-3 proof');
+assert.match(shell,/if\(!verified\.ok\)\{/,'unfinished family must veto green success');
+assert.match(shell,/return\{ok:false,error:reason\}/,'unfinished result must not be reported as successful');
+assert.match(shell,/await post\('\/api\/timing-repair\/start'/,'timing repair must still exist after successful verification');
+assert.ok(shell.indexOf('if(!verified.ok)')<shell.indexOf("post('/api/timing-repair/start'"),'timing repair may only start after 3-of-3 proof');
+assert.doesNotMatch(shell,/note\('v625RunMessage','7业务处理完成，签收时效补证已启动。','success'\)/,'unconditional green success must be retired');
+
+const predicateStart=shell.indexOf('function familyComplete(value={})');
+const predicateEnd=shell.indexOf('function familyProgressLabel(value={})');
+const terminalStart=shell.indexOf('function v760FamilyTerminalSummary(');
+const terminalEnd=shell.indexOf('async function v760VerifyAllFamilies(');
+assert.ok(predicateStart>=0&&predicateEnd>predicateStart&&terminalStart>=0&&terminalEnd>terminalStart,'V760 family predicate/terminal owner missing');
+const inspect=new Function('bundle','counts','date',shell.slice(predicateStart,predicateEnd)+
+  '\\n'+shell.slice(terminalStart,terminalEnd)+
+  '\\nreturn v760FamilyTerminalSummary(bundle,counts,date);');
+const date='2026-07-04',counts={CCSL:6200,SHOPEE:300,WHPP:190};
+const done={running:false,runStatus:'finished',reportDate:date};
+const waiting={running:false,phase:'待处理',reportDate:date};
+const partial=inspect({ccsl:waiting,shopee:waiting,whpp:done},counts,date);
+assert.equal(partial.ok,false,'WHPP-only 1-of-3 must not be declared 3-of-3');
+assert.equal(partial.complete,1);
+assert.match(partial.missing.join(','),/CCSL/);
+assert.match(partial.missing.join(','),/SHOPEE/);
+assert.equal(inspect({ccsl:done,shopee:done,whpp:done},counts,date).ok,true,'actual matching 3-of-3 must succeed');
+assert.equal(inspect({ccsl:{...done,reportDate:'2026-07-03'},shopee:done,whpp:done},counts,date).ok,false,'previous date cannot finalize July-4');
+assert.equal(inspect({ccsl:{...done,running:true},shopee:done,whpp:done},counts,date).ok,false,'running member cannot finish from stale terminal label');
+
+console.log('[V760/V755] true selected-date 3-of-3 required before timing repair; 1-of-3 success banner prohibited;  single-click auto-process uses reconciled per-date counts · missing count fields cannot become zero-ticket · actual family run truth owns 3-of-3 completion');
