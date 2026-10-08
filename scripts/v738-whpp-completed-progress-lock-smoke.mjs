@@ -11,7 +11,10 @@ assert.match(truth,/return\{\s*locked:true,finalized:true,reportDate:date/,'comp
 
 assert.match(shell,/const v738WhppCompletionLatch=new Set\(\)/,'browser completion latch missing');
 assert.match(shell,/unifiedCompleted\|\|v738WhppCompletionLatch\.has\(date\)/,'failed WHPP progress read must preserve exact-date completed state');
-assert.match(shell,/V739_UNIFIED_COMPLETED_OVERRIDE|V738_UNIFIED_COMPLETED_FALLBACK/,'WHPP completed fallback/override must be observable');
+assert.match(shell,/V752_UNIFIED_COMPLETED_3OF3|V752_WHPP_DURABLE_COMPLETION/,'WHPP completed fallback/override must be observable');
+assert.match(shell,/ccsl=projectComplete\(ccsl,'CCSL'\)/,'exact unified COMPLETED must project CCSL complete as well as WHPP');
+assert.match(shell,/shopee=projectComplete\(shopee,'SHOPEE'\)/,'exact unified COMPLETED must project SHOPEE complete as well as WHPP');
+assert.match(shell,/v752TerminalProgressLogs/,'terminal progress logs must be deduplicated across polling ticks');
 assert.match(html,/V750_TIMING_EVIDENCE_TRACK_VIEW|V748_PER_BOARD_TRACK_QUALITY_SIGNALS|V744_SIGNING_UI_SIMPLIFIED_AND_TERMINAL_BACKFILL|V743_LATEST_DAILY_REPORT_SIGNING_BACKFILL|V742_DAILY_REPORT_SIGNING_TIME|V741_HISTORICAL_TIMING_CLOSED_LOOP|V739_IMPORT_COMPLETED_3OF3_LOCK|V738_WHPP_COMPLETION_LOCK_FAST_PATH/,'WHPP completion shell build marker missing');
 assert.match(html,/v625-shell\.js\?v=20261007-v(?:738|739|741|742|743|744|748|750)-1/,'WHPP completion JS cache bust missing');
 
