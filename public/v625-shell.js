@@ -1297,6 +1297,107 @@ async function refreshV748BusinessTrackQuality(reportDate=''){
     setText('v748QualityRefreshMeta',/其他业务任务运行/.test(msg)?'当前有业务任务运行，稍后自动/重新进入看板会继续补抓':'轨迹补抓暂未完成：'+msg);
   }
 }
+const v765BoardDetailInflight=new Map();
+const v765BoardDetailCache=new Map();
+let v765BoardLoadGeneration=0;
+async function v765LoadBusinessDetailLane({reportDate,snapshotId,m,options,generation,targetBusiness}){
+  // Do not make a large business-details query compete with the first KPI
+  // paint. A short deferred task allows layout and user navigation first.
+  await new Promise(resolve=>setTimeout(resolve,350));
+  const stillSelected=()=>page==='business'&&business===targetBusiness
+    &&generation===v765BoardLoadGeneration
+    &&String(v628BusinessReportDate||'')===reportDate;
+  if(!stillSelected())return;
+  const cacheKey=targetBusiness+'|'+reportDate+'|'+snapshotId;
+  let cached=v765BoardDetailCache.get(cacheKey);
+  let detail;
+  try{
+    if(!options.skipQualityRefresh&&cached&&Date.now()-cached.at<20000){
+      detail=cached.result;
+    }else{
+      let pending=v765BoardDetailInflight.get(cacheKey);
+      if(!pending){
+        const integrityQuery=new URLSearchParams({businessType:targetBusiness});
+        if(snapshotId)integrityQuery.set('snapshotId',snapshotId);
+        if(reportDate)integrityQuery.set('reportDate',reportDate);
+        const workspaceQuery=new URLSearchParams({scope:'all',businessType:targetBusiness});
+        if(snapshotId)workspaceQuery.set('snapshotId',snapshotId);
+        if(reportDate)workspaceQuery.set('reportDate',reportDate);
+        pending=Promise.allSettled([
+          json('/api/data-integrity?'+integrityQuery.toString(),10000),
+          json('/api/tracking-workspace?'+workspaceQuery.toString(),10000)
+        ]).finally(()=>v765BoardDetailInflight.delete(cacheKey));
+        v765BoardDetailInflight.set(cacheKey,pending);
+      }
+      const settled=await pending;
+      detail={
+        integrity:settled[0].status==='fulfilled'?settled[0].value:null,
+        workspace:settled[1].status==='fulfilled'?settled[1].value:{rows:[]}
+      };
+      // Never cache failed/partial fetches. Retain at most two recent board
+      // detail sets, only in process memory, never in C:/D: or localStorage.
+      if(settled.every(item=>item.status==='fulfilled')){
+        v765BoardDetailCache.delete(cacheKey);
+        v765BoardDetailCache.set(cacheKey,{at:Date.now(),result:detail});
+        while(v765BoardDetailCache.size>2)v765BoardDetailCache.delete(v765BoardDetailCache.keys().next().value);
+      }
+    }
+    if(!stillSelected())return;
+    const integrityR={status:detail.integrity?'fulfilled':'rejected',value:detail.integrity};
+    const workspaceR={status:detail.workspace?'fulfilled':'rejected',value:detail.workspace};
+    const integrity=integrityR.status==='fulfilled'?integrityR.value:null;
+    const bi=integrity?.businesses?.[business];
+    if(bi){
+      setText('v637BusinessIntegrity','源票 '+fmt(bi.sourceCount)+' · 已进入处理 '+fmt(bi.stateMemberCount)+' · 已扫描 '+fmt(bi.scanCount)+' · 待扫描 '+fmt(bi.waitingScan)+' · 已归类 '+fmt(bi.accounted)+' · 差异 '+fmt(bi.difference));
+      const whppScanBtn=byId('v641WhppScanPending');
+      if(whppScanBtn){
+        const waiting=Number(bi.waitingScan||0);
+        const showWhppScan=business==='WHPP'&&waiting>0;
+        whppScanBtn.hidden=!showWhppScan;
+        whppScanBtn.style.setProperty('display',showWhppScan?'inline-flex':'none','important');
+        whppScanBtn.textContent=waiting>0?'扫描WHPP待处理 '+fmt(waiting)+' 票':'扫描WHPP待处理票';
+      }
+    }
+
+    const wr=workspaceR.status==='fulfilled'?workspaceR.value:{rows:[]};
+    v628BusinessWorkspaceRows=(wr.rows||[]).filter(businessTypeMatches);
+    applyV748QualitySignals(wr);
+    const workspaceAllCount=Number(wr.allRowCount||v628BusinessWorkspaceRows.length);
+    const workspaceTruncated=workspaceAllCount>v628BusinessWorkspaceRows.length;
+    if(bi){
+      setText('v631AccountingMeta','已归类 '+fmt(bi.accounted)+' / '+fmt(bi.sourceCount)+' · 差异 '+fmt(Math.abs(Number(bi.difference||0))));
+    }
+    if(v628BusinessWorkspaceRows.length&&!workspaceTruncated){
+      const detailed=buildBusinessAccounting({finalRows:v628BusinessWorkspaceRows},m);
+      v631BusinessAccounting=detailed;
+      if(!bi)setText('v631AccountingMeta','已归类 '+fmt(detailed.accounted)+' / '+fmt(m.total)+' · 差异 '+fmt(Math.max(0,m.total-detailed.accounted)));
+    }
+    if(!options.skipQualityRefresh){
+      const openCount=Number(wr?.summary?.actionable ?? v628BusinessWorkspaceRows.filter(row=>row.isActionable).length);
+      if(openCount>0){
+        // Track reconciliation is a background update, not navigation work.
+        // Repeated routes in a single browsing session reuse their 2h refresh
+        // window; manual "更新未完成POD" always remains available.
+        const qualityKey='CE_QC_V765_TRACK_'+targetBusiness+'|'+reportDate;
+        let recent=0;
+        try{recent=Number(sessionStorage.getItem(qualityKey)||0)}catch{}
+        if(Date.now()-recent>=2*60*60*1000){
+          try{sessionStorage.setItem(qualityKey,String(Date.now()))}catch{}
+          setTimeout(()=>{
+            if(stillSelected())void refreshV748BusinessTrackQuality(reportDate);
+          },2500);
+        }else setText('v748QualityRefreshMeta','轨迹近期已更新；可手动刷新未完成POD');
+      }
+      else setText('v748QualityRefreshMeta','当前无未终态运单，无需轨迹补抓');
+    }
+    const rows=v628BusinessWorkspaceRows.filter(x=>x.isActionable).slice(0,8);
+    const tbody=byId('v625BusinessRows');tbody.replaceChildren();
+    if(!rows.length){tbody.innerHTML='<tr><td colspan="7">当前日报暂无异常记录</td></tr>'}
+    else for(const row of rows){tbody.appendChild(rowTr([row.shipmentCode,row.businessType,row.category||row.queryStatus||'异常',row.pendingDays||row.ocDays||'—',row.currentState||row.queryStatus||'—',row.latestTime||row.lastEventTime||'—','查看']))}
+  }catch(error){
+    if(stillSelected())setText('v631AccountingMeta','明细暂未就绪：'+String(error?.message||error));
+  }
+}
 async function loadBusiness(options={}){
   // V756 navigation-first: URL context is authoritative for first paint.
   // Never block a board switch on /api/import/unified-latest before asking for its compact state.
@@ -1369,50 +1470,11 @@ async function loadBusiness(options={}){
       if(timing?.overall?.avgDays!=null)setText('kpiAvgDays',Number(timing.overall.avgDays).toFixed(2).replace(/\.00$/,''));
     });
 
-    const integrityQuery=new URLSearchParams({businessType:business});
-    if(snapshotId)integrityQuery.set('snapshotId',snapshotId);if(reportDate)integrityQuery.set('reportDate',reportDate);
-    const workspaceQuery=new URLSearchParams({scope:'all',businessType:business});
-    if(snapshotId)workspaceQuery.set('snapshotId',snapshotId);if(reportDate)workspaceQuery.set('reportDate',reportDate);
-    const [integrityR,workspaceR]=await Promise.allSettled([
-      json('/api/data-integrity?'+integrityQuery.toString(),10000),
-      json('/api/tracking-workspace?'+workspaceQuery.toString(),10000)
-    ]);
-    const integrity=integrityR.status==='fulfilled'?integrityR.value:null;
-    const bi=integrity?.businesses?.[business];
-    if(bi){
-      setText('v637BusinessIntegrity','源票 '+fmt(bi.sourceCount)+' · 已进入处理 '+fmt(bi.stateMemberCount)+' · 已扫描 '+fmt(bi.scanCount)+' · 待扫描 '+fmt(bi.waitingScan)+' · 已归类 '+fmt(bi.accounted)+' · 差异 '+fmt(bi.difference));
-      const whppScanBtn=byId('v641WhppScanPending');
-      if(whppScanBtn){
-        const waiting=Number(bi.waitingScan||0);
-        const showWhppScan=business==='WHPP'&&waiting>0;
-        whppScanBtn.hidden=!showWhppScan;
-        whppScanBtn.style.setProperty('display',showWhppScan?'inline-flex':'none','important');
-        whppScanBtn.textContent=waiting>0?'扫描WHPP待处理 '+fmt(waiting)+' 票':'扫描WHPP待处理票';
-      }
-    }
-
-    const wr=workspaceR.status==='fulfilled'?workspaceR.value:{rows:[]};
-    v628BusinessWorkspaceRows=(wr.rows||[]).filter(businessTypeMatches);
-    applyV748QualitySignals(wr);
-    const workspaceAllCount=Number(wr.allRowCount||v628BusinessWorkspaceRows.length);
-    const workspaceTruncated=workspaceAllCount>v628BusinessWorkspaceRows.length;
-    if(bi){
-      setText('v631AccountingMeta','已归类 '+fmt(bi.accounted)+' / '+fmt(bi.sourceCount)+' · 差异 '+fmt(Math.abs(Number(bi.difference||0))));
-    }
-    if(v628BusinessWorkspaceRows.length&&!workspaceTruncated){
-      const detailed=buildBusinessAccounting({finalRows:v628BusinessWorkspaceRows},m);
-      v631BusinessAccounting=detailed;
-      if(!bi)setText('v631AccountingMeta','已归类 '+fmt(detailed.accounted)+' / '+fmt(m.total)+' · 差异 '+fmt(Math.max(0,m.total-detailed.accounted)));
-    }
-    if(!options.skipQualityRefresh){
-      const openCount=Number(wr?.summary?.actionable ?? v628BusinessWorkspaceRows.filter(row=>row.isActionable).length);
-      if(openCount>0)void refreshV748BusinessTrackQuality(reportDate);
-      else setText('v748QualityRefreshMeta','当前无未终态运单，无需轨迹补抓');
-    }
-    const rows=v628BusinessWorkspaceRows.filter(x=>x.isActionable).slice(0,8);
-    const tbody=byId('v625BusinessRows');tbody.replaceChildren();
-    if(!rows.length){tbody.innerHTML='<tr><td colspan="7">当前日报暂无异常记录</td></tr>'}
-    else for(const row of rows){tbody.appendChild(rowTr([row.shipmentCode,row.businessType,row.category||row.queryStatus||'异常',row.pendingDays||row.ocDays||'—',row.currentState||row.queryStatus||'—',row.latestTime||row.lastEventTime||'—','查看']))}
+    // V765: the business summary is already visible. Run 5,000-row
+    // workspace/integrity reads in a deferred lane with a bounded 20s cache.
+    const generation=++v765BoardLoadGeneration;
+    setText('v637BusinessIntegrity','正在后台读取完整性明细…');
+    void v765LoadBusinessDetailLane({reportDate,snapshotId,m,options,generation,targetBusiness:business});
   }catch(e){
     const whppOnlyAction=byId('v641WhppScanPending');
     if(whppOnlyAction){whppOnlyAction.hidden=true;whppOnlyAction.style.setProperty('display','none','important');}
