@@ -1360,6 +1360,65 @@ async function safeWhppRun(mode,reportDate){
     throw error;
   }
 }
+// V761: a missing run is not resumable. A first start is admitted only when
+// same-date persisted source and BOTH scan/final ledgers prove zero prior work.
+async function v761FamilyRecoveryProof(reportDate=''){
+  const date=String(reportDate||'').slice(0,10);
+  const response=await json('/api/family-recovery-proof?reportDate='+encodeURIComponent(date),20000);
+  const latest=String(v626LatestImport?.snapshotId||'');
+  if(response?.ok!==true||response?.reportDate!==date||!latest||String(response?.snapshotId||'')!==latest)
+    throw new Error('恢复状态的日期或快照与当前日报不一致，已禁止重复扫描。');
+  return response;
+}
+async function v761ContinueFamily(type,disposition,date){
+  const label=type==='SHOPEE'?'SHOPEE CN/VN':'CCSL';
+  const action=String(disposition?.action||'BLOCKED');
+  if(action==='DONE'||action==='ZERO_TICKET'){
+    appendLiveLog(label+'已有完成证据或0票，跳过');
+    return;
+  }
+  if(action==='WAIT'){
+    appendLiveLog(label+'后台任务正在运行，仅继续等待，不重复启动');
+    await waitFamilyTerminal(type,date);
+    return;
+  }
+  if(action==='START'){
+    appendLiveLog(label+'无历史扫描记录：从当前日报首次启动处理');
+    const endpoint=type==='SHOPEE'?'/api/shopee/run/start':'/api/run';
+    await autoStartFamily(type,endpoint,date,Number(disposition.sourceCount||0));
+    return;
+  }
+  if(action==='RESUME'){
+    appendLiveLog(label+'有已保存的中断任务，从断点恢复');
+    const endpoint=type==='SHOPEE'?'/api/shopee/run/resume':'/api/resume';
+    await runFamilyRequest(type,endpoint,date);
+    return;
+  }
+  throw new Error(label+'禁止重复处理：'+(disposition?.reason||'完成证据不明确')+
+    '（扫描 '+Number(disposition?.scanCount||0)+'，最终记录 '+Number(disposition?.finalCount||0)+
+    '，任务 '+String(disposition?.runStatus||'UNKNOWN')+'）');
+}
+async function v761DiagnoseFamilyRecovery(){
+  const view=byId('v761FamilyRecoveryResult'),button=byId('v761FamilyRecoveryDiagnostic');
+  if(!view)return;
+  const date=String(v626LatestImport?.reportDate||'').slice(0,10);
+  view.hidden=false;
+  if(button){button.disabled=true;button.textContent='正在诊断…'}
+  try{
+    const proof=await v761FamilyRecoveryProof(date);
+    const lines=['日报日期：'+proof.reportDate,'业务完成状态诊断（只读；不会触发扫描）'];
+    for(const type of ['CCSL','SHOPEE']){
+      const b=proof.businesses?.[type]||{};
+      const actionLabel={DONE:'已完成',ZERO_TICKET:'0票跳过',WAIT:'运行中',START:'可以首次启动',RESUME:'可以断点恢复',BLOCKED:'暂不允许重复处理'};
+      lines.push(type+'：'+(actionLabel[b.action]||b.action||'未知')+
+        ' · 日报 '+Number(b.sourceCount||0)+'票 · 已扫描 '+Number(b.scanCount||0)+
+        '票 · 最终记录 '+Number(b.finalCount||0)+'票 · 任务 '+(b.runStatus||'UNKNOWN'));
+      lines.push('原因：'+(b.reason||'未确认')+(b.error?'；错误：'+b.error:''));
+    }
+    view.textContent=lines.join('\n');
+  }catch(error){view.textContent='读取失败（数据未修改）：'+String(error?.message||error)}
+  finally{if(button){button.disabled=false;button.textContent='诊断CCSL/SHOPEE（只读）'}}
+}
 // V760: business HTTP responses are not a substitute for exact selected-date
 // persisted terminal truth. Never publish success or launch timing while 1/3.
 function v760FamilyTerminalSummary(bundle={},counts={},date=''){
@@ -1415,25 +1474,22 @@ async function runTask(mode,explicitReportDate='',explicitImportData=null){
       if(counts.WHPP>0){appendLiveLog('SHOPEE处理完成，开始WHPP本土');await safeWhppRun('start',reportDate)}
       else appendLiveLog('WHPP 当日日报0票，自动跳过');
     }else{
-      const beforeResume=await fetchLiveProgress(reportDate).catch(()=>({ccsl:{},shopee:{},whpp:{}}));
-      if(familyComplete(beforeResume.ccsl)){
-        appendLiveLog('CCSL已完成，继续处理时自动跳过');
-      }else{
-        appendLiveLog('继续CCSL未完成批次');
-        await runFamilyRequest('CCSL','/api/resume',reportDate).catch(async e=>{const code=String(e.payload?.code||'');if(e.status===409&&['RUN_ALREADY_COMPLETED','RUN_NOT_RECOVERABLE'].includes(code))return;throw e});
+      const proof=await v761FamilyRecoveryProof(reportDate);
+      const failures=[];
+      for(const type of ['CCSL','SHOPEE']){
+        try{await v761ContinueFamily(type,proof?.businesses?.[type],reportDate)}
+        catch(error){const message=String(error?.message||error);appendLiveLog(type+'恢复受阻：'+message);failures.push(message)}
       }
-      if(familyComplete(beforeResume.shopee)){
-        appendLiveLog('SHOPEE已完成，继续处理时自动跳过');
-      }else{
-        appendLiveLog('继续SHOPEE未完成批次');
-        await runFamilyRequest('SHOPEE','/api/shopee/run/resume',reportDate).catch(async e=>{const code=String(e.payload?.code||'');if(e.status===409&&['RUN_ALREADY_COMPLETED','RUN_NOT_RECOVERABLE'].includes(code))return;throw e});
+      const current=await fetchLiveProgress(reportDate);
+      if(familyComplete(current.whpp)){
+        appendLiveLog('WHPP已完成，恢复时自动跳过');
+      }else if(Number(counts.WHPP||0)>0){
+        // WHPP has a separate immutable completion and safe-resume owner.
+        appendLiveLog('WHPP尚未完成，尝试原有受保护恢复流程');
+        try{await safeWhppRun('resume',reportDate)}
+        catch(error){failures.push('WHPP：'+String(error?.message||error))}
       }
-      if(familyComplete(beforeResume.whpp)){
-        appendLiveLog('WHPP已完成，继续处理时自动跳过');
-      }else{
-        appendLiveLog('继续WHPP未完成批次');
-        await safeWhppRun('resume',reportDate);
-      }
+      if(failures.length)throw new Error(failures.join('；'));
     }
     const verified=await v760VerifyAllFamilies(reportDate,counts);
     if(verified.bundle)renderLiveProgress(verified.bundle);
@@ -1929,6 +1985,7 @@ function bind(){
   byId('v625RunStart')?.addEventListener('click',()=>runTask('start'));
   byId('v625RunResume')?.addEventListener('click',()=>runTask('resume'));
   byId('v758WhppReadOnlyDiagnostic')?.addEventListener('click',runV758WhppReadOnlyDiagnostic);
+  byId('v761FamilyRecoveryDiagnostic')?.addEventListener('click',v761DiagnoseFamilyRecovery);
   byId('v758ReloadUsers')?.addEventListener('click',()=>void loadSettingsUsers());
   byId('v734TimingRepairNow')?.addEventListener('click',runTimingRepairNow);
   byId('v626RefreshOpenPod')?.addEventListener('click',refreshOpenPodNow);
