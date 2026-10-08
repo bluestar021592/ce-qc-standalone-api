@@ -204,4 +204,48 @@ assert.equal(persistentWhppCompletionTruth(db,falseDate).locked,false);
 db.prepare("UPDATE business_final_rows SET carryStatus='CLOSED' WHERE businessType='WHPP' AND reportDate=? AND shipmentCode='WF3'").run(falseDate);
 assert.equal(persistentWhppCompletionTruth(db,falseDate).locked,true);
 
-console.log('[V757/V754/V751] exact WHPP terminal scan/final evidence closes reimport-displaced completion · missing scan/retry/open member cannot fake 3/3 · verified WHPP child snapshot remains authoritative · VN/CN timing truth retained');
+// V763: reproduce the July-04 historical WHPP screenshot:
+// legacy sourceCount=0, all four scan/final rows exist, but two neither POD
+// nor returned. A "VALID/COMPLETED" export snapshot must not turn 2/4 into 3/3.
+const whppStaleDate='2026-07-04';
+db.prepare('INSERT INTO unified_import_batches VALUES(?,?,?,?,?)').run('BATCH-V763','SNAP-V763',whppStaleDate,'VALID','2026-07-04T01:00:00Z');
+db.prepare('INSERT INTO unified_snapshots VALUES(?,?,?,?)').run('SNAP-V763','COMPLETED',JSON.stringify({parentRun:{children:{WHPP:{status:'WAIT'}}}}),'2026-07-04T02:00:00Z');
+db.prepare(`INSERT INTO business_export_snapshots(
+ businessType,reportDate,snapshotId,status,reconciliationStatus,invalidReason,payloadJson,generatedAt,createdAt
+) VALUES(?,?,?,?,?,?,?,?,?)`).run('WHPP',whppStaleDate,'WHPP-V763-OLD','VALID','COMPLETED','',
+  JSON.stringify({snapshotId:'WHPP-V763-OLD'}),'2026-07-04T02:50:00Z','2026-07-04T02:50:00Z');
+for(let i=1;i<=4;i++){
+  const code='WST'+i,pod=i<=2,state=pod?'POD':'PENDING';
+  db.prepare('INSERT INTO business_daily_parse_rows VALUES(?,?,?,?,?)').run('WHPP',whppStaleDate,code,JSON.stringify({shipmentCode:code}),i);
+  insertFinal.run('WHPP',code,whppStaleDate,pod?1:0,pod?'POD':'待核验','SUCCESS','CLOSED',
+    whppStaleDate+'T08:00:00','','','WHPP',JSON.stringify({shipmentCode:code,currentState:state}));
+  insertCurrent.run(code,'WHPP',whppStaleDate,state,'SUCCESS',whppStaleDate+'T08:00:00',JSON.stringify({shipmentCode:code,currentState:state}));
+  insertScan.run('WHPP',code,whppStaleDate,pod?1:0,pod?'85':'OPEN',JSON.stringify({shipmentCode:code,orderStatus:pod?'85':'OPEN'}));
+}
+const incompleteLegacy=persistentWhppCompletionTruth(db,whppStaleDate);
+assert.equal(incompleteLegacy.sourceCount,0);
+assert.equal(incompleteLegacy.canonicalTotal,4);
+assert.equal(incompleteLegacy.terminalEvidenceCoverage.scanRows,4);
+assert.equal(incompleteLegacy.terminalEvidenceCoverage.finalRows,4);
+assert.equal(incompleteLegacy.terminalEvidenceCoverage.podRows,2);
+assert.equal(incompleteLegacy.terminalEvidenceCoverage.returnedRows,0);
+assert.equal(incompleteLegacy.terminalEvidenceCoverage.unverifiedRows,2);
+assert.equal(incompleteLegacy.locked,false,'completed snapshot cannot conceal two missing terminal statuses');
+assert.equal(incompleteLegacy.reason,'WHPP_TERMINAL_EVIDENCE_GAP');
+assert.deepEqual(incompleteLegacy.terminalEvidenceGaps.map(row=>row.shipmentCode),['WST3','WST4']);
+
+// Updating exact two statuses in local evidence (never inventing a status)
+// must restore verified legacy completion without reimporting the daily report.
+for(const code of ['WST3','WST4']){
+  db.prepare("UPDATE business_final_rows SET primaryCategory='退回',rawJson=? WHERE businessType='WHPP' AND reportDate=? AND shipmentCode=?")
+    .run(JSON.stringify({shipmentCode:code,currentState:'RETURN_COMPLETED'}),whppStaleDate,code);
+  db.prepare("UPDATE shipment_current_state SET state='RETURN_COMPLETED',stateJson=? WHERE businessType='WHPP' AND reportDate=? AND shipmentCode=?")
+    .run(JSON.stringify({shipmentCode:code,currentState:'RETURN_COMPLETED'}),whppStaleDate,code);
+}
+const completeLegacy=persistentWhppCompletionTruth(db,whppStaleDate);
+assert.equal(completeLegacy.terminalEvidenceVerified,true);
+assert.equal(completeLegacy.locked,true);
+assert.equal(completeLegacy.terminalEvidenceGaps.length,0);
+assert.equal(completeLegacy.terminalEvidenceCoverage.returnedRows,2);
+
+console.log('[V763/V757/V754/V751] July-04 WHPP 2 missing terminal members blocks 3/3 despite immutable snapshot; exact two later trusted states close it; older V757 child and VN/CN truth retained');
