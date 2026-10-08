@@ -336,8 +336,15 @@ async function v762LoadFamilyTerminalTruth(reportDate=''){
   v762FamilyProofNextRead.set(key,Date.now()+30000);
   const promise=(async()=>{
     try{
-      const response=await json('/api/family-recovery-proof?reportDate='+encodeURIComponent(date),6500);
+      const response=await json('/api/family-recovery-proof?reportDate='+encodeURIComponent(date),20000);
       const saved=v762RememberFamilyCompletionProof(response,date,snapshot);
+      // V764: the slow historical 1:1 proof returns independently of the
+      // light progress requests. Publish it exactly once on receipt, without
+      // restarting scanning or issuing another proof request.
+      if(saved&&date===String(v626LatestImport?.reportDate||'').slice(0,10)
+         &&snapshot===String(v626LatestImport?.snapshotId||'')){
+        void refreshLiveProgress();
+      }
       return saved? v762FamilyTerminalProofs.get(key):null;
     }catch(error){
       console.warn('[CE-QC][V762] stored completion proof unavailable',date,error?.code||error?.message||error);
@@ -419,7 +426,9 @@ async function v759VerifyWhppCompletionOnce(date=''){
     try{
       const response=await json('/api/whpp/completion-proof?reportDate='+encodeURIComponent(day),20000);
       const verified=v759RememberWhppProof(response,day);
-      if(verified)void refreshLiveProgress();
+      // Also repaint on negative proof: a persisted "finished" UI state
+      // must be replaced by the exact unmatched WHPP members.
+      if(verified||v763WhppEvidenceGaps.has(key))void refreshLiveProgress();
       return verified;
     }catch(error){
       console.warn('[CE-QC][V759] WHPP completion proof unavailable',day,error?.code||error?.message||error);
@@ -588,18 +597,20 @@ function familyProgressLabel(value={}){
 const v738WhppCompletionLatch=new Set();
 async function fetchLiveProgress(reportDate=''){
   const date=reportDate||v626LatestImport?.reportDate||'';
-  const [ccslR,shopeeR,whppR,familyProofR,whppEvidenceR]=await Promise.allSettled([
+  // V764: a long-running SQLite membership proof must never block each
+  // dashboard paint. Read cached facts immediately; the scoped proof owners
+  // refresh the same UI after they finish asynchronously.
+  void v762LoadFamilyTerminalTruth(date);
+  void v759VerifyWhppCompletionOnce(date);
+  const [ccslR,shopeeR,whppR]=await Promise.allSettled([
     json('/api/v33/run-progress?businessType=CCSL'+(date?'&reportDate='+encodeURIComponent(date):''),7000),
     json('/api/v33/run-progress?businessType=SHOPEE'+(date?'&reportDate='+encodeURIComponent(date):''),7000),
-    json('/api/whpp/progress'+(date?'?reportDate='+encodeURIComponent(date):''),7000),
-    v762LoadFamilyTerminalTruth(date),
-    // Only the existing local, read-only selected-date evidence endpoint.
-    v759VerifyWhppCompletionOnce(date)
+    json('/api/whpp/progress'+(date?'?reportDate='+encodeURIComponent(date):''),7000)
   ]);
   let ccsl=ccslR.status==='fulfilled'?ccslR.value:{};
   let shopee=shopeeR.status==='fulfilled'?shopeeR.value:{};
   let whppPayload=whppR.status==='fulfilled'?whppR.value:null;
-  const familyProof=familyProofR.status==='fulfilled'?familyProofR.value:v762VerifiedFamilyTruth(date);
+  const familyProof=v762VerifiedFamilyTruth(date);
   if(familyProof?.CCSL)ccsl=v762ProjectSavedCompletion(ccsl,familyProof.CCSL,date);
   if(familyProof?.SHOPEE)shopee=v762ProjectSavedCompletion(shopee,familyProof.SHOPEE,date);
   const sameLatestDate=Boolean(date&&String(v626LatestImport?.reportDate||'').slice(0,10)===date);
@@ -636,6 +647,16 @@ async function fetchLiveProgress(reportDate=''){
     outcome:whppLock.locked?'COMPLETED':String(whppPayload.runtime?.outcome||''),
     phase:whppLock.locked?'完成':whppStatusUnavailable?'完成状态核验中':String(whppPayload.runtime?.phase||'')
   };
+  // Neither a stale runtime="finished" nor an old completion latch is
+  // sufficient WHPP evidence. Until the read-only proof completes, show a
+  // verification state rather than a false business completion.
+  const whppProofPending=!zeroWhpp
+    &&Boolean(Number(latestCounts.WHPP||0)>0||Number(whppLock.canonicalTotal||0)>0||whppLock.locked)
+    &&!v759PinnedWhppProof(date);
+  if(whppProofPending){
+    whpp={...whpp,complete:false,active:false,running:false,
+      runStatus:'EVIDENCE_PENDING',outcome:'EVIDENCE_PENDING',phase:'完成证据核验中'};
+  }
   const gap=v763WhppEvidenceGaps.get(date+'|'+String(v626LatestImport?.snapshotId||''));
   if(gap&&!zeroWhpp){
     // The prior "finished" runtime and completion latch are not independent
@@ -647,6 +668,14 @@ async function fetchLiveProgress(reportDate=''){
       evidenceGap:gap,
       completionLock:{...whpp.completionLock,locked:false,finalized:false,reason:'WHPP_TERMINAL_EVIDENCE_GAP'}
     };
+  }
+  // The diagnostic is the authoritative owner for historical CCSL/SHOPEE.
+  // While it is loading, do not conflate "not yet verified" with "not run".
+  if(!zeroCcsl&&!familyProof?.CCSL&&!familyComplete(ccsl)&&Number(latestCounts.CE||0)+Number(latestCounts.CEAF||0)+Number(latestCounts.TBKH||0)+Number(latestCounts.ALI1688||0)>0){
+    ccsl={...ccsl,phase:'历史完成证据核验中'};
+  }
+  if(!zeroShopee&&!familyProof?.SHOPEE&&!familyComplete(shopee)&&Number(latestCounts.SHOPEECN||0)+Number(latestCounts.SHOPEEVN||0)>0){
+    shopee={...shopee,phase:'历史完成证据核验中'};
   }
   return{ccsl,shopee,whpp,reportDate:date};
 }
