@@ -19,4 +19,7 @@ assert.doesNotMatch(shell,/if\(e\.status===409\)return/,'resume UI must not swal
 assert.match(html,/<meta name="ce-qc-build" content="V\d+_[A-Z0-9_]+">/,'current shell build marker missing');
 assert.match(html,/v625-shell\.js\?v=\d{8}-v\d+-\d+/,'current shell cache bust missing');
 
+assert.match(progress,/const lockStatus=String\\(lock.status\\|\\|''\\)/,'V760 status priority uses persisted run lock');
+assert.match(shell,/const verified=await v760VerifyAllFamilies\\(reportDate,counts\\)/,'V760 must verify live selected-date family completion after resume');
+
 console.log('[V756/V718] selected-date progress + resume-only-unfinished families + exact 409 handling passed');
