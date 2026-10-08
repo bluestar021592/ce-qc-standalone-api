@@ -23,7 +23,7 @@ assert.doesNotMatch(shell,/ccsl=projectComplete\(ccsl,'CCSL'\)/,'unified snapsho
 assert.doesNotMatch(shell,/shopee=projectComplete\(shopee,'SHOPEE'\)/,'unified snapshot status must not fabricate SHOPEE completion');
 assert.doesNotMatch(shell,/V752_UNIFIED_COMPLETED_3OF3/,'retired aggregate 3-of-3 projection must stay removed');
 assert.match(shell,/v752TerminalProgressLogs/,'terminal progress logs must remain deduplicated across polling ticks');
-assert.match(html,/v625-shell\.js\?v=20261007-v750-1&patch=763/,'V763 WHPP shell cache bust missing');
+assert.match(html,/v625-shell\.js\?v=20261007-v750-1&patch=764/,'V763 WHPP shell cache bust missing');
 
 
 assert.match(shell,/function v759RememberWhppProof\(/,'WHPP exact selected-date proof owner must exist');
@@ -31,6 +31,9 @@ assert.match(shell,/snapshotId!==String\(v626LatestImport\?\.snapshotId\|\|''\)/
 assert.match(shell,/Number\(evidence\.scanRows\|\|0\)===total/,'WHPP progress fallback must require every member scanned');
 assert.match(shell,/Number\(evidence\.podRows\|\|0\)\+Number\(evidence\.returnedRows\|\|0\)===total/,'WHPP progress fallback must conserve terminal categories');
 assert.match(shell,/const pinnedProof=v759PinnedWhppProof\(date\)/,'live WHPP progress must reuse pinned exact-snapshot proof when progress API is stale');
+assert.match(shell,/void v759VerifyWhppCompletionOnce\(date\)/,'WHPP terminal verification must not delay each board paint');
+assert.match(shell,/if\(verified\|\|v763WhppEvidenceGaps\.has\(key\)\)void refreshLiveProgress\(\)/,'terminal evidence gaps must repaint immediately');
+assert.match(shell,/phase:'终态核验中'/,'WHPP must not show completed until exact proof passes');
 assert.match(shell,/v759VerifyWhppCompletionOnce\(v626LatestImport\?\.reportDate\|\|''\)/,'import page must automatically verify the selected date once, not on every progress poll');
 
 const fnStart=shell.indexOf('function v759RememberWhppProof(');
