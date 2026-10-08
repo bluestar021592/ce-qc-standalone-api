@@ -41,7 +41,7 @@ assert.match(businessLane,/void v765LoadBusinessDetailLane\(/,'background scoped
 assert.match(shell,/v765BoardDetailInflight\.get\(cacheKey\)/,'identical detail reads should join the same in-flight request');
 assert.match(shell,/Date\.now\(\)-cached\.at<20000/,'nonterminal 20-second workspace cache is bounded');
 assert.match(shell,/qualityKey='CE_QC_V765_TRACK_'\+targetBusiness\+'\|'\+reportDate\+'\|'\+snapshotId/,'track refresh needs snapshot-keyed throttling');
-assert.match(shell,/const historyPromise=json\('\/api\/unified-history\?limit=7'/,'history metadata must be supplemental');
+assert.match(shell,/const historyPromise=new Promise\(resolve=>setTimeout\(resolve,900\)\)/,'history metadata must be delayed until after fast summary starts');
 assert.match(shell,/v765InvalidateAllProofCache\(\)/,'new import/purge must invalidate verified completion cache');
 assert.match(server,/const v765WorkspaceReadCache=new Map\(\)/,'heavy tracking workspace must have bounded short-lived server cache');
 assert.match(server,/const V765_WORKSPACE_TTL_MS=20000/,'server cache must never keep dynamic status indefinitely');
