@@ -57,6 +57,7 @@ import { requestSelectedDateTimingRepair, inspectSelectedDateTimingRepair } from
 import { persistentSelectedDatePodTruth, persistentWhppCompletionTruth } from './src/selectedDatePersistentTruth.js';
 import { buildCanonicalBusinessAccounting } from './src/businessAccounting.js';
 import { buildDataIntegrityReport } from './src/dataIntegrity.js';
+import { v766ReadJob, v766ClearReadCache } from './src/v766ReadJobCoordinator.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -659,15 +660,60 @@ app.get('/api/unified-history', (req, res) => {
   res.json({ ok: true, rows: listUnifiedImportHistory(req.query.limit) });
 });
 
+// V766: the first home paint is one exact selected-date classification read.
+// Average signing days, POD/return and 30-day trends are computed later in a
+// READ-ONLY worker, never on the main HTTP event loop. Do not fake zero POD.
+function v766QuickHomeSummary({reportDate='',snapshotId=''}={}){
+  const batch=fastDashboardBatch(snapshotId,reportDate);
+  const types=['CE','CEAF','TBKH','ALI1688','WHPP','SHOPEECN','SHOPEEVN'];
+  const counts=Object.fromEntries(types.map(type=>[type,0]));
+  if(!batch)return{
+    ok:true,quickOnly:true,selectionMatched:false,requestedReportDate:String(reportDate||''),
+    reportDate:'',snapshotId:'',generatedAt:new Date().toISOString(),
+    classification:{total:0,classified:0,balanced:false,counts,businesses:[]},
+    returns:{},timing:{},timingTrend:{},timingEvidenceRepair:{active:false,types:{}}
+  };
+  const db=getDb();
+  const batchMeta=db.prepare('SELECT batchId,summaryJson FROM unified_import_batches WHERE snapshotId=? AND reportDate=? AND status=\'VALID\' LIMIT 1').get(batch.snapshotId,batch.reportDate);
+  const rows=db.prepare('SELECT businessType, COUNT(*) AS count FROM unified_import_rows WHERE batchId=? GROUP BY businessType').all(batchMeta.batchId);
+  for(const row of rows)if(Object.prototype.hasOwnProperty.call(counts,row.businessType))counts[row.businessType]=Number(row.count||0);
+  // Legacy WHPP may be in the separately persisted daily source, while newer
+  // days already include it in unified_import_rows. Never add it twice.
+  try{
+    const whpp=Number(db.prepare("SELECT COUNT(DISTINCT shipmentCode) AS count FROM business_daily_parse_rows WHERE businessType='WHPP' AND reportDate=?").get(batch.reportDate)?.count||0);
+    counts.WHPP=Math.max(counts.WHPP,whpp);
+  }catch{}
+  const total=types.reduce((sum,type)=>sum+counts[type],0);
+  const summary=JSON.parse(batchMeta.summaryJson||'{}');
+  const conflicts=Math.max(0,Number(summary.classificationConflicts||0));
+  return{ok:true,quickOnly:true,selectionMatched:true,reportDate:batch.reportDate,
+    snapshotId:batch.snapshotId,generatedAt:new Date().toISOString(),
+    classification:{total,classified:total,balanced:total>0,counts,autoRecognized:Math.max(0,total-conflicts),
+      unrecognized:0,conflicts,accuracyRate:total?Number(((total-conflicts)*100/total).toFixed(2)):0,
+      businesses:types.map(type=>({businessType:type,count:counts[type],
+        share:total?Number((counts[type]*100/total).toFixed(2)):0,status:'已分类'}))},
+    returns:{},timing:{},timingTrend:{},timingEvidenceRepair:{active:false,types:{}}
+  };
+}
 app.get('/api/home-quality-summary', async (req, res) => {
   try {
     const reportDate=String(req.query.reportDate||'');
     const snapshotId=String(req.query.snapshotId||'');
     if(String(req.query.fast||'')==='1'){
-      const payload=buildHomeQualitySummary({reportDate,snapshotId});
-      res.setHeader('Cache-Control','private, max-age=3');
-      res.setHeader('X-CE-QC-Home-Summary','FAST_LOCAL_ONLY');
-      return res.json(payload);
+      if(String(req.query.quick||'')==='1'){
+        const payload=v766QuickHomeSummary({reportDate,snapshotId});
+        res.setHeader('Cache-Control','no-store');
+        res.setHeader('X-CE-QC-Home-Summary','V766_QUICK_COUNTS');
+        return res.json(payload);
+      }
+      // The former "fast" route invoked the 30-day SQLite signing loop on
+      // the Express event loop. Heavy work now runs in a read-only worker.
+      const pinned=fastDashboardBatch(snapshotId,reportDate);
+      const read=await v766ReadJob('HOME_FULL',{reportDate:reportDate||pinned?.reportDate||'',
+        snapshotId:snapshotId||pinned?.snapshotId||''});
+      res.setHeader('X-CE-QC-Home-Summary','V766_ASYNC_FULL');
+      res.setHeader('X-CE-QC-Read-Cache',read.cache);
+      return res.json(read.result);
     }
     const payload=await buildHomeQualitySummaryWithArchive({reportDate,snapshotId});
     try{
@@ -1921,10 +1967,25 @@ app.get('/api/whpp/completion-proof', (req,res)=>{
 });
 // V761: read-only selected-date CCSL/SHOPEE recovery disposition.
 // No remote CE calls, run mutations, date switching, or inferred completion.
-app.get('/api/family-recovery-proof', (req,res)=>{
+app.get('/api/family-recovery-proof', async (req,res)=>{
   const date=String(req.query?.reportDate||'').slice(0,10);
   if(!/^\d{4}-\d{2}-\d{2}$/.test(date))
     return res.status(400).json({ok:false,code:'REPORT_DATE_INVALID',error:'缺少有效日报日期'});
+  // V766: normal reads stay in a separate worker, leaving this HTTP thread
+  // responsive to menu navigation and quick dashboard metadata.
+  if(process.env.CE_QC_FORCE_INLINE_READ!=='1'){
+    try{
+      const batch=fastDashboardBatch('',date);
+      if(!batch)return res.status(404).json({ok:false,code:'VALID_BATCH_MISSING',error:'该日期缺少有效的综合日报'});
+      const read=await v766ReadJob('FAMILY_PROOF',{reportDate:date,snapshotId:String(batch.snapshotId)});
+      if(String(read.result?.snapshotId||'')!==String(batch.snapshotId))throw new Error('V766_SNAPSHOT_MISMATCH');
+      res.setHeader('Cache-Control','no-store');
+      res.setHeader('X-CE-QC-Read-Cache',read.cache);
+      return res.json(read.result);
+    }catch(error){
+      return res.status(503).json({ok:false,code:'V766_READ_ONLY_WORKER_UNAVAILABLE',error:'历史核验仍在后台读取，请稍后重试；原始数据未发生修改。'});
+    }
+  }
   const db=getDb();
   const batch=db.prepare("SELECT snapshotId, batchId FROM unified_import_batches WHERE reportDate=? AND status='VALID' ORDER BY createdAt DESC,batchId DESC LIMIT 1").get(date);
   if(!batch)return res.status(404).json({ok:false,code:'VALID_BATCH_MISSING',error:'该日期缺少有效的综合日报'});
