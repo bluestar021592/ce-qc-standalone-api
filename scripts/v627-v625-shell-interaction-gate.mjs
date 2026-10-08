@@ -29,6 +29,8 @@ const bindings=[
   ['v625ImportButton','doImport'],
   ['v625RunStart',"runTask('start')"],
   ['v625RunResume',"runTask('resume')"],
+  ['v758WhppReadOnlyDiagnostic','runV758WhppReadOnlyDiagnostic'],
+  ['v758ReloadUsers','loadSettingsUsers'],
   ['v626RefreshOpenPod','refreshOpenPodNow'],
   ['v626ImportRefreshOpen','refreshOpenPodNow'],
   ['v625TrackSearch','queryTrack'],
@@ -72,5 +74,11 @@ for(const id of ['v626ProcessReportDate','v626ProcessFile','v626StageParse','v62
 assert.match(html,/WHPP本土看板/,'WHPP must remain visible in native navigation');
 assert.match(html,/data-card="WHPP"/,'WHPP must remain visible in home overview');
 assert.match(js,/refreshOpenPodNow[\s\S]*\/api\//,'unfinished POD refresh must invoke live API work');
+assert.match(js,/json\('\/api\/selected-date-truth\?reportDate='\+encodeURIComponent\(date\),20000\)/,'WHPP diagnostic must use same-origin authenticated read-only endpoint');
+assert.match(js,/terminalEvidenceCoverage/,'WHPP diagnostic must show actual scan and final evidence coverage');
+assert.match(js,/status===401\?'登录会话失效/,'account management must distinguish session expiry from permission failure');
+assert.match(js,/status===403\?'当前会话没有管理员权限/,'account management must distinguish actual role failure');
+assert.doesNotMatch(js,/需要管理员权限或读取失败/,'generic account error must be removed');
+assert.match(html,/id="v758WhppDiagnosticResult"/,'WHPP diagnostic must render on the already-authenticated import page');
 
-console.log('[V627] V625/V626 shell interaction gate passed · native navigation preserved · no click interception · data-management controls bound · live processing/open POD/return metrics wired');
+console.log('[V758/V627] shell interaction passed · same-origin WHPP diagnostic wired · admin user errors reveal HTTP status · navigation and data-management unchanged');
