@@ -319,6 +319,10 @@
                 <span>WHPP <b id="v626ImportWhpp">—</b></span>
               </div>
               <div id="v625RunMessage" class="v625-inline-note">上传日报后系统将自动开始处理。</div>
+              <div class="v625-button-row">
+                <button id="v758WhppReadOnlyDiagnostic" class="v625-btn outline" type="button">诊断WHPP完成状态（只读）</button>
+              </div>
+              <div id="v758WhppDiagnosticResult" class="v625-inline-note" style="white-space:pre-wrap;overflow-wrap:anywhere" hidden>尚未诊断。</div>
             </section>
 
             <section class="v625-panel">
@@ -448,7 +452,7 @@
             <section class="v625-panel">
               <div class="v625-section-head">
                 <h2>账号管理</h2>
-                <button id="v625AddUser" class="v625-btn primary" type="button">新增用户</button>
+                <div class="v625-button-row"><button id="v758ReloadUsers" class="v625-btn outline" type="button">重试读取</button><button id="v625AddUser" class="v625-btn primary" type="button">新增用户</button></div>
               </div>
               <div id="v625UserEditor" class="v625-user-editor" hidden>
                 <div class="v625-section-head"><h2 id="v625UserEditorTitle">新增用户</h2><button id="v625CancelUserEdit" class="v625-btn outline" type="button">取消</button></div>
@@ -652,6 +656,6 @@
       </main>
     </div>
   </div>
-  <script src="/v625-shell.js?v=20261007-v750-1&patch=756" defer></script>
+  <script src="/v625-shell.js?v=20261007-v750-1&patch=758" defer></script>
 </body>
 </html>
