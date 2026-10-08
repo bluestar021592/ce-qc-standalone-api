@@ -79,7 +79,14 @@ parentPort.on('message',async message=>{
   try{
     ensureReadOnlySource();
     let result;
-    if(message.kind==='FAMILY_PROOF')result=familyProof(message.reportDate);
+    if(message.kind==='READ_ONLY_CHECK'){
+      let prevented=false;
+      try{getDb().exec('CREATE TABLE v766_must_not_exist(id INTEGER)')}
+      catch{prevented=true}
+      if(!prevented)throw new Error('V766_SQLITE_WRITE_UNEXPECTEDLY_SUCCEEDED');
+      result={ok:true,readOnly:true};
+    }
+    else if(message.kind==='FAMILY_PROOF')result=familyProof(message.reportDate);
     else if(message.kind==='HOME_FULL')result=buildHomeQualitySummary({
       reportDate:message.reportDate||'',snapshotId:message.snapshotId||''
     });
