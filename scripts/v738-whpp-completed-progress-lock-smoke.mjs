@@ -20,7 +20,7 @@ assert.doesNotMatch(shell,/ccsl=projectComplete\(ccsl,'CCSL'\)/,'unified snapsho
 assert.doesNotMatch(shell,/shopee=projectComplete\(shopee,'SHOPEE'\)/,'unified snapshot status must not fabricate SHOPEE completion');
 assert.doesNotMatch(shell,/V752_UNIFIED_COMPLETED_3OF3/,'retired aggregate 3-of-3 projection must stay removed');
 assert.match(shell,/v752TerminalProgressLogs/,'terminal progress logs must remain deduplicated across polling ticks');
-assert.match(html,/v625-shell\.js\?v=20261007-v750-1&patch=761/,'V761 shell cache bust missing');
+assert.match(html,/v625-shell\.js\?v=20261007-v750-1&patch=762/,'V762 shell cache bust missing');
 
 
 assert.match(shell,/function v759RememberWhppProof\(/,'WHPP exact selected-date proof owner must exist');
