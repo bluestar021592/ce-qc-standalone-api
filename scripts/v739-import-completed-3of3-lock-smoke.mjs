@@ -47,7 +47,7 @@ const terminalEnd=shell.indexOf('async function v760VerifyAllFamilies(');
 assert.ok(predicateStart>=0&&predicateEnd>predicateStart&&terminalStart>=0&&terminalEnd>terminalStart,'V760 family predicate/terminal owner missing');
 const inspect=new Function('bundle','counts','date',shell.slice(predicateStart,predicateEnd)+
   '\n'+shell.slice(terminalStart,terminalEnd)+
-  '\\nreturn v760FamilyTerminalSummary(bundle,counts,date);');
+  '\nreturn v760FamilyTerminalSummary(bundle,counts,date);');
 const date='2026-07-04',counts={CCSL:6200,SHOPEE:300,WHPP:190};
 const done={running:false,runStatus:'finished',reportDate:date};
 const waiting={running:false,phase:'待处理',reportDate:date};
