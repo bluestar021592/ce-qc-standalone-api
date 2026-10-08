@@ -1,4 +1,5 @@
 import { loadWhppCanonicalTruth } from './whppCanonicalTruth.js';
+import { dailyReportProvesPod } from './dailyReportSigningTiming.js';
 
 const dateKey=v=>{const s=String(v||'').trim().slice(0,10);return /^\d{4}-\d{2}-\d{2}$/.test(s)?s:'';};
 const safeJson=(v,fallback={})=>{try{return v&&typeof v==='object'?v:(JSON.parse(String(v||''))||fallback)}catch{return fallback}};
@@ -48,6 +49,32 @@ function completedShopeeSnapshotPodTruth(db,date,group,sourceRows=[]){
   return null;
 }
 
+
+function latestDailyPodBillsForSource(db,date,businessType,sourceRows=[]){
+  const sourceBills=uniqueBills(sourceRows);
+  if(!sourceBills.length)return[];
+  const sourceSet=new Set(sourceBills),pod=new Set();
+  for(let i=0;i<sourceBills.length;i+=300){
+    const chunk=sourceBills.slice(i,i+300),marks=chunk.map(()=>'?').join(',');
+    let rows=[];
+    try{
+      rows=db.prepare(`SELECT UPPER(TRIM(u.shipmentCode)) shipmentCode,u.rowJson,u.reportDate,u.rowid
+        FROM unified_import_rows u
+        JOIN unified_import_batches b ON b.batchId=u.batchId AND b.status='VALID'
+        WHERE u.reportDate>=? AND UPPER(TRIM(u.businessType))=? AND UPPER(TRIM(u.shipmentCode)) IN (${marks})
+        ORDER BY UPPER(TRIM(u.shipmentCode)),u.reportDate DESC,u.rowid DESC`)
+        .all(date,businessType,...chunk);
+    }catch{}
+    for(const row of rows){
+      const bill=String(row.shipmentCode||'').trim().toUpperCase();
+      if(!bill||!sourceSet.has(bill)||pod.has(bill))continue;
+      const parsed=safeJson(row.rowJson,{}),raw=parsed?.raw&&typeof parsed.raw==='object'?parsed.raw:parsed;
+      if(dailyReportProvesPod(raw))pod.add(bill);
+    }
+  }
+  return [...pod].sort();
+}
+
 export function persistentSelectedDatePodTruth(db,businessType='',reportDate=''){
   const type=String(businessType||'').trim().toUpperCase(),date=dateKey(reportDate);
   if(!date)return{authoritative:false,bills:[],sourceCount:0,resolvedCount:0,source:'REPORT_DATE_MISSING'};
@@ -82,7 +109,21 @@ export function persistentSelectedDatePodTruth(db,businessType='',reportDate='')
     `).all(batch.batchId,date,type);
 
     const snapshotTruth=completedShopeeSnapshotPodTruth(db,date,group,sourceRows);
-    if(snapshotTruth)return snapshotTruth;
+    if(snapshotTruth){
+      // Historical CN snapshots can be structurally complete while carrying an empty *_pod tab.
+      // Treat that as authoritative only when no later VALID daily report proves POD for the exact
+      // selected-date source members. Membership stays frozen; only terminal status may recover.
+      if(snapshotTruth.bills.length>0)return snapshotTruth;
+      const recovered=latestDailyPodBillsForSource(db,date,type,sourceRows);
+      if(recovered.length)return{
+        ...snapshotTruth,
+        bills:recovered,
+        authoritative:true,
+        source:'IMMUTABLE_SHOPEE_COMPLETED_SNAPSHOT_RECOVERED_BY_LATEST_DAILY_POD',
+        recoveredFromEmptySnapshot:true
+      };
+      return snapshotTruth;
+    }
 
     const rows=db.prepare(`
       SELECT u.shipmentCode,
