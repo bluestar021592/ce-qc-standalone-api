@@ -231,7 +231,9 @@ assert.equal(incompleteLegacy.terminalEvidenceCoverage.finalRows,4);
 assert.equal(incompleteLegacy.terminalEvidenceCoverage.podRows,2);
 assert.equal(incompleteLegacy.terminalEvidenceCoverage.returnedRows,0);
 assert.equal(incompleteLegacy.terminalEvidenceCoverage.unverifiedRows,2);
-assert.equal(incompleteLegacy.locked,true,'4/4 scanned and finalized proves processing completion');\nassert.equal(incompleteLegacy.processingEvidenceVerified,true);\nassert.equal(incompleteLegacy.terminalEvidenceVerified,false,'2/4 POD/return terminal statuses must remain open');
+assert.equal(incompleteLegacy.locked,true,'4/4 scanned and finalized proves processing completion');
+assert.equal(incompleteLegacy.processingEvidenceVerified,true);
+assert.equal(incompleteLegacy.terminalEvidenceVerified,false,'2/4 POD/return terminal statuses must remain open');
 assert.equal(incompleteLegacy.reason,'PERSISTED_WHPP_COMPLETED');
 assert.deepEqual(incompleteLegacy.terminalEvidenceGaps.map(row=>row.shipmentCode),['WST3','WST4']);
 
