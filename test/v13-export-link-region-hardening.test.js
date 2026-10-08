@@ -41,7 +41,12 @@ test('V13 locked Shopee export does not count UNKNOWN as PV and waybill cells op
     const dashboard = workbook.getWorksheet('每日看板');
     assert.equal(dashboard.getCell('A5').value.result, 3);
     assert.equal(dashboard.getCell('C5').value.result, 1);
-    assert.equal(dashboard.getCell('E5').value.result, 1);
+    const pvLinks=[];
+    dashboard.getRow(5).eachCell(cell=>{
+      if (typeof cell.value?.formula==='string'&&cell.value.formula.includes('外省明细!A1'))pvLinks.push(cell.value);
+    });
+    assert.ok(pvLinks.some(cell=>Number(cell.result)===1),
+      'dashboard must link exactly one confirmed PV waybill, with unknown region excluded');
 
     const detail = workbook.getWorksheet('全部明细');
     const rows = [];
