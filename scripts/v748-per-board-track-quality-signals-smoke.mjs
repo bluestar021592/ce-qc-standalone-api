@@ -32,6 +32,8 @@ assert.match(shell,/businessType:requestedBusiness,fromDate:date,toDate:date/,'b
 assert.match(shell,/\/api\/v246\/tracking\/reconcile/,'board precision refresh must use existing CE trajectory reconcile engine');
 assert.match(shell,/await loadBusiness\(\{skipQualityRefresh:true\}\)/,'completed track refresh must immediately repaint the board without recursion');
 assert.match(shell,/v748QualityRefreshKeys/,'automatic track refresh must be once-per-business/date per browser session');
+assert.match(shell,/CE_QC_V765_TRACK_/,'recent exact-date automatic tracking must be throttled across board switches');
+assert.match(shell,/setTimeout\(\(\)=>\{\s*if\(stillSelected\(\)\)void refreshV748BusinessTrackQuality\(reportDate\)/,'automatic tracking must be delayed until after KPI and detail paints');
 assert.match(shell,/v748QualityRefreshKeys\.clear\(\)/,'latest shop-code import must invalidate quality refresh cache');
 assert.match(shell,/void refreshV748BusinessTrackQuality\(v628BusinessReportDate\)/,'latest store list must trigger fresh trajectory classification on an open board');
 
