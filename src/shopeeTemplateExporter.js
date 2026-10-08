@@ -173,7 +173,10 @@ function fillDetailPrepared(sheet, range, prepared, bucketKey) {
     const shipmentCode=bill(row);
     if(shipmentCode){
       const billCell=dataRow.getCell(2);
-      billCell.value=shipmentCode;
+      // V767: retain the user's exact 10-sheet master, and restore the
+      // shipment-specific CE-QC detail hyperlink (not an Excel formula).
+      // Explicit businessType keeps CN/VN scope separate on app drilldown.
+      billCell.value={text:shipmentCode,hyperlink:detailUrl(row)};
       billCell.numFmt='@';
     }
   });
