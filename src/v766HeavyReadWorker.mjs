@@ -1,5 +1,5 @@
 import {parentPort,workerData} from 'node:worker_threads';
-import {getDb,getRuntimeConfig,closeDb} from './db.js';
+import {getDb,getRuntimeConfig} from './db.js';
 import {getCurrentReportDate} from './store.js';
 import {SHOPEE,getBusinessCurrentReportDate} from './businessStore.js';
 import {buildHomeQualitySummary} from './homeQualitySummary.js';
@@ -14,12 +14,13 @@ function ensureReadOnlySource(){
 }
 function familyProof(reportDate){
   const date=String(reportDate||'').slice(0,10);
-  if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(date))throw new Error('REPORT_DATE_INVALID');
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(date))throw new Error('REPORT_DATE_INVALID');
   ensureReadOnlySource();
   const db=getDb();
   const batch=db.prepare("SELECT snapshotId, batchId FROM unified_import_batches WHERE reportDate=? AND status='VALID' ORDER BY createdAt DESC,batchId DESC LIMIT 1").get(date);
-  if(!batch)return res.status(404).json({ok:false,code:'VALID_BATCH_MISSING',error:'该日期缺少有效的综合日报'});
+  if(!batch)throw new Error('VALID_BATCH_MISSING');
   const snapshotId=String(batch.snapshotId||'');
+  if(String(workerData.expectedSnapshot||'')&&String(workerData.expectedSnapshot)!==snapshotId)throw new Error('V766_SNAPSHOT_MISMATCH');
   const currentCcsl=String(getCurrentReportDate()||'').slice(0,10);
   const currentShopee=String(getBusinessCurrentReportDate(SHOPEE)||'').slice(0,10);
   const groups=[
