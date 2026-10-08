@@ -118,6 +118,50 @@ async function runFamilyRequest(type,endpoint,reportDate){
     void refreshLiveProgress();
   }
 }
+function importedFamilyCounts(){
+  const counts=v626LatestImport?.classificationCounts||{};
+  return{
+    CCSL:Number(counts.CE||0)+Number(counts.CEAF||0)+Number(counts.TBKH||0)+Number(counts.ALI1688||0),
+    SHOPEE:Number(counts.SHOPEECN||0)+Number(counts.SHOPEEVN||0),
+    WHPP:Number(counts.WHPP||0)
+  };
+}
+async function waitFamilyTerminal(type,reportDate,timeoutMs=1800000){
+  const started=Date.now();
+  while(Date.now()-started<timeoutMs){
+    const progress=await readFamilyProgress(type,reportDate);
+    if(familyComplete(progress))return progress;
+    const status=String(progress?.runStatus||progress?.phase||'').toLowerCase();
+    if(/failed|失败/.test(status))throw new Error(progress?.lastMessage||type+'后台任务失败');
+    await sleep(1800);
+  }
+  throw new Error(type+'处理等待超时');
+}
+async function autoStartFamily(type,endpoint,reportDate,total){
+  const label=type==='SHOPEE'?'SHOPEE CN/VN':'CCSL';
+  if(Number(total||0)<=0){appendLiveLog(label+' 当日日报0票，自动跳过');return{ok:true,skipped:true,reason:'ZERO_TICKET'}}
+  const existing=await readFamilyProgress(type,reportDate).catch(()=>null);
+  if(existing&&familyComplete(existing)){appendLiveLog(label+' 已完成，自动跳过重复处理');return{ok:true,skipped:true,reason:'ALREADY_COMPLETED'}}
+  if(existing?.running){
+    appendLiveLog(label+' 已在后台处理中，继续等待现有任务');
+    await waitFamilyTerminal(type,reportDate);
+    return{ok:true,waited:true};
+  }
+  try{return await runFamilyRequest(type,endpoint,reportDate)}
+  catch(error){
+    const code=String(error?.payload?.code||'');
+    if(error?.status===409&&code==='RUN_ALREADY_COMPLETED'){
+      appendLiveLog(label+' 已完成，自动跳过重复处理');
+      return{ok:true,skipped:true,reason:code};
+    }
+    if(error?.status===409&&code==='RUN_ALREADY_ACTIVE'){
+      appendLiveLog(label+' 已在后台处理中，继续等待现有任务');
+      await waitFamilyTerminal(type,reportDate);
+      return{ok:true,waited:true};
+    }
+    throw error;
+  }
+}
 const setText=(id,val)=>{const el=byId(id);if(el)el.textContent=val===undefined||val===null||val===''?'—':String(val)};
 const showOnly=id=>qa('.v625-page').forEach(el=>el.hidden=el.id!==id);
 const today=()=>new Date().toISOString().slice(0,10);
@@ -312,7 +356,16 @@ async function fetchLiveProgress(reportDate=''){
   let ccsl=ccslR.status==='fulfilled'?ccslR.value:{};
   let shopee=shopeeR.status==='fulfilled'?shopeeR.value:{};
   let whppPayload=whppR.status==='fulfilled'?whppR.value:null;
-  const unifiedCompleted=Boolean(date&&String(v626LatestImport?.reportDate||'').slice(0,10)===date&&String(v626LatestImport?.snapshotStatus||'').toUpperCase()==='COMPLETED');
+  const sameLatestDate=Boolean(date&&String(v626LatestImport?.reportDate||'').slice(0,10)===date);
+  const latestCounts=sameLatestDate?(v626LatestImport?.classificationCounts||{}):{};
+  const zeroCcsl=sameLatestDate&&(Number(latestCounts.CE||0)+Number(latestCounts.CEAF||0)+Number(latestCounts.TBKH||0)+Number(latestCounts.ALI1688||0)===0);
+  const zeroShopee=sameLatestDate&&(Number(latestCounts.SHOPEECN||0)+Number(latestCounts.SHOPEEVN||0)===0);
+  const zeroWhpp=sameLatestDate&&Number(latestCounts.WHPP||0)===0;
+  const zeroComplete=(value,type)=>({...value,businessType:type,reportDate:date,running:false,active:false,complete:true,phase:'完成',runStatus:'completed',outcome:'COMPLETED',lastMessage:type+'当日日报0票，自动跳过',completionProjection:'ZERO_TICKET'});
+  if(zeroCcsl)ccsl=zeroComplete(ccsl,'CCSL');
+  if(zeroShopee)shopee=zeroComplete(shopee,'SHOPEE');
+  if(zeroWhpp)whppPayload={...(whppPayload||{}),runtime:zeroComplete(whppPayload?.runtime||{},'WHPP'),completionLock:{...(whppPayload?.completionLock||{}),locked:true,finalized:true,reportDate:date,reason:'ZERO_TICKET'}};
+  const unifiedCompleted=Boolean(sameLatestDate&&String(v626LatestImport?.snapshotStatus||'').toUpperCase()==='COMPLETED');
   if(whppPayload?.completionLock?.locked||familyComplete(whppPayload?.runtime||{}))v738WhppCompletionLatch.add(date);
   if(unifiedCompleted){
     const projectComplete=(value,type)=>({...value,businessType:type,reportDate:date,running:false,active:false,complete:true,phase:'完成',runStatus:'completed',outcome:'COMPLETED',lastMessage:type+'已完成（统一日报完成锁）',completionProjection:'UNIFIED_COMPLETED'});
@@ -1053,17 +1106,29 @@ function renderImport(data){
 }
 async function doImport(){
   const file=byId('v625ImportFile').files?.[0];if(!file){note('v625ImportMessage','请选择综合日报文件。','error');return}
+  if(runBusy){note('v625ImportMessage','当前日报仍在处理中，请等待完成后再上传下一份日报。','error');return}
+  const button=byId('v625ImportButton');
+  if(button){button.disabled=true;button.textContent='上传中…'}
   const fd=new FormData();fd.append('file',file);
   const manualWrap=byId('v626ManualDateWrap');
   if(manualWrap&&!manualWrap.hidden&&byId('v626ManualReportDate')?.value)fd.append('reportDate',byId('v626ManualReportDate').value);
-  note('v625ImportMessage','正在读取Excel并自动识别日报日期、分类7个业务…');
+  note('v625ImportMessage','正在读取Excel、识别日报日期并分类7业务…');
   appendLiveLog('开始上传综合日报 '+file.name);
   try{
     const r=await request('/api/import/unified-daily-report',{method:'POST',body:fd},120000);
     renderImport(r);appendLiveLog('日报解析完成：'+(r.reportDate||'')+'，有效唯一运单 '+fmt(r.summary?.validUniqueWaybills||0)+' 票');
-    note('v625ImportMessage','导入成功：系统识别日报日期 '+(r.reportDate||'—')+'，7业务分类已完成。','success');
     await loadImport();
-  }catch(e){appendLiveLog('日报导入失败：'+e.message);note('v625ImportMessage','导入失败：'+e.message,'error')}
+    note('v625ImportMessage','日报已导入，正在自动处理7业务…','success');
+    if(button)button.textContent='自动处理中…';
+    const outcome=await runTask('auto',r.reportDate||'');
+    if(outcome?.ok)note('v625ImportMessage','日报导入及7业务自动处理已完成。','success');
+    else if(outcome?.error)note('v625ImportMessage','日报已导入，但自动处理未完成：'+outcome.error,'error');
+  }catch(e){
+    appendLiveLog('日报导入失败：'+e.message);
+    note('v625ImportMessage','导入失败：'+e.message,'error');
+  }finally{
+    if(button){button.disabled=false;button.textContent='上传并自动处理'}
+  }
 }
 async function waitWhppTerminal(reportDate,timeoutMs=1800000){
   const started=Date.now();
@@ -1103,15 +1168,26 @@ async function safeWhppRun(mode,reportDate){
     throw error;
   }
 }
-async function runTask(mode){
-  if(runBusy)return;runBusy=true;const reportDate=v626LatestImport?.reportDate||(await latestImportContext())?.reportDate||'';
-  note('v625RunMessage','正在处理7业务，扫描与轨迹进度会实时更新。');appendLiveLog((mode==='resume'?'继续':'开始')+'7业务处理 '+(reportDate||''));
+async function runTask(mode,explicitReportDate=''){
+  if(runBusy)return{ok:false,error:'当前已有处理任务正在运行'};
+  runBusy=true;
+  const reportDate=explicitReportDate||v626LatestImport?.reportDate||(await latestImportContext())?.reportDate||'';
+  const auto=mode==='auto',counts=importedFamilyCounts();
+  note('v625RunMessage',auto?'日报上传完成，系统正在自动处理7业务。':'正在处理7业务，扫描与轨迹进度会实时更新。');
+  appendLiveLog((auto?'自动开始':mode==='resume'?'继续':'开始')+'7业务处理 '+(reportDate||''));
   startProgressPolling();
   try{
-    if(mode==='start'){
-      appendLiveLog('开始CCSL订单扫描/轨迹处理');await runFamilyRequest('CCSL','/api/run',reportDate);
-      appendLiveLog('CCSL处理完成，开始SHOPEE CN/VN');await runFamilyRequest('SHOPEE','/api/shopee/run/start',reportDate);
-      appendLiveLog('SHOPEE处理完成，开始WHPP本土');await safeWhppRun('start',reportDate);
+    if(auto){
+      appendLiveLog('自动处理：CCSL');await autoStartFamily('CCSL','/api/run',reportDate,counts.CCSL);
+      appendLiveLog('自动处理：SHOPEE CN/VN');await autoStartFamily('SHOPEE','/api/shopee/run/start',reportDate,counts.SHOPEE);
+      if(counts.WHPP>0){
+        appendLiveLog('自动处理：WHPP本土');await safeWhppRun('start',reportDate);
+      }else appendLiveLog('WHPP 当日日报0票，自动跳过');
+    }else if(mode==='start'){
+      appendLiveLog('开始CCSL订单扫描/轨迹处理');await autoStartFamily('CCSL','/api/run',reportDate,counts.CCSL);
+      appendLiveLog('CCSL处理完成，开始SHOPEE CN/VN');await autoStartFamily('SHOPEE','/api/shopee/run/start',reportDate,counts.SHOPEE);
+      if(counts.WHPP>0){appendLiveLog('SHOPEE处理完成，开始WHPP本土');await safeWhppRun('start',reportDate)}
+      else appendLiveLog('WHPP 当日日报0票，自动跳过');
     }else{
       appendLiveLog('继续CCSL未完成批次');await runFamilyRequest('CCSL','/api/resume',reportDate).catch(async e=>{const code=String(e.payload?.code||'');if(e.status===409&&['RUN_ALREADY_COMPLETED','RUN_NOT_RECOVERABLE'].includes(code))return;throw e});
       appendLiveLog('继续SHOPEE未完成批次');await runFamilyRequest('SHOPEE','/api/shopee/run/resume',reportDate).catch(async e=>{const code=String(e.payload?.code||'');if(e.status===409&&['RUN_ALREADY_COMPLETED','RUN_NOT_RECOVERABLE'].includes(code))return;throw e});
@@ -1119,10 +1195,17 @@ async function runTask(mode){
     }
     appendLiveLog('7业务处理完成，开始补齐签收时效60/70→80证据');
     await post('/api/timing-repair/start',{reportDate},15000).catch(error=>appendLiveLog('签收时效补证启动失败：'+error.message));
-    appendLiveLog('7业务处理完成，正在刷新首页与未完成POD账本');note('v625RunMessage','7业务处理完成，签收时效补证已启动。','success');
+    appendLiveLog('7业务处理完成，正在刷新首页与未完成POD账本');
+    note('v625RunMessage','7业务处理完成，签收时效补证已启动。','success');
     await Promise.all([refreshLiveProgress(),loadOpenPod(),refreshImportCanonicalClassification(reportDate),page==='home'?loadHome({skipAux:true}):Promise.resolve()]);
-  }catch(e){appendLiveLog('处理未完成：'+e.message);note('v625RunMessage','任务未完成：'+e.message,'error')}
-  finally{runBusy=false;stopProgressPolling();void refreshLiveProgress()}
+    return{ok:true};
+  }catch(e){
+    appendLiveLog('处理未完成：'+e.message);
+    note('v625RunMessage','任务未完成：'+e.message,'error');
+    return{ok:false,error:e.message||String(e)};
+  }finally{
+    runBusy=false;stopProgressPolling();void refreshLiveProgress();
+  }
 }
 function note(id,msg,tone=''){const el=byId(id);if(!el)return;el.textContent=msg;el.className='v625-inline-note'+(tone?' '+tone:'')}
 
