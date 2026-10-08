@@ -13,6 +13,8 @@ const DEFAULT_DATA_DIR = 'D:\\CE CCSL金边数据库';
 const EXPORT_WORKER_MODE = String(process.env.CE_QC_EXPORT_WORKER_MODE || '').toUpperCase();
 const IS_EXPORT_WORKER = EXPORT_WORKER_MODE === 'SINGLE_BUSINESS_DIRECT' || EXPORT_WORKER_MODE === 'ALL_BUSINESS_ORCHESTRATOR';
 const IS_PURGE_EXECUTE_WORKER = String(process.env.CE_QC_PURGE_EXECUTE_CHILD || '') === '1';
+// V766: dashboard workers use read-only SQLite and never run migrations or PRAGMA writes.
+const IS_DASHBOARD_READ_WORKER = String(process.env.CE_QC_DASHBOARD_READ_WORKER || '') === '1';
 const SQLITE_CACHE_KIB = Math.max(8 * 1024, Math.min(256 * 1024, Number(process.env.SQLITE_CACHE_KIB || (IS_EXPORT_WORKER ? 8 * 1024 : 64 * 1024))));
 const SQLITE_MMAP_BYTES = Math.max(0, Math.min(1024 * 1024 * 1024, Number(process.env.SQLITE_MMAP_BYTES ?? (IS_EXPORT_WORKER ? 0 : 256 * 1024 * 1024))));
 const SQLITE_WAL_AUTOCHECKPOINT_PAGES = Math.max(1000, Math.min(16000, Number(process.env.SQLITE_WAL_AUTOCHECKPOINT_PAGES || 4000)));
@@ -79,6 +81,16 @@ export function getRuntimeConfig() {
 export function getDb() {
   if (!db) {
     const cfg = getRuntimeConfig();
+    if(IS_DASHBOARD_READ_WORKER){
+      // Open the existing file only. Never copy a legacy database, perform
+      // migrations, checkpoint WAL, or create a new SQLite file.
+      if(!fs.existsSync(cfg.dbFile))throw new Error('V766_READ_DB_MISSING');
+      db=new DatabaseSync(cfg.dbFile,{readOnly:true});
+      db.exec('PRAGMA query_only=ON');
+      db.exec('PRAGMA busy_timeout=1000');
+      initialized=true;
+      return db;
+    }
     // The destructive worker receives this environment binding only after its
     // PREPARE/challenge/manifest path evidence has been verified. Re-check it
     // here, inside the DB layer and before runtime directories or SQLite are
