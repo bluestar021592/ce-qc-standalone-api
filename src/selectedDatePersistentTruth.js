@@ -285,11 +285,22 @@ export function persistentWhppCompletionTruth(db,reportDate=''){
   }
   const unifiedWhppCompleted=unifiedCompleted&&unifiedChildStatus==='COMPLETED'&&unifiedWhppSnapshotVerified;
 
-  // V763: date-matched snapshots/daily/history alone cannot promote two
-  // unknown final statuses to a real WHPP completed lock.
-  const locked=unifiedWhppCompleted||terminalEvidenceVerified;
+  // V764: keep processing completion distinct from POD/returned closure.
+  // Every exact saved source member must have been scanned and finalized, and
+  // a dated durable WHPP snapshot/summary must attest this run. An unresolved
+  // customer status remains visible in terminalEvidenceGaps, but it cannot
+  // rewrite a finished scan/track job into an unstarted one.
+  const processingEvidenceVerified=Boolean(
+    batch&&canonicalTotal>0&&canonicalResolved===canonicalTotal
+    &&(sourceCount===0||canonicalTotal===sourceCount)
+    &&Number(canonical?.evidence?.scanRows||0)===canonicalTotal
+    &&Number(canonical?.evidence?.finalRows||0)===canonicalTotal
+    &&membershipMatches&&(snapshotLocked||dailyLocked||historyLocked)
+  );
+  const locked=unifiedWhppCompleted||terminalEvidenceVerified||processingEvidenceVerified;
   const completionSource=unifiedWhppCompleted?'UNIFIED_VERIFIED_WHPP_CHILD'
     :terminalEvidenceVerified?'EXACT_WHPP_TERMINAL_SCAN_FINAL_EVIDENCE'
+    :processingEvidenceVerified?'EXACT_WHPP_SCAN_FINAL_PROCESSING_COMPLETED'
     :snapshotLocked?'IMMUTABLE_EXPORT_SNAPSHOT'
     :dailyLocked?'DAILY_SUMMARY'
     :historyLocked?'FINAL_ROWS_HISTORY':'';
@@ -298,7 +309,7 @@ export function persistentWhppCompletionTruth(db,reportDate=''){
     locked,finalized:locked,reportDate:date,sourceCount,finalCount,
     canonicalTotal,canonicalResolved,unifiedCompleted,unifiedWhppCompleted,
     snapshotLocked,dailyLocked,historyLocked,membershipMatches,
-    terminalEvidenceVerified,
+    terminalEvidenceVerified,processingEvidenceVerified,
     terminalEvidenceCoverage:{sourceCount,scanRows:Number(canonical?.evidence?.scanRows||0),finalRows:Number(canonical?.evidence?.finalRows||0),podRows:Number(canonical?.evidence?.podRows||0),returnedRows:Number(canonical?.evidence?.returnedRows||0),unverifiedRows:terminalEvidenceGaps.length},
     terminalEvidenceGaps:terminalEvidenceGaps.slice(0,50).map(row=>({
       shipmentCode:String(row?.shipmentCode||row?.运单号||'').trim().toUpperCase(),
