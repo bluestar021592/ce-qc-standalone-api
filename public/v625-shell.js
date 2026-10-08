@@ -107,10 +107,15 @@ async function recoverFamilyTransport(type,reportDate,retryEndpoint){
   throw new Error(label+'连接恢复后等待任务完成超时，请查看启动日志。');
 }
 async function runFamilyRequest(type,endpoint,reportDate){
-  try{return await post(endpoint,{},0)}
+  v752LaunchingFamily=type;
+  void refreshLiveProgress();
+  try{return await post(endpoint,{reportDate},0)}
   catch(error){
     if(!isTransportLoss(error))throw error;
     return recoverFamilyTransport(type,reportDate,endpoint);
+  }finally{
+    if(v752LaunchingFamily===type)v752LaunchingFamily='';
+    void refreshLiveProgress();
   }
 }
 const setText=(id,val)=>{const el=byId(id);if(el)el.textContent=val===undefined||val===null||val===''?'—':String(val)};
@@ -233,6 +238,8 @@ let v626OpenRows=[];
 let v626OpenFilter='all';
 let v626ProgressTimer=null;
 let v626TrackingJobId='';
+let v752LaunchingFamily='';
+const v752TerminalProgressLogs=new Set();
 let v640EvidenceRefreshTimer=null;
 const v626LogKeys=new Set();
 
@@ -302,13 +309,20 @@ async function fetchLiveProgress(reportDate=''){
     json('/api/v33/run-progress?businessType=SHOPEE'+(date?'&reportDate='+encodeURIComponent(date):''),7000),
     json('/api/whpp/progress'+(date?'?reportDate='+encodeURIComponent(date):''),7000)
   ]);
-  const ccsl=ccslR.status==='fulfilled'?ccslR.value:{};
-  const shopee=shopeeR.status==='fulfilled'?shopeeR.value:{};
+  let ccsl=ccslR.status==='fulfilled'?ccslR.value:{};
+  let shopee=shopeeR.status==='fulfilled'?shopeeR.value:{};
   let whppPayload=whppR.status==='fulfilled'?whppR.value:null;
   const unifiedCompleted=Boolean(date&&String(v626LatestImport?.reportDate||'').slice(0,10)===date&&String(v626LatestImport?.snapshotStatus||'').toUpperCase()==='COMPLETED');
   if(whppPayload?.completionLock?.locked||familyComplete(whppPayload?.runtime||{}))v738WhppCompletionLatch.add(date);
+  if(unifiedCompleted){
+    const projectComplete=(value,type)=>({...value,businessType:type,reportDate:date,running:false,active:false,complete:true,phase:'完成',runStatus:'completed',outcome:'COMPLETED',lastMessage:type+'已完成（统一日报完成锁）',completionProjection:'UNIFIED_COMPLETED'});
+    ccsl=projectComplete(ccsl,'CCSL');
+    shopee=projectComplete(shopee,'SHOPEE');
+  }
   if(unifiedCompleted||v738WhppCompletionLatch.has(date)){
-    whppPayload={...(whppPayload||{}),runtime:{...(whppPayload?.runtime||{}),active:false,reportDate:date,phase:'完成',outcome:'COMPLETED',lastMessage:'WHPP已完成（统一日报完成锁）'},completionLock:{...(whppPayload?.completionLock||{}),locked:true,finalized:true,reportDate:date,reason:'V739_UNIFIED_COMPLETED_OVERRIDE'},summary:whppPayload?.summary||{},log:whppPayload?.log||[]};
+    const reason=unifiedCompleted?'V752_UNIFIED_COMPLETED_3OF3':'V752_WHPP_DURABLE_COMPLETION';
+    const message=unifiedCompleted?'WHPP已完成（统一日报完成锁）':'WHPP已完成（WHPP持久完成锁）';
+    whppPayload={...(whppPayload||{}),runtime:{...(whppPayload?.runtime||{}),active:false,reportDate:date,phase:'完成',outcome:'COMPLETED',lastMessage:message},completionLock:{...(whppPayload?.completionLock||{}),locked:true,finalized:true,reportDate:date,reason},summary:whppPayload?.summary||{},log:whppPayload?.log||[]};
   }
   whppPayload=whppPayload||{};
   const whppLock=whppPayload.completionLock||{};
@@ -322,6 +336,8 @@ function renderLiveProgress(bundle={}){
     shopee:familyProgressLabel(shopee),
     whpp:familyProgressLabel(whpp)
   };
+  if(v752LaunchingFamily==='CCSL'&&!familyComplete(ccsl))familyLabels.ccsl='启动中';
+  if(v752LaunchingFamily==='SHOPEE'&&!familyComplete(shopee))familyLabels.shopee='启动中';
   setText('v626CcslProgress',familyLabels.ccsl);setText('v626ShopeeProgress',familyLabels.shopee);setText('v626WhppProgress',familyLabels.whpp);
   setText('v626ImportCcsl',familyLabels.ccsl);setText('v626ImportShopee',familyLabels.shopee);setText('v626ImportWhpp',familyLabels.whpp);
 
@@ -330,14 +346,14 @@ function renderLiveProgress(bundle={}){
   const trackDone=Number(ccsl.trackDone||0)+Number(shopee.trackDone||0);
   const trackTotal=Number(ccsl.trackTotal||0)+Number(shopee.trackTotal||0);
   const whppBatch=Number(whpp.batchIndex||0),whppBatches=Number(whpp.totalBatches||0);
-  const allRunning=Boolean(ccsl.running||shopee.running||whpp.active);
+  const allRunning=Boolean(ccsl.running||shopee.running||whpp.active||v752LaunchingFamily);
   const completeFamilies=Object.values(familyLabels).filter(label=>label==='完成').length;
   const allComplete=completeFamilies===3;
   const scanPct=allComplete?100:progressPercent(scanDone,scanTotal),trackPct=allComplete?100:progressPercent(trackDone,trackTotal);
   const whppPct=allComplete?100:progressPercent(whppBatch,whppBatches);
   const overall=allComplete?100:Math.round((scanPct+trackPct+(whppBatches?whppPct:(completeFamilies/3*100)))/3);
   for(const id of ['v626ProcessBar','v626ImportBar']){const el=byId(id);if(el)el.style.width=Math.max(0,Math.min(100,overall))+'%'}
-  const activePhase=whpp.active?String(whpp.phase||'WHPP处理中'):shopee.running?String(shopee.phase||'SHOPEE处理中'):ccsl.running?String(ccsl.phase||'CCSL处理中'):'';
+  const activePhase=whpp.active?String(whpp.phase||'WHPP处理中'):shopee.running?String(shopee.phase||'SHOPEE处理中'):ccsl.running?String(ccsl.phase||'CCSL处理中'):v752LaunchingFamily?(v752LaunchingFamily+'启动中'):'';
   const phase=allComplete?'全部处理完成':activePhase||(completeFamilies===2&&familyLabels.whpp!=='完成'?'已完成 2/3 业务 · WHPP待处理，请点击“继续未完成处理”':completeFamilies?('已完成 '+completeFamilies+'/3 业务，等待下一业务处理'):'等待开始处理');
   setText('v626ProcessText',phase);setText('v626ImportProgressText',phase);
   const progressCount=(scanTotal+trackTotal)>0?((scanDone+trackDone)+' / '+(scanTotal+trackTotal)):(completeFamilies+'/3 业务完成');
@@ -349,11 +365,20 @@ function renderLiveProgress(bundle={}){
   setText('v626ImportScan',scanStage);setText('v626ImportTrack',trackStage);setText('v626ImportDone',doneStage);
   const badge=byId('v626ProcessState');if(badge){badge.textContent=completeFamilies>=3?'已完成':allRunning?'处理中':'待处理';badge.className='v625-badge '+(completeFamilies>=3?'success':allRunning?'warning':'warning')}
   const resumeBtn=byId('v625RunResume');if(resumeBtn){resumeBtn.disabled=allComplete;resumeBtn.hidden=allComplete;resumeBtn.style.setProperty('display',allComplete?'none':'inline-flex','important')}
-  for(const item of [
-    [ccsl.generatedAt||new Date().toISOString(),ccsl.phase||ccsl.lastMessage],
-    [shopee.generatedAt||new Date().toISOString(),shopee.phase||shopee.lastMessage],
-    [whpp.heartbeatAt||whpp.finishedAt||new Date().toISOString(),whpp.lastMessage||whpp.phase]
-  ])if(item[1])appendLiveLog(item[1],item[0]);
+  const progressLogs=[
+    ['CCSL',ccsl,ccsl.generatedAt||new Date().toISOString(),ccsl.phase||ccsl.lastMessage],
+    ['SHOPEE',shopee,shopee.generatedAt||new Date().toISOString(),shopee.phase||shopee.lastMessage],
+    ['WHPP',whpp,whpp.heartbeatAt||whpp.finishedAt||new Date().toISOString(),whpp.lastMessage||whpp.phase]
+  ];
+  for(const [family,value,at,message] of progressLogs){
+    if(!message)continue;
+    if(familyComplete(value)){
+      const key=[bundle.reportDate||value.reportDate||'',family,String(message)].join('|');
+      if(v752TerminalProgressLogs.has(key))continue;
+      v752TerminalProgressLogs.add(key);
+    }
+    appendLiveLog(message,at);
+  }
   for(const log of whpp.log||[])appendLiveLog(log.message||'',log.at||new Date().toISOString());
 }
 async function refreshLiveProgress(){
