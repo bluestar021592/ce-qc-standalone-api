@@ -1723,7 +1723,7 @@ app.get('/api/tracking-workspace', async (req, res) => {
     completed: allRows.filter(row => ['成功', 'POD跳过', '退回跳过', '特殊节点跳过', '正常分流跳过'].includes(row.queryStatus)).length
   };
   const payload={ok:true,reportDate,batchId:unified?.batchId||'',snapshotId,scope,
-    allRowCount:allRows.length,summary,qualitySignals,qualityRows,rows:rows.slice(0,5000)};
+    allRowCount: allRows.length,summary,qualitySignals,qualityRows,rows: rows.slice(0, 5000)};
   if(cacheEligible){
     v765WorkspaceReadCache.delete(cacheKey);
     v765WorkspaceReadCache.set(cacheKey,{at:Date.now(),payload});
