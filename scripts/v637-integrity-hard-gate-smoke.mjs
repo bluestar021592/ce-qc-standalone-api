@@ -29,7 +29,7 @@ assert.match(server,/state\.accounting=buildCanonicalBusinessAccounting/,'standa
 assert.match(server,/accounting=buildCanonicalBusinessAccounting/,'WHPP must expose backend accounting');
 
 assert.match(js,/state\.accounting\?\.rowsByKind\s*\?\s*state\.accounting\s*:\s*\{total:m\.total/,'frontend must prefer backend accounting when the compact state includes canonical rowsByKind');
-assert.match(js,/new URLSearchParams\(\{businessType:business\}\)/,'business board must scope integrity reads to the selected business');
+assert.match(js,/new URLSearchParams\(\{businessType:targetBusiness\}\)/,'deferred business board must scope integrity reads to the selected business');
 assert.match(js,/json\('\/api\/data-integrity\?'\+integrityQuery\.toString\(\),10000\)/,'business board must hydrate integrity after compact first paint');
 assert.match(js,/待扫描/,'visible waiting-scan signal missing');
 assert.match(js,/const dataHealthy=Boolean\(classification\.balanced\)/,'home first paint must use classification conservation only and defer full integrity checks');

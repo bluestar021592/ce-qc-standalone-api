@@ -1647,12 +1647,29 @@ app.post('/api/track-query', async (req, res) => {
   }
 });
 
+// V765: short-lived read-only memoization for identical selected-date,
+ // same-user business workspaces. No SQLite writes; explicit refresh bypasses.
+const v765WorkspaceReadCache=new Map();
+const V765_WORKSPACE_TTL_MS=20000;
 app.get('/api/tracking-workspace', async (req, res) => {
-  const unified = getLatestUnifiedImport();
-  const snapshotId = String(req.query.snapshotId || unified?.snapshotId || '');
-  const reportDate = String(req.query.reportDate || unified?.reportDate || '');
+  // Resolve an authenticated, explicit date/snapshot cache hit BEFORE reading
+  // the latest import. Incomplete URL contexts never enter the cache.
+  const explicitSnapshotId=String(req.query.snapshotId||'');
+  const explicitReportDate=String(req.query.reportDate||'');
   const scope = ['all', 'pod'].includes(String(req.query.scope || '')) ? String(req.query.scope) : 'actionable';
   const requestedBusinessType=String(req.query.businessType||'').trim().toUpperCase();
+  const identity=String(req.user?.id||req.user?.email||req.user?.username||'').trim();
+  const cacheEligible=Boolean(identity&&explicitSnapshotId&&explicitReportDate&&requestedBusinessType&&scope==='all');
+  const cacheKey=cacheEligible?[identity,requestedBusinessType,explicitReportDate,explicitSnapshotId,scope].join('|'):'';
+  const previous=cacheEligible&&String(req.query.fresh||'')!=='1'?v765WorkspaceReadCache.get(cacheKey):null;
+  if(previous&&Date.now()-previous.at<V765_WORKSPACE_TTL_MS){
+    res.setHeader('Cache-Control','no-store');
+    res.setHeader('X-CE-QC-Workspace-Cache','HIT');
+    return res.json(previous.payload);
+  }
+  const unified=getLatestUnifiedImport();
+  const snapshotId=explicitSnapshotId||String(unified?.snapshotId||'');
+  const reportDate=explicitReportDate||String(unified?.reportDate||'');
   const unifiedTypes=new Set(['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN']);
   let states = [];
   if (snapshotId) {
@@ -1705,7 +1722,16 @@ app.get('/api/tracking-workspace', async (req, res) => {
     actionable: allRows.filter(row => row.isActionable).length,
     completed: allRows.filter(row => ['成功', 'POD跳过', '退回跳过', '特殊节点跳过', '正常分流跳过'].includes(row.queryStatus)).length
   };
-  res.json({ ok: true, reportDate, batchId: unified?.batchId || '', snapshotId, scope, allRowCount: allRows.length, summary, qualitySignals, qualityRows, rows: rows.slice(0, 5000) });
+  const payload={ok:true,reportDate,batchId:unified?.batchId||'',snapshotId,scope,
+    allRowCount: allRows.length,summary,qualitySignals,qualityRows,rows: rows.slice(0, 5000)};
+  if(cacheEligible){
+    v765WorkspaceReadCache.delete(cacheKey);
+    v765WorkspaceReadCache.set(cacheKey,{at:Date.now(),payload});
+    while(v765WorkspaceReadCache.size>2)v765WorkspaceReadCache.delete(v765WorkspaceReadCache.keys().next().value);
+  }
+  res.setHeader('Cache-Control','no-store');
+  res.setHeader('X-CE-QC-Workspace-Cache','MISS');
+  res.json(payload);
 });
 
 app.post('/api/test-ce-api', async (req, res) => {
