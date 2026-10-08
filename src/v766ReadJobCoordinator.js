@@ -58,7 +58,7 @@ function start(entry){
 }
 function drain(){while(running<MAX_CONCURRENT&&queue.length)start(queue.shift())}
 export function v766ReadJob(kind,args={}){
-  if(!['FAMILY_PROOF','HOME_FULL'].includes(kind))return Promise.reject(new Error('V766_JOB_NOT_ALLOWED'));
+  if(!['FAMILY_PROOF','HOME_FULL','READ_ONLY_CHECK'].includes(kind))return Promise.reject(new Error('V766_JOB_NOT_ALLOWED'));
   const key=cacheKey(kind,args), prior=settled.get(key);
   if(prior&&Date.now()-prior.at<prior.ttl)return Promise.resolve({result:prior.result,cache:'HIT',elapsedMs:0});
   if(active.has(key))return active.get(key);
