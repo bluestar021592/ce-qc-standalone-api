@@ -655,7 +655,7 @@ async function fetchLiveProgress(reportDate=''){
     &&!v759PinnedWhppProof(date);
   if(whppProofPending){
     whpp={...whpp,complete:false,active:false,running:false,
-      runStatus:'EVIDENCE_PENDING',outcome:'EVIDENCE_PENDING',phase:'完成证据核验中'};
+      runStatus:'EVIDENCE_PENDING',outcome:'EVIDENCE_PENDING',phase:'终态核验中'};
   }
   const gap=v763WhppEvidenceGaps.get(date+'|'+String(v626LatestImport?.snapshotId||''));
   if(gap&&!zeroWhpp){
@@ -672,10 +672,10 @@ async function fetchLiveProgress(reportDate=''){
   // The diagnostic is the authoritative owner for historical CCSL/SHOPEE.
   // While it is loading, do not conflate "not yet verified" with "not run".
   if(!zeroCcsl&&!familyProof?.CCSL&&!familyComplete(ccsl)&&Number(latestCounts.CE||0)+Number(latestCounts.CEAF||0)+Number(latestCounts.TBKH||0)+Number(latestCounts.ALI1688||0)>0){
-    ccsl={...ccsl,phase:'历史完成证据核验中'};
+    ccsl={...ccsl,phase:'历史证据核验中'};
   }
   if(!zeroShopee&&!familyProof?.SHOPEE&&!familyComplete(shopee)&&Number(latestCounts.SHOPEECN||0)+Number(latestCounts.SHOPEEVN||0)>0){
-    shopee={...shopee,phase:'历史完成证据核验中'};
+    shopee={...shopee,phase:'历史证据核验中'};
   }
   return{ccsl,shopee,whpp,reportDate:date};
 }
