@@ -17,7 +17,7 @@ assert.match(sqliteFixture,/Current normalized tables deliberately contain ZERO 
 assert.match(sqliteFixture,/VN_pod:\{rows:vnPodRows,total:vnPodRows\.length\}/,'VN fixture must preserve 545 POD members in the completed snapshot');
 assert.match(sqliteFixture,/OLD-CARRY-POD/,'historical carry POD exclusion must be exercised');
 assert.match(sqliteFixture,/BATCH-OLD.*SUPERSEDED/s,'superseded same-date batch exclusion must be exercised');
-assert.match(sqliteFixture,/completion\.completionSource,'UNIFIED_COMPLETED'/,'unified COMPLETED must be the terminal WHPP receipt');
+assert.match(sqliteFixture,/completion\.completionSource,'UNIFIED_VERIFIED_WHPP_CHILD'/,'verified WHPP child snapshot must be the terminal WHPP receipt');
 assert.match(sqliteFixture,/vn\.bills\.length,545/,'VN formal truth must prove 545 POD');
 assert.match(sqliteFixture,/CN stale empty POD snapshot recovers 4\/5/,'CN fixture must cover stale empty completed-snapshot POD recovery');
 assert.match(sqliteFixture,/cn\.bills\.length,4/,'CN formal truth must recover later daily-report POD members without changing selected-date membership');
@@ -28,7 +28,8 @@ assert.match(sqliteFixture,/whpp\.bills\.length,166/,'WHPP canonical truth must 
 assert.match(helper,/status='VALID'.*ORDER BY createdAt DESC,rowid DESC LIMIT 1/s,'selected-date truth must use latest VALID import batch');
 assert.match(helper,/IMMUTABLE_SHOPEE_COMPLETED_SNAPSHOT/,'Shopee POD denominator must prefer exact completed snapshot truth');
 assert.match(helper,/FORMAL_DASHBOARD_MEMBERSHIP_SQL/,'Shopee POD denominator must retain formal dashboard joins as fallback');
-assert.match(helper,/UNIFIED_COMPLETED/,'WHPP progress must recognize unified COMPLETED as terminal receipt');
+assert.match(helper,/UNIFIED_VERIFIED_WHPP_CHILD/,'WHPP progress may recognize unified completion only when the exact WHPP child snapshot is verified');
+assert.match(sqliteFixture,/falseCompletion\.locked,false/,'aggregate unified COMPLETED without a real WHPP child must stay unlocked');
 assert.match(repair,/persistentSelectedDatePodTruth/,'timing denominator must read selected-date canonical POD truth');
 assert.match(modern,/persistentWhppCompletionTruth/,'modern WHPP progress must use persistent completion truth');
 assert.match(legacy,/persistentWhppCompletionTruth/,'legacy WHPP progress must converge on persistent completion truth');
@@ -37,4 +38,4 @@ assert.match(shell,/complete:Boolean\(whppLock\.locked\)\|\|familyComplete\(whpp
 assert.match(store,/persistedBusinessPodFlag/,'future SQLite writes must preserve formal POD semantics');
 assert.match(home,/currentTotal>0\?currentTotal:n\(row\.pod,0\)/,'cache must not shrink canonical POD denominator');
 assert.match(home,/requestSelectedDateTimingRepair/,'missing signing evidence must auto-enter selected-date repair');
-console.log('[V751] July-1 acceptance locked · WHPP 190/166 · VN 588/545 immutable snapshot · CN empty POD snapshot recovers from later VALID daily-report POD while source membership stays frozen');
+console.log('[V754/V751] July-1 acceptance locked · WHPP true completion requires verified child snapshot · false aggregate 3/3 blocked · VN/CN timing truth retained');
