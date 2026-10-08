@@ -31,6 +31,7 @@ db.prepare('INSERT INTO unified_snapshots VALUES(?,?,?,?)').run(
   '2026-07-01T03:00:00Z'
 );
 db.prepare('INSERT INTO unified_import_batches VALUES(?,?,?,?,?)').run('BATCH-OLD','SNAP-OLD',date,'SUPERSEDED','2026-07-01T00:00:00Z');
+db.prepare('INSERT INTO unified_import_batches VALUES(?,?,?,?,?)').run('BATCH-LATER','SNAP-LATER','2026-07-02','VALID','2026-07-02T01:00:00Z');
 db.prepare('INSERT INTO unified_import_rows VALUES(?,?,?,?,?,?,?,?)').run('BATCH-OLD','SNAP-OLD',date,'WHPP','OLD-BATCH-ONLY','PP',JSON.stringify({shipmentCode:'OLD-BATCH-ONLY'}),1);
 
 const insertSource=db.prepare('INSERT INTO unified_import_rows VALUES(?,?,?,?,?,?,?,?)');
@@ -64,6 +65,19 @@ for(let i=1;i<=588;i++){
   insertCurrent.run(bill,'SHOPEEVN',date,i<=545?'DELIVERY':'RETURN_COMPLETED','SUCCESS',date+'T10:00:00',JSON.stringify({shipmentCode:bill,currentState:i<=545?'DELIVERY':'RETURN_COMPLETED'}));
   insertScan.run('SHOPEE',bill,date,0,i<=545?'':'R',JSON.stringify({shipmentCode:bill,orderStatus:i<=545?'':'R'}));
 }
+
+// SHOPEE CN regression: selected-date completed snapshot has exact CN_all membership but a stale
+// empty CN_pod tab. A later VALID daily report proves POD for 4 of the same 5 exact July-1 members.
+// The selected-date member set must stay frozen while terminal POD status recovers from later reports.
+const cnAllRows=[],cnPodRows=[];
+for(let i=1;i<=5;i++){
+  const bill='C'+String(i).padStart(3,'0');
+  const row={shipmentCode:bill,运单号:bill,recipient_group:'CN',currentState:'DELIVERY'};
+  cnAllRows.push(row);
+  insertSource.run('BATCH-NEW','SNAP-NEW',date,'SHOPEECN',bill,i%2?'PP':'PV',JSON.stringify({shipmentCode:bill,'状态标识':'N'}),2000+i);
+  insertSource.run('BATCH-LATER','SNAP-LATER','2026-07-02','SHOPEECN',bill,i%2?'PP':'PV',
+    JSON.stringify({shipmentCode:bill,'状态标识':i<=4?'Y':'N','下单时间':'2026-07-01 08:00:00','派件时间':i<=4?'2026-07-02 12:00:00':''}),3000+i);
+}
 db.prepare(`INSERT INTO business_export_snapshots(
   businessType,reportDate,snapshotId,status,reconciliationStatus,invalidReason,payloadJson,generatedAt,createdAt
 ) VALUES(?,?,?,?,?,?,?,?,?)`).run(
@@ -71,7 +85,12 @@ db.prepare(`INSERT INTO business_export_snapshots(
   JSON.stringify({snapshotId:'SHOPEE-SNAP',view:{detailTabs:{
     VN_all:{rows:vnAllRows,total:vnAllRows.length},
     VN_pod:{rows:vnPodRows,total:vnPodRows.length},
-    byRecipientGroup:{VN:{all:{rows:vnAllRows,total:vnAllRows.length},pod:{rows:vnPodRows,total:vnPodRows.length}}}
+    CN_all:{rows:cnAllRows,total:cnAllRows.length},
+    CN_pod:{rows:cnPodRows,total:cnPodRows.length},
+    byRecipientGroup:{
+      VN:{all:{rows:vnAllRows,total:vnAllRows.length},pod:{rows:vnPodRows,total:vnPodRows.length}},
+      CN:{all:{rows:cnAllRows,total:cnAllRows.length},pod:{rows:cnPodRows,total:cnPodRows.length}}
+    }
   }}}),
   '2026-07-01T02:30:00Z','2026-07-01T02:30:00Z'
 );
@@ -100,7 +119,14 @@ assert.equal(vn.authoritative,true);
 assert.equal(vn.sourceCount,588);
 assert.equal(vn.bills.length,545);
 assert.equal(vn.source,'IMMUTABLE_SHOPEE_COMPLETED_SNAPSHOT');
-assert.equal(persistentSelectedDatePodBills(db,'SHOPEECN',date).length,0);
+
+const cn=persistentSelectedDatePodTruth(db,'SHOPEECN',date);
+assert.equal(cn.authoritative,true);
+assert.equal(cn.sourceCount,5);
+assert.equal(cn.bills.length,4);
+assert.equal(cn.source,'IMMUTABLE_SHOPEE_COMPLETED_SNAPSHOT_RECOVERED_BY_LATEST_DAILY_POD');
+assert.equal(cn.recoveredFromEmptySnapshot,true);
+assert.deepEqual(cn.bills,['C001','C002','C003','C004']);
 
 // Same date old/superseded source and historical carry rows must not inflate the denominator.
 assert.equal(vn.bills.includes('OLD-CARRY-POD'),false);
@@ -112,4 +138,4 @@ const completionAfterLossyFinalRows=persistentWhppCompletionTruth(db,date);
 assert.equal(completionAfterLossyFinalRows.locked,true);
 assert.equal(completionAfterLossyFinalRows.completionSource,'UNIFIED_COMPLETED');
 
-console.log('[V681] real SQLite truth passed · unified COMPLETED=>WHPP complete · WHPP 190/166 · VN 588/545 recovered from exact completed snapshot even when normalized POD evidence is zero · stale batch/carry excluded');
+console.log('[V751] real SQLite truth passed · WHPP 190/166 · VN 588/545 exact completed snapshot · CN stale empty POD snapshot recovers 4/5 from later VALID daily report · membership frozen');
