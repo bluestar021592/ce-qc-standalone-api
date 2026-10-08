@@ -63,6 +63,10 @@ assert.equal(inspect({ccsl:{...done,running:true},shopee:done,whpp:done},counts,
 
 
 assert.match(shell,/v762LoadFamilyTerminalTruth\(date\)/,'progress refresh must load saved completion evidence in parallel with live progress');
+assert.match(shell,/void v762LoadFamilyTerminalTruth\(date\)/,'history proof must run independently of fast dashboard reads');
+assert.match(shell,/\/api\/family-recovery-proof\?reportDate='\+encodeURIComponent\(date\),20000/,'slow local SQLite exact evidence must receive same 20-second budget as manual diagnostic');
+assert.match(shell,/if\(saved&&date===String\(v626LatestImport\?\.reportDate/,'completed historical proof must repaint UI as soon as it arrives');
+assert.match(shell,/phase:'历史证据核验中'/,'pending proof must not imply business never ran');
 assert.match(shell,/v762ProjectSavedCompletion\(ccsl,familyProof.CCSL,date\)/,'CCSL completed snapshot proof must project into the live bar');
 assert.match(shell,/v762ProjectSavedCompletion\(shopee,familyProof.SHOPEE,date\)/,'SHOPEE completed snapshot proof must project into the live bar');
 assert.match(shell,/v762RememberFamilyCompletionProof\(proof,date,String\(v626LatestImport\?\.snapshotId\|\|''\)\)/,'read-only diagnostic must update the same authoritative UI owner');

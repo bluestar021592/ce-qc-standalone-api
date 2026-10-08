@@ -206,7 +206,8 @@ assert.equal(persistentWhppCompletionTruth(db,falseDate).locked,true);
 
 // V763: reproduce the July-04 historical WHPP screenshot:
 // legacy sourceCount=0, all four scan/final rows exist, but two neither POD
-// nor returned. A "VALID/COMPLETED" export snapshot must not turn 2/4 into 3/3.
+// nor returned. A "VALID/COMPLETED" snapshot can prove 4/4 scan/final processing
+// without fabricating POD/return closure for the two unknown customer statuses.
 const whppStaleDate='2026-07-04';
 db.prepare('INSERT INTO unified_import_batches VALUES(?,?,?,?,?)').run('BATCH-V763','SNAP-V763',whppStaleDate,'VALID','2026-07-04T01:00:00Z');
 db.prepare('INSERT INTO unified_snapshots VALUES(?,?,?,?)').run('SNAP-V763','COMPLETED',JSON.stringify({parentRun:{children:{WHPP:{status:'WAIT'}}}}),'2026-07-04T02:00:00Z');
@@ -230,8 +231,10 @@ assert.equal(incompleteLegacy.terminalEvidenceCoverage.finalRows,4);
 assert.equal(incompleteLegacy.terminalEvidenceCoverage.podRows,2);
 assert.equal(incompleteLegacy.terminalEvidenceCoverage.returnedRows,0);
 assert.equal(incompleteLegacy.terminalEvidenceCoverage.unverifiedRows,2);
-assert.equal(incompleteLegacy.locked,false,'completed snapshot cannot conceal two missing terminal statuses');
-assert.equal(incompleteLegacy.reason,'WHPP_TERMINAL_EVIDENCE_GAP');
+assert.equal(incompleteLegacy.locked,true,'4/4 scanned and finalized proves processing completion');
+assert.equal(incompleteLegacy.processingEvidenceVerified,true);
+assert.equal(incompleteLegacy.terminalEvidenceVerified,false,'2/4 POD/return terminal statuses must remain open');
+assert.equal(incompleteLegacy.reason,'PERSISTED_WHPP_COMPLETED');
 assert.deepEqual(incompleteLegacy.terminalEvidenceGaps.map(row=>row.shipmentCode),['WST3','WST4']);
 
 // Updating exact two statuses in local evidence (never inventing a status)
@@ -248,4 +251,4 @@ assert.equal(completeLegacy.locked,true);
 assert.equal(completeLegacy.terminalEvidenceGaps.length,0);
 assert.equal(completeLegacy.terminalEvidenceCoverage.returnedRows,2);
 
-console.log('[V763/V757/V754/V751] July-04 WHPP 2 missing terminal members blocks 3/3 despite immutable snapshot; exact two later trusted states close it; older V757 child and VN/CN truth retained');
+console.log('[V764/V757/V754/V751] July-04 WHPP 4/4 scan/final complete while two customer statuses remain explicitly unclosed; trusted later terminal facts close gaps; older V757 child and VN/CN proof retained');
