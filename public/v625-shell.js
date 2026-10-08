@@ -1135,9 +1135,13 @@ async function queryTrack(){
       const state=String(row?.currentState||row?.primaryCategory||row?.scanNormalizedState||'').trim();
       if(state)addStatus(row,'当前分析状态 '+state,'系统已识别当前业务状态；如无轨迹节点，下方状态仅用于说明当前事实，不作为签收日期。','业务分析状态');
     }
+    const strongTerminalPod=(r.scanRows||[]).some(row=>belongs(row)&&String(row?.orderStatus??'').trim()==='85')
+      ||(r.shipmentRows||[]).some(row=>belongs(row)&&String(row?.shipmentStatus??'').trim()==='60')
+      ||(r.ledger||[]).some(row=>belongs(row)&&String(row?.terminalReason||'').trim().toUpperCase()==='POD');
     for(const row of r.ledger||[]){
-      const terminal=String(row?.terminalReason||'').trim().toUpperCase(),state=String(row?.currentState||'').trim();
+      const terminal=String(row?.terminalReason||'').trim().toUpperCase(),state=String(row?.currentState||'').trim(),upperState=state.toUpperCase();
       if(terminal==='POD')addStatus(row,'本地账本：POD','本地持续追踪账本已确认POD'+(row?.podDate?'，并保存POD时间。':'，但未保存可用POD时间。'),'qc_tracking_ledger');
+      else if(strongTerminalPod&&/API_PENDING_RETRY|PENDING_RETRY|待重试/.test(upperState))continue;
       else if(state||terminal)addStatus(row,'本地账本：'+(state||terminal),'本地账本存在当前状态记录。','qc_tracking_ledger');
     }
     const eventHtml=events.map(e=>'<div class="v625-timeline-item"><b>'+esc(first(e,['eventTime','time','updateTime','createdAt'])||'—')+'</b><p>'+esc(eventDesc(e))+'</p><small>'+esc(e.evidenceSource||'CE实时轨迹')+'</small></div>').join('');
