@@ -490,6 +490,7 @@ async function latestImportContext(){
 }
 function progressPercent(done,total){return total>0?Math.max(0,Math.min(100,Math.round(done*100/total))):0}
 function familyComplete(value={}){
+  if(value.running===true||value.active===true)return false;
   return Boolean(value.complete)||/FINISHED|COMPLETED|完成/i.test(String(value.runStatus||value.outcome||value.phase||''));
 }
 function familyProgressLabel(value={}){
@@ -1359,6 +1360,38 @@ async function safeWhppRun(mode,reportDate){
     throw error;
   }
 }
+// V760: business HTTP responses are not a substitute for exact selected-date
+// persisted terminal truth. Never publish success or launch timing while 1/3.
+function v760FamilyTerminalSummary(bundle={},counts={},date=''){
+  const required=[['CCSL','ccsl',counts.CCSL],['SHOPEE','shopee',counts.SHOPEE],['WHPP','whpp',counts.WHPP]];
+  const missing=[];
+  for(const [name,key,total] of required){
+    const value=bundle?.[key]||{};
+    const actualDate=String(value.reportDate||value.completionLock?.reportDate||'').slice(0,10);
+    if(Number(total||0)>0&&actualDate&&actualDate!==date){
+      missing.push(name+'日期不匹配（'+actualDate+'）');
+      continue;
+    }
+    if(!familyComplete(value)){
+      const state=String(value.runStatus||value.outcome||value.phase||'等待进度确认');
+      missing.push(name+'未完成（'+state+'）');
+    }
+  }
+  return{ok:missing.length===0,missing,complete:required.length-missing.length};
+}
+async function v760VerifyAllFamilies(reportDate,counts){
+  let last=null,summary=null;
+  for(let attempt=0;attempt<3;attempt++){
+    if(attempt)await sleep(1300);
+    last=await fetchLiveProgress(reportDate);
+    summary=v760FamilyTerminalSummary(last,counts,reportDate);
+    if(summary.ok)return{ok:true,bundle:last,summary};
+    if(summary.missing.some(item=>item.startsWith('WHPP'))&&Number(counts.WHPP||0)>0){
+      await v759VerifyWhppCompletionOnce(reportDate);
+    }
+  }
+  return{ok:false,bundle:last,summary};
+}
 async function runTask(mode,explicitReportDate='',explicitImportData=null){
   if(runBusy)return{ok:false,error:'当前已有处理任务正在运行'};
   runBusy=true;
@@ -1402,12 +1435,29 @@ async function runTask(mode,explicitReportDate='',explicitImportData=null){
         await safeWhppRun('resume',reportDate);
       }
     }
-    appendLiveLog('7业务处理完成，开始补齐签收时效60/70→80证据');
-    await post('/api/timing-repair/start',{reportDate},15000).catch(error=>appendLiveLog('签收时效补证启动失败：'+error.message));
-    appendLiveLog('7业务处理完成，正在刷新首页与未完成POD账本');
-    note('v625RunMessage','7业务处理完成，签收时效补证已启动。','success');
+    const verified=await v760VerifyAllFamilies(reportDate,counts);
+    if(verified.bundle)renderLiveProgress(verified.bundle);
+    if(!verified.ok){
+      const reason='当前确认 '+verified.summary.complete+'/3业务完成；'+verified.summary.missing.join('；');
+      appendLiveLog('7业务状态尚未核实完成：'+reason);
+      note('v625RunMessage','处理请求已返回，但'+reason+'。未启动签收时效补证；不要重复上传或清数据。','error');
+      return{ok:false,error:reason};
+    }
+    appendLiveLog('7业务 '+reportDate+' 已核实3/3完成，准备启动签收时效补证');
+    let repairStarted=false,repairError='';
+    try{
+      const repair=await post('/api/timing-repair/start',{reportDate},15000);
+      repairStarted=repair?.ok!==false;
+    }catch(error){repairError=error.message||String(error)}
+    if(repairStarted){
+      appendLiveLog('7业务已核实完成，签收时效补证已启动');
+      note('v625RunMessage','7业务已核实3/3完成，签收时效补证已启动。','success');
+    }else{
+      appendLiveLog('7业务已核实3/3完成，但签收时效补证未能确认启动：'+(repairError||'接口未确认'));
+      note('v625RunMessage','7业务已核实3/3完成，但签收时效补证启动失败：'+(repairError||'接口未确认'),'error');
+    }
     await Promise.all([refreshLiveProgress(),loadOpenPod(),refreshImportCanonicalClassification(reportDate),page==='home'?loadHome({skipAux:true}):Promise.resolve()]);
-    return{ok:true};
+    return{ok:true,repairStarted};
   }catch(e){
     appendLiveLog('处理未完成：'+e.message);
     note('v625RunMessage','任务未完成：'+e.message,'error');
