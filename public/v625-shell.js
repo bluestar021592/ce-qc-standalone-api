@@ -875,7 +875,7 @@ async function refreshOpenPodNow(){
     const r=await post('/api/v246/tracking/reconcile',{businessType:'ALL',fromDate:reportDate,toDate:reportDate},30000);
     const job=await pollTrackingJob(r.job?.jobId||'');
     note('v626RefreshPodMessage',reportDate+' 定向补查完成：成功刷新 '+fmt(job.refreshed||0)+' 票，待重试 '+fmt(job.failed||0)+' 票。','success');
-    await Promise.all([loadOpenPod(),page==='home'?loadHome({skipAux:true}):Promise.resolve(),page==='business'?loadBusiness():Promise.resolve()]);
+    await Promise.all([loadOpenPod(),page==='home'?loadHome({skipAux:true}):Promise.resolve(),page==='business'?loadBusiness({skipQualityRefresh:true}):Promise.resolve()]);
   }catch(error){note('v626RefreshPodMessage','更新失败：'+error.message,'error')}
 }
 
@@ -1342,6 +1342,7 @@ async function v765LoadBusinessDetailLane({reportDate,snapshotId,m,options,gener
         const workspaceQuery=new URLSearchParams({scope:'all',businessType:targetBusiness});
         if(snapshotId)workspaceQuery.set('snapshotId',snapshotId);
         if(reportDate)workspaceQuery.set('reportDate',reportDate);
+        if(options.skipQualityRefresh)workspaceQuery.set('fresh','1');
         pending=Promise.allSettled([
           json('/api/data-integrity?'+integrityQuery.toString(),10000),
           json('/api/tracking-workspace?'+workspaceQuery.toString(),10000)
