@@ -239,18 +239,29 @@ export function persistentWhppCompletionTruth(db,reportDate=''){
   // unresolved API retry, and the source/member sets must agree. Read-only:
   // never invent a WHPP child snapshot or mutate a run lock.
   const exactTerminalRows=Array.isArray(canonical?.rows)?canonical.rows:[];
+  // V763: an immutable export/summary is historical evidence, not terminal
+  // proof when even one member is neither POD nor returned. The older WHPP
+  // daily-parse membership may exist without unified_import_rows (sourceCount=0):
+  // allow that exact-date legacy case only with a saved WHPP snapshot and
+  // every canonical member independently scanned and finalized.
+  const v763TerminalRowValid=row=>{
+    const evidence=row?.truthEvidence||{};
+    const terminal=Boolean(evidence.pod)!==Boolean(evidence.returned);
+    const status=String(row?.apiStatus||row?.API状态||'').trim().toUpperCase();
+    const carry=String(row?.carryStatus||'').trim().toUpperCase();
+    return evidence.scan===true&&evidence.final===true&&terminal
+      &&status!=='API_PENDING_RETRY'&&status!=='FAILED'&&carry!=='OPEN';
+  };
+  const terminalEvidenceGaps=exactTerminalRows.filter(row=>!v763TerminalRowValid(row));
   const terminalEvidenceVerified=Boolean(
-    batch&&sourceCount>0&&canonicalTotal===sourceCount&&canonicalResolved===sourceCount
-    &&Number(canonical?.evidence?.scanRows||0)===sourceCount
-    &&Number(canonical?.evidence?.finalRows||0)===sourceCount
+    batch&&canonicalTotal>0&&canonicalResolved===canonicalTotal
+    &&(sourceCount>0?canonicalTotal===sourceCount:Boolean(snapshot?.snapshotId))
+    &&(sourceCount>0?Number(canonical?.evidence?.scanRows||0)===sourceCount:Number(canonical?.evidence?.scanRows||0)===canonicalTotal)
+    &&(sourceCount>0?Number(canonical?.evidence?.finalRows||0)===sourceCount:Number(canonical?.evidence?.finalRows||0)===canonicalTotal)
     &&exactTerminalRows.every(row=>{
       const evidence=row?.truthEvidence||{};
       const terminal=Boolean(evidence.pod)!==Boolean(evidence.returned);
-      const status=String(row?.apiStatus||row?.API状态||'').trim().toUpperCase();
-      const carry=String(row?.carryStatus||'').trim().toUpperCase();
-      return evidence.scan===true&&evidence.final===true&&terminal
-        &&status!=='API_PENDING_RETRY'&&status!=='FAILED'
-        &&carry!=='OPEN';
+      return v763TerminalRowValid(row)&&terminal;
     })
   );
 
@@ -274,7 +285,9 @@ export function persistentWhppCompletionTruth(db,reportDate=''){
   }
   const unifiedWhppCompleted=unifiedCompleted&&unifiedChildStatus==='COMPLETED'&&unifiedWhppSnapshotVerified;
 
-  const locked=unifiedWhppCompleted||terminalEvidenceVerified||membershipMatches&&(snapshotLocked||dailyLocked||historyLocked);
+  // V763: date-matched snapshots/daily/history alone cannot promote two
+  // unknown final statuses to a real WHPP completed lock.
+  const locked=unifiedWhppCompleted||terminalEvidenceVerified;
   const completionSource=unifiedWhppCompleted?'UNIFIED_VERIFIED_WHPP_CHILD'
     :terminalEvidenceVerified?'EXACT_WHPP_TERMINAL_SCAN_FINAL_EVIDENCE'
     :snapshotLocked?'IMMUTABLE_EXPORT_SNAPSHOT'
@@ -286,11 +299,20 @@ export function persistentWhppCompletionTruth(db,reportDate=''){
     canonicalTotal,canonicalResolved,unifiedCompleted,unifiedWhppCompleted,
     snapshotLocked,dailyLocked,historyLocked,membershipMatches,
     terminalEvidenceVerified,
-    terminalEvidenceCoverage:{sourceCount,scanRows:Number(canonical?.evidence?.scanRows||0),finalRows:Number(canonical?.evidence?.finalRows||0),podRows:Number(canonical?.evidence?.podRows||0),returnedRows:Number(canonical?.evidence?.returnedRows||0)},
+    terminalEvidenceCoverage:{sourceCount,scanRows:Number(canonical?.evidence?.scanRows||0),finalRows:Number(canonical?.evidence?.finalRows||0),podRows:Number(canonical?.evidence?.podRows||0),returnedRows:Number(canonical?.evidence?.returnedRows||0),unverifiedRows:terminalEvidenceGaps.length},
+    terminalEvidenceGaps:terminalEvidenceGaps.slice(0,50).map(row=>({
+      shipmentCode:String(row?.shipmentCode||row?.运单号||'').trim().toUpperCase(),
+      scan:Boolean(row?.truthEvidence?.scan),final:Boolean(row?.truthEvidence?.final),
+      pod:Boolean(row?.truthEvidence?.pod),returned:Boolean(row?.truthEvidence?.returned),
+      currentState:String(row?.currentState||''),
+      apiStatus:String(row?.apiStatus||row?.API状态||''),
+      primaryCategory:String(row?.primaryCategory||'')
+    })),
     snapshotId:String(snapshot?.snapshotId||dailySummary.finalizedSnapshotId||historySummary.snapshotId||batch?.snapshotId||''),
     finalizedAt:String(dailySummary.finalizedAt||snapshot?.generatedAt||snapshot?.createdAt||unifiedSnapshot?.createdAt||history?.updatedAt||''),
     completionSource,
     reason:locked?'PERSISTED_WHPP_COMPLETED'
+      :terminalEvidenceGaps.length?'WHPP_TERMINAL_EVIDENCE_GAP'
       :sourceCount&&finalCount!==sourceCount?'SOURCE_FINAL_MEMBERSHIP_MISMATCH'
       :'PERSISTED_WHPP_INCOMPLETE'
   };
