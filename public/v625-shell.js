@@ -118,13 +118,8 @@ async function runFamilyRequest(type,endpoint,reportDate){
     void refreshLiveProgress();
   }
 }
-function importedFamilyCounts(){
-  const counts=v626LatestImport?.classificationCounts||{};
-  return{
-    CCSL:Number(counts.CE||0)+Number(counts.CEAF||0)+Number(counts.TBKH||0)+Number(counts.ALI1688||0),
-    SHOPEE:Number(counts.SHOPEECN||0)+Number(counts.SHOPEEVN||0),
-    WHPP:Number(counts.WHPP||0)
-  };
+function importedFamilyCounts(reportDate=''){
+  return aggregateV755FamilyCounts(v755ImportCountTruth.get(String(reportDate||v626LatestImport?.reportDate||'').slice(0,10)));
 }
 async function waitFamilyTerminal(type,reportDate,timeoutMs=1800000){
   const started=Date.now();
@@ -284,6 +279,61 @@ let v626ProgressTimer=null;
 let v626TrackingJobId='';
 let v752LaunchingFamily='';
 const v752TerminalProgressLogs=new Set();
+const V755_BUSINESS_COUNT_TYPES=['CE','CEAF','TBKH','ALI1688','WHPP','SHOPEECN','SHOPEEVN'];
+const v755ImportCountTruth=new Map();
+function rememberV755ImportCounts(data={},source=''){
+  const date=String(data?.reportDate||'').slice(0,10),raw=data?.classificationCounts;
+  if(!date||!raw||typeof raw!=='object')return null;
+  const explicitAll=V755_BUSINESS_COUNT_TYPES.every(type=>Object.prototype.hasOwnProperty.call(raw,type));
+  const counts=Object.fromEntries(V755_BUSINESS_COUNT_TYPES.map(type=>[type,Number(raw[type]||0)]));
+  const sum=V755_BUSINESS_COUNT_TYPES.reduce((total,type)=>total+counts[type],0);
+  const expectedRaw=data?.summary?.validUniqueWaybills??data?.sourceReconciliation?.validUniqueWaybills??data?.sourceReconciliation?.total??null;
+  const expected=expectedRaw===null||expectedRaw===undefined?null:Number(expectedRaw);
+  const reconciled=data?.sourceReconciliation?.balanced===true||(explicitAll&&(expected===null||!Number.isFinite(expected)||sum===expected));
+  if(!reconciled)return null;
+  const truth={date,counts,sum,source:source||'IMPORT_COUNTS',reconciled:true};
+  v755ImportCountTruth.set(date,truth);
+  return truth;
+}
+function aggregateV755FamilyCounts(truth){
+  if(!truth?.reconciled)return null;
+  const counts=truth.counts||{};
+  return{
+    CCSL:Number(counts.CE||0)+Number(counts.CEAF||0)+Number(counts.TBKH||0)+Number(counts.ALI1688||0),
+    SHOPEE:Number(counts.SHOPEECN||0)+Number(counts.SHOPEEVN||0),
+    WHPP:Number(counts.WHPP||0),
+    raw:counts,
+    source:truth.source||''
+  };
+}
+async function resolveV755FamilyCounts(reportDate='',explicitData=null){
+  const date=String(reportDate||explicitData?.reportDate||v626LatestImport?.reportDate||'').slice(0,10);
+  if(!date)throw new Error('无法确认当前日报日期，已阻止0票自动跳过。');
+  if(explicitData)rememberV755ImportCounts(explicitData,'UPLOAD_RESPONSE');
+  if(String(v626LatestImport?.reportDate||'').slice(0,10)===date)rememberV755ImportCounts(v626LatestImport,'LATEST_IMPORT_CACHE');
+  let truth=v755ImportCountTruth.get(date)||null;
+  if(!truth){
+    try{
+      const latest=await json('/api/import/unified-latest',7000);
+      if(String(latest?.import?.reportDate||'').slice(0,10)===date)truth=rememberV755ImportCounts(latest.import,'UNIFIED_LATEST');
+    }catch{}
+  }
+  if(!truth){
+    try{
+      const summary=await json('/api/home-quality-summary?fast=1&reportDate='+encodeURIComponent(date),10000);
+      const counts=summary?.classification?.counts||null;
+      truth=rememberV755ImportCounts({
+        reportDate:date,
+        classificationCounts:counts,
+        sourceReconciliation:{balanced:summary?.classification?.balanced===true},
+        summary:{validUniqueWaybills:summary?.classification?.total}
+      },'HOME_SUMMARY');
+    }catch{}
+  }
+  const family=aggregateV755FamilyCounts(truth);
+  if(!family)throw new Error('无法从服务器确认 '+date+' 的7业务票数；已阻止把未知票数误判成0票。');
+  return family;
+}
 let v640EvidenceRefreshTimer=null;
 const v626LogKeys=new Set();
 
@@ -357,10 +407,11 @@ async function fetchLiveProgress(reportDate=''){
   let shopee=shopeeR.status==='fulfilled'?shopeeR.value:{};
   let whppPayload=whppR.status==='fulfilled'?whppR.value:null;
   const sameLatestDate=Boolean(date&&String(v626LatestImport?.reportDate||'').slice(0,10)===date);
-  const latestCounts=sameLatestDate?(v626LatestImport?.classificationCounts||{}):{};
-  const zeroCcsl=sameLatestDate&&(Number(latestCounts.CE||0)+Number(latestCounts.CEAF||0)+Number(latestCounts.TBKH||0)+Number(latestCounts.ALI1688||0)===0);
-  const zeroShopee=sameLatestDate&&(Number(latestCounts.SHOPEECN||0)+Number(latestCounts.SHOPEEVN||0)===0);
-  const zeroWhpp=sameLatestDate&&Number(latestCounts.WHPP||0)===0;
+  const countTruth=v755ImportCountTruth.get(date)||null;
+  const latestCounts=countTruth?.counts||{};
+  const zeroCcsl=Boolean(countTruth)&&(Number(latestCounts.CE||0)+Number(latestCounts.CEAF||0)+Number(latestCounts.TBKH||0)+Number(latestCounts.ALI1688||0)===0);
+  const zeroShopee=Boolean(countTruth)&&(Number(latestCounts.SHOPEECN||0)+Number(latestCounts.SHOPEEVN||0)===0);
+  const zeroWhpp=Boolean(countTruth)&&Number(latestCounts.WHPP||0)===0;
   const zeroComplete=(value,type)=>({...value,businessType:type,reportDate:date,running:false,active:false,complete:true,phase:'完成',runStatus:'completed',outcome:'COMPLETED',lastMessage:type+'当日日报0票，自动跳过',completionProjection:'ZERO_TICKET'});
   if(zeroCcsl)ccsl=zeroComplete(ccsl,'CCSL');
   if(zeroShopee)shopee=zeroComplete(shopee,'SHOPEE');
@@ -1062,6 +1113,12 @@ async function refreshImportCanonicalClassification(reportDate=''){
       if(el&&counts[type]!==undefined){el.textContent=fmt(counts[type]);changed=true;}
     }
     if(changed&&v626LatestImport)v626LatestImport={...v626LatestImport,classificationCounts:{...(v626LatestImport.classificationCounts||{}),...counts}};
+    rememberV755ImportCounts({
+      reportDate:date,
+      classificationCounts:counts,
+      sourceReconciliation:{balanced:summary?.classification?.balanced===true},
+      summary:{validUniqueWaybills:summary?.classification?.total}
+    },'HOME_SUMMARY_REFRESH');
     return summary;
   }catch{return null}
 }
@@ -1071,7 +1128,11 @@ async function loadImport(){
     const latestImport=latest.import||v626LatestImport||null;
     const exactHistory=(history.rows||[]).find(r=>String(r.reportDate||'').slice(0,10)===String(latestImport?.reportDate||'').slice(0,10))||null;
     v626LatestImport=latestImport?{...latestImport,...(exactHistory?{snapshotStatus:exactHistory.snapshotStatus||exactHistory.status||latestImport.snapshotStatus||'IMPORTED',createdAt:exactHistory.createdAt||latestImport.createdAt}:{} )}:v626LatestImport;
-    if(v626LatestImport){renderImport(v626LatestImport);note('v625ImportMessage','已读取最近一次综合日报。','success')}
+    if(v626LatestImport){
+      rememberV755ImportCounts(v626LatestImport,'UNIFIED_LATEST_LOAD');
+      renderImport(v626LatestImport);
+      note('v625ImportMessage','已读取最近一次综合日报。','success');
+    }
     const tbody=byId('v625ImportHistory');if(tbody){tbody.replaceChildren();
       for(const r of history.rows||[]){
         const tr=document.createElement('tr');
@@ -1080,7 +1141,7 @@ async function loadImport(){
       }
       if(!(history.rows||[]).length)tbody.innerHTML='<tr><td colspan="6">暂无导入记录</td></tr>';
     }
-    void refreshLiveProgress();void loadOpenPod();void refreshImportCanonicalClassification(v626LatestImport?.reportDate||'');
+    await refreshImportCanonicalClassification(v626LatestImport?.reportDate||'');void refreshLiveProgress();void loadOpenPod();
   }catch(error){note('v625ImportMessage','读取导入状态失败：'+error.message,'error')}
 }
 function dateSourceText(data={}){
@@ -1091,6 +1152,7 @@ function dateSourceText(data={}){
 }
 function renderImport(data){
   v626LatestImport={...(v626LatestImport||{}),...data};
+  rememberV755ImportCounts(data,'RENDER_IMPORT');
   const counts=data.classificationCounts||{};for(const type of ['CE','CEAF','TBKH','ALI1688','WHPP','SHOPEECN','SHOPEEVN']){const el=q('[data-classification="'+type+'"]');if(el)el.textContent=fmt(counts[type]||0)}
   setText('v625ImportState','已导入');setText('v625ImportDateMeta',(data.reportDate||'—')+' · '+dateSourceText(data));
   setText('v626DetectedReportDate',data.reportDate||'—');setText('v626DetectedDateSource',dateSourceText(data));
@@ -1110,11 +1172,12 @@ async function doImport(){
   appendLiveLog('开始上传综合日报 '+file.name);
   try{
     const r=await request('/api/import/unified-daily-report',{method:'POST',body:fd},120000);
+    rememberV755ImportCounts(r,'UPLOAD_RESPONSE');
     renderImport(r);appendLiveLog('日报解析完成：'+(r.reportDate||'')+'，有效唯一运单 '+fmt(r.summary?.validUniqueWaybills||0)+' 票');
     await loadImport();
     note('v625ImportMessage','日报已导入，正在自动处理7业务…','success');
     if(button)button.textContent='自动处理中…';
-    const outcome=await runTask('auto',r.reportDate||'');
+    const outcome=await runTask('auto',r.reportDate||'',r);
     if(outcome?.ok)note('v625ImportMessage','日报导入及7业务自动处理已完成。','success');
     else if(outcome?.error)note('v625ImportMessage','日报已导入，但自动处理未完成：'+outcome.error,'error');
   }catch(e){
@@ -1158,19 +1221,22 @@ async function safeWhppRun(mode,reportDate){
   }catch(error){
     const code=String(error.payload?.code||'');
     if(code==='WHPP_ALREADY_FINALIZED')return{ok:true,skipped:true,code};
-    if(code==='WHPP_REPORT_MISSING'&&Number(v626LatestImport?.classificationCounts?.WHPP||0)===0)return{ok:true,skipped:true,code:'WHPP_ZERO_TICKET'};
+    const countTruth=v755ImportCountTruth.get(String(reportDate||'').slice(0,10))||null;
+    if(code==='WHPP_REPORT_MISSING'&&countTruth&&Number(countTruth.counts?.WHPP||0)===0)return{ok:true,skipped:true,code:'WHPP_ZERO_TICKET'};
     throw error;
   }
 }
-async function runTask(mode,explicitReportDate=''){
+async function runTask(mode,explicitReportDate='',explicitImportData=null){
   if(runBusy)return{ok:false,error:'当前已有处理任务正在运行'};
   runBusy=true;
   const reportDate=explicitReportDate||v626LatestImport?.reportDate||(await latestImportContext())?.reportDate||'';
-  const auto=mode==='auto',counts=importedFamilyCounts();
+  const auto=mode==='auto';
   note('v625RunMessage',auto?'日报上传完成，系统正在自动处理7业务。':'正在处理7业务，扫描与轨迹进度会实时更新。');
   appendLiveLog((auto?'自动开始':mode==='resume'?'继续':'开始')+'7业务处理 '+(reportDate||''));
   startProgressPolling();
   try{
+    const counts=await resolveV755FamilyCounts(reportDate,explicitImportData);
+    appendLiveLog('已确认当日日报票数：CCSL '+counts.CCSL+' · SHOPEE '+counts.SHOPEE+' · WHPP '+counts.WHPP);
     if(auto){
       appendLiveLog('自动处理：CCSL');await autoStartFamily('CCSL','/api/run',reportDate,counts.CCSL);
       appendLiveLog('自动处理：SHOPEE CN/VN');await autoStartFamily('SHOPEE','/api/shopee/run/start',reportDate,counts.SHOPEE);
