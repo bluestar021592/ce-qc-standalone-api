@@ -263,7 +263,12 @@ function progressShape({ businessType, reportDate, lock = {}, checkpoint = null,
         ? exactCount(persistedTrackTotal)
         : Math.max(0, rawTrackDone + rawTrackRetry);
   const track = boundedCounts(trackTotal, rawTrackDone, rawTrackRetry, rawTrackObserved);
-  const runStatus = String(payload.runStatus || last.runStatus || lock.status || checkpoint?.status || '');
+  // V760: the persisted run lock is the terminal authority for a selected date.
+  // A previous checkpoint can still say "running" after the lock is finished.
+  const lockStatus=String(lock.status||'').trim().toLowerCase();
+  const runStatus = String(['finished','completed','failed','paused','running'].includes(lockStatus)
+    ? lockStatus
+    : (payload.runStatus || last.runStatus || lock.status || checkpoint?.status || ''));
 
   return {
     ok: true,
