@@ -30,6 +30,9 @@ assert.match(helper,/IMMUTABLE_SHOPEE_COMPLETED_SNAPSHOT/,'Shopee POD denominato
 assert.match(helper,/FORMAL_DASHBOARD_MEMBERSHIP_SQL/,'Shopee POD denominator must retain formal dashboard joins as fallback');
 assert.match(helper,/UNIFIED_VERIFIED_WHPP_CHILD/,'WHPP progress may recognize unified completion only when the exact WHPP child snapshot is verified');
 assert.match(sqliteFixture,/falseCompletion\.locked,false/,'aggregate unified COMPLETED without a real WHPP child must stay unlocked');
+assert.match(helper,/EXACT_WHPP_TERMINAL_SCAN_FINAL_EVIDENCE/,'exact persisted WHPP scan+final terminal evidence may restore completion without an obsolete child snapshot');
+assert.match(sqliteFixture,/recoveredCompletion\.terminalEvidenceVerified,true/,'historical daily reimport must retain WHPP 3-of-3 when all terminal members have scan and final evidence');
+assert.match(sqliteFixture,/business_scan_results WHERE businessType='WHPP'/,'missing scan must prevent false terminal completion');
 assert.match(repair,/persistentSelectedDatePodTruth/,'timing denominator must read selected-date canonical POD truth');
 assert.match(modern,/persistentWhppCompletionTruth/,'modern WHPP progress must use persistent completion truth');
 assert.match(legacy,/persistentWhppCompletionTruth/,'legacy WHPP progress must converge on persistent completion truth');
@@ -38,4 +41,4 @@ assert.match(shell,/complete:Boolean\(whppLock\.locked\)\|\|familyComplete\(whpp
 assert.match(store,/persistedBusinessPodFlag/,'future SQLite writes must preserve formal POD semantics');
 assert.match(home,/currentTotal>0\?currentTotal:n\(row\.pod,0\)/,'cache must not shrink canonical POD denominator');
 assert.match(home,/requestSelectedDateTimingRepair/,'missing signing evidence must auto-enter selected-date repair');
-console.log('[V754/V751] July-1 acceptance locked · WHPP true completion requires verified child snapshot · false aggregate 3/3 blocked · VN/CN timing truth retained');
+console.log('[V754/V751] July-1 acceptance locked · WHPP completion requires verified child snapshot or exact all-member scan+final terminal truth · false aggregate 3/3 blocked · VN/CN timing truth retained');
