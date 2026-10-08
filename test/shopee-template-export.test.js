@@ -31,8 +31,9 @@ test('SHOPEE daily weekly and monthly exports preserve the active locked 10-shee
     });
     assert.ok(returnLinks.length>0, 'returned dashboard card must link to the correct detail sheet');
     assert.ok(returnLinks.some(link=>Number(link.result)===1), 'returned detail link must display the actual one returned waybill');
-    assert.equal(workbook.getWorksheet('退回明细').getCell('B2').value, 'SPE2', 'returned waybill must appear on the returned sheet');
-    assert.equal(workbook.getWorksheet('全部明细').getCell('B3').value, 'SPE2', 'complete ledger must contain second day member');
+    assert.equal(workbook.getWorksheet('退回明细').getCell('B2').value.text, 'SPE2', 'returned waybill must appear with clickable detail link');
+    assert.match(workbook.getWorksheet('退回明细').getCell('B2').value.hyperlink, /shipmentCode=SPE2/);
+    assert.equal(workbook.getWorksheet('全部明细').getCell('B3').value.text, 'SPE2', 'complete ledger must link second day member');
     assert.equal(dashboard.getCell('A11').value, '2026-08-01', 'daily trend must preserve first source date');
     assert.equal(dashboard.getCell('A12').value, '2026-08-02', 'daily trend must preserve second source date');
     let brokenLinks = 0;
