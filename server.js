@@ -1918,6 +1918,14 @@ app.get('/api/family-recovery-proof', (req,res)=>{
     const lock=db.prepare(`SELECT runId,status,currentStage,errorMessage,completedAt,updatedAt FROM ${group.lockTable} WHERE ${where} LIMIT 1`).get(...args)||null;
     const scanCount=Number(db.prepare(`SELECT COUNT(DISTINCT shipmentCode) AS count FROM ${group.scanTable} WHERE ${where}`).get(...args)?.count||0);
     const finalCount=Number(db.prepare(`SELECT COUNT(DISTINCT shipmentCode) AS count FROM ${group.finalTable} WHERE ${where}`).get(...args)?.count||0);
+    const trajectoryTables=group.name==='SHOPEE'?['business_shipment_tracks','business_track_events']:['track_events'];
+    let trackCount=0,evidenceReadable=true;
+    try{
+      for(const table of trajectoryTables){
+        const row=db.prepare(`SELECT COUNT(DISTINCT shipmentCode) AS count FROM ${table} WHERE ${where}`).get(...args);
+        trackCount+=Number(row?.count||0);
+      }
+    }catch{evidenceReadable=false}
     const status=String(lock?.status||'').toLowerCase();
     let action='BLOCKED',reason='';
     if(sourceCount===0){action='ZERO_TICKET';reason='该日期该业务确实0票'}
@@ -1925,9 +1933,9 @@ app.get('/api/family-recovery-proof', (req,res)=>{
     else if(status==='running'){action='WAIT';reason='已有运行任务；不重复启动'}
     else if(group.currentDate!==date){action='BLOCKED';reason='后台当前业务日期与诊断日期不一致'}
     else if(['paused','failed'].includes(status)&&lock?.runId){action='RESUME';reason='存在中断任务，允许从断点恢复'}
-    else if(!lock?.runId&&scanCount===0&&finalCount===0){action='START';reason='没有运行锁且无已保存扫描/最终记录，可首次启动'}
-    else {action='BLOCKED';reason='存在扫描、最终记录或不可辨识运行锁，需要保留历史证据并人工排查'}
-    result[group.name]={sourceCount,scanCount,finalCount,runId:String(lock?.runId||''),runStatus:status||'NOT_STARTED',phase:String(lock?.currentStage||''),error:String(lock?.errorMessage||''),currentDate:group.currentDate,action,reason};
+    else if(evidenceReadable&&!lock?.runId&&scanCount===0&&finalCount===0&&trackCount===0){action='START';reason='没有运行锁且无已保存扫描/最终记录，可首次启动'}
+    else {action='BLOCKED';reason='存在扫描、轨迹、最终记录、读取失败或不可辨识运行锁，需要保留历史证据并人工排查'}
+    result[group.name]={sourceCount,scanCount,finalCount,trackCount,evidenceReadable,runId:String(lock?.runId||''),runStatus:status||'NOT_STARTED',phase:String(lock?.currentStage||''),error:String(lock?.errorMessage||''),currentDate:group.currentDate,action,reason};
   }
   res.setHeader('Cache-Control','no-store');
   return res.json({ok:true,reportDate:date,snapshotId,businesses:result});
