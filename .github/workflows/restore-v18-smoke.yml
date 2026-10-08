@@ -78,6 +78,7 @@ jobs:
         shell: pwsh
         run: |
           $tests = @(
+            'test/shopee-template-export.test.js',
             'test/dashboard-v18.test.js',
             'test/data-purge-large-backup.test.js',
             'test/filename-date-detection.test.js',
@@ -86,7 +87,6 @@ jobs:
             'test/shopee-cnvn.test.js',
             'test/shopee-latest-track-classification.test.js',
             'test/shopee-pv-open-disposition.test.js',
-            'test/shopee-template-export.test.js',
             'test/store-flow.test.js',
             'test/store-load-detail.test.js',
             'test/unified-snapshot-membership.test.js',
