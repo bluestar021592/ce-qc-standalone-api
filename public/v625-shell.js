@@ -913,8 +913,12 @@ async function loadHome(options={}){
   const summaryUrl='/api/home-quality-summary?fast=1'+(requestedDate?'&reportDate='+encodeURIComponent(requestedDate):'');
   // V765: summary is the first paint authority. History metadata is
   // decorative and must not hold the home view for up to seven seconds.
-  const historyPromise=json('/api/unified-history?limit=7',7000).catch(()=>null);
-  const summary=await json(summaryUrl,10000).catch(()=>null);
+  const summaryPromise=json(summaryUrl,10000).catch(()=>null);
+  // Start optional history after the fast SQL summary request, to avoid
+  // competing for the SQLite event-loop before first KPI paint.
+  const historyPromise=new Promise(resolve=>setTimeout(resolve,900))
+    .then(()=>json('/api/unified-history?limit=7',7000).catch(()=>null));
+  const summary=await summaryPromise;
   const historyRows=[];
   void historyPromise.then(history=>{
     if(page!=='home')return;
