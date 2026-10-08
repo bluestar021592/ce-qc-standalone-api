@@ -19,6 +19,10 @@ assert.match(sqliteFixture,/OLD-CARRY-POD/,'historical carry POD exclusion must 
 assert.match(sqliteFixture,/BATCH-OLD.*SUPERSEDED/s,'superseded same-date batch exclusion must be exercised');
 assert.match(sqliteFixture,/completion\.completionSource,'UNIFIED_COMPLETED'/,'unified COMPLETED must be the terminal WHPP receipt');
 assert.match(sqliteFixture,/vn\.bills\.length,545/,'VN formal truth must prove 545 POD');
+assert.match(sqliteFixture,/CN stale empty POD snapshot recovers 4\/5/,'CN fixture must cover stale empty completed-snapshot POD recovery');
+assert.match(sqliteFixture,/cn\.bills\.length,4/,'CN formal truth must recover later daily-report POD members without changing selected-date membership');
+assert.match(helper,/IMMUTABLE_SHOPEE_COMPLETED_SNAPSHOT_RECOVERED_BY_LATEST_DAILY_POD/,'empty Shopee snapshot POD must recover from later VALID daily reports for exact source members');
+assert.match(helper,/dailyReportProvesPod/,'CN recovery must use canonical daily-report POD semantics');
 assert.match(sqliteFixture,/whpp\.bills\.length,166/,'WHPP canonical truth must prove 166 POD');
 
 assert.match(helper,/status='VALID'.*ORDER BY createdAt DESC,rowid DESC LIMIT 1/s,'selected-date truth must use latest VALID import batch');
@@ -33,4 +37,4 @@ assert.match(shell,/complete:Boolean\(whppLock\.locked\)\|\|familyComplete\(whpp
 assert.match(store,/persistedBusinessPodFlag/,'future SQLite writes must preserve formal POD semantics');
 assert.match(home,/currentTotal>0\?currentTotal:n\(row\.pod,0\)/,'cache must not shrink canonical POD denominator');
 assert.match(home,/requestSelectedDateTimingRepair/,'missing signing evidence must auto-enter selected-date repair');
-console.log('[V681] July-1 acceptance locked · unified COMPLETED=>WHPP complete · WHPP 190/166 · VN 588/545 from exact completed snapshot despite normalized-zero failure · cache/restart/repair convergence');
+console.log('[V751] July-1 acceptance locked · WHPP 190/166 · VN 588/545 immutable snapshot · CN empty POD snapshot recovers from later VALID daily-report POD while source membership stays frozen');
