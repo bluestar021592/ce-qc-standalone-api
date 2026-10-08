@@ -8,7 +8,7 @@ const v713=fs.readFileSync('scripts/v713-long-run-no-browser-abort-smoke.mjs','u
 const html=fs.readFileSync('public/v625-shell.html','utf8');
 
 assert.match(v713,/CCSL long run must use the automatic transport-recovery owner/,'legacy V713 gate must follow the automatic transport recovery owner');
-assert.match(v713,/SHOPEE resume must use the unbounded transport-recovery owner/,'legacy V713 resume gate must follow the transport recovery owner');
+assert.match(v713,/interrupted CCSL\/SHOPEE resume must remain unbounded and transport-recoverable/,'V713 selected-date resume gate must follow the transport recovery owner');
 assert.doesNotMatch(shell,/selected-date-truth\?reportDate=.*fetchLiveProgress/s,'live 3-second progress polling must not hit selected-date truth');
 assert.match(shell,/setInterval\(\(\)=>\{void refreshLiveProgress\(\)\},3000\)/,'live progress polling must be throttled to 3 seconds');
 assert.match(shell,/home-quality-summary\?fast=1/,'home/import reads must use local-only fast summary');
