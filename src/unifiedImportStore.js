@@ -56,8 +56,16 @@ export function saveUnifiedImport(parsed, sourceName, options = {}) {
 }
 
 export function getLatestUnifiedImport() {
-  const row = getDb().prepare("SELECT * FROM unified_import_batches WHERE status='VALID' ORDER BY reportDate DESC,createdAt DESC,rowid DESC LIMIT 1").get();
-  return row ? hydrateBatch(row, false) : null;
+  const row = getDb().prepare(`SELECT b.*,s.status snapshotStatus,s.createdAt snapshotCreatedAt
+    FROM unified_import_batches b
+    LEFT JOIN unified_snapshots s ON s.snapshotId=b.snapshotId
+    WHERE b.status='VALID'
+    ORDER BY b.reportDate DESC,b.createdAt DESC,b.rowid DESC LIMIT 1`).get();
+  return row ? {
+    ...hydrateBatch(row, false),
+    snapshotStatus: row.snapshotStatus || 'IMPORTED',
+    createdAt: row.snapshotCreatedAt || row.createdAt
+  } : null;
 }
 
 export function listUnifiedImportHistory(limit = 120) {
