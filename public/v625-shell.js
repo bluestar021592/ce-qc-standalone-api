@@ -381,10 +381,10 @@ async function v762LoadFamilyTerminalTruth(reportDate=''){
   const key=date+'|'+snapshot;
   if(v762FamilyProofInflight.has(key))return v762FamilyProofInflight.get(key);
   if(Date.now()<Number(v762FamilyProofNextRead.get(key)||0))return verified;
-  v762FamilyProofNextRead.set(key,Date.now()+30000);
+  v762FamilyProofNextRead.set(key,Date.now()+12000);
   const promise=(async()=>{
     try{
-      const response=await json('/api/family-recovery-proof?reportDate='+encodeURIComponent(date),20000);
+      const response=await json('/api/family-recovery-proof?reportDate='+encodeURIComponent(date)+'&snapshotId='+encodeURIComponent(snapshot),45000);
       const saved=v762RememberFamilyCompletionProof(response,date,snapshot);
       // V764: the slow historical 1:1 proof returns independently of the
       // light progress requests. Publish it exactly once on receipt, without
@@ -631,7 +631,14 @@ function appendLiveLog(message,at=new Date().toISOString()){
 async function latestImportContext(){
   try{
     const r=await json('/api/import/unified-latest',7000);
-    v626LatestImport=r.import||null;
+    const newest=r.import||null;
+    // V766: do not replace a selected July-04 snapshot by a newer import
+    // while a read-only July-04 proof is in flight.
+    const selected=selectedReportDate();
+    const active=String(v626LatestImport?.reportDate||'').slice(0,10);
+    if(newest&&(selected&&selected!==String(newest.reportDate||'').slice(0,10)
+      ||active&&active!==String(newest.reportDate||'').slice(0,10)))return v626LatestImport;
+    if(newest)v626LatestImport=newest;
     return v626LatestImport;
   }catch{return v626LatestImport}
 }
@@ -911,14 +918,40 @@ async function scanWhppPending(){
 async function loadHome(options={}){
   const requestedDate=selectedReportDate();
   const summaryUrl='/api/home-quality-summary?fast=1'+(requestedDate?'&reportDate='+encodeURIComponent(requestedDate):'');
+  const summaryQuickUrl=summaryUrl+'&quick=1';
   // V765: summary is the first paint authority. History metadata is
   // decorative and must not hold the home view for up to seven seconds.
-  const summaryPromise=json(summaryUrl,10000).catch(()=>null);
+  const summaryPromise=options.summaryOverride
+    ?Promise.resolve(options.summaryOverride)
+    :json(summaryQuickUrl,12000).catch(()=>null);
   // Start optional history after the fast SQL summary request, to avoid
   // competing for the SQLite event-loop before first KPI paint.
-  const historyPromise=new Promise(resolve=>setTimeout(resolve,900))
-    .then(()=>json('/api/unified-history?limit=7',7000).catch(()=>null));
+  const historyPromise=options.skipHistory?Promise.resolve(null)
+    :new Promise(resolve=>setTimeout(resolve,1200))
+      .then(()=>json('/api/unified-history?limit=7',7000).catch(()=>null));
   const summary=await summaryPromise;
+  // V766: never hold the menu while 30 days of signing and return SQL runs.
+  // The first response holds only verified source classification counts.
+  // The completed full result is applied only if the exact original
+  // report-date and snapshot are still selected.
+  if(summary?.quickOnly&&summary.selectionMatched&&summary.snapshotId){
+    const proofDate=String(summary.reportDate||''),proofSnapshot=String(summary.snapshotId||'');
+    const url='/api/home-quality-summary?fast=1&reportDate='+encodeURIComponent(proofDate)+
+      '&snapshotId='+encodeURIComponent(proofSnapshot);
+    setTimeout(()=>{
+      if(page!=='home'||String(selectedReportDate()||proofDate)!==proofDate)return;
+      void json(url,70000).then(full=>{
+        if(!full||String(full.reportDate||'')!==proofDate
+          ||String(full.snapshotId||'')!==proofSnapshot
+          ||String(v626LatestImport?.snapshotId||'')!==proofSnapshot
+          ||String(selectedReportDate()||proofDate)!==proofDate)return;
+        void loadHome({summaryOverride:full,skipHistory:true,skipAux:true});
+      }).catch(()=>{
+        if(page==='home'&&String(selectedReportDate()||proofDate)===proofDate)
+          setText('v625HomeStatus','分类概览可用；签收时效明细后台读取暂未完成，可继续切换业务看板。');
+      });
+    },1200);
+  }
   const historyRows=[];
   void historyPromise.then(history=>{
     if(page!=='home')return;
@@ -956,7 +989,10 @@ async function loadHome(options={}){
   setText('v632GrandTotalCheck',fmt(sevenBusinessTotal));
   const totalCard=q('[data-card="TOTAL"]');
   if(totalCard)totalCard.classList.toggle('v632-total-mismatch',grand!==sevenBusinessTotal);
-  setText('v637HomeIntegrity','快速看板 · 七业务源票 '+fmt(grand)+' · 完整性明细进入对应业务看板后按需读取');
+  setText('v637HomeIntegrity',summary?.selectionMatched===false
+    ?'所选日期暂无已导入日报，请选择实际导入日期（历史任务不会丢失）'
+    :(summary?.quickOnly?'七业务源票 '+fmt(grand)+' · 分类概览已就绪；时效统计后台补充中'
+      :'七业务源票 '+fmt(grand)+' · 明细在对应业务看板按需读取'));
   const fastIntegrityBar=byId('v637HomeIntegrityBar');if(fastIntegrityBar){fastIntegrityBar.classList.remove('error');fastIntegrityBar.classList.add('ok')}
 
   for(const type of types){
@@ -972,7 +1008,7 @@ async function loadHome(options={}){
     if(summary?.reportDate)params.set('reportDate',summary.reportDate);
     card.href=base+'?'+params.toString();
   }
-  for(const type of ['WHPP','SHOPEECN','SHOPEEVN']){
+  if(!summary?.quickOnly)for(const type of ['WHPP','SHOPEECN','SHOPEEVN']){
     setText('v626Return'+type,fmt(returns[type]?.count||0));
     setText('v626ReturnRate'+type,pct(returns[type]?.rate||0));
   }
@@ -985,10 +1021,12 @@ async function loadHome(options={}){
   setText('v626ProcessDateSource',processExists?('当前查看日报：'+processDate+(selectedBatch?.snapshotStatus?' · '+selectedBatch.snapshotStatus:'')):'日报日期将由系统自动识别');
   setText('v626StageParse',summary?.reportDate?'完成':'等待');setText('v626StageClassify',classification.balanced?'完成':'待核验');
   const dataHealthy=Boolean(classification.balanced);
-  setText('v625HomeStatusTitle',dataHealthy?'快速看板已就绪':'分类数据待核验');
-  setText('v625HomeStatus',dataHealthy
-    ?'七业务分类总量已守恒；处理成员、扫描和状态账完整性在对应业务看板按需核验，不再阻塞首页。'
-    :'当前分类总量与综合日报未完全守恒，请先检查分类结果。');
+  setText('v625HomeStatusTitle',summary?.selectionMatched===false?'所选日期没有日报'
+    :dataHealthy?'七业务分类概览已就绪':'分类数据待核验');
+  setText('v625HomeStatus',summary?.selectionMatched===false?'该日期没有有效日报记录；请选择已导入日报日期。'
+    :summary?.quickOnly?'七业务源票已加载，POD、退回与平均签收天数仍在后台核验；可正常切换看板。'
+    :dataHealthy?'七业务分类总量已守恒；明细按需读取。'
+    :'当前分类总量与综合日报未完全守恒，请检查分类结果。');
   setText('v625DataStatus',dataHealthy?'正常':'待核验');
   setText('v625UpdatedAt',summary?.generatedAt?dateTime(summary.generatedAt):new Date().toLocaleString('zh-CN',{hour12:false}));
 
@@ -1006,6 +1044,7 @@ async function loadHome(options={}){
     else for(const row of businesses){const tr=document.createElement('tr');for(const value of [labels[row.businessType]||row.businessType,fmt(row.count),pct(row.share)]){const td=document.createElement('td');td.textContent=value;tr.appendChild(td)}const statusTd=document.createElement('td');const status=document.createElement('span');status.className='v625-recognition-status';status.textContent=row.status||'已分类';statusTd.appendChild(status);tr.appendChild(statusTd);tbody.appendChild(tr)}
   }
 
+  if(!summary?.quickOnly){
   const timing=summary?.timing||{},timingTrend=summary?.timingTrend||{};
   const timingRepairTypes=summary?.timingEvidenceRepair?.types||{};
   v741TimingRepairStates=timingRepairTypes;
@@ -1059,6 +1098,9 @@ async function loadHome(options={}){
     ?('统计日报 '+summary.reportDate+(totalMissingCount===0?' · 最新日报记录：下单时间→派件时间（含首日）':(noMoreRepair?' · 已读日报时效；缺失票等待后续日报自动回补':' · 日报派件时间 / 轨迹补充证据')))
     :'统计当前日报POD');
 
+  }else{
+    setText('v625TimingPeriod',summary?.selectionMatched===false?'所选日期暂无日报':'签收天数及退回统计后台核验中；业务导航可以立即使用');
+  }
   const history=historyRows;
   renderTrend('v625HomeTrend',history.slice().reverse().map(r=>({label:r.reportDate,value:Object.values(r.classificationCounts||{}).reduce((a,b)=>a+Number(b||0),0)})));
   if(!options.skipAux){void refreshLiveProgress();void loadOpenPod()}
