@@ -30,7 +30,7 @@ assert.match(shell,/if\(runBusy\)\{note\('v625ImportMessage','当前日报仍在
 assert.match(shell,/resumeBtn\.disabled=allComplete/,'resume button must be disabled after exact 3\/3 completion');
 assert.match(shell,/resumeBtn\.hidden=allComplete/,'resume button must be hidden after exact 3\/3 completion');
 assert.match(html,/V750_TIMING_EVIDENCE_TRACK_VIEW|V748_PER_BOARD_TRACK_QUALITY_SIGNALS|V744_SIGNING_UI_SIMPLIFIED_AND_TERMINAL_BACKFILL|V743_LATEST_DAILY_REPORT_SIGNING_BACKFILL|V742_DAILY_REPORT_SIGNING_TIME|V741_HISTORICAL_TIMING_CLOSED_LOOP|V739_IMPORT_COMPLETED_3OF3_LOCK/,'V739+ shell build marker missing');
-assert.match(html,/v625-shell\.js\?v=20261007-v(?:739|741|742|743|744|748|750)-1/,'V739+ JS cache bust missing');
+assert.match(html,/v625-shell\.js\?v=\d{8}-v\d{3,}-1/,'V739+ installed shell must keep a versioned script URL');
 
 
 assert.match(shell,/const verified=await v760VerifyAllFamilies\(reportDate,counts\)/,'HTTP success must be followed by selected-date 3-of-3 proof');
