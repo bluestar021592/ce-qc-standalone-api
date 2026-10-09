@@ -74,12 +74,24 @@ try {
   assert.equal(viewer.passwordHash,originalHash,'another account must remain unchanged');
   assert.ok(verified.prepare('SELECT revokedAt FROM user_sessions WHERE id=1').get().revokedAt);
   assert.equal(verified.prepare('SELECT revokedAt FROM user_sessions WHERE id=2').get().revokedAt,null);
-  assert.deepEqual(verified.prepare('SELECT * FROM business_final_rows').get(),{
+  // node:sqlite get() intentionally returns null-prototype row objects.
+  // Compare their actual fields without depending on the JS object prototype.
+  assert.deepEqual({...verified.prepare('SELECT * FROM business_final_rows').get()},{
     shipmentCode:'CE04072600013',isPod:0,primaryCategory:'订单取消'
   });
   verified.close();
   assert.notEqual(fs.readFileSync(secretFile,'utf8'),'fixture-old-signing-secret','old local auth cookies must be invalidated on next restart');
   console.log('[V773 LOCAL ADMIN RESET] credential-only atomic update, active ADMIN authorization, lockedUntil reset, session revocation, local secret rotation and unchanged business data PASS');
 }finally {
-  fs.rmSync(tmp,{recursive:true,force:true});
+  // Windows Defender/indexers may briefly hold a freshly closed SQLite test
+  // directory open. Retry first. Do not allow a cleanup EPERM to mask real
+  // test failures or reject a correct credential-only recovery candidate.
+  try {
+    fs.rmSync(tmp,{recursive:true,force:true,maxRetries:10,retryDelay:250});
+  } catch (error) {
+    const windowsTransient=process.platform==='win32'
+      && ['EPERM','EACCES','EBUSY','ENOTEMPTY'].includes(String(error?.code||''));
+    if (!windowsTransient) throw error;
+    console.warn('[V773 LOCAL ADMIN RESET] Windows temp cleanup deferred: '+String(error.code)+'; test assertions remain authoritative.');
+  }
 }
