@@ -2420,6 +2420,7 @@ async function activateSavedShopCodes(){
   if(btn)btn.disabled=true;
   try{
     if(!v780CandidateShopSource)await loadCompleteShopStatus();
+    if(!v780CandidateShopSource||!v780CandidateShopHash)throw new Error('请先刷新门店名单，确认72码来源与校验值后再激活');
     const r=await post('/api/admin/shop-codes/activate-complete',{
       sourceFile:v780CandidateShopSource,expectedCount:72,expectedHash:v780CandidateShopHash
     },20000);
