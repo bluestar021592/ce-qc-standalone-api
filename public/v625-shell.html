@@ -6,7 +6,7 @@
   <meta name="ce-qc-shell" content="V625_FULL_SYSTEM_UI">
   <meta name="ce-qc-build" content="V750_TIMING_EVIDENCE_TRACK_VIEW">
   <title>__V625_PAGE_TITLE__ - CE EXPRESS 质量控制管理系统</title>
-  <link rel="stylesheet" href="/v625-shell.css?v=20261007-v748-1">
+  <link rel="stylesheet" href="/v625-shell.css?v=20261009-v768-1">
 </head>
 <body data-page="__V625_PAGE_KEY__" data-business="__V625_BUSINESS_TYPE__">
   <div class="v625-app">
@@ -27,7 +27,7 @@
         <div class="v625-nav-divider"></div>
         <a data-key="import" href="/import?auth=v625"><svg><use href="/assets/ui-icons-v625.svg#icon-file-up"/></svg><span>数据导入</span></a>
         <a data-key="tracking" href="/tracking?auth=v625"><svg><use href="/assets/ui-icons-v625.svg#icon-search"/></svg><span>轨迹查询</span></a>
-        <a data-key="exceptions" href="/exceptions?auth=v625"><svg><use href="/assets/ui-icons-v625.svg#icon-alert"/></svg><span>异常明细</span></a>
+        <a data-key="exceptions" href="/exceptions?auth=v625"><svg><use href="/assets/ui-icons-v625.svg#icon-alert"/></svg><span>质控行动中心</span></a>
         <a data-key="reports" href="/reports?auth=v625"><svg><use href="/assets/ui-icons-v625.svg#icon-clipboard"/></svg><span>报表导出</span></a>
         <a data-key="settings" href="/settings?auth=v625"><svg><use href="/assets/ui-icons-v625.svg#icon-settings"/></svg><span>系统设置</span></a>
         <a data-key="logs" href="/logs?auth=v625"><svg><use href="/assets/ui-icons-v625.svg#icon-history"/></svg><span>操作日志</span></a>
@@ -368,25 +368,42 @@
           </section>
         </section>
 
-        <!-- EXCEPTIONS -->
+        <!-- QC ACTION CENTER : read-only evidence and copyable handoff, never mutates status -->
         <section id="v625Exceptions" class="v625-page" hidden>
-          <section class="v625-panel">
-            <div class="v625-filter-row">
-              <label><span>异常类型</span><select id="v625ExceptionType"><option value="">全部</option><option>Pending不连续</option><option>Pending 3天+</option><option>OC 1天+</option><option>门店滞留</option></select></label>
-              <label><span>业务类型</span><select id="v625ExceptionBusiness"><option value="">全部</option><option>CE</option><option>CEAF</option><option>TBKH</option><option>ALI1688</option><option>WHPP</option><option>SHOPEECN</option><option>SHOPEEVN</option></select></label>
-              <label><span>时间范围</span><input id="v625ExceptionDate" type="date"></label>
-              <button id="v625ExceptionSearch" class="v625-btn primary"><svg><use href="/assets/ui-icons-v625.svg#icon-search"/></svg>查询</button>
+          <section class="v625-panel v768-intro">
+            <div class="v625-section-head">
+              <div><h2>质控行动中心</h2><p class="v768-subtitle">根据最新有效轨迹生成待核验清单 · 责任部门仅为建议 · 不自动修改运单状态</p></div>
+              <span class="v768-readonly">只读追踪</span>
             </div>
+            <div class="v625-filter-row v768-filters">
+              <label><span>日报日期</span><input id="v625ExceptionDate" type="date" aria-label="筛选日报日期"></label>
+              <label><span>业务板块</span><select id="v625ExceptionBusiness"><option value="">全部七业务</option><option value="CE">CE</option><option value="CEAF">CEAF空运</option><option value="TBKH">TBKH</option><option value="ALI1688">ALI1688</option><option value="WHPP">WHPP</option><option value="SHOPEECN">SHOPEE CN</option><option value="SHOPEEVN">SHOPEE VN</option></select></label>
+              <label><span>异常类型</span><select id="v625ExceptionType"><option value="">全部待核验</option><option value="PENDING_GAP">Pending不连续</option><option value="OC_2_PLUS">OC 2天+</option><option value="SHOP_STAY">门店待跟进</option><option value="RETRY">轨迹待重试</option><option value="RETURNING">退回中</option><option value="OTHER">其他待核验</option></select></label>
+              <label class="v768-keyword"><span>搜索运单 / 门店</span><input id="v768ExceptionKeyword" type="search" placeholder="输入单号、门店名称或编码"></label>
+              <button id="v625ExceptionSearch" class="v625-btn primary" type="button">查询真实数据</button>
+            </div>
+            <p class="v768-evidence" id="v768ExceptionEvidence" role="status">当前使用已保存的最终记录与轨迹证据。请选择日期后查询；不需要重新扫描。</p>
           </section>
           <div class="v625-quality-grid exception-summary">
-            <article class="metric-red"><span>Pending不连续</span><b id="exPendingGap">—</b><small>实时异常</small></article>
-            <article class="metric-orange"><span>Pending 3天+</span><b id="exPending3">—</b><small>需优先处理</small></article>
-            <article class="metric-orange"><span>OC 1天+</span><b id="exOc1">—</b><small>在仓异常</small></article>
-            <article class="metric-blue"><span>门店滞留</span><b id="exShopStay">—</b><small>门店异常</small></article>
+            <article class="metric-red"><span>待核验运单</span><b id="v768TotalActionable">—</b><small>以实际未闭环记录为准</small></article>
+            <article class="metric-orange"><span>Pending不连续</span><b id="exPendingGap">—</b><small>按不同日期识别</small></article>
+            <article class="metric-orange"><span>OC 2天+</span><b id="v768Oc2">—</b><small>需跟进带出或POD</small></article>
+            <article class="metric-blue"><span>到店待跟进</span><b id="exShopStay">—</b><small>仅有效门店到件轨迹</small></article>
           </div>
-          <section class="v625-panel">
-            <div class="v625-section-head"><h2>异常列表</h2><span id="v625ExceptionMeta">—</span></div>
-            <div class="v625-table-wrap"><table class="v625-table"><thead><tr><th>运单号</th><th>业务类型</th><th>异常类型</th><th>异常天数</th><th>当前状态</th><th>最新轨迹</th><th>操作</th></tr></thead><tbody id="v625ExceptionRows"><tr><td colspan="7">正在读取…</td></tr></tbody></table></div>
+          <section class="v625-panel v768-queue-panel">
+            <div class="v625-section-head">
+              <div><h2>异常处理清单</h2><p class="v768-subtitle" id="v625ExceptionMeta">等待读取真实运单</p></div>
+              <div class="v768-actions">
+                <button id="v768CopySelected" type="button" class="v625-btn" disabled>复制已勾选</button>
+                <button id="v768CopyCurrent" type="button" class="v625-btn" disabled>复制当前页</button>
+              </div>
+            </div>
+            <div class="v625-table-wrap"><table class="v625-table v768-queue-table">
+              <thead><tr><th><input type="checkbox" id="v768CheckAll" aria-label="勾选当前页运单"></th><th>运单号</th><th>业务</th><th>异常分类</th><th>滞留天数</th><th>建议责任部门</th><th>最后有效轨迹</th><th>建议处理事项</th><th>操作</th></tr></thead>
+              <tbody id="v625ExceptionRows"><tr><td colspan="9">正在等待真实数据…</td></tr></tbody>
+            </table></div>
+            <div class="v768-pagination"><span>每页展示100票，支持继续翻页</span><div><button id="v768PreviousPage" class="v625-btn" type="button" disabled>上一页</button><span id="v768PageLabel">第 1 / 1 页</span><button id="v768NextPage" class="v625-btn" type="button" disabled>下一页</button></div></div>
+            <p class="v768-evidence">复制清单用于下发处理，不等于运单已处理或已闭环。已POD、合规自提/580与其他可信终态不进入本清单。</p>
           </section>
         </section>
 
@@ -658,6 +675,6 @@
       </main>
     </div>
   </div>
-  <script src="/v625-shell.js?v=20261007-v750-1&patch=766" defer></script>
+  <script src="/v625-shell.js?v=20261009-v768-1&patch=768" defer></script>
 </body>
 </html>

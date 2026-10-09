@@ -31,7 +31,7 @@ assert.match(home,/if\(!obsByBill\.has\(bill\)\)obsByBill\.set\(bill,\[\]\)/,'la
 assert.match(home,/for\(const row of candidates\)/,'backfill must scan newest-to-older observations until a valid terminal signing row is found');
 assert.match(shell,/当日无POD/,'zero-POD boards must explain why no signing average exists');
 assert.match(html,/V750_TIMING_EVIDENCE_TRACK_VIEW|V748_PER_BOARD_TRACK_QUALITY_SIGNALS|V744_SIGNING_UI_SIMPLIFIED_AND_TERMINAL_BACKFILL/,'V744+ shell marker missing');
-assert.match(html,/v625-shell\.js\?v=20261007-v(?:744|748|750)-1/,'V744+ cache bust missing');
+assert.match(html,/v625-shell\.js\?v=\d{8}-v\d{3,}-1/,'V744+ cache bust missing');
 
 assert.match(home,/FROM business_daily_parse_rows[\s\S]*businessType='WHPP'/,'V746 WHPP signing must read canonical business_daily_parse_rows fallback');
 assert.match(home,/latest_whpp_daily_parse_delivery_time/,'V746 later WHPP daily backfill source missing');
