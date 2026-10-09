@@ -870,8 +870,8 @@ function renderOpenPodRows(){
     return true;
   });
   setText('v626OpenAll',v785OpenSourceVerified?v785OpenTotal:'待核验');
-  setText('v626OpenToday',v626OpenRows.filter(row=>String(row.reportDate||row.sourceReportDate||'').slice(0,10)===latestDate).length);
-  setText('v626OpenRetry',v626OpenRows.filter(row=>String(row.queryStatus||'').includes('重试')||String(row.apiStatus||'').includes('失败')).length);
+  setText('v626OpenToday',v785OpenSourceVerified?v626OpenRows.filter(row=>String(row.reportDate||row.sourceReportDate||'').slice(0,10)===latestDate).length:'—');
+  setText('v626OpenRetry',v785OpenSourceVerified?v626OpenRows.filter(row=>String(row.queryStatus||'').includes('重试')||String(row.apiStatus||'').includes('失败')).length:'—');
   const targets=[['v626OpenPodRows',5],['v626ImportOpenRows',6]];
   for(const [id,cols] of targets){
     const tbody=byId(id);if(!tbody)continue;tbody.replaceChildren();
