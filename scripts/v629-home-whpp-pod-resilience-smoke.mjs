@@ -22,7 +22,10 @@ assert.match(js,/function renderKpiDetail\(kind\)/,'KPI detail drilldown must re
 assert.match(server,/import \{ loadWhppState, saveWhppDailyImport \} from '\.\/src\/whppStore\.js'/,'WHPP state/import integration missing');
 assert.match(server,/requestedType === 'WHPP'[\s\S]*loadWhppState\(\)[\s\S]*loadWhppCanonicalTruth\([\s\S]*buildWhppDashboard/,'WHPP business board must use canonical merged truth');
 assert.match(server,/\['CE', 'CEAF', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN'\]\.map\(type => loadLightweightUnifiedBusinessState/,'POD workspace lightweight readers must exclude WHPP');
-assert.match(server,/const whppState = loadWhppState\(\)/,'POD workspace must add WHPP through dedicated state');
+assert.match(server,/const whppState = dateWhppState\(\)/,
+  'POD workspace must add WHPP through selected-date canonical daily source, never the latest unrelated WHPP run');
+assert.match(server,/const truth=loadWhppCanonicalTruth\(reportDate,snapshotId,getDb\(\)\)/,
+  'WHPP selected-day source must include independent 156 members as well as unified-source members');
 assert.doesNotMatch(server,/\['CE', 'CEAF', 'TBKH', 'ALI1688', 'WHPP', 'SHOPEECN', 'SHOPEEVN'\]\.map\(type => loadLightweightUnifiedBusinessState/,'WHPP must never enter unsupported lightweight reader');
 
 assert.match(html,/v625-shell\.js\?v=\d{8}-v\d{3,}-1/,'V629+ JS cache bust missing');
