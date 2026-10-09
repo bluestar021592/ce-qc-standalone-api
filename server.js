@@ -58,6 +58,7 @@ import { persistentSelectedDatePodTruth, persistentWhppCompletionTruth } from '.
 import { buildCanonicalBusinessAccounting } from './src/businessAccounting.js';
 import { buildDataIntegrityReport } from './src/dataIntegrity.js';
 import { v766ReadJob, v766ClearReadCache } from './src/v766ReadJobCoordinator.js';
+import { qcDetailRead } from './src/qcActionDetailRead.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -258,6 +259,12 @@ function startDashboardCacheScheduler() {
 
 app.get('/detail', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'detail.html'));
+});
+ 
+// V769: native CE QC action drilldown uses an isolated responsive page.
+app.get('/qc-action-detail', (req,res) => {
+  res.setHeader('Cache-Control','no-store');
+  res.sendFile(path.join(__dirname,'public','qc-action-detail.html'));
 });
 
 app.get(['/ccsl', '/shopee'], (req, res) => {
@@ -2212,6 +2219,26 @@ app.get('/api/whpp-timing-source-diagnostics', (req,res)=>{
     if(!/^\d{4}-\d{2}-\d{2}$/.test(reportDate))return res.status(400).json({ok:false,error:'reportDate格式必须为YYYY-MM-DD'});
     res.json(diagnoseWhppDailyTimingSources(reportDate,Number(req.query.limit||8)));
   }catch(error){res.status(500).json({ok:false,error:String(error?.message||error)})}
+});
+
+// Exact selected-date, seven-business QC evidence. No CE remote call or writes.
+app.get('/api/qc-action-detail', (req,res) => {
+  res.setHeader('Cache-Control','no-store');
+  try{
+    const result=qcDetailRead(getDb(),{
+      reportDate:req.query.reportDate,
+      shipmentCode:req.query.shipmentCode,
+      businessType:req.query.businessType,
+      snapshotId:req.query.snapshotId
+    });
+    return res.status(result.ok?200:result.status||500).json(result.ok?result:{
+      ok:false,code:result.code,error:result.error
+    });
+  }catch(error){
+    console.warn('[CE-QC][V769_QC_DETAIL]',String(error?.message||error));
+    return res.status(503).json({ok:false,code:'QC_DETAIL_SOURCE_UNAVAILABLE',
+      error:'详情本地证据暂不可读取；未触发任何重复扫描或数据库修改。'});
+  }
 });
 
 app.get('/api/detail', async (req, res) => {
