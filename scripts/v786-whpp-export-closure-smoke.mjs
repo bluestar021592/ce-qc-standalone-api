@@ -55,7 +55,7 @@ try{
   assert.equal(updated[0].是否POD,'是','POD evidence must hydrate completed old daily');
   assert.equal(updated[0].reportDate,day,'later terminal must not move original daily into later date');
   assert.equal(updated[1].退回状态,'已退回','returned evidence must hydrate completed old daily');
-  assert.equal(updated[2].currentState,'PENDING','shipmentStatus80/eventCode60 is not POD/returned');
+  assert.equal(updated[2].currentState,'RETURNING','shipmentStatus80 must remain a visible nonterminal return-in-progress, never POD or returned');
   assert.equal(updated[2].是否POD,'否');
   const cats=between(exporter,'function isPod(row = {})', 'function isDelivery(row = {})');
   const predicates=new Function(cats+'\nreturn {isPod,isReturned,isCancelled};')();
