@@ -19,6 +19,8 @@ const db=new DatabaseSync(':memory:');
 db.exec(`
 CREATE TABLE unified_import_batches(snapshotId TEXT,batchId TEXT,reportDate TEXT,status TEXT,createdAt TEXT);
 CREATE TABLE unified_import_rows(batchId TEXT,shipmentCode TEXT,businessType TEXT,reportDate TEXT,snapshotId TEXT,regionCode TEXT,recipientNormalized TEXT,sheetName TEXT,rowNumber INTEGER,classificationReason TEXT,rowJson TEXT);
+CREATE TABLE business_states(businessType TEXT PRIMARY KEY,valueJson TEXT,updatedAt TEXT);
+CREATE TABLE business_export_snapshots(id INTEGER PRIMARY KEY,snapshotId TEXT,businessType TEXT,reportDate TEXT,payloadJson TEXT);
 CREATE TABLE business_scan_results(businessType TEXT,reportDate TEXT,shipmentCode TEXT,isPod INTEGER,orderStatus TEXT,updatedAt TEXT,rawJson TEXT);
 CREATE TABLE business_final_rows(businessType TEXT,reportDate TEXT,shipmentCode TEXT,isPod INTEGER,primaryCategory TEXT,apiStatus TEXT,carryStatus TEXT,latestEventTime TEXT,latestEventDesc TEXT,latestNode TEXT,updatedAt TEXT,rawJson TEXT);
 CREATE TABLE business_shipment_tracks(businessType TEXT,reportDate TEXT,shipmentCode TEXT,shipmentStatus TEXT,statusText TEXT,apiStatus TEXT,updatedAt TEXT,rawJson TEXT);
