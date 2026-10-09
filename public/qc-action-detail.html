@@ -7,10 +7,10 @@
 <style>
 :root{font-family:"Microsoft YaHei","Segoe UI",Arial,sans-serif;color:#123456;background:#eff5fb;font-size:14px}
 *{box-sizing:border-box}body{margin:0;min-height:100vh}button,a{font:inherit}
-.qcd-top{background:#fff;border-bottom:1px solid #dfe8f2;padding:15px max(18px,calc((100vw - 1240px)/2));display:flex;align-items:center;justify-content:space-between;gap:15px}
+.qcd-top{background:#104779;border-bottom:1px solid #0c3c69;padding:15px max(18px,calc((100vw - 1240px)/2));display:flex;align-items:center;justify-content:space-between;gap:15px}
 .qcd-brand{display:flex;align-items:center;gap:13px;min-width:0}
-.qcd-logo{display:block;width:92px;max-width:92px;height:38px;max-height:38px;object-fit:contain;flex:none}
-.qcd-brand h1{font-size:18px;line-height:1.4;margin:0;color:#0a3966}.qcd-brand p{font-size:11px;color:#66809a;margin:2px 0}
+.qcd-logo{display:block;width:94px;max-width:94px;height:53px;max-height:53px;object-fit:contain;background:#fff;border-radius:11px;padding:6px;flex:none}
+.qcd-brand h1{font-size:18px;line-height:1.4;margin:0;color:#fff}.qcd-brand p{font-size:11px;color:#d5e4f4;margin:2px 0}
 .qcd-link{color:#1768da;border:1px solid #cfdfef;border-radius:10px;padding:9px 13px;background:#fff;white-space:nowrap;text-decoration:none}
 main{max-width:1240px;margin:22px auto 60px;padding:0 18px;display:grid;gap:16px}
 .qcd-card{background:white;border:1px solid #e0eaf3;border-radius:16px;padding:22px;box-shadow:0 5px 18px rgba(23,69,115,.035)}
@@ -37,12 +37,12 @@ th{background:#f4f8fc;color:#385d7c}
 .qcd-actions button{border-radius:9px;padding:9px 13px;background:#1877ee;color:#fff;border:0;cursor:pointer}
 .qcd-actions button:disabled{opacity:.5;cursor:default}
 .qcd-neutral{color:#657c94;font-size:12px;line-height:1.7}
-@media(max-width:760px){.qcd-top{padding:12px 15px}.qcd-logo{width:65px;max-width:65px;height:32px;max-height:32px}.qcd-brand h1{font-size:15px}.qcd-info{grid-template-columns:repeat(2,minmax(0,1fr))}.qcd-block{grid-template-columns:1fr}.qcd-fields{grid-template-columns:1fr}main{margin-top:14px;padding:0 12px}.qcd-card{padding:17px}}
+@media(max-width:760px){.qcd-top{padding:12px 15px}.qcd-logo{width:65px;max-width:65px;height:44px;max-height:44px}.qcd-brand h1{font-size:15px}.qcd-info{grid-template-columns:repeat(2,minmax(0,1fr))}.qcd-block{grid-template-columns:1fr}.qcd-fields{grid-template-columns:1fr}main{margin-top:14px;padding:0 12px}.qcd-card{padding:17px}}
 </style>
 </head>
 <body>
 <header class="qcd-top">
- <div class="qcd-brand"><img class="qcd-logo" src="/assets/ce-express-logo.svg" alt="CE EXPRESS"><div><h1>运单质控核验</h1><p>CE EXPRESS · 质量控制管理系统</p></div></div>
+ <div class="qcd-brand"><img class="qcd-logo" src="/assets/ce-express-logo-main.png" alt="CE EXPRESS"><div><h1>运单质控核验</h1><p>CE EXPRESS · 质量控制管理系统</p></div></div>
  <a id="qcdBack" class="qcd-link" href="/exceptions?auth=v625">返回质控行动中心</a>
 </header>
 <main>
@@ -120,11 +120,11 @@ async function main(){
     set('qcdBusiness',d.businessType);
     set('qcdDate','日报：'+d.reportDate+' · 来源快照：'+d.snapshotId);
     set('qcdNotice',d.notice);
-    set('qcdSourceFlag','已匹配');
+    set('qcdSourceFlag',d.evidence.source?'日报已验证':'仅保存处理记录');
     set('qcdScanFlag',d.evidence.scan?'已保存':'缺失待核验');
     set('qcdTrackFlag',d.evidence.trackEvents?'节点 '+d.evidence.trackEvents:d.evidence.shipmentTrack?'有TMS查询':'缺失待核验');
     set('qcdFinalFlag',d.evidence.final?'有最终记录':'缺失待核验');
-    renderPairs('qcdSource',d.source,[['运单号','shipmentCode'],['业务','businessType'],['日报日期','reportDate'],['PP/PV','regionCode'],['工作表','sheetName'],['来源行号','rowNumber'],['分类理由','classificationReason'],['快照','snapshotId']]);
+    renderPairs('qcdSource',d.source,[['运单号','shipmentCode'],['业务','businessType'],['日报日期','reportDate'],['PP/PV','regionCode'],['工作表','sheetName'],['来源行号','rowNumber'],['分类理由','classificationReason'],['来源证据','sourceNote'],['来源类别','sourceKind'],['快照','snapshotId']]);
     renderPairs('qcdFinal',d.finalRow,[['主分类','primaryCategory'],['是否POD','isPod'],['接口状态','apiStatus'],['跨日状态','carryStatus'],['最后节点','latestNode'],['节点时间','latestEventTime'],['节点说明','latestEventDesc']]);
     renderPairs('qcdScan',d.scan||d.track,[['TMS状态码','shipmentStatus'],['扫描POD字段','isPod'],['订单状态','orderStatus'],['轨迹状态','statusText'],['查询状态','apiStatus'],['最后更新','updatedAt']]);
     renderPairs('qcdCurrent',d.current,[['记录所属日报','reportDate'],['最新状态','state'],['API状态','apiStatus'],['最后轨迹时间','lastEventTime'],['记录更新','updatedAt'],['证据适用说明','note']]);
