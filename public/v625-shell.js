@@ -820,7 +820,19 @@ function renderLiveProgress(bundle={}){
   const phase=allComplete
     ?'全部处理完成'+(whpp.evidenceGap?' · WHPP '+whpp.evidenceGap.missing+'票状态待跟进':'')
     :activePhase||(historyVerifying?'CCSL/SHOPEE历史证据核验中；无需重新上传或扫描，可正常切换看板':whpp.evidenceGap?'已完成'+completeFamilies+'/3业务 · WHPP '+whpp.evidenceGap.missing+'票状态待核验（无需重新上传）':whppVerifying?'WHPP完成状态核验中，请勿重复扫描':completeFamilies===2&&familyLabels.whpp!=='完成'?'已完成 2/3 业务 · WHPP待处理，请点击“继续未完成处理”':completeFamilies?('已完成 '+completeFamilies+'/3 业务，等待下一业务处理'):'等待开始处理');
-  setText('v626ProcessText',phase);setText('v626ImportProgressText',phase);
+  // V785: "WHPP 0 tickets auto-skipped" belongs to the task engine's old
+  // unified sub-count; it cannot describe a separately verified 156-member
+  // WHPP daily source. Display the customer terminal gap independently.
+  const whppSource=v785WhppProofFor(bundle.reportDate||'');
+  const whppRealMembers=Number(whppSource?.total??0);
+  const verifiedWhppProcessing=Boolean(v759PinnedWhppProof(bundle.reportDate||''));
+  const whppPendingCustomer=whpp.evidenceGap?.missing||0;
+  const whppStatusNote=whppRealMembers>0
+    ?' · WHPP独立来源 '+fmt(whppRealMembers)+'票；'+
+      (verifiedWhppProcessing?'扫描/最终记录处理完成':'扫描/最终记录仍待核验')+
+      (whppPendingCustomer?'，未POD/退回终态待查 '+fmt(whppPendingCustomer)+'票':'')
+    :'';
+  setText('v626ProcessText',phase+whppStatusNote);setText('v626ImportProgressText',phase+whppStatusNote);
   const progressCount=historyVerifying?'历史核验中（当前已确认 '+completeFamilies+'/3 业务）'
     :(scanTotal+trackTotal)>0?((scanDone+trackDone)+' / '+(scanTotal+trackTotal)):(completeFamilies+'/3 业务完成');
   const reconciledCount=whpp.evidenceGap?progressCount+' · WHPP已确认终态 '+whpp.evidenceGap.terminalCount+'/'+whpp.evidenceGap.total:progressCount;
