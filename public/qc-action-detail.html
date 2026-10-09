@@ -123,7 +123,7 @@ async function main(){
     set('qcdSourceFlag',d.source.classificationConflict?'跨业务分类冲突':d.evidence.source?'日报成员已核实':'仅保存处理记录');
     set('qcdScanFlag',d.evidence.scan?'已保存':'缺失待核验');
     set('qcdTrackFlag',d.evidence.trackEvents?'节点 '+d.evidence.trackEvents:d.evidence.shipmentTrack?'有TMS查询':'缺失待核验');
-    set('qcdFinalFlag',d.evidence.final?'有最终记录':'缺失待核验');
+    set('qcdFinalFlag',d.terminalOutcome==='ORDER_CANCELLED'?'订单取消（已闭环）':d.evidence.final?'有最终记录':'缺失待核验');
     renderPairs('qcdSource',d.source,[['运单号','shipmentCode'],['业务','businessType'],['日报日期','reportDate'],['PP/PV','regionCode'],['工作表','sheetName'],['来源行号','rowNumber'],['分类理由','classificationReason'],['来源证据','sourceNote'],['来源类别','sourceKind'],['快照','snapshotId']]);
     renderPairs('qcdFinal',d.finalRow,[['主分类','primaryCategory'],['是否POD','isPod'],['接口状态','apiStatus'],['跨日状态','carryStatus'],['最后节点','latestNode'],['节点时间','latestEventTime'],['节点说明','latestEventDesc']]);
     renderPairs('qcdScan',d.scan||d.track,[['TMS状态码','shipmentStatus'],['扫描POD字段','isPod'],['订单状态','orderStatus'],['轨迹状态','statusText'],['查询状态','apiStatus'],['最后更新','updatedAt']]);
