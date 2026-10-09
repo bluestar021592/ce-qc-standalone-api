@@ -2663,8 +2663,9 @@ function workspaceRows(state = {}, businessType = 'CCSL') {
     const terminalCode=String(row.shipmentStatus ?? scan.shipmentStatus ?? row.orderStatus ?? scan.orderStatus ?? '').trim();
     const isPod = row.是否POD === '是' || terminalCode==='60' || terminalCode==='85';
     const returnText = `${row.退回状态 || ''} ${row.primaryCategory || ''}`.trim().toUpperCase();
-    const isReturn = (terminalCode==='81' || /(^|\s)(已退回|退回完成|RETURNED|RETURN_COMPLETED|RETURN)(\s|$)/.test(returnText))
-      && !/(未退回|非退回|待退回|NOT_RETURNED|NO_RETURN|PENDING_RETURN)/.test(returnText);
+    const isReturn = terminalCode==='81' || (
+      /(^|\s)(已退回|退回完成|RETURNED|RETURN_COMPLETED|RETURN)(\s|$)/.test(returnText)
+      && !/(未退回|非退回|待退回|NOT_RETURNED|NO_RETURN|PENDING_RETURN)/.test(returnText));
     const failed = /fail|失败|refresh_failed/i.test(`${row.查询状态 || ''} ${row.API状态 || ''} ${batch.status || ''}`);
     const specialState = row.specialState || row.primaryCategory || row.主分类 || '';
     const shopState = row.shopState || row.shopStatus || row.门店状态 || row.storeFlowState || '';
