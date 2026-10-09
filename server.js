@@ -1788,7 +1788,7 @@ app.get('/api/tracking-workspace', async (req, res) => {
     trackFailed: allRows.filter(row => row.queryStatus === '失败').length,
     retryPending: allRows.filter(row => row.queryStatus === '待重试').length,
     actionable: allRows.filter(row => row.isActionable).length,
-    completed: allRows.filter(row => ['成功', 'POD跳过', '退回跳过', '特殊节点跳过', '正常分流跳过'].includes(row.queryStatus)).length
+    completed: allRows.filter(row => ['成功', 'POD跳过', '退回跳过', '订单取消跳过', '特殊节点跳过', '正常分流跳过'].includes(row.queryStatus)).length
   };
   // A source batch with no finalized evidence is NOT a genuine zero-anomaly day.
   let qcCoverage=null;
@@ -2701,7 +2701,15 @@ function workspaceRows(state = {}, businessType = 'CCSL') {
     const specialClosed=['SELF_PICKUP','CECN_RETENTION','CEZT_RETENTION','CCSL580_RETENTION',
       'CECN','CEZT','CCSL580'].includes(normalizedSpecial);
     const normalFinal = category === '正常分流节点' || row.matchedRule === 'NORMAL_FINAL_HUB';
-    const isClosed = isPod || isReturn || specialClosed || normalFinal;
+    // WHPP terminal cancellation must follow its saved analysis and close
+    // status, never a bare scan orderStatus=10 or an unverified text hint.
+    // V771 detail already shows these exact-day final outcomes; the QC
+    // action queue must not reopen the same verified cancellation as OTHER.
+    const whppCancelled = String(row.businessType || businessType).toUpperCase()==='WHPP'
+      && (String(row.currentState || row.scanNormalizedState || '').toUpperCase()==='ORDER_CANCELLED'
+        || row.订单取消==='是' || row.取消状态==='已取消' || category==='订单取消')
+      && ['CLOSED','CLOSED_CANCELLED'].includes(String(row.carry状态 || row.carryStatus || '').trim().toUpperCase());
+    const isClosed = isPod || isReturn || whppCancelled || specialClosed || normalFinal;
     const isActionable = !isClosed;
     const reportDate=String(row.reportDate || state.reportDate || '').slice(0,10);
     const pendingNonContinuous=!isClosed&&workspacePendingNonContinuous(row);
@@ -2711,7 +2719,7 @@ function workspaceRows(state = {}, businessType = 'CCSL') {
     return {
       shipmentCode, businessType: row.businessType || businessType, region: row.regionCode || row.区域 || '',
       shipmentStatus: terminalCode,
-      scanStatus: isPod ? 'POD' : (isReturn ? 'RETURN' : (scan.orderStatus || row.扫描状态 || '已扫描')),
+      scanStatus: isPod ? 'POD' : (isReturn ? 'RETURN' : (whppCancelled ? 'CANCELLED' : (scan.orderStatus || row.扫描状态 || '已扫描'))),
       latestNode: row.最后节点 || row.latestEventDesc || '', latestTime: row.最后节点时间 || row.latestEventTime || '',
       pendingRawEventCount: Number(row.pendingRawEventCount || 0), pendingDistinctDayCount: Number(row.pendingDistinctDayCount ?? row.Pending次数 ?? 0),
       pendingDates: Array.isArray(row.pendingDates) ? row.pendingDates : String(row.Pending日期 || '').split(/[,、]/).map(value => value.trim()).filter(Boolean),
@@ -2723,8 +2731,8 @@ function workspaceRows(state = {}, businessType = 'CCSL') {
       shopArrivedAt: row.shopArrivedAt || row.门店入库时间 || '',
       shopRetentionDays:Number(row.shopRetentionNaturalDays || row.门店滞留天数 || 0),
       storeTags:Array.isArray(row.storeTags)?row.storeTags:[],
-      category, isClosed, isActionable,
-      queryStatus: isPod ? 'POD跳过' : (isReturn ? '退回跳过' : (specialClosed ? '特殊节点跳过' : (normalFinal ? '正常分流跳过' : (failed ? '待重试' : ((row.轨迹节点数 || row.轨迹节点数量 || 0) > 0 ? '成功' : '需查轨迹'))))),
+      category, isClosed, isActionable, whppCancelled,
+      queryStatus: isPod ? 'POD跳过' : (isReturn ? '退回跳过' : (whppCancelled ? '订单取消跳过' : (specialClosed ? '特殊节点跳过' : (normalFinal ? '正常分流跳过' : (failed ? '待重试' : ((row.轨迹节点数 || row.轨迹节点数量 || 0) > 0 ? '成功' : '需查轨迹')))))),
       retryCount: Number(batch.attemptCount || row.retryCount || 0), reportDate, snapshotId: state.snapshotId || ''
     };
   }).filter(row => row.shipmentCode);
