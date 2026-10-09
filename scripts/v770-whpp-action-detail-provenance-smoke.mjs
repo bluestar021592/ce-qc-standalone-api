@@ -34,6 +34,9 @@ const run=(code,type='WHPP',day=date,snapshot=snap)=>qcDetailRead(db,{reportDate
 const resolved=run(a);
 assert.equal(resolved.ok,true,'WHPP daily proof must win when unified row is labeled CE');
 assert.equal(resolved.detail.source.sourceKind,'WHPP_DAILY_PARSE');
+assert.equal(resolved.detail.source.classificationConflict,true,'same waybill has CE versus WHPP classification conflict');
+assert.equal(resolved.detail.source.otherUnifiedBusiness,'CE');
+assert.match(resolved.detail.notice,/跨业务分类冲突/);
 assert.equal(resolved.detail.evidence.source,true);
 assert.equal(resolved.detail.source.businessType,'WHPP');
 assert.equal(resolved.detail.finalRow.latestEventDesc,'仓库待核验','read the WHPP saved final, not CE');
