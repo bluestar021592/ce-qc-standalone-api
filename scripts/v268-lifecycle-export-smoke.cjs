@@ -45,14 +45,30 @@ assert.match(owner,/records\.some\(r=>\[\.\.\.r\.addedNodes\]/,'MutationObserver
 assert.doesNotMatch(owner,/preventDefault\s*\(|stopPropagation\s*\(|stopImmediatePropagation\s*\(/,'lifecycle owner must never swallow navigation events');
 assert.match(owner,/without click interception/,'runtime log must explicitly disclose click safety');
 
-// V306 keeps the useful V270 ADMIN-override behavior, but expands runtime authority
-// to the signed 95-code + alias map and explicitly forbids store recognition from
-// changing the seven-business daily-report board assignment.
-assert.match(shops,/SHOP_CODE_RUNTIME_VERSION = '2026-08-25-v306-authoritative-code-name-alias-v1'/,'V306 authoritative code/name/alias shop runtime must remain active');
-assert.match(shops,/const persisted = loadAllPersistedShopCodes\(db\);[\s\S]*merged\.set\(code, name\)/,'persisted ADMIN CP codes must continue to merge over builtin display names at runtime');
-assert.match(shops,/ADMIN-uploaded canonical names still override display names/,'V306 must explicitly preserve the V270 ADMIN display-name override contract');
-assert.match(shops,/authority: 'SHOP_CODE_FIRST_ALIAS_SECOND_BUSINESS_BOARD_UNCHANGED'/,'shop summary must disclose code-first, alias-second, business-board-unchanged authority');
-assert.match(shops,/effectiveImmediately: true/,'successful CP-code import must become effective immediately');
+// V781: preserve the V306 legacy fallback only until an administrator explicitly
+// activates a complete 72-code current list. The old 95-code workbook remains
+// stored for historical evidence, but cannot decide CURRENT store arrival after
+// that activation. These are complementary rules, not one permanent version.
+assert.match(shops,/SHOP_CODE_RUNTIME_VERSION = '2026-10-09-v780-complete-72-active-set-v1'/,
+  'current shop runtime must advertise the exact-72 activation contract');
+assert.match(shops,/if\(active\)\{[\s\S]*?new Map\(active\.members\.map/,
+  'activated 72-code map must take precedence over any built-in/legacy codes');
+assert.match(shops,/seedLatestShopWhitelist\(db\);[\s\S]*?const merged = latestShopCodeMap\(\);[\s\S]*?for \(const \[code, name\] of persisted\) merged\.set\(code, name\)/,
+  'unactivated compatibility mode must still preserve the V306 ADMIN override');
+assert.match(shops,/ADMIN-uploaded canonical names still override display names/,
+  'V306 fallback must retain old ADMIN display-name override contract');
+assert.match(shops,/ACTIVE_72_CODES_ONLY_HISTORICAL_PRESERVED/,
+  'shop summary must disclose current-only 72 authority after activation');
+assert.match(shops,/SHOP_CODE_FIRST_ALIAS_SECOND_BUSINESS_BOARD_UNCHANGED/,
+  'legacy summary must still disclose original code-first business isolation');
+assert.match(shops,/COMPLETE_SHOP_LIST_CHANGED/,
+  'new active CP set must not silently change between admin preview and activation');
+assert.match(shops,/shop_cp_import_snapshots/,
+  'each CP import must preserve its own exact workbook membership');
+assert.match(shops,/shop_active_code_set_history/,
+  'historical activation evidence must remain stored for audit');
+assert.match(shops,/if\(strictCanonical\)return null;/,
+  'current 72-name aliases must not fuzzy-match retired or similar names');
 assert.match(shops,/SHOP_CODE_NAME_CONFLICT/,'same CP code with conflicting names must block import');
 assert.match(shops,/NO_VALID_SHOP_CODES/,'invalid CP workbooks must be rejected rather than silently accepted');
 assert.match(integrity,/不会改变CE、CEAF、TBKH、ALI1688、SHOPEE CN\/VN、WHPP的日报业务归属/,'retired V271 compatibility source must retain CP-code business-isolation documentation');
