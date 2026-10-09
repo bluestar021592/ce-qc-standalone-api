@@ -1983,6 +1983,32 @@ function qcActionDetailUrl(row){
   if(qcActionScope?.snapshotId)p.set('snapshotId',qcActionScope.snapshotId);
   return '/qc-action-detail?'+p.toString();
 }
+// V776: independent read-only exact-waybill navigation. The actionable queue
+// excludes verified terminal records by design, but an operator must still be
+// able to inspect the saved historical source for those very same shipments.
+function qcOpenAnyWaybill(){
+  const bill=String(byId('v768ExceptionKeyword')?.value||'').trim().toUpperCase();
+  const business=String(byId('v625ExceptionBusiness')?.value||'').trim().toUpperCase();
+  const date=String(byId('v625ExceptionDate')?.value||'').slice(0,10);
+  const hint=message=>setText('v776DirectHelp',message);
+  if(!/^[A-Z0-9][A-Z0-9_-]{4,69}$/.test(bill)){
+    hint('请输入完整运单号（不是门店名称），再点击“运单直查（含已闭环）”。');return;
+  }
+  if(!['CE','CEAF','TBKH','ALI1688','WHPP','SHOPEECN','SHOPEEVN'].includes(business)){
+    hint('请先指定单个业务板块，避免不同业务同号记录混淆。');return;
+  }
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(date)){
+    hint('请先选择运单所属日报日期，不能借用其他日期的历史状态。');return;
+  }
+  const row={shipmentCode:bill,businessType:business,reportDate:date};
+  // Only pin a snapshot if the current QC query proved it belongs to this
+  // exact date; otherwise the evidence endpoint verifies the dated source.
+  const pin=qcActionScope?.reportDate===date&&qcActionScope?.snapshotId
+    ?qcActionScope.snapshotId:'';
+  const url=new URLSearchParams(row);
+  if(pin)url.set('snapshotId',pin);
+  location.assign('/qc-action-detail?'+url.toString());
+}
 function qcActionUpdateSelection(){
   const checked=qa('#v625ExceptionRows input[data-qc-case]:checked');
   const btn=byId('v768CopySelected');
@@ -2008,7 +2034,7 @@ function renderExceptionRows(){
   setText('v768PageLabel','第 '+(qcActionPage+1)+' / '+totalPages+' 页');
   if(!items.length){
     const tr=document.createElement('tr'),td=document.createElement('td');
-    td.colSpan=9;td.textContent='当前条件暂无待核验运单；不表示其他日期或其他业务已全部闭环。';
+    td.colSpan=9;td.textContent='当前条件暂无待核验运单。已闭环运单不会出现在此清单；请通过上方“运单直查（含已闭环）”按单号核对历史证据。';
     tr.appendChild(td);tbody.appendChild(tr);qcActionUpdateSelection();return;
   }
   for(const row of items){
@@ -2485,6 +2511,8 @@ function bind(){
   qa('[data-open-filter]').forEach(btn=>btn.addEventListener('click',()=>{v626OpenFilter=btn.dataset.openFilter;qa('[data-open-filter]').forEach(x=>x.classList.toggle('active',x===btn));renderOpenPodRows()}));
   byId('v625TrackSearch')?.addEventListener('click',queryTrack);byId('v625TrackReset')?.addEventListener('click',()=>{byId('v625TrackCode').value='';byId('v625TrackTimeline').innerHTML='<div class="v625-empty-state">暂无轨迹数据</div>'});
   byId('v625ExceptionSearch')?.addEventListener('click',loadExceptions);
+  byId('v776OpenAnyWaybill')?.addEventListener('click',qcOpenAnyWaybill);
+  byId('v768ExceptionKeyword')?.addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();qcOpenAnyWaybill()}});
   if(byId('v625ExceptionDate')&&selectedReportDate())byId('v625ExceptionDate').value=selectedReportDate();
   for(const id of ['v625ExceptionType','v625ExceptionBusiness','v768ExceptionKeyword']){
     const element=byId(id);
