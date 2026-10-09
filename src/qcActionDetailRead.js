@@ -29,7 +29,10 @@ export function qcDetailRead(db,{reportDate='',shipmentCode='',businessType='',s
     return final?{state,final,kind,whppSnapshotId}:null;
   }
   let whppSaved=null;
-  if(business==='WHPP'&&!src){
+  // A verified unified WHPP member can still have scan/final evidence only
+  // in the independent WHPP saved state. Load exact-day saved evidence for
+  // both verified and unverified members; it never becomes import proof.
+  if(business==='WHPP'){
     const row=db.prepare("SELECT valueJson FROM business_states WHERE businessType='WHPP'").get();
     if(row)whppSaved=matchingWhppSaved(safeStateJson(row.valueJson),'WHPP_CURRENT');
     if(!whppSaved){
