@@ -776,8 +776,12 @@ function overlaySavedTerminalExportTruth(rows=[],db=getDb()){
         // never be confused with shipmentStatus 60/80/81.
         const status=String(raw.shipmentStatus||raw?.shipmentTrack?.shipmentStatus||'');
         const state=String(row.state||raw.currentState||'').toUpperCase();
+        // shipmentStatus 80 is RETURNING and must not masquerade as a
+        // completed return when older exported classifications say "退回".
+        // Never use eventCode 80 as a shipment terminal fact.
         const outcome=status==='60'||state==='POD'?'POD':
           status==='81'||['RETURNED','RETURN_COMPLETED'].includes(state)?'RETURNED':
+          status==='80'?'RETURNING':
           state==='ORDER_CANCELLED'?'ORDER_CANCELLED':'';
         if(outcome)closed.set(bill,{outcome,businessType:String(row.businessType||'').toUpperCase(),
           podTime:String(raw.podTime||raw.POD时间||''),eventTime:String(row.lastEventTime||'')});
@@ -794,6 +798,9 @@ function overlaySavedTerminalExportTruth(rows=[],db=getDb()){
     if(fact.outcome==='RETURNED')return {...row,isPod:0,是否POD:'否',是否退回:'是',退回状态:'已退回',
       currentState:'RETURNED',primaryCategory:'已退回',
       terminalEvidenceSource:'SAVED_STRICT_RETURNED'};
+    if(fact.outcome==='RETURNING')return {...row,isPod:0,是否POD:'否',是否退回:'否',
+      退回状态:'退回中',订单取消:'否',currentState:'RETURNING',primaryCategory:'退回中',
+      terminalEvidenceSource:'SAVED_STATUS_80_NONTERMINAL'};
     return {...row,isPod:0,是否POD:'否',订单取消:'是',
       currentState:'ORDER_CANCELLED',primaryCategory:'订单取消',terminalEvidenceSource:'SAVED_STRICT_CANCELLED'};
   });
