@@ -33,6 +33,12 @@ function safeJson(value, fallback = {}) {
 }
 function billOf(row = {}) { return String(row.shipmentCode || row.运单号 || row.waybill || '').trim().toUpperCase(); }
 function terminalFlags(row = {}) {
+  // ShipmentStatus belongs to the TMS shipment result, NOT eventCode.
+  // A later 60 closes POD, 81 closes returned, 80 stays return-in-progress.
+  const status=String(row.shipmentStatus||row?.shipmentTrack?.shipmentStatus||'').trim();
+  if(status==='60')return{pod:true,returned:false,cancelled:false};
+  if(status==='81')return{pod:false,returned:true,cancelled:false};
+  if(status==='80')return{pod:false,returned:false,cancelled:false};
   const classified = classifyV246Terminal({
     state: row.currentState || row.scanNormalizedState || '',
     stateJson: row
@@ -73,7 +79,8 @@ function normalizeDynamicCarryRow(row = {}) {
   }
   const state = String(row.currentState || row.scanNormalizedState || '').toUpperCase();
   const category = String(row.primaryCategory || row.主分类 || row.异常分类 || '');
-  const returnInProgress = state === 'RETURN_IN_PROGRESS' || row.退回状态 === '退回处理中' || /退回处理中/.test(category);
+  const returnInProgress = String(row.shipmentStatus||'').trim()==='80'
+    || state === 'RETURN_IN_PROGRESS' || row.退回状态 === '退回处理中' || /退回处理中/.test(category);
   if (returnInProgress) {
     return {
       ...row,
