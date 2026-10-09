@@ -1828,9 +1828,37 @@ app.get('/api/tracking-workspace', async (req, res) => {
   let qcCoverage=null;
   if(qcActionMode){
     const db=getDb();
-    const source=db.prepare('SELECT COUNT(DISTINCT shipmentCode) AS count FROM unified_import_rows WHERE snapshotId=?').get(snapshotId);
-    qcCoverage={sourceMembers:Number(source?.count||0),evidenceRows:allRows.length,
-      hasFinalEvidence:allRows.length>0};
+    const type=requestedBusinessType;
+    const source=db.prepare(`SELECT COUNT(DISTINCT shipmentCode) AS count FROM unified_import_rows
+      WHERE snapshotId=? AND (?='' OR businessType=?)`).get(snapshotId,type,type);
+    const whppDaily=db.prepare(`SELECT COUNT(DISTINCT shipmentCode) AS count FROM business_daily_parse_rows
+      WHERE reportDate=? AND businessType='WHPP'`).get(reportDate);
+    const sourceCount=Number(source?.count||0);
+    const whppCount=Number(whppDaily?.count||0);
+    const expected=type==='WHPP'?Math.max(sourceCount,whppCount):
+      !type?sourceCount+Math.max(0,whppCount-Number(db.prepare(`SELECT COUNT(DISTINCT shipmentCode) AS count
+        FROM unified_import_rows WHERE snapshotId=? AND businessType='WHPP'`).get(snapshotId)?.count||0)):sourceCount;
+    const finalCcsl=db.prepare(`SELECT COUNT(DISTINCT f.shipmentCode) AS count FROM final_rows f
+      INNER JOIN unified_import_rows u ON u.shipmentCode=f.shipmentCode AND u.reportDate=f.reportDate
+      WHERE u.snapshotId=? AND (?='' OR u.businessType=?) AND u.businessType NOT IN ('SHOPEECN','SHOPEEVN')`)
+      .get(snapshotId,type,type);
+    const finalShopee=db.prepare(`SELECT COUNT(DISTINCT (u.businessType||'|'||f.shipmentCode)) AS count
+      FROM business_final_rows f INNER JOIN unified_import_rows u
+        ON u.shipmentCode=f.shipmentCode AND u.reportDate=f.reportDate
+      WHERE u.snapshotId=? AND (?='' OR u.businessType=?)
+        AND u.businessType IN ('SHOPEECN','SHOPEEVN') AND f.businessType='SHOPEE'`)
+      .get(snapshotId,type,type);
+    const finalWhpp=(type==='WHPP'||!type)?db.prepare(`SELECT COUNT(DISTINCT shipmentCode) AS count
+      FROM business_final_rows WHERE businessType='WHPP' AND reportDate=?`).get(reportDate):null;
+    const finalEvidence=Number(finalCcsl?.count||0)+Number(finalShopee?.count||0)+Number(finalWhpp?.count||0);
+    const sourceMembers=expected;
+    const uniqueObserved=new Set(allRows.map(row=>row.businessType+'|'+row.shipmentCode)).size;
+    const complete=expected>0&&finalEvidence>=expected&&uniqueObserved>=expected;
+    qcCoverage={sourceMembers,evidenceRows:uniqueObserved,finalEvidenceRows:finalEvidence,
+      missingFinalEvidence:Math.max(0,expected-finalEvidence),
+      missingVisibleMembers:Math.max(0,expected-uniqueObserved),
+      hasFinalEvidence:complete,verifiedZero:complete&&summary.actionable===0,
+      basis:'EXACT_DATED_SOURCE_FINAL_AND_WORKSPACE_MEMBERS'};
   }
   const payload={ok:true,reportDate,batchId:unified?.batchId||'',snapshotId,scope,
     allRowCount: allRows.length,summary,qualitySignals,qualityRows,qcCoverage,rows: rows.slice(0, 5000)};
