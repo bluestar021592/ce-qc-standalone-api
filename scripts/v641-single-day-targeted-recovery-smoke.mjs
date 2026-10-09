@@ -11,7 +11,12 @@ assert.match(gate,/V501_LEGACY_WIDE_RANGE_BLOCKED/,'wide-range legacy reconcile 
 assert.match(gate,/无需清空数据/,'legacy scoped refresh must not instruct the user to purge');
 
 assert.match(js,/const reportDate=selectedReportDate\(\)\|\|latest\.reportDate/,'manual POD refresh must bind to the selected report day');
-assert.match(js,/fromDate:reportDate,toDate:reportDate/,'manual POD refresh must never expand to today');
+assert.match(js,/const fromDate=v785OpenEarliestDate&&v785OpenEarliestDate<reportDate\?v785OpenEarliestDate:reportDate/,
+  'manual POD refresh may include only verified still-open historical carry from a bounded earlier date');
+assert.match(js,/\{businessType:'ALL',fromDate,toDate:reportDate\}/,
+  'manual tracking refresh must end on selected report day, never expand to today');
+assert.doesNotMatch(js,/toDate:cambodiaToday\(/,
+  'manual POD refresh may never automatically sweep to today');
 assert.doesNotMatch(js,/const to=cambodiaToday\(\);let from=latest\.reportDate/,'old long-window refresh must be removed');
 
 assert.match(html,/id="v641WhppScanPending"/,'WHPP waiting-scan action missing');
