@@ -486,12 +486,15 @@ function matchTargetShop(targetNode, codeMap, aliasMap, strictCanonical = false)
   // a retired shop name into an arrival for a similarly named active shop.
   if(strictCanonical)return null;
 
-  // Some CE descriptions append operational words after the node name. Allow a
-  // unique long alias to match as a substring, but never use short names this way.
+  // Legacy compatible fuzzy matching is allowed only when a sufficiently
+  // long canonical alias appears WITHIN a longer actual node description.
+  // Never match a short node against a long alias: "CE:580" normalizes to
+  // "580" and used to falsely match a CP*580 store as SHOP_PENDING.
+  if (normalized.length < 5) return null;
   const matches = [];
   for (const [aliasKey, row] of aliasMap) {
     if (aliasKey.length < 5) continue;
-    if (normalized.includes(aliasKey) || aliasKey.includes(normalized)) matches.push({ aliasKey, row });
+    if (normalized.includes(aliasKey)) matches.push({ aliasKey, row });
   }
   const uniqueCodes = [...new Set(matches.map(item => item.row.code))];
   if (uniqueCodes.length === 1) {
