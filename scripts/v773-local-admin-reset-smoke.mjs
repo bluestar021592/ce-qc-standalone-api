@@ -10,6 +10,7 @@ import bcrypt from 'bcryptjs';
 const ROOT=fileURLToPath(new URL('../',import.meta.url));
 const script=path.join(ROOT,'scripts','reset-local-admin-password.mjs');
 const ps=fs.readFileSync(path.join(ROOT,'tools','CE_QC_Reset_Admin_Password.ps1'),'utf8');
+assert.ok([...ps].every(ch=>ch.charCodeAt(0)<128),'PowerShell 5 script must stay ASCII-only to avoid ANSI mis-decoding');
 for(const required of ['WindowsBuiltInRole','Administrator','Read-Host','-AsSecureString','Get-NetTCPConnection','YES','reset-local-admin-password.mjs']) {
   assert.ok(ps.includes(required),'Windows recovery must require '+required);
 }
