@@ -1551,25 +1551,47 @@ function rowTr(values){const tr=document.createElement('tr');for(const v of valu
 
 let runBusy=false;
 async function refreshImportCanonicalClassification(reportDate=''){
-  const date=reportDate||v626LatestImport?.reportDate||'';
+  const date=String(reportDate||v626LatestImport?.reportDate||'').slice(0,10);
   if(!date)return null;
+  const snapshotId=String(v626LatestImport?.snapshotId||'').trim();
+  // The quick home response can show core-source+separate WHPP counts, but
+  // it does not prove shipment-code overlap. Do NOT replace the verified import
+  // source ledger with quick display counts or mark it as balanced.
+  if(!snapshotId){
+    setText('v783ImportSourceNote','当前日报快照缺失，已保留原始导入分类，禁止猜测总票数。');
+    return null;
+  }
   try{
-    const summary=await json('/api/home-quality-summary?fast=1&quick=1&reportDate='+encodeURIComponent(date),10000);
-    const counts=summary?.classification?.counts||{};
-    let changed=false;
-    for(const type of ['CE','CEAF','TBKH','ALI1688','WHPP','SHOPEECN','SHOPEEVN']){
+    const truth=await json('/api/import/source-reconciliation?reportDate='+encodeURIComponent(date)+'&snapshotId='+encodeURIComponent(snapshotId),15000);
+    if(!truth?.ok||truth.reportDate!==date||truth.snapshotId!==snapshotId)throw new Error('来源快照不匹配');
+    const source=truth.source||{},independent=truth.whppIndependent||{};
+    const counts={...(source.counts||{})};
+    const overlap=Number(independent.crossBusinessOverlap||0);
+    const overlapWithImport=Number(independent.alreadyInImport||0);
+    const extra=Number(independent.separateNotInImport||0);
+    // Real current WHPP membership is displayed separately from the immutable
+    // imported source count. Count new WHPP bills only when identities show no
+    // cross-business collision, not just because two totals happen to match.
+    if(overlap===0)counts.WHPP=Number(counts.WHPP||0)+extra;
+    const types=['CE','CEAF','TBKH','ALI1688','WHPP','SHOPEECN','SHOPEEVN'];
+    for(const type of types){
       const el=q('[data-classification="'+type+'"]');
-      if(el&&counts[type]!==undefined){el.textContent=fmt(counts[type]);changed=true;}
+      if(el)el.textContent=fmt(counts[type]||0);
     }
-    if(changed&&v626LatestImport)v626LatestImport={...v626LatestImport,classificationCounts:{...(v626LatestImport.classificationCounts||{}),...counts}};
-    rememberV755ImportCounts({
-      reportDate:date,
-      classificationCounts:counts,
-      sourceReconciliation:{balanced:summary?.classification?.balanced===true},
-      summary:{validUniqueWaybills:summary?.classification?.total}
-    },'HOME_SUMMARY_REFRESH');
-    return summary;
-  }catch{return null}
+    const importCount=Number(source.validUniqueWaybills||0);
+    const union=Number(truth.display?.distinctUnion||0);
+    const sourceOkay=source.balanced===true&&overlap===0;
+    const note=sourceOkay
+      ?'来源已逐票核验：统一导入 '+fmt(importCount)+' 票；独立WHPP '+fmt(independent.total||0)+' 票（与统一成员重复 '+fmt(overlapWithImport)+' 票）；最终唯一运单 '+fmt(union)+' 票。WHPP原始扫描、POD与退回证据均保留。'
+      :'来源待核查：统一导入 '+fmt(importCount)+' 票；独立WHPP '+fmt(independent.total||0)+' 票；跨业务重叠 '+fmt(overlap)+' 票。已阻止错误标记七业务守恒。';
+    setText('v783ImportSourceNote',note);
+    // The original imported business counts stay untouched. Family lifecycle
+    // decisions must continue using their persisted source member sets.
+    return truth;
+  }catch(error){
+    setText('v783ImportSourceNote','来源逐票核验暂未完成（'+String(error?.message||error)+'）；保留原始导入数据，未重新扫描。');
+    return null;
+  }
 }
 async function loadImport(){
   try{
