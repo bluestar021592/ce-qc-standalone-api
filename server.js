@@ -1882,11 +1882,30 @@ app.get('/api/tracking-workspace', async (req, res) => {
       hasFinalEvidence:complete,verifiedZero:complete&&summary.actionable===0,
       basis:'EXACT_DATED_SOURCE_FINAL_AND_WORKSPACE_MEMBERS'};
   }
+  let openSourceCoverage=null;
+  if(scope==='open'&&reportDate&&snapshotId){
+    try{
+      const db=getDb();
+      const required=new Set(db.prepare(`SELECT shipmentCode,businessType FROM unified_import_rows WHERE snapshotId=? AND reportDate=?`)
+        .all(snapshotId,reportDate).map(row=>String(row.businessType||'').toUpperCase()+'|'+String(row.shipmentCode||'').trim().toUpperCase()));
+      const whppBills=db.prepare(`SELECT DISTINCT shipmentCode FROM business_daily_parse_rows
+        WHERE businessType='WHPP' AND reportDate=?`).all(reportDate);
+      for(const row of whppBills)required.add('WHPP|'+String(row.shipmentCode||'').trim().toUpperCase());
+      const found=new Set(allRows.map(row=>String(row.businessType||'').toUpperCase()+'|'+String(row.shipmentCode||'').trim().toUpperCase()));
+      const missing=[...required].filter(key=>!found.has(key));
+      const extra=[...found].filter(key=>!required.has(key));
+      openSourceCoverage={expected:required.size,observed:found.size,missing:missing.length,extra:extra.length,
+        complete:required.size>0&&missing.length===0&&extra.length===0,
+        basis:'EXACT_7BUSINESS_WAYBILL_AND_DATED_WHPP'};
+    }catch(error){
+      openSourceCoverage={complete:false,error:String(error?.message||error),basis:'EXACT_SOURCE_READ_FAILED'};
+    }
+  }
   const payload={ok:true,reportDate,batchId:unified?.batchId||'',snapshotId,scope,
     allRowCount: allRows.length,openRowCount:allRows.filter(row=>!row.isClosed).length,
     returnedCompletedCount:allRows.filter(row=>row.isReturned===true).length,
     displayedRows:Math.min(rows.length,5000),truncated:rows.length>5000,
-    summary,qualitySignals,qualityRows,qcCoverage,rows: rows.slice(0, 5000)};
+    summary,qualitySignals,qualityRows,qcCoverage,openSourceCoverage,rows: rows.slice(0, 5000)};
   if(cacheEligible){
     v765WorkspaceReadCache.delete(cacheKey);
     v765WorkspaceReadCache.set(cacheKey,{at:Date.now(),payload});
@@ -2776,9 +2795,11 @@ function workspaceRows(state = {}, businessType = 'CCSL') {
     // 85 is historical POD evidence. Prefer the saved shipment terminal code.
     const terminalCode=String(row.shipmentStatus ?? scan.shipmentStatus ?? row.orderStatus ?? scan.orderStatus ?? '').trim();
     const isPod = row.是否POD === '是' || Number(row.isPod||0)===1
-      || Number(scan.isPod||0)===1 || terminalCode==='60' || terminalCode==='85';
+      || Number(scan.isPod||0)===1 || terminalCode==='60' || terminalCode==='85'
+      || String(scan.skipTrackReason||'')==='MANUAL_TERMINAL_POD';
     const returnText = `${row.退回状态 || ''} ${row.primaryCategory || ''}`.trim().toUpperCase();
-    const isReturn = !isPod && (row.truthEvidence?.returned===true || terminalCode==='81') || (!isPod && (
+    const isReturn = !isPod && (row.truthEvidence?.returned===true || terminalCode==='81'
+      || String(scan.skipTrackReason||'')==='MANUAL_TERMINAL_RETURNED') || (!isPod && (
       /(^|\s)(已退回|退回完成|RETURNED|RETURN_COMPLETED|RETURN)(\s|$)/.test(returnText)
       && !/(未退回|非退回|待退回|NOT_RETURNED|NO_RETURN|PENDING_RETURN)/.test(returnText)));
     const failed = /fail|失败|refresh_failed/i.test(`${row.查询状态 || ''} ${row.API状态 || ''} ${batch.status || ''}`);
