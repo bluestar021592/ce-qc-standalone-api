@@ -2196,6 +2196,7 @@ async function loadSettings(){
     setText('v625LocalUrl',net.localUrl||location.origin);
     setText('v625LanUrl',net.lanUrl||'未启用');
     setText('v625ShopMeta',fmt(num(first(shops,['count','total','active','size']))??0)+' 个CP码');
+    void loadCompleteShopStatus();
   }
 }
 
@@ -2398,7 +2399,38 @@ async function settingsBackupNow(){
 }
 async function ceLogin(){try{const r=await post('/api/ce-login',{tenantId:byId('v625CeTenant').value||'000000',username:byId('v625CeUser').value.trim(),password:byId('v625CePassword').value},30000);byId('v625CePassword').value='';setText('v625CeStatus','已连接');note('v625CeMessage','CE登录成功：'+(r.authStatus?.account||''),'success')}catch(e){note('v625CeMessage','登录失败：'+e.message,'error')}}
 async function ceLogout(){try{await post('/api/ce-logout',{},15000);setText('v625CeStatus','未连接');note('v625CeMessage','已退出CE系统。','success')}catch(e){note('v625CeMessage','退出失败：'+e.message,'error')}}
-async function importShop(){const file=byId('v625ShopFile').files?.[0];if(!file)return;const fd=new FormData();fd.append('file',file);try{const r=await request('/api/import-shop-codes',{method:'POST',body:fd},60000);v748QualityRefreshKeys.clear();setText('v625ShopMeta','更新完成 · '+fmt(r.imported?.imported||0)+'个门店编码已生效');if(page==='business'&&v628BusinessReportDate)void refreshV748BusinessTrackQuality(v628BusinessReportDate)}catch(e){setText('v625ShopMeta','更新失败：'+e.message)}}
+let v780CandidateShopSource = '';
+async function loadCompleteShopStatus(){
+  try{
+    const data=await json('/api/admin/shop-codes/complete-status',10000);
+    v780CandidateShopSource=String(data.candidateSource||'');
+    const status=data.active
+      ?'已激活完整名单：'+data.activeCount+'码 · '+(data.activeSource||'')+'；旧编码不参与当前到店判定'
+      :'尚未激活完整名单；最新已保存文件 '+(data.candidateSource||'无')+'：'+data.candidateCount+'码';
+    setText('v780ActiveShopStatus',status);
+    const activate=byId('v780ActivateSavedShops');
+    if(activate) activate.disabled=!data.readyToActivate;
+    if(data.active)setText('v625ShopMeta','当前有效 '+data.activeCount+' 个门店编码 · 完整名单');
+  }catch(error){setText('v780ActiveShopStatus','无法核验门店名单：'+(error?.message||error));}
+}
+async function activateSavedShopCodes(){
+  const btn=byId('v780ActivateSavedShops');
+  if(btn)btn.disabled=true;
+  try{
+    if(!v780CandidateShopSource)await loadCompleteShopStatus();
+    const r=await post('/api/admin/shop-codes/activate-complete',{
+      sourceFile:v780CandidateShopSource,expectedCount:72
+    },20000);
+    v748QualityRefreshKeys.clear();
+    setText('v625ShopMeta','当前有效 '+r.activeCount+' 个门店编码 · 完整名单');
+    setText('v780ActiveShopStatus','完整72码激活成功 · '+r.sourceFile+' · 旧门店不会再计入当前到店');
+    await loadCompleteShopStatus();
+  }catch(error){
+    setText('v780ActiveShopStatus','完整名单未激活：'+(error?.message||error));
+    if(btn)btn.disabled=false;
+  }
+}
+async function importShop(){const file=byId('v625ShopFile').files?.[0];if(!file)return;const fd=new FormData();fd.append('file',file);try{const r=await request('/api/import-shop-codes',{method:'POST',body:fd},60000);v748QualityRefreshKeys.clear();setText('v625ShopMeta','保存完成 · '+fmt(r.imported?.imported||0)+'码，需激活完整名单后生效');void loadCompleteShopStatus();if(page==='business'&&v628BusinessReportDate)void refreshV748BusinessTrackQuality(v628BusinessReportDate)}catch(e){setText('v625ShopMeta','更新失败：'+e.message)}}
 
 async function loadLogs(){
   try{
@@ -2545,6 +2577,7 @@ function bind(){
   byId('v625AddUser')?.addEventListener('click',()=>openUserEditor());byId('v625CancelUserEdit')?.addEventListener('click',closeUserEditor);byId('v625SaveUser')?.addEventListener('click',saveSettingsUser);
   byId('v625CeLogin')?.addEventListener('click',ceLogin);byId('v625CeLogout')?.addEventListener('click',ceLogout);
   byId('v625ShopFile')?.addEventListener('change',()=>setText('v625ShopFileName',byId('v625ShopFile').files?.[0]?.name||'请选择CP码文件'));byId('v625ShopImport')?.addEventListener('click',importShop);
+  byId('v780ActivateSavedShops')?.addEventListener('click',activateSavedShopCodes);
   byId('v625SettingsBackupNow')?.addEventListener('click',settingsBackupNow);
   byId('v625LogSearch')?.addEventListener('click',loadLogs);
   byId('v625BackupNow')?.addEventListener('click',backupNow);byId('v626BackupNowTop')?.addEventListener('click',backupNow);
