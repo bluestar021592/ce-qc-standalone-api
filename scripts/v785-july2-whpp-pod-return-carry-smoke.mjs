@@ -74,6 +74,19 @@ try{
    CREATE TABLE scan_results(shipmentCode TEXT,isPod INTEGER,needsTrackQuery INTEGER,skipTrackReason TEXT,updatedAt TEXT);
    CREATE TABLE business_scan_results(shipmentCode TEXT,businessType TEXT,isPod INTEGER,needsTrackQuery INTEGER,skipTrackReason TEXT,updatedAt TEXT);
   `);
+  const carryCode=fs.readFileSync(new URL('../src/carryoverRefreshScheduler.js',import.meta.url),'utf8');
+  const carryBegin=carryCode.indexOf('function terminalFlags(row = {})');
+  const carryEnd=carryCode.indexOf('export function cambodiaClock(',carryBegin);
+  assert.ok(carryBegin>=0&&carryEnd>carryBegin,'carry refresh must have real status normalization');
+  const normalizer=new Function('classifyV246Terminal',carryCode.slice(carryBegin,carryEnd)
+    +'\nreturn normalizeDynamicCarryRow;')(()=>{throw new Error('TMS codes must take strict precedence over legacy event codes')});
+  const normalizedPod=normalizer({shipmentStatus:'60',currentState:'OPEN',eventCode:'60'});
+  const normalizedReturned=normalizer({shipmentStatus:'81',currentState:'OPEN'});
+  const normalizedReturning=normalizer({shipmentStatus:'80',currentState:'OPEN',primaryCategory:'退回'});
+  assert.equal(normalizedPod.currentState,'POD');
+  assert.equal(normalizedReturned.currentState,'RETURN_COMPLETED');
+  assert.equal(normalizedReturning.currentState,'RETURN_IN_PROGRESS');
+  assert.equal(normalizedReturning.dynamicCarryRule,'KEEP_OPEN_UNTIL_RETURN_86');
   const bill=['D785POD','D785RETURN','D785RETURNING'];
   db.prepare('INSERT INTO unified_import_batches VALUES(?,?,?,?,?)').run('BATCH-785',snap,d,'VALID','2026-10-09T00:00:00Z');
   const addState=db.prepare('INSERT INTO shipment_current_state VALUES(?,?,?,?,?,?,?,?,?)');
