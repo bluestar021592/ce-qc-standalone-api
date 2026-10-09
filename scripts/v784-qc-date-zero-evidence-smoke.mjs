@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 
-const server=fs.readFileSync(new URL('../server.js',import.meta.url),'utf8');
+const server=fs.readFileSync(new URL('../server.js',import.meta.url),'utf8').replace(/\r\n?/g,'\n');
 const ui=fs.readFileSync(new URL('../public/v625-shell.js',import.meta.url),'utf8');
 const start=server.indexOf("  let qcCoverage=null;\n  if(qcActionMode){",server.indexOf("app.get('/api/tracking-workspace'"));
 const end=server.indexOf('  const payload={ok:true,reportDate',start);
