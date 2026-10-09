@@ -22,11 +22,13 @@ export function qcDetailRead(db,{reportDate='',shipmentCode='',businessType='',s
   function matchingWhppSaved(payload,kind,whppSnapshotId=''){
     const state=payload?.state&&typeof payload.state==='object'?payload.state:payload;
     if(!state||String(state.reportDate||'').slice(0,10)!==date)return null;
-    const final=(state.finalRows||[]).find(r=>
-      String(r.shipmentCode||r.运单号||r.waybill||'').trim().toUpperCase()===bill
+    const matches=r=>String(r?.shipmentCode||r?.运单号||r?.waybill||'').trim().toUpperCase()===bill
       && (!r.reportDate||String(r.reportDate).slice(0,10)===date)
-      && (!r.businessType||String(r.businessType).toUpperCase()==='WHPP'));
-    return final?{state,final,kind,whppSnapshotId}:null;
+      && (!r.businessType||String(r.businessType).toUpperCase()==='WHPP');
+    const final=(state.finalRows||[]).find(matches)||null;
+    const scan=(state.scanResults||[]).find(matches)||null;
+    const hasEvents=(state.trackEvents||[]).some(matches);
+    return final||scan||hasEvents?{state,final,scan,kind,whppSnapshotId}:null;
   }
   let whppSaved=null;
   // A verified unified WHPP member can still have scan/final evidence only
@@ -64,10 +66,7 @@ export function qcDetailRead(db,{reportDate='',shipmentCode='',businessType='',s
       description:String(raw.eventDesc||raw.description||raw.statusText||raw.轨迹描述||'').slice(0,350)};
   }
   const exact=[business,date,bill];
-  const savedRow=rows=>(rows||[]).find(r=>
-    String(r.shipmentCode||r.运单号||r.waybill||'').trim().toUpperCase()===bill
-    && (!r.reportDate||String(r.reportDate).slice(0,10)===date))||null;
-  const savedScan=whppSaved?savedRow(whppSaved.state.scanResults):null;
+  const savedScan=whppSaved?.scan||null;
   const scan=rawView(db.prepare('SELECT isPod,orderStatus,updatedAt,rawJson FROM business_scan_results WHERE businessType=? AND reportDate=? AND shipmentCode=? LIMIT 1').get(...exact))
     ||(savedScan?{isPod:savedScan.isPod??savedScan.是否POD??null,orderStatus:savedScan.orderStatus||'',
       updatedAt:savedScan.updatedAt||'',sourceNote:'WHPP已保存扫描结果'}:null);
@@ -95,6 +94,7 @@ export function qcDetailRead(db,{reportDate='',shipmentCode='',businessType='',s
     for(const event of whppSaved.state.trackEvents||[]){
       if(String(event.shipmentCode||event.运单号||event.waybill||'').trim().toUpperCase()!==bill)continue;
       if(event.reportDate&&String(event.reportDate).slice(0,10)!==date)continue;
+      if(event.businessType&&String(event.businessType).toUpperCase()!=='WHPP')continue;
       events.push({eventTime:String(event.eventTime||event.time||event.时间||''),
         eventCode:String(event.eventCode||event.statusCode||''),
         description:String(event.description||event.eventDesc||event.statusText||event.轨迹描述||'').slice(0,350)});
