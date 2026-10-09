@@ -1932,7 +1932,7 @@ function qcActionClassify(row){
   if(query==='待重试'||/失败|RETRY|QUERY_FAILED/i.test(query))return{
     key:'RETRY',name:'轨迹待重试',team:'工单组',
     days:null,action:'核实接口和最后有效节点后重试查询，不得虚构状态'};
-  if(/退回中|RETURN_IN_PROGRESS|RETURNING/.test(category+' '+special))return{
+  if(String(row.shipmentStatus||'')==='80'||/退回中|RETURN_IN_PROGRESS|RETURNING/.test(category+' '+special))return{
     key:'RETURNING',name:'退回中待核验',team:'返仓 / 退回负责人',
     days:null,action:'核对退回轨迹、交接证据和实际退回完成时间'};
   return{key:'OTHER',name:'其他待核验',team:'工单组 / 派送组长',
