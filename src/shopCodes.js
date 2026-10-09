@@ -57,8 +57,17 @@ export function getActiveCompleteShopSet(db = getDb()) {
 }
 
 function newestSavedAdminUpload(db) {
-  // Existing V779 import rows contain the source filename and update timestamp.
-  // Require an exact 72-member source group. Old rows remain as history.
+  // New imports have immutable batch membership, even if their filenames are
+  // reused. Pre-V780 (already uploaded) workbooks fall back to saved source
+  // rows, so the existing 72-file can be activated without reuploading.
+  const hasBatch=db.prepare("SELECT 1 AS ok FROM sqlite_master WHERE type='table' AND name='shop_cp_import_snapshots'").get();
+  if(hasBatch){
+    const row=db.prepare('SELECT sourceFile,membersJson,createdAt FROM shop_cp_import_snapshots ORDER BY id DESC LIMIT 1').get();
+    if(row){
+      const members=JSON.parse(String(row.membersJson||'[]'));
+      return {sourceFile:String(row.sourceFile||''),latest:String(row.createdAt||''),count:members.length,members};
+    }
+  }
   const file=db.prepare(`
     SELECT sourceFile, COUNT(*) AS count, MAX(updatedAt) AS latest
     FROM shop_cp_codes
@@ -268,6 +277,10 @@ export function importShopCodesFromWorkbook(filePath, sourceFile = '') {
   seedLatestShopWhitelist(db);
   const before = loadAllPersistedShopCodes(db);
   const now = nowIso();
+  db.exec(`CREATE TABLE IF NOT EXISTS shop_cp_import_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    sourceFile TEXT NOT NULL, membersJson TEXT NOT NULL, createdAt TEXT NOT NULL
+  )`);
   const stmt = db.prepare(`
     INSERT INTO shop_cp_codes(shopCode, shopName, sourceFile, createdAt, updatedAt)
     VALUES(?, ?, ?, ?, ?)
@@ -288,6 +301,8 @@ export function importShopCodesFromWorkbook(filePath, sourceFile = '') {
       else unchanged += 1;
       stmt.run(code, name, sourceFile || '', now, now);
     }
+    db.prepare('INSERT INTO shop_cp_import_snapshots(sourceFile,membersJson,createdAt) VALUES(?,?,?)')
+      .run(String(sourceFile||''),JSON.stringify([...found].sort(([a],[b])=>a.localeCompare(b)).map(([code,name])=>({code,name}))),now);
     db.exec('COMMIT');
   } catch (error) {
     db.exec('ROLLBACK');
@@ -325,7 +340,7 @@ export function detectShopInfo({ events = [], shopCodeMap = null, shopAliasMap =
   }
 
   const supportedTargetCode = extractSupportedShopCodes(evidence.targetNode)[0] || '';
-  const matched = matchTargetShop(evidence.targetNode, codeMap, aliasMap);
+  const matched = matchTargetShop(evidence.targetNode, codeMap, aliasMap, Boolean(getActiveCompleteShopSet()));
   if (!matched) {
     if (supportedTargetCode) {
       return { isShop: false, unknownShopCode: supportedTargetCode, ...evidence, matchedRule: 'UNKNOWN_SHOP_CODE' };
@@ -441,7 +456,7 @@ function loadPersistedShopCodeMap(db) {
   return out;
 }
 
-function matchTargetShop(targetNode, codeMap, aliasMap) {
+function matchTargetShop(targetNode, codeMap, aliasMap, strictCanonical = false) {
   const target = String(targetNode || '').trim();
   if (!target) return null;
   const codeSet = new Set(codeMap.keys());
@@ -451,6 +466,9 @@ function matchTargetShop(targetNode, codeMap, aliasMap) {
   const normalized = normalizeShopAlias(target);
   const direct = aliasMap.get(normalized);
   if (direct?.code) return { code: direct.code, name: codeMap.get(direct.code) || direct.name || direct.code, source: 'NAME_ALIAS', alias: normalized };
+  // Strict current mode never uses fuzzy or substring matching: it could turn
+  // a retired shop name into an arrival for a similarly named active shop.
+  if(strictCanonical)return null;
 
   // Some CE descriptions append operational words after the node name. Allow a
   // unique long alias to match as a substring, but never use short names this way.
