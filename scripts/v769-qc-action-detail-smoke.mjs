@@ -40,7 +40,7 @@ assert.equal(a.detail.source.snapshotId,snapshot);
 assert.equal(a.detail.source.regionCode,'PP');
 assert.equal(a.detail.hasProcessingEvidence,false,'CCSL evidence must not leak into WHPP detail');
 assert.equal(a.detail.finalRow,null);
-assert.match(a.detail.notice,/已找到此运单的日报来源/);
+assert.match(a.detail.notice,/已确认日报来源/,'verified import but no saved track remains explicit and never implies POD');
 assert.equal(a.detail.evidence.source,true);
 assert.equal(a.detail.evidence.trackEvents,0);
 assert.equal(qcDetailRead(db,{reportDate:date,businessType:'CE',shipmentCode:bill,snapshotId:snapshot}).code,'QC_DETAIL_MEMBER_MISSING');
