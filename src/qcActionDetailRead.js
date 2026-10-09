@@ -55,15 +55,32 @@ export function qcDetailRead(db,{reportDate='',shipmentCode='',businessType='',s
       description:String(raw.eventDesc||raw.description||raw.statusText||raw.轨迹描述||'').slice(0,350)};
   }
   const exact=[business,date,bill];
-  const scan=rawView(db.prepare('SELECT isPod,orderStatus,updatedAt,rawJson FROM business_scan_results WHERE businessType=? AND reportDate=? AND shipmentCode=? LIMIT 1').get(...exact));
-  const finalRow=rawView(db.prepare('SELECT isPod,primaryCategory,apiStatus,carryStatus,latestEventTime,latestEventDesc,latestNode,updatedAt,rawJson FROM business_final_rows WHERE businessType=? AND reportDate=? AND shipmentCode=? LIMIT 1').get(...exact));
+  const savedRow=rows=>(rows||[]).find(r=>
+    String(r.shipmentCode||r.运单号||r.waybill||'').trim().toUpperCase()===bill
+    && (!r.reportDate||String(r.reportDate).slice(0,10)===date))||null;
+  const savedScan=whppSaved?savedRow(whppSaved.state.scanResults):null;
+  const scan=rawView(db.prepare('SELECT isPod,orderStatus,updatedAt,rawJson FROM business_scan_results WHERE businessType=? AND reportDate=? AND shipmentCode=? LIMIT 1').get(...exact))
+    ||(savedScan?{isPod:savedScan.isPod??savedScan.是否POD??null,orderStatus:savedScan.orderStatus||'',
+      updatedAt:savedScan.updatedAt||'',sourceNote:'WHPP已保存扫描结果'}:null);
+  const persistedFinal=rawView(db.prepare('SELECT isPod,primaryCategory,apiStatus,carryStatus,latestEventTime,latestEventDesc,latestNode,updatedAt,rawJson FROM business_final_rows WHERE businessType=? AND reportDate=? AND shipmentCode=? LIMIT 1').get(...exact));
+  const whppFinal=whppSaved?.final;
+  const finalRow=persistedFinal||(whppFinal?{
+    isPod:whppFinal.isPod??whppFinal.是否POD??null,
+    primaryCategory:whppFinal.primaryCategory||whppFinal.主分类||whppFinal.异常分类||'',
+    apiStatus:whppFinal.apiStatus||whppFinal.API状态||'',
+    carryStatus:whppFinal.carryStatus||'',
+    latestEventTime:whppFinal.latestEventTime||whppFinal.最后节点时间||'',
+    latestEventDesc:whppFinal.latestEventDesc||whppFinal.最后节点||'',
+    latestNode:whppFinal.latestNode||whppFinal.最后节点||'',
+    updatedAt:whppFinal.updatedAt||'',sourceNote:'WHPP独立保存结果，非日报成员证明'
+  }:null);
   const track=rawView(db.prepare('SELECT shipmentStatus,statusText,apiStatus,updatedAt,rawJson FROM business_shipment_tracks WHERE businessType=? AND reportDate=? AND shipmentCode=? LIMIT 1').get(...exact));
   const events=db.prepare('SELECT eventTime,eventCode,rawJson FROM business_track_events WHERE businessType=? AND reportDate=? AND shipmentCode=? ORDER BY eventTime DESC,id DESC LIMIT 50').all(...exact).map(e=>{
     const parsed=safeJson(e.rawJson);
     return {eventTime:e.eventTime,eventCode:e.eventCode,
       description:String(parsed.description||parsed.eventDesc||parsed.statusText||parsed.remark||parsed.轨迹描述||'').slice(0,350)};
   });
-  const daily=db.prepare("SELECT sheetName,rowNumber,source_row_number,recipient_normalized,createdAt FROM business_daily_parse_rows WHERE businessType=? AND reportDate=? AND shipmentCode=? ORDER BY id DESC LIMIT 3").all(...exact);
+  const daily=business==='WHPP'?whppDaily:db.prepare("SELECT sheetName,rowNumber,source_row_number,recipient_normalized,createdAt FROM business_daily_parse_rows WHERE businessType=? AND reportDate=? AND shipmentCode=? ORDER BY id DESC LIMIT 3").all(...exact);
   const current=db.prepare('SELECT reportDate,snapshotId,state,apiStatus,lastEventTime,updatedAt FROM shipment_current_state WHERE shipmentCode=? AND businessType=? LIMIT 1').get(bill,business)||null;
   const source={shipmentCode:src.shipmentCode,businessType:src.businessType,reportDate:src.reportDate,
     snapshotId:src.snapshotId,regionCode:src.regionCode||'',
