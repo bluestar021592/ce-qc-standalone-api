@@ -87,6 +87,9 @@ export function getCompleteShopActivationStatus() {
   const active=getActiveCompleteShopSet(db);
   const latest=newestSavedAdminUpload(db);
   const candidateHash=latest?crypto.createHash('sha256').update(JSON.stringify(latest.members)).digest('hex'):'';
+  const activeCodes=new Set(active?.members?.map(item=>item.code)||[]);
+  const historical=db.prepare('SELECT shopCode FROM shop_cp_codes ORDER BY shopCode').all()
+    .map(row=>normalizeShopCode(row.shopCode)).filter(code=>!activeCodes.has(code));
   return {
     active:!!active,
     mode:active?.mode || 'LEGACY_UNION',
@@ -94,6 +97,9 @@ export function getCompleteShopActivationStatus() {
     activeSource:active?.sourceFile || '',
     activatedAt:active?.activatedAt || '',
     activeVersion:active?.hash || '',
+    activeSamples:active?.members?.slice(0,3)||[],
+    historicalExcludedCount:active?historical.length:0,
+    inactiveExamples:active?historical.slice(0,3):[],
     candidateSource:latest?.sourceFile || '',
     candidateCount:latest?.count || 0,
     candidateHash,
