@@ -1827,36 +1827,48 @@ app.get('/api/tracking-workspace', async (req, res) => {
   // A source batch with no finalized evidence is NOT a genuine zero-anomaly day.
   let qcCoverage=null;
   if(qcActionMode){
-    const db=getDb();
-    const type=requestedBusinessType;
-    const source=db.prepare(`SELECT COUNT(DISTINCT shipmentCode) AS count FROM unified_import_rows
-      WHERE snapshotId=? AND (?='' OR businessType=?)`).get(snapshotId,type,type);
-    const whppDaily=db.prepare(`SELECT COUNT(DISTINCT shipmentCode) AS count FROM business_daily_parse_rows
-      WHERE reportDate=? AND businessType='WHPP'`).get(reportDate);
-    const sourceCount=Number(source?.count||0);
-    const whppCount=Number(whppDaily?.count||0);
-    const expected=type==='WHPP'?Math.max(sourceCount,whppCount):
-      !type?sourceCount+Math.max(0,whppCount-Number(db.prepare(`SELECT COUNT(DISTINCT shipmentCode) AS count
-        FROM unified_import_rows WHERE snapshotId=? AND businessType='WHPP'`).get(snapshotId)?.count||0)):sourceCount;
-    const finalCcsl=db.prepare(`SELECT COUNT(DISTINCT f.shipmentCode) AS count FROM final_rows f
-      INNER JOIN unified_import_rows u ON u.shipmentCode=f.shipmentCode AND u.reportDate=f.reportDate
-      WHERE u.snapshotId=? AND (?='' OR u.businessType=?) AND u.businessType NOT IN ('SHOPEECN','SHOPEEVN')`)
-      .get(snapshotId,type,type);
-    const finalShopee=db.prepare(`SELECT COUNT(DISTINCT (u.businessType||'|'||f.shipmentCode)) AS count
-      FROM business_final_rows f INNER JOIN unified_import_rows u
+    const db=getDb(),type=requestedBusinessType;
+    const validSource=new Set();
+    const key=(business,bill)=>String(business||'').toUpperCase()+'|'+String(bill||'').trim().toUpperCase();
+    // Exact imported snapshot membership, not a broad "some final rows exist".
+    const sourceRows=db.prepare(`SELECT shipmentCode,businessType FROM unified_import_rows
+      WHERE snapshotId=? AND (?='' OR businessType=?)`).all(snapshotId,type,type);
+    for(const item of sourceRows)validSource.add(key(item.businessType,item.shipmentCode));
+    const withWhpp=type===''||type==='WHPP';
+    if(withWhpp){
+      const whppMembers=db.prepare(`SELECT DISTINCT shipmentCode FROM business_daily_parse_rows
+        WHERE reportDate=? AND businessType='WHPP'`).all(reportDate);
+      for(const row of whppMembers)validSource.add(key('WHPP',row.shipmentCode));
+    }
+    // Final proof must be present for the SAME waybill+date and business.
+    const finalEvidence=new Set();
+    const finalizedCcsl=db.prepare(`SELECT DISTINCT f.shipmentCode,u.businessType
+      FROM final_rows f JOIN unified_import_rows u
         ON u.shipmentCode=f.shipmentCode AND u.reportDate=f.reportDate
       WHERE u.snapshotId=? AND (?='' OR u.businessType=?)
-        AND u.businessType IN ('SHOPEECN','SHOPEEVN') AND f.businessType='SHOPEE'`)
-      .get(snapshotId,type,type);
-    const finalWhpp=(type==='WHPP'||!type)?db.prepare(`SELECT COUNT(DISTINCT shipmentCode) AS count
-      FROM business_final_rows WHERE businessType='WHPP' AND reportDate=?`).get(reportDate):null;
-    const finalEvidence=Number(finalCcsl?.count||0)+Number(finalShopee?.count||0)+Number(finalWhpp?.count||0);
-    const sourceMembers=expected;
-    const uniqueObserved=new Set(allRows.map(row=>row.businessType+'|'+row.shipmentCode)).size;
-    const complete=expected>0&&finalEvidence>=expected&&uniqueObserved>=expected;
-    qcCoverage={sourceMembers,evidenceRows:uniqueObserved,finalEvidenceRows:finalEvidence,
-      missingFinalEvidence:Math.max(0,expected-finalEvidence),
-      missingVisibleMembers:Math.max(0,expected-uniqueObserved),
+      AND u.businessType NOT IN ('SHOPEECN','SHOPEEVN','WHPP')`).all(snapshotId,type,type);
+    for(const row of finalizedCcsl)finalEvidence.add(key(row.businessType,row.shipmentCode));
+    const finalizedShopee=db.prepare(`SELECT DISTINCT f.shipmentCode,u.businessType
+      FROM business_final_rows f JOIN unified_import_rows u
+        ON u.shipmentCode=f.shipmentCode AND u.reportDate=f.reportDate
+      WHERE u.snapshotId=? AND (?='' OR u.businessType=?)
+        AND u.businessType IN ('SHOPEECN','SHOPEEVN') AND f.businessType='SHOPEE'`).all(snapshotId,type,type);
+    for(const row of finalizedShopee)finalEvidence.add(key(row.businessType,row.shipmentCode));
+    if(withWhpp){
+      const whppFinal=db.prepare(`SELECT DISTINCT shipmentCode FROM business_final_rows
+        WHERE businessType='WHPP' AND reportDate=?`).all(reportDate);
+      for(const row of whppFinal)finalEvidence.add(key('WHPP',row.shipmentCode));
+    }
+    const visible=new Set(allRows.map(row=>{
+      const business=String(row.businessType||'').toUpperCase();
+      return key(type.startsWith('SHOPEE')&&business==='SHOPEE'?type:business,row.shipmentCode);
+    }));
+    const missingFinal=[...validSource].filter(bill=>!finalEvidence.has(bill));
+    const missingVisible=[...validSource].filter(bill=>!visible.has(bill));
+    const complete=validSource.size>0&&missingFinal.length===0&&missingVisible.length===0;
+    qcCoverage={sourceMembers:validSource.size,evidenceRows:visible.size,
+      finalEvidenceRows:validSource.size-missingFinal.length,
+      missingFinalEvidence:missingFinal.length,missingVisibleMembers:missingVisible.length,
       hasFinalEvidence:complete,verifiedZero:complete&&summary.actionable===0,
       basis:'EXACT_DATED_SOURCE_FINAL_AND_WORKSPACE_MEMBERS'};
   }
