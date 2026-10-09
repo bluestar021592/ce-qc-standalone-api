@@ -2832,8 +2832,13 @@ function workspaceRows(state = {}, businessType = 'CCSL') {
       || Number(scan.isPod||0)===1 || terminalCode==='60' || terminalCode==='85'
       || String(scan.skipTrackReason||'')==='MANUAL_TERMINAL_POD';
     const returnText = `${row.退回状态 || ''} ${row.primaryCategory || ''}`.trim().toUpperCase();
-    const isReturn = !isPod && terminalCode!=='80' && ((row.truthEvidence?.returned===true || terminalCode==='81'
-      || String(scan.skipTrackReason||'')==='MANUAL_TERMINAL_RETURNED') || (
+    const explicitReturn = row.truthEvidence?.returned===true || terminalCode==='81'
+      || String(scan.skipTrackReason||'')==='MANUAL_TERMINAL_RETURNED';
+    // WHPP: a loose historical category "退回" does not prove receipt by the
+    // return depot. Only strictly saved return-completed evidence closes it.
+    const isWhppRow=String(row.businessType||businessType).toUpperCase()==='WHPP';
+    const isReturn = !isPod && terminalCode!=='80' && (
+      explicitReturn || (!isWhppRow &&
       /(^|\s)(已退回|退回完成|RETURNED|RETURN_COMPLETED|RETURN)(\s|$)/.test(returnText)
       && !/(未退回|非退回|待退回|NOT_RETURNED|NO_RETURN|PENDING_RETURN)/.test(returnText)));
     const failed = /fail|失败|refresh_failed/i.test(`${row.查询状态 || ''} ${row.API状态 || ''} ${batch.status || ''}`);
