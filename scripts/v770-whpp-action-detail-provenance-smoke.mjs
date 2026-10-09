@@ -48,6 +48,17 @@ assert.equal(unverified.detail.evidence.source,false,'saved final cannot pretend
 assert.equal(unverified.detail.source.sourceKind,'WHPP_FINAL_ONLY');
 assert.match(unverified.detail.notice,/日报来源成员/);
 assert.equal(unverified.detail.finalRow.latestEventDesc,'需要核实扫描节点');
+// Regression: a unified WHPP member must not lose independent exact-day
+// saved scan/final evidence merely because its import membership is verified.
+db.prepare("INSERT INTO unified_import_rows VALUES(?,?,?,?,?,?,?,?,?,?,?)").run('B-WHPP-770',b,'WHPP',date,snap,'PP','','sheet1',14,'WHPP verified member','{}');
+const verifiedWithSaved=run(b);
+assert.equal(verifiedWithSaved.ok,true);
+assert.equal(verifiedWithSaved.detail.source.sourceKind,'UNIFIED_IMPORT');
+assert.equal(verifiedWithSaved.detail.evidence.source,true);
+assert.equal(verifiedWithSaved.detail.evidence.final,true,'read existing WHPP-only final when imported source is present');
+assert.equal(verifiedWithSaved.detail.finalRow.latestEventDesc,'需要核实扫描节点');
+assert.equal(verifiedWithSaved.detail.source.snapshotId,snap,'preserve unified immutable snapshot');
+
 assert.equal(run('UNKNOWN').code,'QC_DETAIL_MEMBER_MISSING','unknown member stays blocked');
 assert.equal(run(b,'WHPP','2026-07-05').code,'QC_DETAIL_SNAPSHOT_MISSING','cannot borrow another date');
 assert.equal(run(b,'SHOPEECN').code,'QC_DETAIL_MEMBER_MISSING','cannot borrow another business');
