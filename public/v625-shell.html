@@ -380,8 +380,10 @@
               <label><span>业务板块</span><select id="v625ExceptionBusiness"><option value="">全部七业务</option><option value="CE">CE</option><option value="CEAF">CEAF空运</option><option value="TBKH">TBKH</option><option value="ALI1688">ALI1688</option><option value="WHPP">WHPP</option><option value="SHOPEECN">SHOPEE CN</option><option value="SHOPEEVN">SHOPEE VN</option></select></label>
               <label><span>异常类型</span><select id="v625ExceptionType"><option value="">全部待核验</option><option value="PENDING_GAP">Pending不连续</option><option value="OC_2_PLUS">OC 2天+</option><option value="SHOP_STAY">门店待跟进</option><option value="RETRY">轨迹待重试</option><option value="RETURNING">退回中</option><option value="OTHER">其他待核验</option></select></label>
               <label class="v768-keyword"><span>搜索运单 / 门店</span><input id="v768ExceptionKeyword" type="search" placeholder="输入单号、门店名称或编码"></label>
-              <button id="v625ExceptionSearch" class="v625-btn primary" type="button">查询真实数据</button>
+              <button id="v625ExceptionSearch" class="v625-btn primary" type="button">查询待处理异常</button>
+              <button id="v776OpenAnyWaybill" class="v625-btn outline" type="button">运单直查（含已闭环）</button>
             </div>
+            <p class="v768-evidence" id="v776DirectHelp">待处理清单显示0票时，也可以输入完整运单号，选择日期与业务后点击“运单直查”，查看已POD、已取消、已退回及其他历史记录；只读，不会重新扫描。</p>
             <p class="v768-evidence" id="v768ExceptionEvidence" role="status">当前使用已保存的最终记录与轨迹证据。请选择日期后查询；不需要重新扫描。</p>
           </section>
           <div class="v625-quality-grid exception-summary">
