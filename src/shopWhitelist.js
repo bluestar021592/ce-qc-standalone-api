@@ -158,11 +158,11 @@ export function seedLatestShopWhitelist(db) {
     INSERT INTO shop_whitelist_aliases(version, shopCode, alias, createdAt)
     VALUES(?,?,?,?) ON CONFLICT(version,shopCode,alias) DO NOTHING
   `);
+  // The bundled whitelist is a baseline, not an authority over user-uploaded
+  // code/name corrections. Refresh only rows previously seeded by a whitelist.
   const legacy = db.prepare(`
     INSERT INTO shop_cp_codes(shopCode, shopName, sourceFile, createdAt, updatedAt)
     VALUES(?,?,?,?,?)
-    // The bundled whitelist is a baseline, not an authority over user-uploaded
-    // code/name corrections. Refresh only rows previously seeded by a whitelist.
     ON CONFLICT(shopCode) DO UPDATE SET
       shopName=excluded.shopName,sourceFile=excluded.sourceFile,updatedAt=excluded.updatedAt
     WHERE shop_cp_codes.sourceFile LIKE 'whitelist:%'
