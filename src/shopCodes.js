@@ -86,6 +86,7 @@ export function getCompleteShopActivationStatus() {
   const db=getDb();
   const active=getActiveCompleteShopSet(db);
   const latest=newestSavedAdminUpload(db);
+  const candidateHash=latest?crypto.createHash('sha256').update(JSON.stringify(latest.members)).digest('hex'):'';
   return {
     active:!!active,
     mode:active?.mode || 'LEGACY_UNION',
@@ -95,11 +96,13 @@ export function getCompleteShopActivationStatus() {
     activeVersion:active?.hash || '',
     candidateSource:latest?.sourceFile || '',
     candidateCount:latest?.count || 0,
-    readyToActivate:Boolean(latest && latest.count===COMPLETE_SHOP_EXPECTED_COUNT)
+    candidateHash,
+    needsActivation:Boolean(latest && active?.hash!==candidateHash),
+    readyToActivate:Boolean(latest && latest.count===COMPLETE_SHOP_EXPECTED_COUNT && active?.hash!==candidateHash)
   };
 }
 
-export function activateSavedCompleteShopList({sourceFile='',expectedCount=COMPLETE_SHOP_EXPECTED_COUNT}={}) {
+export function activateSavedCompleteShopList({sourceFile='',expectedCount=COMPLETE_SHOP_EXPECTED_COUNT,expectedHash=''}={}) {
   const db=getDb();
   const newest=newestSavedAdminUpload(db);
   if(!newest || newest.count!==COMPLETE_SHOP_EXPECTED_COUNT || Number(expectedCount)!==COMPLETE_SHOP_EXPECTED_COUNT)
@@ -114,6 +117,8 @@ export function activateSavedCompleteShopList({sourceFile='',expectedCount=COMPL
   }
   const now=nowIso();
   const hash=crypto.createHash('sha256').update(JSON.stringify(newest.members)).digest('hex');
+  if(expectedHash && String(expectedHash)!==hash)
+    throw new Error('COMPLETE_SHOP_LIST_CHANGED: 待激活门店名单已变化，请刷新页面后再确认');
   const record={mode:'COMPLETE',sourceFile:newest.sourceFile,activatedAt:now,hash,members:newest.members};
   db.exec(`CREATE TABLE IF NOT EXISTS shop_active_code_set_history (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
