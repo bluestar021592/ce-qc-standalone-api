@@ -41,6 +41,7 @@ const TASKS=[
   ['node',['scripts/v584-local-update-gate-smoke.mjs']],
   ['node',['--check','src/shopWhitelist.js']],
   ['node',['scripts/v778-shop-code-admin-priority-smoke.mjs']],
+  ['node',['scripts/v780-complete-72-current-stores-smoke.mjs']],
   ['node',['--check','bootstrap.js']],
   ['node',['--check','server.js']],
   ['node',['--check','src/homeQualitySummary.js']],
