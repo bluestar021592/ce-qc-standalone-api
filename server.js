@@ -28,7 +28,7 @@ import { createDatabaseBackup, deleteAllBackups, deleteBackup, fileHash, getBack
 import { closeDb, ensureRuntimeDirs, getDb, getRuntimeConfig } from './src/db.js';
 import { createOrRecoverRun, getCurrentReportDate, getDbStatus, getRunStatus, listExportRecords, loadDetail, resetRunForReport, updateRunLock } from './src/store.js';
 import { buildConsistencyReport } from './src/consistency.js';
-import { getShopCodeSummary, importShopCodesFromWorkbook } from './src/shopCodes.js';
+import { getShopCodeSummary, importShopCodesFromWorkbook, getCompleteShopActivationStatus, activateSavedCompleteShopList } from './src/shopCodes.js';
 import { appendRuntimeLog } from './src/runtimeLog.js';
 import { createDashboardSnapshot, getMatchingSnapshot, getSnapshotById, listSnapshotHistory, repairSnapshotFromStoredData } from './src/snapshots.js';
 import { appendHistorySummary, buildLongBackupV2 } from './src/longBackup.js';
@@ -1115,6 +1115,23 @@ app.post('/api/import/daily-report', upload.single('file'), handleDailyReportImp
 app.post('/api/import/unified-daily-report', upload.single('file'), handleUnifiedDailyImport);
 app.get('/api/import/unified-latest', (req, res) => res.json({ ok: true, import: getLatestUnifiedImport() }));
 app.post('/api/shopee/import-excel', upload.single('file'), handleShopeeDailyImport);
+// An explicit ADMIN activation, never automatic on startup or import.
+// The existing 72 rows are snapshotted; older shop rows and track evidence stay
+// intact and can be consulted as history but cannot count as current arrivals.
+app.get('/api/admin/shop-codes/complete-status', requireRole('ADMIN'), (req,res)=>{
+  try { res.json({ok:true,...getCompleteShopActivationStatus()}); }
+  catch(e){res.status(409).json({ok:false,error:e.message});}
+});
+app.post('/api/admin/shop-codes/activate-complete', requireRole('ADMIN'), (req,res)=>{
+  try{
+    const result=activateSavedCompleteShopList({
+      sourceFile:req.body?.sourceFile||'',
+      expectedCount:req.body?.expectedCount
+    });
+    try{auditAction(req,'SHOP_COMPLETE_SET_ACTIVATED',{sourceFile:result.sourceFile,activeCount:result.activeCount,version:result.version});}catch{}
+    res.json(result);
+  }catch(e){res.status(409).json({ok:false,error:e.message});}
+});
 app.post('/api/import-shop-codes', upload.single('file'), async (req, res) => {
   try {
     if (!req.file) throw new Error('没有收到门店CP码文件');
