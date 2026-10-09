@@ -1126,7 +1126,8 @@ app.post('/api/admin/shop-codes/activate-complete', requireRole('ADMIN'), (req,r
   try{
     const result=activateSavedCompleteShopList({
       sourceFile:req.body?.sourceFile||'',
-      expectedCount:req.body?.expectedCount
+      expectedCount:req.body?.expectedCount,
+      expectedHash:req.body?.expectedHash||''
     });
     try{auditAction(req,'SHOP_COMPLETE_SET_ACTIVATED',{sourceFile:result.sourceFile,activeCount:result.activeCount,version:result.version});}catch{}
     res.json(result);
