@@ -6,7 +6,7 @@ import {qcDetailRead} from '../src/qcActionDetailRead.js';
 const page=fs.readFileSync(new URL('../public/qc-action-detail.html',import.meta.url),'utf8');
 assert.match(page,/ce-express-logo-main\.png/,'details use the existing CE QC app logo');
 assert.match(page,/\.qcd-top\{background:#104779/,'details use the same blue-white identity');
-assert.match(page,/d\.evidence\.source\?'日报已验证':'仅保存处理记录'/,'unverified source never shows success');
+assert.match(page,/d\.source\.classificationConflict\?'跨业务分类冲突':d\.evidence\.source\?'日报成员已核实':'仅保存处理记录'/,'source/conflict label reflects actual evidence');
 const db=new DatabaseSync(':memory:');
 db.exec(`
 CREATE TABLE unified_import_batches(snapshotId TEXT,batchId TEXT,reportDate TEXT,status TEXT,createdAt TEXT);
