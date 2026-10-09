@@ -4,6 +4,18 @@ import os from 'node:os';
 import path from 'node:path';
 import XLSX from 'xlsx';
 
+const serverSource=fs.readFileSync('server.js','utf8');
+const shellSource=fs.readFileSync('public/v625-shell.js','utf8');
+const htmlSource=fs.readFileSync('public/v625-shell.html','utf8');
+assert.match(serverSource,/app\.post\('\/api\/admin\/shop-codes\/activate-complete', requireRole\('ADMIN'\)/,
+  '72-code activation must be ADMIN-only');
+assert.match(serverSource,/SHOP_LIST_PREVIEW_REQUIRED/,'the UI must prove its 72-member source and checksum');
+assert.match(htmlSource,/id="v780ActivateSavedShops"/,'activation button must be visible in settings');
+assert.match(shellSource,/v780ActivateSavedShops'\)\?\.addEventListener\('click',activateSavedShopCodes\)/,
+  'activation button must call the guarded admin handler');
+assert.match(shellSource,/expectedHash:v780CandidateShopHash/,'the stored preview hash must be forwarded');
+assert.doesNotMatch(shellSource,/preventDefault\(/,'native navigation protection must remain valid');
+
 const dir=fs.mkdtempSync(path.join(os.tmpdir(),'ce-qc-v780-72-current-'));
 process.env.DATA_DIR=dir;
 process.env.DB_FILE=path.join(dir,'test.sqlite');
