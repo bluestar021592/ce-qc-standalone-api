@@ -41,9 +41,11 @@ try{
   assert.equal(candidate.readyToActivate,true);
   assert.throws(()=>activateSavedCompleteShopList({expectedCount:73,sourceFile:src}),/COMPLETE_SHOP_LIST_NOT_72/);
   assert.throws(()=>activateSavedCompleteShopList({sourceFile:'different.xlsx'}),/COMPLETE_SHOP_SOURCE_CHANGED/);
-  const activated=activateSavedCompleteShopList({sourceFile:src,expectedCount:72});
+  assert.throws(()=>activateSavedCompleteShopList({sourceFile:src,expectedCount:72,expectedHash:'0'.repeat(64)}),/COMPLETE_SHOP_LIST_CHANGED/);
+  const activated=activateSavedCompleteShopList({sourceFile:src,expectedCount:72,expectedHash:candidate.candidateHash});
   assert.equal(activated.activeCount,72);
   assert.equal(activated.historyPreserved,true);
+  assert.equal(getCompleteShopActivationStatus().readyToActivate,false,'already active source should not be marked for replacement');
   const current=getShopCodeMap();
   assert.equal(current.size,72,'union with built-in 95 codes forbidden after activation');
   assert.equal(current.get('CP990001'),'Current Shop 001');
@@ -84,8 +86,9 @@ try{
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM shop_cp_codes WHERE sourceFile=?').get(src).n,73,
     'prior same-named file members must remain preserved as historical reference');
   assert.equal(getCompleteShopActivationStatus().candidateCount,72,'latest uploaded batch is 72 even if source has 73 cumulative codes');
+  assert.equal(getCompleteShopActivationStatus().needsActivation,true,'saved newer batch must remain pending explicit action');
   assert.equal(getShopCodeMap().has('CP990001'),true,'new upload must not silently replace activated set');
-  const repeat=activateSavedCompleteShopList({sourceFile:src,expectedCount:72});
+  const repeat=activateSavedCompleteShopList({sourceFile:src,expectedCount:72,expectedHash:getCompleteShopActivationStatus().candidateHash});
   assert.equal(repeat.activeCount,72);
   assert.equal(getShopCodeMap().has('CP990001'),false,'previously valid but now retired code must be removed from current scope');
   assert.equal(getShopCodeMap().get('CP990073'),'Latest Shop 073','new current code must enter exact active set');
