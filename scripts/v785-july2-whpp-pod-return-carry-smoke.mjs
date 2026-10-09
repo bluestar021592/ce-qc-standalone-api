@@ -69,7 +69,7 @@ try{
       stateJson TEXT,updatedAt TEXT,snapshotId TEXT,reportDate TEXT);
    CREATE TABLE carryover_open_items(shipmentCode TEXT,businessType TEXT,sourceReportDate TEXT,sourceSnapshotId TEXT);
    CREATE TABLE unified_import_batches(batchId TEXT,snapshotId TEXT,reportDate TEXT,status TEXT,createdAt TEXT);
-   CREATE TABLE unified_import_rows(shipmentCode TEXT,businessType TEXT,reportDate TEXT,snapshotId TEXT);
+   CREATE TABLE unified_import_rows(id INTEGER PRIMARY KEY,shipmentCode TEXT,businessType TEXT,reportDate TEXT,snapshotId TEXT);
    CREATE TABLE business_daily_parse_rows(shipmentCode TEXT,businessType TEXT,reportDate TEXT);
    CREATE TABLE scan_results(shipmentCode TEXT,isPod INTEGER,needsTrackQuery INTEGER,skipTrackReason TEXT,updatedAt TEXT);
    CREATE TABLE business_scan_results(shipmentCode TEXT,businessType TEXT,isPod INTEGER,needsTrackQuery INTEGER,skipTrackReason TEXT,updatedAt TEXT);
