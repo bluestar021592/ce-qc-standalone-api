@@ -1585,6 +1585,16 @@ async function refreshImportCanonicalClassification(reportDate=''){
       ?'来源已逐票核验：统一导入 '+fmt(importCount)+' 票；独立WHPP '+fmt(independent.total||0)+' 票（与统一成员重复 '+fmt(overlapWithImport)+' 票）；最终唯一运单 '+fmt(union)+' 票。WHPP原始扫描、POD与退回证据均保留。'
       :'来源待核查：统一导入 '+fmt(importCount)+' 票；独立WHPP '+fmt(independent.total||0)+' 票；跨业务重叠 '+fmt(overlap)+' 票。已阻止错误标记七业务守恒。';
     setText('v783ImportSourceNote',note);
+    // Show the true distinct seven-business total in today's import history
+    // while retaining the saved unified batch source count as provenance.
+    if(sourceOkay){
+      const historyBody=byId('v625ImportHistory');
+      for(const row of historyBody?.querySelectorAll('tr')||[]){
+        if(String(row.cells?.[2]?.textContent||'').slice(0,10)!==date)continue;
+        const countCell=row.cells?.[4];
+        if(countCell)countCell.textContent=fmt(union)+(extra>0?'（核心'+fmt(importCount)+' + WHPP'+fmt(extra)+'）':'');
+      }
+    }
     // The original imported business counts stay untouched. Family lifecycle
     // decisions must continue using their persisted source member sets.
     return truth;
