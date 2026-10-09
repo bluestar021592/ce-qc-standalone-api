@@ -1978,7 +1978,10 @@ async function qcCopyText(value){
 function qcActionDetailUrl(row){
   const p=new URLSearchParams({shipmentCode:row.shipmentCode,businessType:row.businessType});
   if(row.reportDate||qcActionScope?.reportDate)p.set('reportDate',row.reportDate||qcActionScope.reportDate);
-  return '/detail?'+p.toString();
+  // Preserve the exact source snapshot of the action card so a later import
+  // cannot silently replace the historical WHPP/CE/Shopee evidence.
+  if(qcActionScope?.snapshotId)p.set('snapshotId',qcActionScope.snapshotId);
+  return '/qc-action-detail?'+p.toString();
 }
 function qcActionUpdateSelection(){
   const checked=qa('#v625ExceptionRows input[data-qc-case]:checked');
