@@ -957,8 +957,18 @@ async function refreshOpenPodNow(){
     const fromDate=v785OpenEarliestDate&&v785OpenEarliestDate<reportDate?v785OpenEarliestDate:reportDate;
     const r=await post('/api/v246/tracking/reconcile',{businessType:'ALL',fromDate,toDate:reportDate},30000);
     const job=await pollTrackingJob(r.job?.jobId||'');
-    note('v626RefreshPodMessage',reportDate+' 定向补查完成：成功刷新 '+fmt(job.refreshed||0)+' 票，待重试 '+fmt(job.failed||0)+' 票。','success');
-    await Promise.all([loadOpenPod(),page==='home'?loadHome({skipAux:true}):Promise.resolve(),page==='business'?loadBusiness({skipQualityRefresh:true}):Promise.resolve()]);
+    // V786: a completed HTTP task is NOT a completed business publication.
+    // Re-read the dated source and current OPEN queue before announcing success.
+    const verified=await loadOpenPod();
+    if(!verified?.openSourceCoverage?.complete)
+      throw new Error('接口刷新结束，但未能重新核对全部原始成员和未完结队列，不能宣称业务闭环');
+    await Promise.all([page==='home'?loadHome({skipAux:true}):Promise.resolve(),
+      page==='business'?loadBusiness({skipQualityRefresh:true}):Promise.resolve()]);
+    const retryCount=Number(job.failed||0);
+    note('v626RefreshPodMessage',reportDate+' 定向补查完成：已复核来源 '+fmt(v785OpenExpectedCount)+
+      '票；当前仍未完结 '+fmt(v785OpenTotal)+'票；成功刷新 '+fmt(job.refreshed||0)+
+      '票，待重试 '+fmt(retryCount)+'票。'+(retryCount?'部分运单仍需继续补查。':'最新状态已保存并重新核对。'),
+      retryCount?'warning':'success');
   }catch(error){note('v626RefreshPodMessage','更新失败：'+error.message,'error')}
 }
 
