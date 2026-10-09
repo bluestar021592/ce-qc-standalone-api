@@ -1124,6 +1124,8 @@ app.get('/api/admin/shop-codes/complete-status', requireRole('ADMIN'), (req,res)
 });
 app.post('/api/admin/shop-codes/activate-complete', requireRole('ADMIN'), (req,res)=>{
   try{
+    if(!String(req.body?.sourceFile||'').trim() || !/^[0-9a-f]{64}$/i.test(String(req.body?.expectedHash||'')))
+      return res.status(409).json({ok:false,code:'SHOP_LIST_PREVIEW_REQUIRED',error:'请先读取并确认72码完整名单，再执行激活。'});
     const result=activateSavedCompleteShopList({
       sourceFile:req.body?.sourceFile||'',
       expectedCount:req.body?.expectedCount,
