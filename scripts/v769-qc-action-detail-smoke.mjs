@@ -6,7 +6,7 @@ import {qcDetailRead} from '../src/qcActionDetailRead.js';
 const html=fs.readFileSync(new URL('../public/qc-action-detail.html',import.meta.url),'utf8');
 const shell=fs.readFileSync(new URL('../public/v625-shell.js',import.meta.url),'utf8');
 const server=fs.readFileSync(new URL('../server.js',import.meta.url),'utf8');
-assert.match(html,/\.qcd-logo\{[^}]*max-width:92px/,'logo must not expand to screen');
+assert.match(html,/\.qcd-logo\{[^}]*max-width:94px/,'logo must remain small and bounded in the new CE QC brand header');
 assert.match(html,/\.qcd-block\{[^}]*grid-template-columns:repeat\(2/,'desktop layout must remain two-column');
 assert.match(html,/@media\(max-width:760px\)/,'detail must respond to narrow windows');
 assert.match(html,/api\/qc-action-detail/,'detail must request the correct read-only API');
