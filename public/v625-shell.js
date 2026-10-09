@@ -470,8 +470,8 @@ async function v759VerifyWhppCompletionOnce(date=''){
   const snapshotId=String(v626LatestImport?.snapshotId||'');
   if(!/^\d{4}-\d{2}-\d{2}$/.test(day)||!snapshotId
      ||day!==String(v626LatestImport?.reportDate||'').slice(0,10))return false;
-  const countTruth=v755ImportCountTruth.get(day);
-  if(countTruth&&Number(countTruth.counts?.WHPP||0)===0)return false;
+  // The unified 515-ticket subset may have WHPP=0 while a separate
+  // 156-ticket WHPP daily source exists. Never skip proof for this reason.
   if(v759PinnedWhppProof(day))return true;
   const key=day+'|'+snapshotId;
   if(v759WhppProofRequests.has(key))return v759WhppProofRequests.get(key);
@@ -535,6 +535,36 @@ function v756LogProgressChange(reportDate,family,value={}){
 }
 const V755_BUSINESS_COUNT_TYPES=['CE','CEAF','TBKH','ALI1688','WHPP','SHOPEECN','SHOPEEVN'];
 const v755ImportCountTruth=new Map();
+// Date/snapshot-scoped verified WHPP source count (independent daily parse may
+// not appear among the 515 unified daily members). Do not treat an unknown
+// WHPP count as zero.
+const v785WhppCountProof=new Map();
+function v785WhppProofFor(date=''){
+  const day=String(date||'').slice(0,10);
+  const proof=v785WhppCountProof.get(day);
+  return proof?.snapshotId===String(v626LatestImport?.snapshotId||'')?proof:null;
+}
+function v785RememberWhppSource(truth){
+  const day=String(truth?.reportDate||'').slice(0,10);
+  const snapshotId=String(truth?.snapshotId||'');
+  if(!day||!snapshotId||day!==String(v626LatestImport?.reportDate||'').slice(0,10)
+    ||snapshotId!==String(v626LatestImport?.snapshotId||''))return null;
+  if(!truth?.source?.balanced||truth?.display?.hasUnresolvedConflict)throw new Error('WHPP来源与统一日报有冲突，已停止自动完成');
+  const n=Number(truth?.source?.counts?.WHPP||0)+Number(truth?.whppIndependent?.separateNotInImport||0);
+  if(!Number.isSafeInteger(n)||n<0)throw new Error('WHPP成员数量无效');
+  const proof={date:day,snapshotId,total:n,source:'EXACT_UNIFIED_PLUS_INDEPENDENT_WHPP'};
+  v785WhppCountProof.set(day,proof);
+  return proof;
+}
+async function v785ReadWhppSource(date='',snapshotId=''){
+  const day=String(date||'').slice(0,10);
+  const snap=String(snapshotId||v626LatestImport?.snapshotId||'');
+  if(!day||!snap)throw new Error('无法确认WHPP独立来源快照');
+  const payload=await json('/api/import/source-reconciliation?reportDate='+encodeURIComponent(day)+'&snapshotId='+encodeURIComponent(snap),15000);
+  const result=v785RememberWhppSource(payload);
+  if(!result)throw new Error('WHPP来源校验返回了其他日期或快照');
+  return result;
+}
 function rememberV755ImportCounts(data={},source=''){
   const date=String(data?.reportDate||'').slice(0,10),raw=data?.classificationCounts;
   if(!date||!raw||typeof raw!=='object')return null;
@@ -586,6 +616,10 @@ async function resolveV755FamilyCounts(reportDate='',explicitData=null){
   }
   const family=aggregateV755FamilyCounts(truth);
   if(!family)throw new Error('无法从服务器确认 '+date+' 的7业务票数；已阻止把未知票数误判成0票。');
+  const snapshotId=String(explicitData?.snapshotId||v626LatestImport?.snapshotId||'');
+  const proof=v785WhppProofFor(date)||await v785ReadWhppSource(date,snapshotId);
+  family.WHPP=proof.total;
+  family.whppSource=proof.source;
   return family;
 }
 let v640EvidenceRefreshTimer=null;
@@ -681,14 +715,18 @@ async function fetchLiveProgress(reportDate=''){
   const latestCounts=countTruth?.counts||{};
   const zeroCcsl=Boolean(countTruth)&&(Number(latestCounts.CE||0)+Number(latestCounts.CEAF||0)+Number(latestCounts.TBKH||0)+Number(latestCounts.ALI1688||0)===0);
   const zeroShopee=Boolean(countTruth)&&(Number(latestCounts.SHOPEECN||0)+Number(latestCounts.SHOPEEVN||0)===0);
-  const zeroWhpp=Boolean(countTruth)&&Number(latestCounts.WHPP||0)===0;
+  const independentWhpp=v785WhppProofFor(date);
+  const effectiveWhppCount=independentWhpp?.total??Number(latestCounts.WHPP||0);
+  const zeroWhpp=Boolean(independentWhpp)&&independentWhpp.total===0;
   const zeroComplete=(value,type)=>({...value,businessType:type,reportDate:date,running:false,active:false,complete:true,phase:'完成',runStatus:'completed',outcome:'COMPLETED',lastMessage:type+'当日日报0票，自动跳过',completionProjection:'ZERO_TICKET'});
   if(zeroCcsl)ccsl=zeroComplete(ccsl,'CCSL');
   if(zeroShopee)shopee=zeroComplete(shopee,'SHOPEE');
   if(zeroWhpp)whppPayload={...(whppPayload||{}),runtime:zeroComplete(whppPayload?.runtime||{},'WHPP'),completionLock:{...(whppPayload?.completionLock||{}),locked:true,finalized:true,reportDate:date,reason:'ZERO_TICKET'}};
   // V754: import/unified snapshot lifecycle is not a substitute for real business execution.
   // Only each family's own persisted run/progress truth may mark that family complete.
-  if(whppPayload?.completionLock?.locked||familyComplete(whppPayload?.runtime||{}))v738WhppCompletionLatch.add(date);
+  if(whppPayload?.completionLock?.locked&&
+     (zeroWhpp||Number(whppPayload.completionLock.canonicalTotal||0)>0))v738WhppCompletionLatch.add(date);
+  if(effectiveWhppCount>0&&!v759PinnedWhppProof(date))v738WhppCompletionLatch.delete(date);
   if(v738WhppCompletionLatch.has(date)&&!whppPayload?.completionLock?.locked){
     whppPayload={...(whppPayload||{}),runtime:{...(whppPayload?.runtime||{}),active:false,reportDate:date,phase:'完成',outcome:'COMPLETED',lastMessage:'WHPP已完成（WHPP持久完成锁）'},completionLock:{...(whppPayload?.completionLock||{}),locked:true,finalized:true,reportDate:date,reason:'V754_WHPP_VERIFIED_DURABLE_COMPLETION'},summary:whppPayload?.summary||{},log:whppPayload?.log||[]};
   }
@@ -714,7 +752,7 @@ async function fetchLiveProgress(reportDate=''){
   // sufficient WHPP evidence. Until the read-only proof completes, show a
   // verification state rather than a false business completion.
   const whppProofPending=!zeroWhpp
-    &&Boolean(Number(latestCounts.WHPP||0)>0||Number(whppLock.canonicalTotal||0)>0||whppLock.locked)
+    &&Boolean(effectiveWhppCount>0||Number(whppLock.canonicalTotal||0)>0||whppLock.locked||!independentWhpp)
     &&!v759PinnedWhppProof(date);
   if(whppProofPending){
     whpp={...whpp,complete:false,active:false,running:false,
@@ -1564,6 +1602,7 @@ async function refreshImportCanonicalClassification(reportDate=''){
   try{
     const truth=await json('/api/import/source-reconciliation?reportDate='+encodeURIComponent(date)+'&snapshotId='+encodeURIComponent(snapshotId),15000);
     if(!truth?.ok||truth.reportDate!==date||truth.snapshotId!==snapshotId)throw new Error('来源快照不匹配');
+    v785RememberWhppSource(truth);
     const source=truth.source||{},independent=truth.whppIndependent||{};
     const counts={...(source.counts||{})};
     const overlap=Number(independent.crossBusinessOverlap||0);
