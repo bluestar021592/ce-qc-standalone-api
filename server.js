@@ -1749,7 +1749,7 @@ app.get('/api/tracking-workspace', async (req, res) => {
   // the latest import. Incomplete URL contexts never enter the cache.
   const explicitSnapshotId=String(req.query.snapshotId||'');
   const explicitReportDate=String(req.query.reportDate||'');
-  const scope = ['all', 'pod'].includes(String(req.query.scope || '')) ? String(req.query.scope) : 'actionable';
+  const scope = ['all', 'pod', 'open'].includes(String(req.query.scope || '')) ? String(req.query.scope) : 'actionable';
   const requestedBusinessType=String(req.query.businessType||'').trim().toUpperCase();
   const qcActionMode=String(req.query.qcAction||'')==='1';
   // QC must never substitute a newer day's final status for selected history.
@@ -1774,20 +1774,29 @@ app.get('/api/tracking-workspace', async (req, res) => {
   const reportDate=qcActionMode?String(qcPinned.reportDate):explicitReportDate||String(unified?.reportDate||'');
   const unifiedTypes=new Set(['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN']);
   let states = [];
+  const dateWhppState=()=>{
+    if(!reportDate)return null;
+    const truth=loadWhppCanonicalTruth(reportDate,snapshotId,getDb());
+    if(!truth?.total)return null;
+    // Daily WHPP members may be stored outside the 515 core import. Always
+    // project the selected date's canonical members, never a stale latest run.
+    return {businessType:'WHPP',reportDate,snapshotId,finalRows:truth.rows||[],scanResults:[],
+      sourceCount:truth.total,canonicalEvidence:truth.evidence};
+  };
   if (snapshotId) {
     if(unifiedTypes.has(requestedBusinessType)){
       states=[loadLightweightUnifiedBusinessState(requestedBusinessType,snapshotId)];
     }else if(requestedBusinessType==='WHPP'){
-      const whppState=loadWhppState();
-      if(!reportDate||String(whppState.reportDate||'')===reportDate)states=[whppState];
+      const whppState=dateWhppState();
+      if(whppState)states=[whppState];
     }else{
       states = ['CE', 'CEAF', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN'].map(type => loadLightweightUnifiedBusinessState(type, snapshotId));
-      const whppState = loadWhppState();
-      if (!reportDate || String(whppState.reportDate || '') === reportDate) states.push(whppState);
+      const whppState = dateWhppState();
+      if (whppState) states.push(whppState);
     }
   }
   if (!qcActionMode&&!states.some(state => state?.finalRows?.length)) {
-    if(requestedBusinessType==='WHPP')states=[loadWhppState()];
+    if(requestedBusinessType==='WHPP')states=[dateWhppState()||{businessType:'WHPP',reportDate,finalRows:[]}];
     else if(requestedBusinessType.startsWith('SHOPEE'))states=[loadBusinessState(SHOPEE)];
     else if(['CE','CEAF','TBKH','ALI1688'].includes(requestedBusinessType))states=[loadLightweightUnifiedBusinessState(requestedBusinessType,snapshotId)];
     else states = [await loadState(), loadBusinessState(SHOPEE), loadWhppState()];
@@ -1795,7 +1804,8 @@ app.get('/api/tracking-workspace', async (req, res) => {
   const allRows = states.flatMap(state => workspaceRows(state, state.businessType || 'CCSL'));
   const priority = row => row.queryStatus === '待重试' ? 0 : row.isActionable ? 1 : 2;
   allRows.sort((a, b) => priority(a) - priority(b) || String(a.businessType).localeCompare(String(b.businessType)) || String(a.shipmentCode).localeCompare(String(b.shipmentCode)));
-  const rows = scope === 'all' ? allRows : scope === 'pod' ? allRows.filter(row => row.isClosed) : allRows.filter(row => row.isActionable);
+  const rows = scope === 'all' ? allRows : scope === 'pod' ? allRows.filter(row => row.isClosed)
+    : scope==='open' ? allRows.filter(row=>!row.isClosed) : allRows.filter(row => row.isActionable);
   const qualityBuckets={
     shopArrived:allRows.filter(row=>row.shopArrivedCurrent),
     pendingGap:allRows.filter(row=>row.pendingNonContinuous),
@@ -1873,7 +1883,10 @@ app.get('/api/tracking-workspace', async (req, res) => {
       basis:'EXACT_DATED_SOURCE_FINAL_AND_WORKSPACE_MEMBERS'};
   }
   const payload={ok:true,reportDate,batchId:unified?.batchId||'',snapshotId,scope,
-    allRowCount: allRows.length,summary,qualitySignals,qualityRows,qcCoverage,rows: rows.slice(0, 5000)};
+    allRowCount: allRows.length,openRowCount:allRows.filter(row=>!row.isClosed).length,
+    returnedCompletedCount:allRows.filter(row=>row.isReturned===true).length,
+    displayedRows:Math.min(rows.length,5000),truncated:rows.length>5000,
+    summary,qualitySignals,qualityRows,qcCoverage,rows: rows.slice(0, 5000)};
   if(cacheEligible){
     v765WorkspaceReadCache.delete(cacheKey);
     v765WorkspaceReadCache.set(cacheKey,{at:Date.now(),payload});
@@ -2762,11 +2775,12 @@ function workspaceRows(state = {}, businessType = 'CCSL') {
     // TMS terminal facts: 60=POD, 81=returned; 80 remains RETURNING.
     // 85 is historical POD evidence. Prefer the saved shipment terminal code.
     const terminalCode=String(row.shipmentStatus ?? scan.shipmentStatus ?? row.orderStatus ?? scan.orderStatus ?? '').trim();
-    const isPod = row.是否POD === '是' || terminalCode==='60' || terminalCode==='85';
+    const isPod = row.是否POD === '是' || Number(row.isPod||0)===1
+      || Number(scan.isPod||0)===1 || terminalCode==='60' || terminalCode==='85';
     const returnText = `${row.退回状态 || ''} ${row.primaryCategory || ''}`.trim().toUpperCase();
-    const isReturn = terminalCode==='81' || (
+    const isReturn = !isPod && (row.truthEvidence?.returned===true || terminalCode==='81') || (!isPod && (
       /(^|\s)(已退回|退回完成|RETURNED|RETURN_COMPLETED|RETURN)(\s|$)/.test(returnText)
-      && !/(未退回|非退回|待退回|NOT_RETURNED|NO_RETURN|PENDING_RETURN)/.test(returnText));
+      && !/(未退回|非退回|待退回|NOT_RETURNED|NO_RETURN|PENDING_RETURN)/.test(returnText)));
     const failed = /fail|失败|refresh_failed/i.test(`${row.查询状态 || ''} ${row.API状态 || ''} ${batch.status || ''}`);
     const specialState = row.specialState || row.primaryCategory || row.主分类 || '';
     const shopState = row.shopState || row.shopStatus || row.门店状态 || row.storeFlowState || '';
@@ -2805,7 +2819,7 @@ function workspaceRows(state = {}, businessType = 'CCSL') {
       shopArrivedAt: row.shopArrivedAt || row.门店入库时间 || '',
       shopRetentionDays:Number(row.shopRetentionNaturalDays || row.门店滞留天数 || 0),
       storeTags:Array.isArray(row.storeTags)?row.storeTags:[],
-      category, isClosed, isActionable, whppCancelled,
+      category, isClosed, isActionable, isPod, isReturned:isReturn, whppCancelled,
       queryStatus: isPod ? 'POD跳过' : (isReturn ? '退回跳过' : (whppCancelled ? '订单取消跳过' : (specialClosed ? '特殊节点跳过' : (normalFinal ? '正常分流跳过' : (failed ? '待重试' : ((row.轨迹节点数 || row.轨迹节点数量 || 0) > 0 ? '成功' : '需查轨迹')))))),
       retryCount: Number(batch.attemptCount || row.retryCount || 0), reportDate, snapshotId: state.snapshotId || ''
     };
