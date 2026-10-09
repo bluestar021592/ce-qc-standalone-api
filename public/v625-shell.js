@@ -2485,7 +2485,11 @@ function bind(){
   if(byId('v625ExceptionDate')&&selectedReportDate())byId('v625ExceptionDate').value=selectedReportDate();
   for(const id of ['v625ExceptionType','v625ExceptionBusiness','v768ExceptionKeyword']){
     const element=byId(id);
-    element?.addEventListener(id==='v768ExceptionKeyword'?'input':'change',()=>{qcActionPage=0;renderExceptionRows()});
+    element?.addEventListener(id==='v768ExceptionKeyword'?'input':'change',()=>{
+      qcActionPage=0;
+      if(id==='v625ExceptionBusiness'&&qcActionScope?.truncated){void loadExceptions();return}
+      renderExceptionRows();
+    });
   }
   byId('v768CheckAll')?.addEventListener('change',event=>{
     qa('#v625ExceptionRows input[data-qc-case]').forEach(item=>item.checked=event.target.checked);
