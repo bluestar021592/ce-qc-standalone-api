@@ -142,7 +142,13 @@ export function getShopCodeMap() {
   const db = getDb();
   seedLatestShopWhitelist(db);
   const active=getActiveCompleteShopSet(db);
-  if(active) return new Map(active.members.map(item=>[item.code,item.name]));
+  if(active){
+    const map=new Map(active.members.map(item=>[item.code,item.name]));
+    // Tag this ephemeral Map so repeated trajectory events need no extra
+    // SQLite query just to know that fuzzy legacy aliases are forbidden.
+    Object.defineProperty(map,'_ceQcStrictComplete',{value:true});
+    return map;
+  }
   const merged = latestShopCodeMap();
   const persisted = loadAllPersistedShopCodes(db);
   for (const [code, name] of persisted) merged.set(code, name);
@@ -345,7 +351,7 @@ export function detectShopInfo({ events = [], shopCodeMap = null, shopAliasMap =
   }
 
   const supportedTargetCode = extractSupportedShopCodes(evidence.targetNode)[0] || '';
-  const matched = matchTargetShop(evidence.targetNode, codeMap, aliasMap, Boolean(getActiveCompleteShopSet()));
+  const matched = matchTargetShop(evidence.targetNode, codeMap, aliasMap, codeMap._ceQcStrictComplete===true);
   if (!matched) {
     if (supportedTargetCode) {
       return { isShop: false, unknownShopCode: supportedTargetCode, ...evidence, matchedRule: 'UNKNOWN_SHOP_CODE' };
