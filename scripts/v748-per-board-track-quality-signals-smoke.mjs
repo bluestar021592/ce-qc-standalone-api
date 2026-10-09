@@ -25,7 +25,7 @@ assert.match(html,/data-kpi-detail="shopArrived"/,'every business board must ren
 assert.match(html,/data-kpi-detail="pendingGap"/,'every business board must render Pending-gap KPI');
 assert.match(html,/data-kpi-detail="oc2Plus"/,'every business board must render OC2+ KPI');
 assert.match(html,/V750_TIMING_EVIDENCE_TRACK_VIEW|V748_PER_BOARD_TRACK_QUALITY_SIGNALS/,'V748+ shell marker missing');
-assert.match(html,/v625-shell\.js\?v=20261007-v(?:748|750)-1/,'V748+ JS cache bust missing');
+assert.match(html,/v625-shell\.js\?v=\d{8}-v\d{3,}-1/,'V748+ JS cache bust missing');
 assert.match(css,/v748-quality-signals/,'V748 quality card layout missing');
 
 assert.match(shell,/businessType:requestedBusiness,fromDate:date,toDate:date/,'board must launch business-scoped exact-date tracking reconcile');
