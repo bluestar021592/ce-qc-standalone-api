@@ -33,12 +33,31 @@ export function publishManualRefreshTruth(refreshId,{db=getDb()}={}){
       WHERE c.snapshotId=? AND b.status='VALID'
     ) SELECT shipmentCode,businessType,snapshotId,reportDate FROM ranked WHERE rn=1`).all(id);
   const memberByBill=new Map(memberships.map(row=>[membershipKey(row.shipmentCode,row.businessType),row]));
+  // WHPP is frequently absent from unified_import_rows (e.g. July-02:
+  // 515 unified + 156 independent WHPP). Bind manual terminal refreshes
+  // to the exact independent WHPP source member and a VALID dated batch.
+  // Previously such refreshes were counted "unbound" and never appeared in
+  // the original WHPP POD/return/timing chain.
+  const whppMembers=db.prepare(`SELECT p.shipmentCode,p.reportDate,b.snapshotId
+    FROM business_daily_parse_rows p
+    JOIN unified_import_batches b ON b.reportDate=p.reportDate AND b.status='VALID'
+    JOIN shipment_current_state c ON c.shipmentCode=p.shipmentCode AND c.snapshotId=? AND UPPER(c.businessType)='WHPP'
+    WHERE p.businessType='WHPP'
+    ORDER BY p.reportDate ASC,b.createdAt DESC`).all(id);
+  for(const row of whppMembers){
+    const key=membershipKey(row.shipmentCode,'WHPP');
+    if(!memberByBill.has(key))memberByBill.set(key,{
+      shipmentCode:row.shipmentCode,businessType:'WHPP',
+      reportDate:row.reportDate,snapshotId:row.snapshotId
+    });
+  }
   const allDates=db.prepare(`SELECT DISTINCT u.reportDate
       FROM unified_import_rows u
       INNER JOIN unified_import_batches b ON b.snapshotId=u.snapshotId
       INNER JOIN shipment_current_state c ON c.shipmentCode=u.shipmentCode AND UPPER(COALESCE(c.businessType,''))=UPPER(COALESCE(u.businessType,''))
       WHERE c.snapshotId=? AND b.status='VALID' AND u.reportDate<>'' ORDER BY u.reportDate`).all(id).map(row=>dateKey(row.reportDate)).filter(Boolean);
 
+  for(const row of whppMembers)if(!allDates.includes(dateKey(row.reportDate)))allDates.push(dateKey(row.reportDate));
   const updateCurrent=db.prepare('UPDATE shipment_current_state SET snapshotId=?,reportDate=?,updatedAt=? WHERE shipmentCode=? AND snapshotId=?');
   const updateCcslScan=db.prepare("UPDATE scan_results SET isPod=?,needsTrackQuery=0,skipTrackReason=?,updatedAt=? WHERE shipmentCode=?");
   const updateBusinessScan=db.prepare("UPDATE business_scan_results SET isPod=?,needsTrackQuery=0,skipTrackReason=?,updatedAt=? WHERE businessType=? AND shipmentCode=?");
