@@ -194,6 +194,11 @@ function isPodEvidence(final,current,scan,row){
   return row?.是否POD==='是'||row?.POD状态==='POD';
 }
 function isReturnEvidence(final,current,scan,row){
+  // Do not turn a newer TMS shipmentStatus=80 (return in progress) into
+  // completed return merely because the legacy category says "退回".
+  const status=String(row?.shipmentStatus||final?.shipmentStatus||current?.shipmentStatus||scan?.shipmentStatus||'').trim();
+  if(status==='80')return false;
+  if(status==='81')return true;
   const values=[current?.currentState,final?.currentState,final?.primaryCategory,row?.退回状态,row?.primaryCategory,scan?.currentState].map(v=>String(v||'').trim().toUpperCase());
   return values.some(v=>['RETURN','RETURNED','RETURN_COMPLETED','已退回','退回','退回完成'].includes(v));
 }
