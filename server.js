@@ -2670,7 +2670,9 @@ function workspaceRows(state = {}, businessType = 'CCSL') {
     const specialState = row.specialState || row.primaryCategory || row.主分类 || '';
     const shopState = row.shopState || row.shopStatus || row.门店状态 || row.storeFlowState || '';
     const category = row.primaryCategory || row.主分类 || row.异常分类 || '';
-    const specialClosed = ['SELF_PICKUP', 'CECN_RETENTION', 'CEZT_RETENTION', 'CCSL580_RETENTION'].includes(String(specialState || '').trim().toUpperCase());
+    const normalizedSpecial=String(specialState||'').trim().toUpperCase().replace(/^(?:CEL|CE):/,'');
+    const specialClosed=['SELF_PICKUP','CECN_RETENTION','CEZT_RETENTION','CCSL580_RETENTION',
+      'CECN','CEZT','CCSL580'].includes(normalizedSpecial);
     const normalFinal = category === '正常分流节点' || row.matchedRule === 'NORMAL_FINAL_HUB';
     const isClosed = isPod || isReturn || specialClosed || normalFinal;
     const isActionable = !isClosed;
@@ -2681,6 +2683,7 @@ function workspaceRows(state = {}, businessType = 'CCSL') {
     const oc2Plus=!isClosed&&ocDays>=2;
     return {
       shipmentCode, businessType: row.businessType || businessType, region: row.regionCode || row.区域 || '',
+      shipmentStatus: terminalCode,
       scanStatus: isPod ? 'POD' : (isReturn ? 'RETURN' : (scan.orderStatus || row.扫描状态 || '已扫描')),
       latestNode: row.最后节点 || row.latestEventDesc || '', latestTime: row.最后节点时间 || row.latestEventTime || '',
       pendingRawEventCount: Number(row.pendingRawEventCount || 0), pendingDistinctDayCount: Number(row.pendingDistinctDayCount ?? row.Pending次数 ?? 0),
