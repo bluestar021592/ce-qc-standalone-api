@@ -1926,7 +1926,9 @@ app.get('/api/tracking-workspace', async (req, res) => {
       const missing=[...required].filter(key=>!found.has(key));
       const extra=[...found].filter(key=>!required.has(key));
       openSourceCoverage={expected:required.size,observed:found.size,missing:missing.length,extra:extra.length,
-        historicalCarryCount:historicalCarryRows.length,historicalCarryError,
+        historicalCarryCount:historicalCarryRows.length,
+        earliestCarryDate:historicalCarryRows.map(row=>row.sourceReportDate).filter(Boolean).sort()[0]||reportDate,
+        historicalCarryError,
         complete:required.size>0&&missing.length===0&&extra.length===0&&!historicalCarryError,
         basis:'EXACT_7BUSINESS_WAYBILL_AND_DATED_WHPP_PLUS_HISTORICAL_OPEN_LEDGER'};
     }catch(error){
