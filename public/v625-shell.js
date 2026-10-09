@@ -2011,7 +2011,7 @@ function renderExceptionRows(){
   for(const row of items){
     const tr=document.createElement('tr');
     const checkTd=document.createElement('td'),check=document.createElement('input');
-    check.type='checkbox';check.dataset.qcCase=row.shipmentCode;check.setAttribute('aria-label','选择运单 '+row.shipmentCode);
+    check.type='checkbox';check.dataset.qcCase=row.businessType+'|'+row.shipmentCode;check.setAttribute('aria-label','选择运单 '+row.shipmentCode);
     check.addEventListener('change',qcActionUpdateSelection);checkTd.appendChild(check);tr.appendChild(checkTd);
     const billTd=document.createElement('td'),bill=document.createElement('a');
     bill.href=qcActionDetailUrl(row);bill.target='_blank';bill.rel='noopener noreferrer';bill.textContent=row.shipmentCode;
@@ -2494,7 +2494,7 @@ function bind(){
   byId('v768CopySelected')?.addEventListener('click',async()=>{
     const list=qcActionFilter().slice(qcActionPage*QC_ACTION_PAGE_SIZE,(qcActionPage+1)*QC_ACTION_PAGE_SIZE);
     const checked=new Set(qa('#v625ExceptionRows input[data-qc-case]:checked').map(i=>i.dataset.qcCase));
-    const rows=list.filter(row=>checked.has(row.shipmentCode));
+    const rows=list.filter(row=>checked.has(row.businessType+'|'+row.shipmentCode));
     const ok=await qcCopyText(rows.map(qcActionLine).join('\n'));
     setText('v768ExceptionEvidence',ok?'已复制 '+rows.length+' 票待处理清单（不代表处理完成）':'复制失败，请检查剪贴板权限');
   });
