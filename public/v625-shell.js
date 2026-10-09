@@ -498,6 +498,9 @@ let v631TimingMissing={};
 let v700TimingAvailability={};
 let v741TimingRepairStates={};
 let v626OpenRows=[];
+let v785OpenSourceVerified=false;
+let v785OpenExpectedCount=0;
+let v785OpenTotal=0;
 let v626OpenFilter='all';
 let v626ProgressTimer=null;
 let v626TrackingJobId='';
@@ -865,13 +868,14 @@ function renderOpenPodRows(){
     if(v626OpenFilter==='retry')return String(row.queryStatus||'').includes('重试')||String(row.apiStatus||'').includes('失败');
     return true;
   });
-  setText('v626OpenAll',v626OpenRows.length);
+  setText('v626OpenAll',v785OpenSourceVerified?v785OpenTotal:'待核验');
   setText('v626OpenToday',v626OpenRows.filter(row=>String(row.reportDate||row.sourceReportDate||'').slice(0,10)===latestDate).length);
   setText('v626OpenRetry',v626OpenRows.filter(row=>String(row.queryStatus||'').includes('重试')||String(row.apiStatus||'').includes('失败')).length);
   const targets=[['v626OpenPodRows',5],['v626ImportOpenRows',6]];
   for(const [id,cols] of targets){
     const tbody=byId(id);if(!tbody)continue;tbody.replaceChildren();
-    if(!rows.length){tbody.innerHTML='<tr><td colspan="'+cols+'">当前没有未完成POD</td></tr>';continue}
+    if(!v785OpenSourceVerified){tbody.innerHTML='<tr><td colspan="'+cols+'">未完成POD来源尚未核验，不能按0票判定；请核对已保存的当日成员。</td></tr>';continue}
+    if(!rows.length){tbody.innerHTML='<tr><td colspan="'+cols+'">已核对 '+fmt(v785OpenExpectedCount)+' 票来源成员，当前没有需要继续查询的未完结运单。</td></tr>';continue}
     for(const row of rows.slice(0,300)){
       const tr=document.createElement('tr');
       const values=cols===5
@@ -885,15 +889,29 @@ function renderOpenPodRows(){
 async function loadOpenPod(){
   try{
     const latest=v626LatestImport||await latestImportContext();
-    const params=new URLSearchParams({scope:'actionable'});
+    const params=new URLSearchParams({scope:'open'});
     if(latest?.snapshotId)params.set('snapshotId',latest.snapshotId);
     if(latest?.reportDate)params.set('reportDate',latest.reportDate);
     const r=await json('/api/tracking-workspace?'+params.toString(),12000);
+    if(!r.openSourceCoverage?.complete){
+      const gap=r.openSourceCoverage||{};
+      throw new Error('来源核验不完整：应有'+fmt(gap.expected||0)+'票，已读'+fmt(gap.observed||0)
+        +'票，缺失'+fmt(gap.missing||0)+'票，多余'+fmt(gap.extra||0)+'票'
+        +(gap.error?'；'+gap.error:''));
+    }
+    v785OpenSourceVerified=true;
+    v785OpenExpectedCount=Number(r.openSourceCoverage.expected||0);
+    v785OpenTotal=Number(r.openRowCount||0);
     v626OpenRows=(r.rows||[]).filter(row=>!row.isClosed);
     renderOpenPodRows();
+    if(r.truncated)note('v626RefreshPodMessage','未完结共'+fmt(v785OpenTotal)+'票，页面当前最多显示前5000票。请缩小日期范围进行详细核对。');
+    else note('v626RefreshPodMessage','已逐票核对 '+fmt(v785OpenExpectedCount)+' 个来源成员；未完结 '+fmt(v785OpenTotal)+'票。');
     return r;
   }catch(error){
-    note('v626RefreshPodMessage','未完成POD读取失败：'+error.message,'error');
+    v785OpenSourceVerified=false;
+    v626OpenRows=[];
+    renderOpenPodRows();
+    note('v626RefreshPodMessage','未完成POD暂不可验收：'+error.message,'error');
     return null;
   }
 }
