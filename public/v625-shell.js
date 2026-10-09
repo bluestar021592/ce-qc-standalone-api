@@ -1132,8 +1132,9 @@ async function loadHome(options={}){
     if(!exhausted&&missingCount===0&&Number(data.overall?.podCount||0)>0)v700TimingAvailability[type]='AVAILABLE';
     const totalPod=Number(data.overall?.totalPodCount||0);
     setText(prefix+'Overall',showDays(data.overall?.avgDays));
+    const hasWhppSource=type==='WHPP'&&Number(summary?.classification?.counts?.WHPP||0)>0;
     setText(prefix+'Pod',totalPod===0
-      ?'当日无POD'
+      ?(hasWhppSource?('当日WHPP '+fmt(summary.classification.counts.WHPP)+'票，暂无已确认POD；签收时效待终态证据'):'当日无POD')
       :(exhausted
         ?('日报时效 '+fmt(data.overall?.podCount||0)+' / POD总数 '+fmt(totalPod)+' 票 · 待后续日报回补 '+fmt(missingCount))
         :('有效时效 '+fmt(data.overall?.podCount||0)+' / POD总数 '+fmt(totalPod)+' 票')));
