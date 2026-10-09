@@ -2512,7 +2512,6 @@ function bind(){
   byId('v625TrackSearch')?.addEventListener('click',queryTrack);byId('v625TrackReset')?.addEventListener('click',()=>{byId('v625TrackCode').value='';byId('v625TrackTimeline').innerHTML='<div class="v625-empty-state">暂无轨迹数据</div>'});
   byId('v625ExceptionSearch')?.addEventListener('click',loadExceptions);
   byId('v776OpenAnyWaybill')?.addEventListener('click',qcOpenAnyWaybill);
-  byId('v768ExceptionKeyword')?.addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();qcOpenAnyWaybill()}});
   if(byId('v625ExceptionDate')&&selectedReportDate())byId('v625ExceptionDate').value=selectedReportDate();
   for(const id of ['v625ExceptionType','v625ExceptionBusiness','v768ExceptionKeyword']){
     const element=byId(id);
