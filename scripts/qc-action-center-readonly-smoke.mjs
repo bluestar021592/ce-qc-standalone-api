@@ -14,7 +14,7 @@ for(const id of ['v625Exceptions','v625ExceptionDate','v625ExceptionBusiness','v
 assert.match(css,/\.v768-queue-table/,'native QC action table must have readable responsive styles');
 assert.match(shell,/new URLSearchParams\(\{scope:'actionable',qcAction:'1'\}\)/,'QC evidence must use strictly pinned read-only mode');
 assert.match(shell,/r\.qcCoverage&&!r\.qcCoverage\.hasFinalEvidence/,'no-final-ledger must never be represented as zero exceptions');
-assert.match(shell,/return '\/detail\?'\+p\.toString\(\)/,'waybill details must open real existing system route');
+assert.match(shell,/return '\/qc-action-detail\?'\+p\.toString\(\)/,'QC waybill opens the real source-scoped detail route');
 assert.match(shell,/qcActionCase\(item\)/,'action classification must come from returned waybills');
 assert.match(shell,/row\.isActionable===true&&row\.isClosed!==true/,'terminal shipments cannot be sent to actions');
 assert.match(shell,/latestNode:String\(row\.latestNode\|\|''\)/,'cannot invent a latest event from category');

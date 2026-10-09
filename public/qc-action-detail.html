@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="same-origin">
+<title>运单质控核验 - CE EXPRESS</title>
+<style>
+:root{font-family:"Microsoft YaHei","Segoe UI",Arial,sans-serif;color:#123456;background:#eff5fb;font-size:14px}
+*{box-sizing:border-box}body{margin:0;min-height:100vh}button,a{font:inherit}
+.qcd-top{background:#fff;border-bottom:1px solid #dfe8f2;padding:15px max(18px,calc((100vw - 1240px)/2));display:flex;align-items:center;justify-content:space-between;gap:15px}
+.qcd-brand{display:flex;align-items:center;gap:13px;min-width:0}
+.qcd-logo{display:block;width:92px;max-width:92px;height:38px;max-height:38px;object-fit:contain;flex:none}
+.qcd-brand h1{font-size:18px;line-height:1.4;margin:0;color:#0a3966}.qcd-brand p{font-size:11px;color:#66809a;margin:2px 0}
+.qcd-link{color:#1768da;border:1px solid #cfdfef;border-radius:10px;padding:9px 13px;background:#fff;white-space:nowrap;text-decoration:none}
+main{max-width:1240px;margin:22px auto 60px;padding:0 18px;display:grid;gap:16px}
+.qcd-card{background:white;border:1px solid #e0eaf3;border-radius:16px;padding:22px;box-shadow:0 5px 18px rgba(23,69,115,.035)}
+.qcd-hdr{display:flex;align-items:center;gap:12px;justify-content:space-between;flex-wrap:wrap}
+h2{margin:0;font-size:17px;color:#123f6e}
+.qcd-title{font-size:24px;font-weight:700;color:#0d3760;overflow-wrap:anywhere;margin:7px 0}
+.qcd-desc{color:#647f99;line-height:1.65;margin:5px 0}
+.qcd-tag{padding:6px 9px;border-radius:9px;color:#175f9a;background:#eaf3ff;font-size:12px}
+.qcd-alert{border-left:4px solid #dd9934;background:#fff8e9;color:#755521;padding:13px;border-radius:8px;line-height:1.6;margin-top:13px}
+.qcd-info{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-top:18px}
+.qcd-metric{background:#f3f8fe;border:1px solid #e0ebf8;border-radius:11px;padding:12px;min-width:0}
+.qcd-label{display:block;font-size:12px;color:#668098;margin-bottom:6px}
+.qcd-value{font-size:16px;font-weight:700;color:#174c79;overflow-wrap:anywhere}
+.qcd-block{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.qcd-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:13px;margin-top:17px}
+.qcd-field{background:#f7faff;padding:12px;border-radius:10px;min-width:0}
+.qcd-field strong{display:block;color:#164c7b;font-size:13px;overflow-wrap:anywhere;font-weight:600}
+.qcd-empty{margin-top:15px;padding:16px;border-radius:10px;background:#f7faff;color:#7990a4;text-align:center}
+.qcd-table-wrap{overflow-x:auto;margin-top:15px}
+table{width:100%;border-collapse:collapse;min-width:480px}
+th,td{padding:11px 13px;text-align:left;border-bottom:1px solid #e7eef7;vertical-align:top;font-size:12px;line-height:1.65;overflow-wrap:anywhere}
+th{background:#f4f8fc;color:#385d7c}
+.qcd-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.qcd-actions button{border-radius:9px;padding:9px 13px;background:#1877ee;color:#fff;border:0;cursor:pointer}
+.qcd-actions button:disabled{opacity:.5;cursor:default}
+.qcd-neutral{color:#657c94;font-size:12px;line-height:1.7}
+@media(max-width:760px){.qcd-top{padding:12px 15px}.qcd-logo{width:65px;max-width:65px;height:32px;max-height:32px}.qcd-brand h1{font-size:15px}.qcd-info{grid-template-columns:repeat(2,minmax(0,1fr))}.qcd-block{grid-template-columns:1fr}.qcd-fields{grid-template-columns:1fr}main{margin-top:14px;padding:0 12px}.qcd-card{padding:17px}}
+</style>
+</head>
+<body>
+<header class="qcd-top">
+ <div class="qcd-brand"><img class="qcd-logo" src="/assets/ce-express-logo.svg" alt="CE EXPRESS"><div><h1>运单质控核验</h1><p>CE EXPRESS · 质量控制管理系统</p></div></div>
+ <a id="qcdBack" class="qcd-link" href="/exceptions?auth=v625">返回质控行动中心</a>
+</header>
+<main>
+<section class="qcd-card">
+ <div class="qcd-hdr"><div><span class="qcd-tag" id="qcdBusiness">业务核验</span><h2 class="qcd-title" id="qcdBill">读取运单中…</h2><p class="qcd-desc" id="qcdDate">按所选日报日期及快照核对</p></div><div class="qcd-actions"><button id="qcdCopy" type="button" disabled>复制运单号</button></div></div>
+ <p class="qcd-alert" id="qcdNotice" role="status">正在读取本地证据，不会触发重复扫描。</p>
+ <div class="qcd-info"><div class="qcd-metric"><span class="qcd-label">日报来源</span><span class="qcd-value" id="qcdSourceFlag">核验中</span></div><div class="qcd-metric"><span class="qcd-label">订单扫描</span><span class="qcd-value" id="qcdScanFlag">核验中</span></div><div class="qcd-metric"><span class="qcd-label">轨迹证据</span><span class="qcd-value" id="qcdTrackFlag">核验中</span></div><div class="qcd-metric"><span class="qcd-label">最终处理记录</span><span class="qcd-value" id="qcdFinalFlag">核验中</span></div></div>
+</section>
+<div class="qcd-block">
+ <section class="qcd-card"><h2>日报来源与分类</h2><div id="qcdSource" class="qcd-fields"></div></section>
+ <section class="qcd-card"><h2>最终判断与处理证据</h2><div id="qcdFinal" class="qcd-fields"></div></section>
+ <section class="qcd-card"><h2>订单扫描与TMS状态</h2><div id="qcdScan" class="qcd-fields"></div></section>
+ <section class="qcd-card"><h2>当前最新状态（不替代历史日期）</h2><div id="qcdCurrent" class="qcd-fields"></div></section>
+</div>
+<section class="qcd-card"><div class="qcd-hdr"><h2>已保存轨迹节点</h2><span class="qcd-neutral" id="qcdEventsLabel">按该业务和该日期查找</span></div><div id="qcdEvents"></div></section>
+<section class="qcd-card"><h2>其他日报来源记录</h2><div id="qcdDaily"></div></section>
+<p class="qcd-neutral">说明：页面仅查询已保存的来源和证据，不自动调用CE接口、不修改状态；没有轨迹证据应标识为“待核验”，而不是认定未POD。</p>
+</main>
+<script>
+(()=>{
+const p=new URLSearchParams(location.search);
+const bill=String(p.get('shipmentCode')||p.get('waybill')||'').trim().toUpperCase();
+const business=String(p.get('businessType')||'').trim().toUpperCase();
+const reportDate=String(p.get('reportDate')||'').slice(0,10);
+const snapshotId=String(p.get('snapshotId')||'');
+const q=id=>document.getElementById(id);
+const set=(id,value)=>{q(id).textContent=String(value??'—')};
+const back=new URL('/exceptions?auth=v625',location.origin);
+if(reportDate)back.searchParams.set('reportDate',reportDate);
+q('qcdBack').href=back.pathname+back.search;
+set('qcdBill',bill||'未提供运单号');
+set('qcdBusiness',business||'未选择业务');
+set('qcdDate','日报日期：'+(reportDate||'未提供')+(snapshotId?' · 快照 '+snapshotId.slice(0,20):''));
+const copy=q('qcdCopy');
+copy.disabled=!bill;
+copy.addEventListener('click',async()=>{if(!bill)return;try{await navigator.clipboard.writeText(bill);copy.textContent='已复制'}catch{copy.textContent='复制失败'}});
+function renderPairs(container,object,fields){
+  const node=q(container);node.replaceChildren();
+  if(!object){node.className='qcd-empty';node.textContent='暂无对应日期的已保存证据';return}
+  node.className='qcd-fields';
+  for(const [title,key] of fields){
+    const box=document.createElement('div');box.className='qcd-field';
+    const label=document.createElement('span');label.className='qcd-label';label.textContent=title;
+    const value=document.createElement('strong');value.textContent=String(object[key]??'—')||'—';
+    box.append(label,value);node.appendChild(box);
+  }
+}
+function renderRows(container,rows,fields){
+  const target=q(container);target.replaceChildren();
+  if(!rows.length){target.className='qcd-empty';target.textContent='当前日期暂无已保存轨迹或记录';return}
+  target.className='qcd-table-wrap';const table=document.createElement('table');
+  const thead=document.createElement('thead'),tr=document.createElement('tr');
+  for(const [name] of fields){const th=document.createElement('th');th.textContent=name;tr.appendChild(th)}
+  thead.appendChild(tr);table.appendChild(thead);
+  const tbody=document.createElement('tbody');
+  for(const row of rows){const tr=document.createElement('tr');for(const [,key] of fields){
+    const td=document.createElement('td');td.textContent=String(row?.[key]??'—');tr.appendChild(td)}
+    tbody.appendChild(tr)}
+  table.appendChild(tbody);target.appendChild(table);
+}
+async function main(){
+  if(!bill||!business||!/^\d{4}-\d{2}-\d{2}$/.test(reportDate)){set('qcdNotice','缺少日期、业务或运单号；请从质控行动中心重新打开。');return}
+  const query=new URLSearchParams({shipmentCode:bill,businessType:business,reportDate});
+  if(snapshotId)query.set('snapshotId',snapshotId);
+  try{
+    const controller=new AbortController();
+    const timer=setTimeout(()=>controller.abort(),18000);
+    let resp;
+    try{resp=await fetch('/api/qc-action-detail?'+query.toString(),{credentials:'same-origin',cache:'no-store',signal:controller.signal})}
+    finally{clearTimeout(timer)}
+    const data=await resp.json();
+    if(!resp.ok||!data.ok)throw new Error(data.error||'详情接口返回失败');
+    const d=data.detail;
+    set('qcdBill',d.shipmentCode);
+    set('qcdBusiness',d.businessType);
+    set('qcdDate','日报：'+d.reportDate+' · 来源快照：'+d.snapshotId);
+    set('qcdNotice',d.notice);
+    set('qcdSourceFlag','已匹配');
+    set('qcdScanFlag',d.evidence.scan?'已保存':'缺失待核验');
+    set('qcdTrackFlag',d.evidence.trackEvents?'节点 '+d.evidence.trackEvents:d.evidence.shipmentTrack?'有TMS查询':'缺失待核验');
+    set('qcdFinalFlag',d.evidence.final?'有最终记录':'缺失待核验');
+    renderPairs('qcdSource',d.source,[['运单号','shipmentCode'],['业务','businessType'],['日报日期','reportDate'],['PP/PV','regionCode'],['工作表','sheetName'],['来源行号','rowNumber'],['分类理由','classificationReason'],['快照','snapshotId']]);
+    renderPairs('qcdFinal',d.finalRow,[['主分类','primaryCategory'],['是否POD','isPod'],['接口状态','apiStatus'],['跨日状态','carryStatus'],['最后节点','latestNode'],['节点时间','latestEventTime'],['节点说明','latestEventDesc']]);
+    renderPairs('qcdScan',d.scan||d.track,[['TMS状态码','shipmentStatus'],['扫描POD字段','isPod'],['订单状态','orderStatus'],['轨迹状态','statusText'],['查询状态','apiStatus'],['最后更新','updatedAt']]);
+    renderPairs('qcdCurrent',d.current,[['记录所属日报','reportDate'],['最新状态','state'],['API状态','apiStatus'],['最后轨迹时间','lastEventTime'],['记录更新','updatedAt'],['证据适用说明','note']]);
+    set('qcdEventsLabel','已保存 '+d.events.length+' 个节点 · 只读取所选业务及日期');
+    renderRows('qcdEvents',d.events,[['轨迹时间','eventTime'],['节点编码','eventCode'],['说明','description']]);
+    renderRows('qcdDaily',d.daily,[['表页','sheetName'],['行号','rowNumber'],['来源行','source_row_number'],['收件地区','recipient_normalized'],['记录时间','createdAt']]);
+  }catch(e){
+    set('qcdNotice','读取失败：'+String(e?.name==='AbortError'?'请求超时，可返回重新打开；原始数据没有改动':e?.message||e));
+    for(const id of ['qcdSourceFlag','qcdScanFlag','qcdTrackFlag','qcdFinalFlag'])set(id,'未完成核验');
+  }
+}
+void main();
+})();
+</script>
+</body>
+</html>
