@@ -48,7 +48,7 @@ try{
   const rows=workspace({businessType:'WHPP',reportDate:d,finalRows:[
     {shipmentCode:'X60',shipmentStatus:'60'},
     {shipmentCode:'X81',shipmentStatus:'81'},
-    {shipmentCode:'X80',shipmentStatus:'80'},
+    {shipmentCode:'X80',shipmentStatus:'80',primaryCategory:'退回'},
     {shipmentCode:'XRET',truthEvidence:{returned:true}},
     {shipmentCode:'XOPEN',currentState:'PENDING'},
     {shipmentCode:'XSCAN',scanIsPod:0}
@@ -59,6 +59,8 @@ try{
   assert.equal(row('X81').isClosed,true,'real status81 closes returned');
   assert.equal(row('X81').isReturned,true);
   assert.equal(row('X80').isClosed,false,'status80 returning stays OPEN');
+  const whppCanon=fs.readFileSync(new URL('../src/whppCanonicalTruth.js',import.meta.url),'utf8');
+  assert.match(whppCanon,/if\(status==='80'\)return false/,'WHPP 80 cannot close through legacy return text');
   assert.equal(row('XRET').isClosed,true,'WHPP saved returned evidence closes');
   assert.equal(row('XOPEN').isClosed,false,'Pending stays in refresh queue');
 
