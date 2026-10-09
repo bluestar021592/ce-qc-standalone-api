@@ -2047,7 +2047,7 @@ async function loadExceptions(){
     if(date&&String(r.reportDate||'').slice(0,10)!==date)throw new Error('接口返回日期与筛选日期不一致，已停止显示以防混入其他批次');
     if(query.has('snapshotId')&&String(r.snapshotId||'')!==urlSnapshot)throw new Error('接口快照不一致，已停止显示旧数据');
     if(!r.reportDate||!r.snapshotId)throw new Error('未取得有效日报及快照证据，请先选择已上传的日报');
-    if(r.qcCoverage?.sourceMembers>0&&!r.qcCoverage.hasFinalEvidence)
+    if(r.qcCoverage&&!r.qcCoverage.hasFinalEvidence)
       throw new Error('该日报已有入库记录，但尚无可信最终处理记录，不能将异常数量显示为0');
     const raw=Array.isArray(r.rows)?r.rows:[];
     // Do not trust a stale closed outcome as a new exception.
