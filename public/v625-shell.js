@@ -2400,12 +2400,14 @@ async function settingsBackupNow(){
 async function ceLogin(){try{const r=await post('/api/ce-login',{tenantId:byId('v625CeTenant').value||'000000',username:byId('v625CeUser').value.trim(),password:byId('v625CePassword').value},30000);byId('v625CePassword').value='';setText('v625CeStatus','已连接');note('v625CeMessage','CE登录成功：'+(r.authStatus?.account||''),'success')}catch(e){note('v625CeMessage','登录失败：'+e.message,'error')}}
 async function ceLogout(){try{await post('/api/ce-logout',{},15000);setText('v625CeStatus','未连接');note('v625CeMessage','已退出CE系统。','success')}catch(e){note('v625CeMessage','退出失败：'+e.message,'error')}}
 let v780CandidateShopSource = '';
+let v780CandidateShopHash = '';
 async function loadCompleteShopStatus(){
   try{
     const data=await json('/api/admin/shop-codes/complete-status',10000);
     v780CandidateShopSource=String(data.candidateSource||'');
+    v780CandidateShopHash=String(data.candidateHash||'');
     const status=data.active
-      ?'已激活完整名单：'+data.activeCount+'码 · '+(data.activeSource||'')+'；旧编码不参与当前到店判定'
+      ?(data.needsActivation?'已有新保存名单尚未激活；当前仍使用原72码 · 新文件 '+data.candidateSource:'已激活完整名单：'+data.activeCount+'码 · '+(data.activeSource||'')+'；旧编码不参与当前到店判定')
       :'尚未激活完整名单；最新已保存文件 '+(data.candidateSource||'无')+'：'+data.candidateCount+'码';
     setText('v780ActiveShopStatus',status);
     const activate=byId('v780ActivateSavedShops');
@@ -2419,7 +2421,7 @@ async function activateSavedShopCodes(){
   try{
     if(!v780CandidateShopSource)await loadCompleteShopStatus();
     const r=await post('/api/admin/shop-codes/activate-complete',{
-      sourceFile:v780CandidateShopSource,expectedCount:72
+      sourceFile:v780CandidateShopSource,expectedCount:72,expectedHash:v780CandidateShopHash
     },20000);
     v748QualityRefreshKeys.clear();
     setText('v625ShopMeta','当前有效 '+r.activeCount+' 个门店编码 · 完整名单');
