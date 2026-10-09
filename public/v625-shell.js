@@ -501,6 +501,7 @@ let v626OpenRows=[];
 let v785OpenSourceVerified=false;
 let v785OpenExpectedCount=0;
 let v785OpenTotal=0;
+let v785OpenEarliestDate='';
 let v626OpenFilter='all';
 let v626ProgressTimer=null;
 let v626TrackingJobId='';
@@ -771,7 +772,7 @@ async function fetchLiveProgress(reportDate=''){
         phase:'完成',runStatus:'finished',outcome:'COMPLETED'};
     }else{
       v738WhppCompletionLatch.delete(date);
-      const incompletePhase='处理证据待核验（'+gap.missing+'票未归类）';
+      const incompletePhase='WHPP处理证据待核验（'+gap.missing+'票尚无POD/退回终态，需区分扫描是否已完成）';
       whpp={...whpp,complete:false,active:false,running:false,
         runStatus:'EVIDENCE_INCOMPLETE',outcome:'EVIDENCE_INCOMPLETE',phase:incompletePhase,
         evidenceGap:gap,
@@ -902,6 +903,7 @@ async function loadOpenPod(){
     v785OpenSourceVerified=true;
     v785OpenExpectedCount=Number(r.openSourceCoverage.expected||0);
     v785OpenTotal=Number(r.openRowCount||0);
+    v785OpenEarliestDate=String(r.openSourceCoverage.earliestCarryDate||r.reportDate||'').slice(0,10);
     v626OpenRows=(r.rows||[]).filter(row=>!row.isClosed);
     renderOpenPodRows();
     if(r.truncated)note('v626RefreshPodMessage','未完结共'+fmt(v785OpenTotal)+'票，页面当前最多显示前5000票。请缩小日期范围进行详细核对。');
@@ -909,6 +911,7 @@ async function loadOpenPod(){
     return r;
   }catch(error){
     v785OpenSourceVerified=false;
+    v785OpenEarliestDate='';
     v626OpenRows=[];
     renderOpenPodRows();
     note('v626RefreshPodMessage','未完成POD暂不可验收：'+error.message,'error');
@@ -937,7 +940,10 @@ async function refreshOpenPodNow(){
   const reportDate=selectedReportDate()||latest.reportDate;
   note('v626RefreshPodMessage','正在补查 '+reportDate+' 当日报表未完成POD与签收轨迹…');
   try{
-    const r=await post('/api/v246/tracking/reconcile',{businessType:'ALL',fromDate:reportDate,toDate:reportDate},30000);
+    if(!v785OpenSourceVerified)await loadOpenPod();
+    if(!v785OpenSourceVerified)throw new Error('未完成来源尚未核验，不能启动批量轨迹处理。');
+    const fromDate=v785OpenEarliestDate&&v785OpenEarliestDate<reportDate?v785OpenEarliestDate:reportDate;
+    const r=await post('/api/v246/tracking/reconcile',{businessType:'ALL',fromDate,toDate:reportDate},30000);
     const job=await pollTrackingJob(r.job?.jobId||'');
     note('v626RefreshPodMessage',reportDate+' 定向补查完成：成功刷新 '+fmt(job.refreshed||0)+' 票，待重试 '+fmt(job.failed||0)+' 票。','success');
     await Promise.all([loadOpenPod(),page==='home'?loadHome({skipAux:true}):Promise.resolve(),page==='business'?loadBusiness({skipQualityRefresh:true}):Promise.resolve()]);
