@@ -27,6 +27,7 @@ assert.match(server,/if \(!qcActionMode&&!states\.some\(/,'QC must not fallback 
 assert.match(server,/qcCoverage=\{sourceMembers:/,'finalized evidence coverage must be explicit');
 assert.match(server,/terminalCode==='60'/,'POD status 60 must not become a new exception');
 assert.match(server,/terminalCode==='81'/,'returned status 81 must not become a new exception');
+assert.match(server,/whppCancelled/,'saved WHPP cancellation closure must be checked by the QC workspace');
 
 const classifierSection=shell.slice(shell.indexOf('function qcActionClassify('),shell.indexOf('function qcActionFilter('));
 assert.ok(classifierSection.length>200);
@@ -54,6 +55,12 @@ const examples=[
  {shipmentCode:'POD60',shipmentStatus:'60',ocDays:7,pendingNonContinuous:true},
  {shipmentCode:'RETURN81',shipmentStatus:'81',ocDays:3},
  {shipmentCode:'RETURN80',shipmentStatus:'80',primaryCategory:'退回中'},
+ {shipmentCode:'WHPP_CANCEL_CLOSED',businessType:'WHPP',primaryCategory:'订单取消',currentState:'ORDER_CANCELLED',carry状态:'closed_cancelled',orderStatus:'10',是否POD:'否'},
+ {shipmentCode:'WHPP_CANCEL_SAVED',businessType:'WHPP',primaryCategory:'订单取消',carryStatus:'CLOSED',orderStatus:'10',是否POD:'否'},
+ {shipmentCode:'WHPP_CANCEL_UNVERIFIED',businessType:'WHPP',primaryCategory:'订单取消',carryStatus:'OPEN',orderStatus:'10'},
+ {shipmentCode:'WHPP_STATUS10_ONLY',businessType:'WHPP',primaryCategory:'其他待核验',orderStatus:'10'},
+ {shipmentCode:'CE_CANCEL_OTHER',businessType:'CE',primaryCategory:'订单取消',carry状态:'closed_cancelled'},
+ {shipmentCode:'WHPP_CLOSED_NO_REASON',businessType:'WHPP',primaryCategory:'其他待核验',carryStatus:'CLOSED'},
  {shipmentCode:'SELFPICK',specialState:'SELF_PICKUP',ocDays:9},
  {shipmentCode:'CCSL580',specialState:'CEL:CCSL580',ocDays:9},
  {shipmentCode:'CEZT',specialState:'CE:CEZT',ocDays:9},
@@ -67,9 +74,20 @@ for(const bill of ['POD60','RETURN81','SELFPICK','CCSL580','CEZT','CECN']){
   assert.equal(find(bill).isClosed,true,bill+' must not be reopened as QC anomaly');
   assert.equal(find(bill).isActionable,false,bill+' closed evidence must remain excluded');
 }
+for (const bill of ['WHPP_CANCEL_CLOSED','WHPP_CANCEL_SAVED']) {
+  const row=find(bill);
+  assert.equal(row.isClosed,true,bill+' verified cancellation should not be a QC open case');
+  assert.equal(row.isActionable,false);
+  assert.equal(row.whppCancelled,true);
+  assert.equal(row.scanStatus,'CANCELLED','cancellation is not POD and not return');
+  assert.equal(row.queryStatus,'订单取消跳过');
+}
+for (const bill of ['WHPP_CANCEL_UNVERIFIED','WHPP_STATUS10_ONLY','CE_CANCEL_OTHER','WHPP_CLOSED_NO_REASON']) {
+  assert.equal(find(bill).isActionable,true,bill+' lacks WHPP terminal cancellation proof');
+}
 assert.equal(find('RETURN80').isActionable,true,'return in progress must continue being tracked');
 assert.equal(find('RETURN80').shipmentStatus,'80','tracked TMS 80 should be available to QC classification');
 assert.equal(find('OC2').oc2Plus,true,'OC 2 days uses saved current-state evidence');
 assert.equal(find('SHOP').shopArrivedCurrent,true,'store arrival must use existing CP validation');
 
-console.log('[QC ACTION CENTER] Seven-business native UI, read-only historical evidence guard, TMS 60/80/81 terminal protections, real details, assignment suggestions and category rules PASS');
+console.log('[V772/QC ACTION CENTER] Seven-business read-only QC, WHPP closed cancellation exclusion, unverified status-10 guard, POD/return/special terminal protections PASS');
