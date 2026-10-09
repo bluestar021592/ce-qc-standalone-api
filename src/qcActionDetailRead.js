@@ -29,7 +29,7 @@ export function qcDetailRead(db,{reportDate='',shipmentCode='',businessType='',s
     return final?{state,final,kind,whppSnapshotId}:null;
   }
   let whppSaved=null;
-  if(business==='WHPP'){
+  if(business==='WHPP'&&!src){
     const row=db.prepare("SELECT valueJson FROM business_states WHERE businessType='WHPP'").get();
     if(row)whppSaved=matchingWhppSaved(safeStateJson(row.valueJson),'WHPP_CURRENT');
     if(!whppSaved){
