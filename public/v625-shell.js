@@ -2410,6 +2410,10 @@ async function loadCompleteShopStatus(){
       ?(data.needsActivation?'已有新保存名单尚未激活；当前仍使用原72码 · 新文件 '+data.candidateSource:'已激活完整名单：'+data.activeCount+'码 · '+(data.activeSource||'')+'；旧编码不参与当前到店判定')
       :'尚未激活完整名单；最新已保存文件 '+(data.candidateSource||'无')+'：'+data.candidateCount+'码';
     setText('v780ActiveShopStatus',status);
+    setText('v780ShopSpotCheck',data.active
+      ?'当前名单抽查：'+(data.activeSamples||[]).map(s=>s.code+' '+s.name).join('；')+
+       '。已停用旧编码 '+(data.historicalExcludedCount||0)+' 个（如 '+(data.inactiveExamples||[]).join('、')+'），只保留历史参考。'
+      :'待激活文件：'+(data.candidateSource||'无')+'；请先确认候选数量为72。');
     const activate=byId('v780ActivateSavedShops');
     if(activate) activate.disabled=!data.readyToActivate;
     if(data.active)setText('v625ShopMeta','当前有效 '+data.activeCount+' 个门店编码 · 完整名单');
