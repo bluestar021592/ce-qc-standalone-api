@@ -140,7 +140,6 @@ export function activateSavedCompleteShopList({sourceFile='',expectedCount=COMPL
 
 export function getShopCodeMap() {
   const db = getDb();
-  seedLatestShopWhitelist(db);
   const active=getActiveCompleteShopSet(db);
   if(active){
     const map=new Map(active.members.map(item=>[item.code,item.name]));
@@ -149,6 +148,7 @@ export function getShopCodeMap() {
     Object.defineProperty(map,'_ceQcStrictComplete',{value:true});
     return map;
   }
+  seedLatestShopWhitelist(db);
   const merged = latestShopCodeMap();
   const persisted = loadAllPersistedShopCodes(db);
   for (const [code, name] of persisted) merged.set(code, name);
@@ -157,9 +157,8 @@ export function getShopCodeMap() {
 
 export function getShopAliasMap() {
   const db = getDb();
-  seedLatestShopWhitelist(db);
-  const codeMap = getShopCodeMap();
   const active=getActiveCompleteShopSet(db);
+  const codeMap = active ? new Map(active.members.map(item=>[item.code,item.name])) : getShopCodeMap();
   // In complete-list mode, old aliases (including deactivated store names)
   // cannot create new current-arrival matches; only 72 current names qualify.
   if(active){
