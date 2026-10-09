@@ -1944,7 +1944,7 @@ function qcActionCase(row){
     shipmentCode:String(row.shipmentCode||'').trim().toUpperCase(),
     businessType:String(row.businessType||'').trim().toUpperCase(),
     shopName:String(row.shopName||row.shopCode||''),
-    latestNode:String(row.latestNode||row.category||''),
+    latestNode:String(row.latestNode||''),
     latestTime:String(row.latestTime||''),
     reportDate:String(row.reportDate||'').slice(0,10)};
 }
@@ -2036,7 +2036,7 @@ async function loadExceptions(){
   const date=(byId('v625ExceptionDate')?.value||selectedReportDate()||'').slice(0,10);
   const urlSnapshot=String(currentParams().get('snapshotId')||'');
   const urlDate=String(selectedReportDate()||'').slice(0,10);
-  const query=new URLSearchParams({scope:'actionable'});
+  const query=new URLSearchParams({scope:'actionable',qcAction:'1'});
   if(date)query.set('reportDate',date);
   if(date&&date===urlDate&&urlSnapshot)query.set('snapshotId',urlSnapshot);
   const btn=byId('v625ExceptionSearch');if(btn)btn.disabled=true;
@@ -2047,6 +2047,8 @@ async function loadExceptions(){
     if(date&&String(r.reportDate||'').slice(0,10)!==date)throw new Error('接口返回日期与筛选日期不一致，已停止显示以防混入其他批次');
     if(query.has('snapshotId')&&String(r.snapshotId||'')!==urlSnapshot)throw new Error('接口快照不一致，已停止显示旧数据');
     if(!r.reportDate||!r.snapshotId)throw new Error('未取得有效日报及快照证据，请先选择已上传的日报');
+    if(r.qcCoverage?.sourceMembers>0&&!r.qcCoverage.hasFinalEvidence)
+      throw new Error('该日报已有入库记录，但尚无可信最终处理记录，不能将异常数量显示为0');
     const raw=Array.isArray(r.rows)?r.rows:[];
     // Do not trust a stale closed outcome as a new exception.
     const actionable=raw.filter(row=>row?.shipmentCode&&row.isActionable===true&&row.isClosed!==true
