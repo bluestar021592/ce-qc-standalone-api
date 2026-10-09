@@ -1,7 +1,9 @@
 import { getDb } from './db.js';
+import { loadWhppCanonicalTruth } from './whppCanonicalTruth.js';
 
 const BUSINESS_TYPES = Object.freeze(['CE', 'CEAF', 'TBKH', 'ALI1688', 'SHOPEECN', 'SHOPEEVN']);
 const SHOPEE_TYPES = new Set(['SHOPEECN', 'SHOPEEVN']);
+const EXPORT_BUSINESS_TYPES = Object.freeze([...BUSINESS_TYPES,'WHPP']);
 
 /**
  * Memory-safe dashboard reader.
@@ -666,9 +668,13 @@ export function loadLightweightPeriodBusinessState(businessType, fromDate, toDat
   };
 }
 
-export function listLightweightCompletedUnifiedSnapshots(fromDate, toDate, businessTypes = BUSINESS_TYPES) {
+export function listLightweightCompletedUnifiedSnapshots(fromDate, toDate, businessTypes = EXPORT_BUSINESS_TYPES) {
   const range = validateDateRange(fromDate, toDate, 180);
-  const types = [...new Set((businessTypes || BUSINESS_TYPES).map(normalizeBusinessType))];
+  const types = [...new Set((businessTypes || EXPORT_BUSINESS_TYPES).map(value => {
+    const type=String(value||'').trim().toUpperCase();
+    if(!EXPORT_BUSINESS_TYPES.includes(type))throw new Error('不支持的报表业务类型');
+    return type;
+  }))];
   return listLatestValidRangeBatches(range.from, range.to, true).map(batch => ({
     snapshotId: batch.snapshotId,
     reportDate: batch.reportDate,
@@ -681,6 +687,28 @@ export function listLightweightCompletedUnifiedSnapshots(fromDate, toDate, busin
 
 function loadLightweightExportRows(snapshotId, reportDate, type) {
   const db = getDb();
+  if(type==='WHPP'){
+    const truth=loadWhppCanonicalTruth(reportDate,snapshotId,db);
+    if(!truth?.total)return [];
+    // Never export a falsely complete WHPP child based only on a 515-ticket
+    // unified import snapshot. Every one of the 156 separate daily members
+    // must have actually been scanned and finalized before reporting.
+    if(Number(truth.evidence?.scanRows||0)!==truth.total
+      ||Number(truth.evidence?.finalRows||0)!==truth.total)
+      throw new Error('WHPP '+reportDate+' 的 '+truth.total+' 票独立日报仍缺扫描或最终记录；请完成WHPP处理后再导出，不能生成漏票报表');
+    const rows=truth.rows.map(row=>({
+      ...row,shipmentCode:billOf(row),businessType:'WHPP',
+      reportDate,regionCode:String(row.regionCode||'').toUpperCase(),
+      isPod:row.truthEvidence?.pod===true?1:0,
+      是否POD:row.truthEvidence?.pod===true?'是':'否',
+      是否退回:row.truthEvidence?.returned===true?'是':'否',
+      退回状态:row.truthEvidence?.returned===true?'已退回':row.退回状态||'',
+      currentState:row.truthEvidence?.pod===true?'POD':
+        row.truthEvidence?.returned===true?'RETURNED':String(row.currentState||''),
+      finalRowAvailable:row.truthEvidence?.final===true
+    }));
+    return overlaySavedTerminalExportTruth(rows,db);
+  }
   const sourceRows = db.prepare(`
     SELECT shipmentCode,rowJson,regionCode,recipientRaw,recipientNormalized
     FROM unified_import_rows
@@ -702,7 +730,7 @@ function loadLightweightExportRows(snapshotId, reportDate, type) {
     }];
   }));
   const state = loadLightweightUnifiedBusinessState(type, snapshotId, { includeHistory: false });
-  return (state.finalRows || []).map(row => {
+  return overlaySavedTerminalExportTruth((state.finalRows || []).map(row => {
     const bill = billOf(row);
     return {
       ...(sourceByBill.get(bill) || {}),
@@ -712,6 +740,62 @@ function loadLightweightExportRows(snapshotId, reportDate, type) {
       businessType: type,
       reportDate: row.reportDate || reportDate
     };
+  }),db);
+}
+
+// Read-only export overlay. Current terminal evidence may arrive after the
+// original report was processed. Preserve original date and business source
+// membership, but never export an old "未POD" if a saved canonical terminal
+// lock now proves POD or completed return. No remote calls or SQLite writes.
+function overlaySavedTerminalExportTruth(rows=[],db=getDb()){
+  const bills=[...new Set(rows.map(billOf).filter(Boolean))];
+  if(!bills.length)return rows;
+  const closed=new Map();
+  for(let i=0;i<bills.length;i+=300){
+    const chunk=bills.slice(i,i+300),marks=chunk.map(()=>'?').join(',');
+    try{
+      const ledger=db.prepare(`SELECT shipmentCode,businessType,trackingStatus,terminalReason,podDate,lastEventTime
+        FROM qc_tracking_ledger WHERE shipmentCode IN (${marks})`).all(...chunk);
+      for(const row of ledger){
+        if(String(row.trackingStatus||'').toUpperCase()!=='TERMINAL')continue;
+        const outcome=String(row.terminalReason||'').toUpperCase();
+        if(!['POD','RETURNED','ORDER_CANCELLED'].includes(outcome))continue;
+        closed.set(String(row.shipmentCode||'').toUpperCase(),{outcome,
+          businessType:String(row.businessType||'').toUpperCase(),
+          podTime:String(row.podDate||''),eventTime:String(row.lastEventTime||'')});
+      }
+    }catch{}
+    try{
+      const states=db.prepare(`SELECT shipmentCode,businessType,state,stateJson,lastEventTime
+        FROM shipment_current_state WHERE shipmentCode IN (${marks})`).all(...chunk);
+      for(const row of states){
+        const bill=String(row.shipmentCode||'').toUpperCase();
+        if(closed.has(bill))continue;
+        let raw={};try{raw=JSON.parse(String(row.stateJson||'{}'))||{}}catch{}
+        // ONLY shipmentStatus may use TMS numeric codes; eventCode must
+        // never be confused with shipmentStatus 60/80/81.
+        const status=String(raw.shipmentStatus||raw?.shipmentTrack?.shipmentStatus||'');
+        const state=String(row.state||raw.currentState||'').toUpperCase();
+        const outcome=status==='60'||state==='POD'?'POD':
+          status==='81'||['RETURNED','RETURN_COMPLETED'].includes(state)?'RETURNED':
+          state==='ORDER_CANCELLED'?'ORDER_CANCELLED':'';
+        if(outcome)closed.set(bill,{outcome,businessType:String(row.businessType||'').toUpperCase(),
+          podTime:String(raw.podTime||raw.POD时间||''),eventTime:String(row.lastEventTime||'')});
+      }
+    }catch{}
+  }
+  return rows.map(row=>{
+    const fact=closed.get(billOf(row));
+    if(!fact||fact.businessType&&fact.businessType!==String(row.businessType||'').toUpperCase())return row;
+    if(fact.outcome==='POD')return {...row,isPod:1,是否POD:'是',POD状态:'POD',currentState:'POD',
+      primaryCategory:'POD闭环',退回状态:'',是否退回:'否',
+      podTime:fact.podTime||row.podTime||'',podDate:fact.podTime||row.podDate||'',
+      lastEventTime:fact.eventTime||row.lastEventTime||'',terminalEvidenceSource:'SAVED_STRICT_POD'};
+    if(fact.outcome==='RETURNED')return {...row,isPod:0,是否POD:'否',是否退回:'是',退回状态:'已退回',
+      currentState:'RETURNED',primaryCategory:'已退回',
+      terminalEvidenceSource:'SAVED_STRICT_RETURNED'};
+    return {...row,isPod:0,是否POD:'否',订单取消:'是',
+      currentState:'ORDER_CANCELLED',primaryCategory:'订单取消',terminalEvidenceSource:'SAVED_STRICT_CANCELLED'};
   });
 }
 
