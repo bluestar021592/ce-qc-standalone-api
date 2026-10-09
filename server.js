@@ -52,6 +52,7 @@ import { createPurgeChallenge, executePurge } from './src/dataPurge.js';
 import { queueDirectDataPurge, getDirectDataPurgeStatus, DIRECT_PURGE_ID } from './src/directDataPurge.js';
 import { buildHomeQualitySummary, buildHomeQualitySummaryWithArchive, diagnoseSelectedDateTiming } from './src/homeQualitySummary.js';
 import { diagnoseV736Timing } from './src/v736TimingDiagnostics.js';
+import { readSelectedDateBusinessSourceTruth } from './src/v783SevenBusinessSourceTruth.js';
 import { diagnoseWhppDailyTimingSources } from './src/v745WhppTimingSourceDiagnostics.js';
 import { requestSelectedDateTimingRepair, inspectSelectedDateTimingRepair } from './src/selectedDateTimingEvidenceRepair.js';
 import { persistentSelectedDatePodTruth, persistentWhppCompletionTruth } from './src/selectedDatePersistentTruth.js';
@@ -663,6 +664,19 @@ app.get('/api/dashboard-cache/status', (req, res) => {
   });
 });
 
+// V783: the independently persisted WHPP 190 rows must not silently change
+// the number of unique members in an uploaded 6,231-row Excel file.
+app.get('/api/import/source-reconciliation', (req,res)=>{
+  try {
+    const reportDate=String(req.query?.reportDate||'').slice(0,10);
+    const snapshotId=String(req.query?.snapshotId||'');
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(reportDate)||!/^SNAP-[A-Za-z0-9-]{8,100}$/.test(snapshotId))
+      return res.status(400).json({ok:false,error:'需指定有效日报日期与来源快照'});
+    const result=readSelectedDateBusinessSourceTruth(getDb(),{reportDate,snapshotId});
+    res.setHeader('Cache-Control','no-store');
+    res.json(result);
+  }catch(error){res.status(409).json({ok:false,error:String(error?.message||error)})}
+});
 app.get('/api/unified-history', (req, res) => {
   res.json({ ok: true, rows: listUnifiedImportHistory(req.query.limit) });
 });
