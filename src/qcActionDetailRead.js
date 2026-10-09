@@ -82,15 +82,28 @@ export function qcDetailRead(db,{reportDate='',shipmentCode='',businessType='',s
   });
   const daily=business==='WHPP'?whppDaily:db.prepare("SELECT sheetName,rowNumber,source_row_number,recipient_normalized,createdAt FROM business_daily_parse_rows WHERE businessType=? AND reportDate=? AND shipmentCode=? ORDER BY id DESC LIMIT 3").all(...exact);
   const current=db.prepare('SELECT reportDate,snapshotId,state,apiStatus,lastEventTime,updatedAt FROM shipment_current_state WHERE shipmentCode=? AND businessType=? LIMIT 1').get(bill,business)||null;
-  const source={shipmentCode:src.shipmentCode,businessType:src.businessType,reportDate:src.reportDate,
-    snapshotId:src.snapshotId,regionCode:src.regionCode||'',
-    recipient:src.recipientNormalized||'',sheetName:src.sheetName||'',rowNumber:src.rowNumber||null,
-    classificationReason:src.classificationReason||''};
+  const dailySource=whppDaily[0]||{};
+  const source={
+    shipmentCode:bill,businessType:business,reportDate:date,
+    snapshotId:src?.snapshotId||whppSaved?.whppSnapshotId||whppSaved?.state?.sourceSnapshotId||'',
+    regionCode:src?.regionCode||whppFinal?.regionCode||whppFinal?.区域||'',
+    recipient:src?.recipientNormalized||dailySource.recipient_normalized||'',
+    sheetName:src?.sheetName||dailySource.sheetName||'',
+    rowNumber:src?.rowNumber??dailySource.rowNumber??null,
+    classificationReason:src?.classificationReason||'',
+    sourceKind,sourceVerified,
+    sourceNote:src?'统一日报成员已匹配':whppDaily.length?
+      'WHPP独立日报成员已匹配；非统一日报快照中的WHPP成员':
+      '仅匹配该日WHPP保存的处理记录；日报来源尚未逐票验证'
+  };
   const hasProcessingEvidence=Boolean(scan||finalRow||track||events.length);
-  const evidence={source:true,scan:!!scan,final:!!finalRow,shipmentTrack:!!track,
+  const evidence={source:sourceVerified,scan:!!scan,final:!!finalRow,shipmentTrack:!!track,
     trackEvents:events.length,whppDailyRows:daily.length,currentState:!!current};
-  const notice=hasProcessingEvidence?'已找到该业务和日期的处理证据。请以最终有效轨迹与明确终态为准。':
-    '已找到此运单的日报来源，但该日期缺少已保存的扫描、轨迹或最终判断记录；待核验不代表已经POD或处理完成。';
+  const notice=!sourceVerified?
+    '找到该日期的WHPP处理记录，但尚未核实其日报来源成员；不能据此认定已POD或处理完成。':
+    hasProcessingEvidence?
+    '找到该业务日期的日报来源与处理证据，请以最后有效轨迹和可信终态为准。':
+    '已确认日报来源，但缺少已保存的扫描、轨迹或最终判断；没有轨迹不代表未POD。';
   return{ok:true,detail:{shipmentCode:bill,businessType:business,reportDate:date,
     snapshotId:batch.snapshotId,source,scan,finalRow,track,events,daily,
     current:current?{...current,note:current.reportDate===date?'当前状态记录':'跨日期最新状态，仅供参考，不作为本日报终态证明'}:null,
