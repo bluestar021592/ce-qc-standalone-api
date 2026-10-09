@@ -1710,6 +1710,15 @@ app.get('/api/tracking-workspace', async (req, res) => {
   const explicitReportDate=String(req.query.reportDate||'');
   const scope = ['all', 'pod'].includes(String(req.query.scope || '')) ? String(req.query.scope) : 'actionable';
   const requestedBusinessType=String(req.query.businessType||'').trim().toUpperCase();
+  const qcActionMode=String(req.query.qcAction||'')==='1';
+  // QC must never substitute a newer day's final status for selected history.
+  const qcPinned=qcActionMode?fastDashboardBatch(explicitSnapshotId,explicitReportDate):null;
+  if(qcActionMode&&!qcPinned)return res.status(404).json({
+    ok:false,code:'QC_SOURCE_SNAPSHOT_MISSING',error:'该日期没有可核验的有效日报快照，请先选择已导入日期。'
+  });
+  if(qcActionMode&&explicitReportDate&&String(qcPinned.reportDate)!==explicitReportDate)return res.status(409).json({
+    ok:false,code:'QC_SOURCE_DATE_MISMATCH',error:'指定日期与快照不一致，已停止显示其他日期的运单。'
+  });
   const identity=String(req.user?.id||req.user?.email||req.user?.username||'').trim();
   const cacheEligible=Boolean(identity&&explicitSnapshotId&&explicitReportDate&&requestedBusinessType&&scope==='all');
   const cacheKey=cacheEligible?[identity,requestedBusinessType,explicitReportDate,explicitSnapshotId,scope].join('|'):'';
@@ -1719,9 +1728,9 @@ app.get('/api/tracking-workspace', async (req, res) => {
     res.setHeader('X-CE-QC-Workspace-Cache','HIT');
     return res.json(previous.payload);
   }
-  const unified=getLatestUnifiedImport();
-  const snapshotId=explicitSnapshotId||String(unified?.snapshotId||'');
-  const reportDate=explicitReportDate||String(unified?.reportDate||'');
+  const unified=qcActionMode?null:getLatestUnifiedImport();
+  const snapshotId=qcActionMode?String(qcPinned.snapshotId):explicitSnapshotId||String(unified?.snapshotId||'');
+  const reportDate=qcActionMode?String(qcPinned.reportDate):explicitReportDate||String(unified?.reportDate||'');
   const unifiedTypes=new Set(['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN']);
   let states = [];
   if (snapshotId) {
@@ -1736,7 +1745,7 @@ app.get('/api/tracking-workspace', async (req, res) => {
       if (!reportDate || String(whppState.reportDate || '') === reportDate) states.push(whppState);
     }
   }
-  if (!states.some(state => state?.finalRows?.length)) {
+  if (!qcActionMode&&!states.some(state => state?.finalRows?.length)) {
     if(requestedBusinessType==='WHPP')states=[loadWhppState()];
     else if(requestedBusinessType.startsWith('SHOPEE'))states=[loadBusinessState(SHOPEE)];
     else if(['CE','CEAF','TBKH','ALI1688'].includes(requestedBusinessType))states=[loadLightweightUnifiedBusinessState(requestedBusinessType,snapshotId)];
@@ -1774,8 +1783,16 @@ app.get('/api/tracking-workspace', async (req, res) => {
     actionable: allRows.filter(row => row.isActionable).length,
     completed: allRows.filter(row => ['成功', 'POD跳过', '退回跳过', '特殊节点跳过', '正常分流跳过'].includes(row.queryStatus)).length
   };
+  // A source batch with no finalized evidence is NOT a genuine zero-anomaly day.
+  let qcCoverage=null;
+  if(qcActionMode){
+    const db=getDb();
+    const source=db.prepare('SELECT COUNT(DISTINCT shipmentCode) AS count FROM unified_import_rows WHERE snapshotId=?').get(snapshotId);
+    qcCoverage={sourceMembers:Number(source?.count||0),evidenceRows:allRows.length,
+      hasFinalEvidence:allRows.length>0};
+  }
   const payload={ok:true,reportDate,batchId:unified?.batchId||'',snapshotId,scope,
-    allRowCount: allRows.length,summary,qualitySignals,qualityRows,rows: rows.slice(0, 5000)};
+    allRowCount: allRows.length,summary,qualitySignals,qualityRows,qcCoverage,rows: rows.slice(0, 5000)};
   if(cacheEligible){
     v765WorkspaceReadCache.delete(cacheKey);
     v765WorkspaceReadCache.set(cacheKey,{at:Date.now(),payload});
@@ -2641,9 +2658,12 @@ function workspaceRows(state = {}, businessType = 'CCSL') {
     const shipmentCode = billOfWorkspace(row);
     const scan = scans.get(shipmentCode) || {};
     const batch = queryStatus.get(shipmentCode) || {};
-    const isPod = row.是否POD === '是' || String(row.orderStatus || scan.orderStatus || '') === '85';
+    // TMS terminal facts: 60=POD, 81=returned; 80 remains RETURNING.
+    // 85 is historical POD evidence. Prefer the saved shipment terminal code.
+    const terminalCode=String(row.shipmentStatus ?? scan.shipmentStatus ?? row.orderStatus ?? scan.orderStatus ?? '').trim();
+    const isPod = row.是否POD === '是' || terminalCode==='60' || terminalCode==='85';
     const returnText = `${row.退回状态 || ''} ${row.primaryCategory || ''}`.trim().toUpperCase();
-    const isReturn = /(^|\s)(已退回|退回完成|RETURNED|RETURN_COMPLETED|RETURN)(\s|$)/.test(returnText)
+    const isReturn = (terminalCode==='81' || /(^|\s)(已退回|退回完成|RETURNED|RETURN_COMPLETED|RETURN)(\s|$)/.test(returnText))
       && !/(未退回|非退回|待退回|NOT_RETURNED|NO_RETURN|PENDING_RETURN)/.test(returnText);
     const failed = /fail|失败|refresh_failed/i.test(`${row.查询状态 || ''} ${row.API状态 || ''} ${batch.status || ''}`);
     const specialState = row.specialState || row.primaryCategory || row.主分类 || '';
