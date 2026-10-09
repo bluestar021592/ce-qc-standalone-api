@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import XLSX from 'xlsx';
 
 const dir=fs.mkdtempSync(path.join(os.tmpdir(),'ce-qc-v780-72-current-'));
 process.env.DATA_DIR=dir;
@@ -11,7 +12,7 @@ process.env.CE_QC_NO_BACKUP_MODE='1';
 const {getDb,closeDb}=await import('../src/db.js');
 const {
  getShopCodeMap,getShopAliasMap,getShopCodeSummary,
- getCompleteShopActivationStatus,activateSavedCompleteShopList,detectShopInfo
+ getCompleteShopActivationStatus,activateSavedCompleteShopList,importShopCodesFromWorkbook,detectShopInfo
 }=await import('../src/shopCodes.js');
 const {analyzeStoreFlow}=await import('../src/storeFlow.js');
 const {executeDirectDataPurge,DIRECT_PURGE_PHRASE}=await import('../src/directDataPurge.js');
@@ -68,9 +69,26 @@ try{
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM shop_active_code_set_history').get().n,1);
   assert.ok(db.prepare('SELECT 1 AS ok FROM shop_cp_codes WHERE shopCode=?').get('CP000457'),
     'historical whitelist remains stored for audit, not active classification');
-  // A second scan of the SAME verified 72-code workbook must be repeatable.
+  // Re-importing a DIFFERENT 72-code workbook with the SAME filename must not
+  // silently union both batches (73 rows). Its immutable import snapshot wins.
+  const rows=[['门店编码','门店名称']];
+  for(let i=2;i<=73;i++)rows.push(['CP'+String(990000+i).padStart(6,'0'),'Latest Shop '+String(i).padStart(3,'0')]);
+  const workbook=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook,XLSX.utils.aoa_to_sheet(rows),'门店');
+  const uploadFile=path.join(dir,'latest-72.xlsx');
+  XLSX.writeFile(workbook,uploadFile);
+  const saved=importShopCodesFromWorkbook(uploadFile,src);
+  assert.equal(saved.imported,72);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM shop_cp_import_snapshots').get().n,1,
+    'each upload must store its own exact member snapshot');
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM shop_cp_codes WHERE sourceFile=?').get(src).n,73,
+    'prior same-named file members must remain preserved as historical reference');
+  assert.equal(getCompleteShopActivationStatus().candidateCount,72,'latest uploaded batch is 72 even if source has 73 cumulative codes');
+  assert.equal(getShopCodeMap().has('CP990001'),true,'new upload must not silently replace activated set');
   const repeat=activateSavedCompleteShopList({sourceFile:src,expectedCount:72});
   assert.equal(repeat.activeCount,72);
+  assert.equal(getShopCodeMap().has('CP990001'),false,'previously valid but now retired code must be removed from current scope');
+  assert.equal(getShopCodeMap().get('CP990073'),'Latest Shop 073','new current code must enter exact active set');
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM shop_active_code_set_history').get().n,2);
   const purged=await executeDirectDataPurge({phrase:DIRECT_PURGE_PHRASE,user:{username:'fixture-admin'}});
   assert.equal(purged.ok,true);
@@ -78,9 +96,11 @@ try{
   assert.equal(getCompleteShopActivationStatus().active,true);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM shop_active_code_set_history').get().n,2,
     'historical whitelist activations must survive business purge');
-  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM shop_cp_codes WHERE sourceFile=?').get(src).n,72,
-    'all approved code names persist across business purge');
-  console.log('[V780 COMPLETE 72 CP] existing saved workbook 72 verified, explicit admin activation, old CP and old aliases excluded, live inbound and name-only inbound confirmed, past whitelist and history preserved through direct business purge PASS; legacyBaseline='+baselineCount);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM shop_cp_codes WHERE sourceFile=?').get(src).n,73,
+    'all new and retired code names persist as historical references across business purge');
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM shop_cp_import_snapshots').get().n,1,
+    'historical per-import source membership is not purged');
+  console.log('[V780 COMPLETE 72 CP] pre-V780 saved 72 recognized; same-filename reimport not unioned; strict current codes/names only; retired aliases blocked; store arrival and historical snapshots survive business purge PASS; legacyBaseline='+baselineCount);
 }finally{
   try{closeDb()}catch{}
   fs.rmSync(dir,{recursive:true,force:true,maxRetries:12,retryDelay:200});
