@@ -2110,8 +2110,14 @@ async function loadExceptions(){
     if(date&&String(r.reportDate||'').slice(0,10)!==date)throw new Error('接口返回日期与筛选日期不一致，已停止显示以防混入其他批次');
     if(query.has('snapshotId')&&String(r.snapshotId||'')!==urlSnapshot)throw new Error('接口快照不一致，已停止显示旧数据');
     if(!r.reportDate||!r.snapshotId)throw new Error('未取得有效日报及快照证据，请先选择已上传的日报');
+    // Pin the actual resolved source date to the dedicated QC date field.
+    // The global header may show today's date, but it must never silently
+    // replace the selected historical QC business date.
+    if(byId('v625ExceptionDate'))byId('v625ExceptionDate').value=String(r.reportDate).slice(0,10);
     if(r.qcCoverage&&!r.qcCoverage.hasFinalEvidence)
-      throw new Error('该日报已有入库记录，但尚无可信最终处理记录，不能将异常数量显示为0');
+      throw new Error('本业务轨迹/最终记录尚未齐全：来源 '+fmt(r.qcCoverage.sourceMembers||0)+' 票，缺最终记录 '
+        +fmt(r.qcCoverage.missingFinalEvidence||0)+' 票，缺可显示运单 '
+        +fmt(r.qcCoverage.missingVisibleMembers||0)+' 票。不能将异常数量显示为0，请检查处理完成证据');
     const raw=Array.isArray(r.rows)?r.rows:[];
     // Do not trust a stale closed outcome as a new exception.
     const actionable=raw.filter(row=>row?.shipmentCode&&row.isActionable===true&&row.isClosed!==true
@@ -2131,7 +2137,9 @@ async function loadExceptions(){
     setText('v768Oc2',fmt(qcActionRows.filter(x=>x.oc2Plus===true).length));
     setText('exShopStay',fmt(qcActionRows.filter(x=>x.shopArrivedCurrent===true).length));
     setText('v768ExceptionEvidence','来源日报：'+qcActionScope.reportDate+' · 快照 '+qcActionScope.snapshotId.slice(0,16)
-      +' · 以已保存的有效轨迹识别；责任部门为建议，尚未记录下发/处理回执'
+      +' · 已核对来源 '+fmt(r.qcCoverage?.sourceMembers||0)+' 票 / 最终记录 '+fmt(r.qcCoverage?.finalEvidenceRows||0)+' 票 / 已显示 '+fmt(r.qcCoverage?.evidenceRows||0)+' 票'
+      +' · '+(r.qcCoverage?.verifiedZero?'证据完整，当前筛选没有待核验运单':'以已保存的有效轨迹识别')
+      +'；责任部门仅为建议，尚未记录下发/处理回执'
       +(qcActionScope.truncated?' · 结果仅覆盖接口返回的前5,000票':''));
     renderExceptionRows();
   }catch(e){
