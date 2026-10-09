@@ -58,6 +58,8 @@ try{
   assert.equal(activated.activeCount,72);
   assert.equal(activated.historyPreserved,true);
   assert.equal(getCompleteShopActivationStatus().readyToActivate,false,'already active source should not be marked for replacement');
+  assert.equal(getCompleteShopActivationStatus().historicalExcludedCount>=1,true,'retired old codes must be measurable');
+  assert.equal(getCompleteShopActivationStatus().activeSamples.length,3,'real active code/name samples are required for verification');
   const current=getShopCodeMap();
   assert.equal(current.size,72,'union with built-in 95 codes forbidden after activation');
   assert.equal(current.get('CP990001'),'Current Shop 001');
