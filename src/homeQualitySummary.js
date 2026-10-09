@@ -696,21 +696,28 @@ function classificationForBatch(batch) {
       businesses:TYPES.map(type=>({businessType:type,count:0,share:0,status:'暂无日报'}))
     };
   }
-  const counts=Object.assign(Object.fromEntries(TYPES.map(type=>[type,0])),batch.classificationCounts||{});
+  const importedCounts=Object.assign(Object.fromEntries(TYPES.map(type=>[type,0])),batch.classificationCounts||{});
+  const counts={...importedCounts};
   const whppDedicated=dedicatedWhppCount(batch.reportDate||'');
-  if(whppDedicated>0)counts.WHPP=whppDedicated;
+  if(whppDedicated>0)counts.WHPP=Math.max(counts.WHPP,whppDedicated);
   const sourceTotal=n(batch.summary?.validUniqueWaybills,0);
+  const sourceClassified=TYPES.reduce((sum,type)=>sum+n(importedCounts[type],0),0);
   const classified=TYPES.reduce((sum,type)=>sum+n(counts[type],0),0);
   const total=classified>0?classified:sourceTotal;
   const conflicts=Math.max(0,n(batch.summary?.classificationConflicts,0));
   const unrecognized=Math.max(0,total-classified);
   const autoRecognized=Math.max(0,classified-conflicts);
-  const balanced=classified===total;
+  // The separately retained WHPP 190 are real deliveries, but cannot be
+  // counted as a verified extension of the imported source until exact member
+  // overlap is checked. The previous self-equality was always true.
+  const balanced=sourceTotal>0&&sourceClassified===sourceTotal&&classified===sourceTotal;
   const accuracyRate=total?Number((autoRecognized*100/total).toFixed(2)):0;
   const coverageRate=total?Number((classified*100/total).toFixed(2)):0;
   return {
     reportDate:batch.reportDate||'',snapshotId:batch.snapshotId||'',
     total,classified,autoRecognized,unrecognized,conflicts,accuracyRate,coverageRate,balanced,counts,
+    sourceTotal,sourceClassified,importedCounts,whppIndependentCount:whppDedicated,
+    requiresSourceMembershipVerification:sourceClassified===sourceTotal&&classified!==sourceTotal,
     businesses:TYPES.map(type=>({
       businessType:type,count:n(counts[type],0),share:total?Number((n(counts[type],0)*100/total).toFixed(2)):0,status:balanced?'已分类':'待核验'
     }))
