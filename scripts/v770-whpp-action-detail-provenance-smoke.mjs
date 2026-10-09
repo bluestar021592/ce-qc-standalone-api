@@ -88,5 +88,23 @@ assert.equal(old.detail.evidence.source,false);
 assert.equal(old.detail.source.snapshotId,'WHPP-SAVED-4');
 assert.equal(old.detail.finalRow.primaryCategory,'需联系客户');
 assert.equal(run(archived,'WHPP','2026-07-05').code,'QC_DETAIL_SNAPSHOT_MISSING');
+// V772: exact WHPP final CLOSED+cancellation is a terminal saved outcome,
+// even when there are no timeline events; no mere scan-10 false closure.
+db.prepare("INSERT INTO business_daily_parse_rows VALUES(?,?,?,?,?,?,?,?,?)").run(3,'WHPP',date,'CE04072600018','WHPP source',18,18,'',date);
+db.prepare("INSERT INTO business_final_rows(businessType,reportDate,shipmentCode,isPod,primaryCategory,apiStatus,carryStatus,latestEventTime,latestEventDesc,latestNode,updatedAt,rawJson) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)")
+  .run('WHPP',date,'CE04072600018',0,'订单取消','SUCCESS','CLOSED','','','',date,'{}');
+const cancelDetail=run('CE04072600018');
+assert.equal(cancelDetail.ok,true);
+assert.equal(cancelDetail.detail.source.sourceVerified,true);
+assert.equal(cancelDetail.detail.evidence.final,true);
+assert.equal(cancelDetail.detail.terminalOutcome,'ORDER_CANCELLED','cancelled CLOSED is not an open missing-track case');
+assert.match(cancelDetail.detail.notice,/订单取消及CLOSED闭环/);
+assert.equal(cancelDetail.detail.events.length,0,'no trajectory event can be invented for a cancellation');
+db.prepare("INSERT INTO business_daily_parse_rows VALUES(?,?,?,?,?,?,?,?,?)").run(4,'WHPP',date,'CE04072600019','WHPP source',19,19,'',date);
+db.prepare("INSERT INTO business_final_rows(businessType,reportDate,shipmentCode,isPod,primaryCategory,apiStatus,carryStatus,updatedAt,rawJson) VALUES(?,?,?,?,?,?,?,?,?)")
+  .run('WHPP',date,'CE04072600019',0,'订单取消','SUCCESS','OPEN',date,'{}');
+assert.equal(run('CE04072600019').detail.terminalOutcome,'','unclosed cancellation label must stay unverified');
+assert.match(page,/d\.terminalOutcome==='ORDER_CANCELLED'\?'订单取消（已闭环）'/,'detail header must show the saved cancelled disposition');
+
 db.close();
 console.log('[V770] WHPP independent daily source vs unified CE, true source/unverified saved final, exact date/snapshot, archived member, original CE QC logo PASS');
