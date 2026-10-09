@@ -24,7 +24,10 @@ assert.match(shell,/const v755ImportCountTruth=new Map\(\)/,'per-date import cou
 assert.match(shell,/rememberV755ImportCounts\(r,'UPLOAD_RESPONSE'\)/,'upload response counts must be pinned before reload can mutate browser state');
 assert.match(shell,/const counts=await resolveV755FamilyCounts\(reportDate,explicitImportData\)/,'auto processing must resolve reconciled per-date counts before any zero-ticket skip');
 assert.match(shell,/if\(!family\)throw new Error\('无法从服务器确认 /,'unknown business counts must fail closed instead of becoming zero');
-assert.match(shell,/const zeroWhpp=Boolean\(countTruth\)&&Number\(latestCounts\.WHPP\|\|0\)===0/,'WHPP zero-ticket projection must require proven per-date count truth');
+assert.match(shell,/const zeroWhpp=Boolean\(independentWhpp\)&&independentWhpp\.total===0/,
+  'WHPP zero-ticket projection requires exact separate-source member proof, not unified-import 0');
+assert.match(shell,/family\.WHPP=proof\.total/,
+  '156 independent WHPP members must enter actual business processing even when the unified 515 source has WHPP zero');
 assert.doesNotMatch(shell,/code==='WHPP_REPORT_MISSING'&&Number\(v626LatestImport\?\.classificationCounts\?\.WHPP\|\|0\)===0/,'missing browser cache must never authorize WHPP zero-ticket skip');
 assert.match(shell,/if\(runBusy\)\{note\('v625ImportMessage','当前日报仍在处理中/,'next daily upload must be blocked while the current day is still processing');
 assert.match(shell,/resumeBtn\.disabled=allComplete/,'resume button must be disabled after exact 3\/3 completion');
