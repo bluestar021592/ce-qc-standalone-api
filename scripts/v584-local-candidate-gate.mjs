@@ -123,6 +123,7 @@ const TASKS=[
   ['node',['scripts/v769-qc-action-detail-smoke.mjs']],
   ['node',['scripts/v770-whpp-action-detail-provenance-smoke.mjs']],
   ['node',['scripts/qc-action-center-readonly-smoke.mjs']],
+  ['node',['scripts/v776-qc-closed-waybill-lookup-smoke.mjs']],
   ['node',['scripts/v773-local-admin-reset-smoke.mjs']],
   ['node',['--test',
     'test/unified-import-v7.test.js',
