@@ -239,9 +239,10 @@ function partitionRows(rows = []) {
     const rowRegion = region(row);
     const pod = isPod(row);
     const returned = isReturned(row);
-    const delivery = isDelivery(row);
+    const cancelled = isCancelled(row);
+    const delivery = !pod&&!returned&&!cancelled&&isDelivery(row);
     const store = Boolean(row.currentStore || row.当前门店 || row.storeCode);
-    const pending = pendingDays(row) > 0;
+    const pending = !pod&&!returned&&!cancelled&&pendingDays(row) > 0;
 
     if (rowRegion === 'PP') buckets.pp.push(row);
     else if (rowRegion === 'PV') buckets.pv.push(row);
@@ -250,7 +251,7 @@ function partitionRows(rows = []) {
     if (delivery) buckets.delivery.push(row);
     if (pending) buckets.pending.push(row);
     if (returned) buckets.returned.push(row);
-    if (!pod && !returned && !delivery && !pending) buckets.notPod.push(row);
+    if (!pod && !returned && !cancelled && !delivery && !pending) buckets.notPod.push(row);
 
     const disposition = pvDisposition(row, { rowRegion, pod, returned, delivery });
     if (disposition === 'PV_DELIVERY_IN_PROGRESS') buckets.pvDelivery.push(row);
@@ -317,8 +318,28 @@ function detailUrl(row = {}) {
   if (businessType) query.set('businessType', businessType);
   return `${base}/detail?${query.toString()}`;
 }
-function isPod(row = {}) { return String(row.currentState || row.scanNormalizedState || '').toUpperCase() === 'POD' || String(row.orderStatus || '') === '85' || row.是否POD === '是'; }
-function isReturned(row = {}) { return String(row.currentState || row.scanNormalizedState || row.退回状态 || '').toUpperCase().includes('RETURN_COMPLETED') || row.是否退回 === '是'; }
+function isPod(row = {}) {
+  const status=String(row.shipmentStatus||'').trim();
+  if(status==='80'||status==='81')return false;
+  return status==='60'||row.truthEvidence?.pod===true||Number(row.isPod||0)===1
+    ||String(row.currentState||row.scanNormalizedState||'').toUpperCase()==='POD'
+    ||String(row.orderStatus||'')==='85'||row.是否POD==='是';
+}
+function isReturned(row = {}) {
+  if(isPod(row))return false;
+  const status=String(row.shipmentStatus||'').trim();
+  if(status==='80')return false;
+  if(status==='81'||row.truthEvidence?.returned===true)return true;
+  const state=String(row.currentState||row.scanNormalizedState||'').toUpperCase();
+  const text=String(row.退回状态||'').toUpperCase();
+  return ['RETURNED','RETURN_COMPLETED','已退回','退回完成'].includes(state)
+    ||['已退回','退回完成','RETURNED','RETURN_COMPLETED'].includes(text)
+    ||row.是否退回==='是';
+}
+function isCancelled(row={}){
+  return row.订单取消==='是'||String(row.currentState||row.scanNormalizedState||'').toUpperCase()==='ORDER_CANCELLED'
+    ||String(row.primaryCategory||'')==='订单取消';
+}
 function isDelivery(row = {}) { return /DELIVERY|派送中|派件分配/.test(String(row.currentState || row.primaryCategory || row.状态说明 || '').toUpperCase()); }
 function pvDisposition(row = {}, precomputed = {}) {
   if (row.pvOpenDisposition) return row.pvOpenDisposition;
