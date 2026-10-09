@@ -36,6 +36,7 @@ assert.equal(classification.qcActionClassify({oc2Plus:true,ocDays:3}).key,'OC_2_
 assert.equal(classification.qcActionClassify({shopArrivedCurrent:true,shopRetentionDays:4}).team,'门店客服 / BD督导');
 assert.equal(classification.qcActionClassify({queryStatus:'待重试'}).key,'RETRY');
 assert.equal(classification.qcActionClassify({category:'退回中'}).key,'RETURNING');
+assert.equal(classification.qcActionClassify({shipmentStatus:'80'}).key,'RETURNING','TMS 80 is open return in progress');
 assert.equal(classification.qcActionClassify({category:'无明确原因'}).key,'OTHER');
 const caseRow=classification.qcActionCase({shipmentCode:'abc0001',businessType:'CE',latestTime:'2026-10-08T12:00:00'});
 assert.equal(caseRow.shipmentCode,'ABC0001');
@@ -54,16 +55,20 @@ const examples=[
  {shipmentCode:'RETURN81',shipmentStatus:'81',ocDays:3},
  {shipmentCode:'RETURN80',shipmentStatus:'80',primaryCategory:'退回中'},
  {shipmentCode:'SELFPICK',specialState:'SELF_PICKUP',ocDays:9},
+ {shipmentCode:'CCSL580',specialState:'CEL:CCSL580',ocDays:9},
+ {shipmentCode:'CEZT',specialState:'CE:CEZT',ocDays:9},
+ {shipmentCode:'CECN',specialState:'CECN',ocDays:9},
  {shipmentCode:'OC2',shipmentStatus:'',ocDays:2},
  {shipmentCode:'SHOP',shopArrivedCurrent:true,shopRetentionNaturalDays:3},
 ];
 const rows=getRows({reportDate:'2026-10-08',finalRows:examples},'CE');
 const find=code=>rows.find(x=>x.shipmentCode===code);
-for(const bill of ['POD60','RETURN81','SELFPICK']){
+for(const bill of ['POD60','RETURN81','SELFPICK','CCSL580','CEZT','CECN']){
   assert.equal(find(bill).isClosed,true,bill+' must not be reopened as QC anomaly');
   assert.equal(find(bill).isActionable,false,bill+' closed evidence must remain excluded');
 }
 assert.equal(find('RETURN80').isActionable,true,'return in progress must continue being tracked');
+assert.equal(find('RETURN80').shipmentStatus,'80','tracked TMS 80 should be available to QC classification');
 assert.equal(find('OC2').oc2Plus,true,'OC 2 days uses saved current-state evidence');
 assert.equal(find('SHOP').shopArrivedCurrent,true,'store arrival must use existing CP validation');
 
