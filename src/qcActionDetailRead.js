@@ -122,17 +122,22 @@ export function qcDetailRead(db,{reportDate='',shipmentCode='',businessType='',s
       '仅匹配该日WHPP保存的处理记录；日报来源尚未逐票验证'
   };
   const hasProcessingEvidence=Boolean(scan||finalRow||track||events.length);
+  const whppCancelledFinal=business==='WHPP'
+    && String(finalRow?.primaryCategory||'').trim()==='订单取消'
+    && ['CLOSED','CLOSED_CANCELLED'].includes(String(finalRow?.carryStatus||whppFinal?.carry状态||'').trim().toUpperCase());
   const evidence={source:sourceVerified,scan:!!scan,final:!!finalRow,shipmentTrack:!!track,
     trackEvents:events.length,whppDailyRows:daily.length,currentState:!!current};
   const notice=classificationConflict?
     '存在跨业务分类冲突：统一日报与WHPP独立记录对同一单号归属不同；两侧证据分开显示，请先核实，不能重复计入业务票数。':
     !sourceVerified?
     '找到该日期的WHPP处理记录，但尚未核实其日报来源成员；不能据此认定已POD或处理完成。':
+    whppCancelledFinal?
+    '此日WHPP已保存订单取消及CLOSED闭环证据；该单不是POD，也不应因缺少轨迹进入普通未处理异常。可继续核对原始取消依据。':
     hasProcessingEvidence?
     '找到该业务日期的日报来源与处理证据，请以最后有效轨迹和可信终态为准。':
     '已确认日报来源，但缺少已保存的扫描、轨迹或最终判断；没有轨迹不代表未POD。';
   return{ok:true,detail:{shipmentCode:bill,businessType:business,reportDate:date,
     snapshotId:batch.snapshotId,source,scan,finalRow,track,events,daily,
     current:current?{...current,note:current.reportDate===date?'当前状态记录':'跨日期最新状态，仅供参考，不作为本日报终态证明'}:null,
-    evidence,notice,hasProcessingEvidence}};
+    evidence,notice,hasProcessingEvidence,terminalOutcome:whppCancelledFinal?'ORDER_CANCELLED':''}};
 }
