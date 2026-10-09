@@ -45,6 +45,12 @@ export function qcDetailRead(db,{reportDate='',shipmentCode='',businessType='',s
     error:'统一日报、WHPP独立日报及该日期已保存的WHPP处理记录中均未找到这票'};
   const sourceVerified=Boolean(src||whppDaily.length);
   const sourceKind=src?'UNIFIED_IMPORT':whppDaily.length?'WHPP_DAILY_PARSE':'WHPP_FINAL_ONLY';
+  // A duplicate number assigned to CE in the unified sheet cannot silently
+  // be re-labelled WHPP. Expose the classification conflict to the QC user.
+  const otherUnified=business==='WHPP'&&!src?db.prepare(
+    'SELECT businessType FROM unified_import_rows WHERE batchId=? AND UPPER(TRIM(shipmentCode))=? LIMIT 1'
+  ).get(batch.batchId,bill):null;
+  const classificationConflict=Boolean(otherUnified&&String(otherUnified.businessType).toUpperCase()!==business);
   function safeJson(input){
     try{return input&&typeof input==='string'?JSON.parse(input):input&&typeof input==='object'?input:{}}catch{return {}}
   }
@@ -104,15 +110,20 @@ export function qcDetailRead(db,{reportDate='',shipmentCode='',businessType='',s
     sheetName:src?.sheetName||dailySource.sheetName||'',
     rowNumber:src?.rowNumber??dailySource.rowNumber??null,
     classificationReason:src?.classificationReason||'',
-    sourceKind,sourceVerified,
-    sourceNote:src?'统一日报成员已匹配':whppDaily.length?
+    sourceKind,sourceVerified,classificationConflict,
+    otherUnifiedBusiness:classificationConflict?otherUnified.businessType:'',
+    sourceNote:classificationConflict?
+      '业务分类冲突：统一日报归属'+otherUnified.businessType+'，WHPP独立来源存在该运单；请核实分类，不合并两业务统计':
+      src?'统一日报成员已匹配':whppDaily.length?
       'WHPP独立日报成员已匹配；非统一日报快照中的WHPP成员':
       '仅匹配该日WHPP保存的处理记录；日报来源尚未逐票验证'
   };
   const hasProcessingEvidence=Boolean(scan||finalRow||track||events.length);
   const evidence={source:sourceVerified,scan:!!scan,final:!!finalRow,shipmentTrack:!!track,
     trackEvents:events.length,whppDailyRows:daily.length,currentState:!!current};
-  const notice=!sourceVerified?
+  const notice=classificationConflict?
+    '存在跨业务分类冲突：统一日报与WHPP独立记录对同一单号归属不同；两侧证据分开显示，请先核实，不能重复计入业务票数。':
+    !sourceVerified?
     '找到该日期的WHPP处理记录，但尚未核实其日报来源成员；不能据此认定已POD或处理完成。':
     hasProcessingEvidence?
     '找到该业务日期的日报来源与处理证据，请以最后有效轨迹和可信终态为准。':
