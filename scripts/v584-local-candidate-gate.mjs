@@ -120,6 +120,7 @@ const TASKS=[
   ['node',['scripts/v746-whpp-canonical-daily-timing-smoke.mjs']],
   ['node',['scripts/v747-offline-safe-dependency-gate-smoke.mjs']],
   ['node',['scripts/v748-per-board-track-quality-signals-smoke.mjs']],
+  ['node',['scripts/v778-shop-code-admin-priority-smoke.mjs']],
   ['node',['scripts/v769-qc-action-detail-smoke.mjs']],
   ['node',['scripts/v770-whpp-action-detail-provenance-smoke.mjs']],
   ['node',['scripts/qc-action-center-readonly-smoke.mjs']],
