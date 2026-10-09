@@ -204,7 +204,7 @@ function syncDashboardNavigationContext(reportDate='',snapshotId=''){
   const snapshot=String(snapshotId||currentParams().get('snapshotId')||v626LatestImport?.snapshotId||'');
   const businessKeys=new Set(['ce','ceaf','tbkh','ali1688','whpp','shopeecn','shopeevn']);
   qa('.v625-nav a[data-key]').forEach(a=>{
-    if(!businessKeys.has(a.dataset.key))return;
+    if(!businessKeys.has(a.dataset.key)&&a.dataset.key!=='exceptions')return;
     a.href=dashboardContextUrl(a.getAttribute('href')||'/',date,snapshot);
   });
 }
@@ -1908,23 +1908,178 @@ async function queryTrack(){
     setText('v625TrackMeta','查询失败 · '+String(e?.message||e));
   }
 }
-async function loadExceptions(){
-  try{
-    const r=await json('/api/tracking-workspace?scope=actionable',10000),rows=r.rows||[];
-    const gap=rows.filter(x=>/不连续/.test(String(x.category||x.queryStatus||''))).length;
-    const p3=rows.filter(x=>Number(x.pendingDays||0)>=3).length;
-    const oc1=rows.filter(x=>Number(x.ocDays||0)>=1).length;
-    const shop=rows.filter(x=>/门店/.test(String(x.category||x.currentState||''))).length;
-    setText('exPendingGap',fmt(gap));setText('exPending3',fmt(p3));setText('exOc1',fmt(oc1));setText('exShopStay',fmt(shop));setText('v625ExceptionMeta',rows.length+' 条异常');
-    renderExceptionRows(rows);
-  }catch(e){byId('v625ExceptionRows').innerHTML='<tr><td colspan="7">'+esc(e.message)+'</td></tr>'}
+// QC action center V1: evidence-backed read-only queue. It never submits
+// status updates or marks a shipment delivered/returned/processed.
+let qcActionRows=[];
+let qcActionScope=null;
+let qcActionGeneration=0;
+let qcActionPage=0;
+const QC_ACTION_PAGE_SIZE=100;
+function qcActionClassify(row){
+  const category=String(row.category||'');
+  const query=String(row.queryStatus||'');
+  const special=String(row.specialState||'');
+  if(row.pendingNonContinuous===true)return{
+    key:'PENDING_GAP',name:'Pending不连续',team:'工单组',
+    days:null,action:'核查缺失日期的真实轨迹，补齐有效Pending后跟进POD'};
+  if(row.oc2Plus===true&&Number(row.ocDays)>=2)return{
+    key:'OC_2_PLUS',name:'OC 2天+',team:'派送组长 / OC负责人',
+    days:Number(row.ocDays),action:'核查返仓及带出记录，安排优先派送并追踪POD'};
+  if(row.shopArrivedCurrent===true)return{
+    key:'SHOP_STAY',name:'门店到件待跟进',team:'门店客服 / BD督导',
+    days:Number.isFinite(Number(row.shopRetentionDays))?Number(row.shopRetentionDays):null,
+    action:'总部客服下发门店核实包裹与客户通知情况，次日回收处理结果'};
+  if(query==='待重试'||/失败|RETRY|QUERY_FAILED/i.test(query))return{
+    key:'RETRY',name:'轨迹待重试',team:'工单组',
+    days:null,action:'核实接口和最后有效节点后重试查询，不得虚构状态'};
+  if(/退回中|RETURN_IN_PROGRESS|RETURNING/.test(category+' '+special))return{
+    key:'RETURNING',name:'退回中待核验',team:'返仓 / 退回负责人',
+    days:null,action:'核对退回轨迹、交接证据和实际退回完成时间'};
+  return{key:'OTHER',name:'其他待核验',team:'工单组 / 派送组长',
+    days:null,action:'核对最后有效轨迹，确认未闭环原因并指派处理'};
 }
-function renderExceptionRows(rows){
-  const type=byId('v625ExceptionType')?.value||'',biz=byId('v625ExceptionBusiness')?.value||'';
-  const filtered=rows.filter(r=>(!type||String(r.category||r.queryStatus||'').includes(type.replace(' 3天+','')))&&(!biz||String(r.businessType||'')===biz)).slice(0,200);
-  const tbody=byId('v625ExceptionRows');tbody.replaceChildren();
-  if(!filtered.length){tbody.innerHTML='<tr><td colspan="7">当前筛选暂无异常</td></tr>';return}
-  for(const r of filtered)tbody.appendChild(rowTr([r.shipmentCode,r.businessType,r.category||r.queryStatus||'异常',r.pendingDays||r.ocDays||'—',r.currentState||r.queryStatus||'—',r.lastEventTime||r.rawSummary||'—','查看']));
+function qcActionCase(row){
+  const evidence=qcActionClassify(row);
+  return{...row,...evidence,
+    shipmentCode:String(row.shipmentCode||'').trim().toUpperCase(),
+    businessType:String(row.businessType||'').trim().toUpperCase(),
+    shopName:String(row.shopName||row.shopCode||''),
+    latestNode:String(row.latestNode||row.category||''),
+    latestTime:String(row.latestTime||''),
+    reportDate:String(row.reportDate||'').slice(0,10)};
+}
+function qcActionFilter(){
+  const type=byId('v625ExceptionType')?.value||'';
+  const biz=byId('v625ExceptionBusiness')?.value||'';
+  const keyword=String(byId('v768ExceptionKeyword')?.value||'').trim().toUpperCase();
+  return qcActionRows.filter(row=>(!type||row.key===type)&&(!biz||row.businessType===biz)
+    &&(!keyword||[row.shipmentCode,row.shopName,row.businessType].join(' ').toUpperCase().includes(keyword)));
+}
+function qcActionLine(row){
+  const latest=[row.latestNode||'无可信轨迹描述',row.latestTime].filter(Boolean).join(' · ');
+  return [row.shipmentCode,row.businessType,row.name,'建议责任部门：'+row.team,
+    '最后有效轨迹：'+latest,'待处理：'+row.action,
+    '日报日期：'+(row.reportDate||qcActionScope?.reportDate||'未提供')].join(' | ');
+}
+async function qcCopyText(value){
+  if(!value)return false;
+  try{
+    if(navigator.clipboard?.writeText)await navigator.clipboard.writeText(value);
+    else{
+      const textarea=document.createElement('textarea');
+      textarea.value=value;textarea.style.position='fixed';textarea.style.left='-9999px';
+      document.body.appendChild(textarea);textarea.select();
+      const ok=document.execCommand('copy');textarea.remove();
+      if(!ok)throw new Error('浏览器未批准复制');
+    }
+    return true;
+  }catch{return false}
+}
+function qcActionDetailUrl(row){
+  const p=new URLSearchParams({shipmentCode:row.shipmentCode,businessType:row.businessType});
+  if(row.reportDate||qcActionScope?.reportDate)p.set('reportDate',row.reportDate||qcActionScope.reportDate);
+  return '/detail?'+p.toString();
+}
+function qcActionUpdateSelection(){
+  const checked=qa('#v625ExceptionRows input[data-qc-case]:checked');
+  const btn=byId('v768CopySelected');
+  if(btn){btn.disabled=!checked.length;btn.textContent=checked.length?'复制已勾选（'+checked.length+'）':'复制已勾选'}
+}
+function renderExceptionRows(){
+  const matched=qcActionFilter();
+  const totalPages=Math.max(1,Math.ceil(matched.length/QC_ACTION_PAGE_SIZE));
+  qcActionPage=Math.min(qcActionPage,totalPages-1);
+  const from=qcActionPage*QC_ACTION_PAGE_SIZE;
+  const items=matched.slice(from,from+QC_ACTION_PAGE_SIZE);
+  const tbody=byId('v625ExceptionRows');if(!tbody)return;
+  tbody.replaceChildren();
+  const headline=(qcActionScope?.reportDate||'最新日报')+' · 筛选 '+matched.length+' 票 · 展示 '+(items.length?from+1:0)+'–'+(from+items.length);
+  const limited=qcActionScope?.truncated?' · 接口最多返回5,000票，请按业务/日期缩小范围':'';
+  setText('v625ExceptionMeta',headline+limited);
+  const copy=byId('v768CopyCurrent');
+  if(copy)copy.disabled=!matched.length;
+  const all=byId('v768CheckAll');if(all){all.checked=false;all.disabled=!items.length}
+  const prev=byId('v768PreviousPage'),next=byId('v768NextPage');
+  if(prev)prev.disabled=qcActionPage===0;
+  if(next)next.disabled=qcActionPage>=totalPages-1;
+  setText('v768PageLabel','第 '+(qcActionPage+1)+' / '+totalPages+' 页');
+  if(!items.length){
+    const tr=document.createElement('tr'),td=document.createElement('td');
+    td.colSpan=9;td.textContent='当前条件暂无待核验运单；不表示其他日期或其他业务已全部闭环。';
+    tr.appendChild(td);tbody.appendChild(tr);qcActionUpdateSelection();return;
+  }
+  for(const row of items){
+    const tr=document.createElement('tr');
+    const checkTd=document.createElement('td'),check=document.createElement('input');
+    check.type='checkbox';check.dataset.qcCase=row.shipmentCode;check.setAttribute('aria-label','选择运单 '+row.shipmentCode);
+    check.addEventListener('change',qcActionUpdateSelection);checkTd.appendChild(check);tr.appendChild(checkTd);
+    const billTd=document.createElement('td'),bill=document.createElement('a');
+    bill.href=qcActionDetailUrl(row);bill.target='_blank';bill.rel='noopener noreferrer';bill.textContent=row.shipmentCode;
+    billTd.appendChild(bill);tr.appendChild(billTd);
+    for(const v of [row.businessType,row.name,row.days===null?'—':String(row.days),
+      row.team,[row.latestNode||'暂无已保存有效轨迹',row.latestTime].filter(Boolean).join(' · '),row.action]){
+      const td=document.createElement('td');td.textContent=v;tr.appendChild(td);
+    }
+    const actionTd=document.createElement('td');actionTd.className='v768-row-actions';
+    const open=document.createElement('a');open.href=qcActionDetailUrl(row);open.target='_blank';open.rel='noopener noreferrer';open.textContent='查看';
+    const copyBtn=document.createElement('button');copyBtn.type='button';copyBtn.className='v768-copy-single';copyBtn.textContent='复制';
+    copyBtn.addEventListener('click',async()=>{
+      const success=await qcCopyText(qcActionLine(row));
+      setText('v768ExceptionEvidence',success?'已复制该运单的待处理要求（不代表已下发或闭环）':'复制失败，请检查浏览器剪贴板权限');
+    });
+    actionTd.append(open,copyBtn);tr.appendChild(actionTd);tbody.appendChild(tr);
+  }
+  qcActionUpdateSelection();
+}
+async function loadExceptions(){
+  const generation=++qcActionGeneration;
+  const date=(byId('v625ExceptionDate')?.value||selectedReportDate()||'').slice(0,10);
+  const urlSnapshot=String(currentParams().get('snapshotId')||'');
+  const urlDate=String(selectedReportDate()||'').slice(0,10);
+  const query=new URLSearchParams({scope:'actionable'});
+  if(date)query.set('reportDate',date);
+  if(date&&date===urlDate&&urlSnapshot)query.set('snapshotId',urlSnapshot);
+  const btn=byId('v625ExceptionSearch');if(btn)btn.disabled=true;
+  setText('v768ExceptionEvidence','正在读取本地已保存的有效轨迹；不会启动扫描或更改状态…');
+  try{
+    const r=await json('/api/tracking-workspace?'+query.toString(),25000);
+    if(generation!==qcActionGeneration)return;
+    if(date&&String(r.reportDate||'').slice(0,10)!==date)throw new Error('接口返回日期与筛选日期不一致，已停止显示以防混入其他批次');
+    if(query.has('snapshotId')&&String(r.snapshotId||'')!==urlSnapshot)throw new Error('接口快照不一致，已停止显示旧数据');
+    if(!r.reportDate||!r.snapshotId)throw new Error('未取得有效日报及快照证据，请先选择已上传的日报');
+    const raw=Array.isArray(r.rows)?r.rows:[];
+    // Do not trust a stale closed outcome as a new exception.
+    const actionable=raw.filter(row=>row?.shipmentCode&&row.isActionable===true&&row.isClosed!==true
+      &&!['POD','RETURN'].includes(String(row.scanStatus||'').toUpperCase()));
+    const distinct=new Map();
+    for(const item of actionable){
+      const caseRow=qcActionCase(item);
+      const key=caseRow.businessType+'|'+caseRow.shipmentCode;
+      if(!distinct.has(key))distinct.set(key,caseRow);
+    }
+    qcActionRows=[...distinct.values()];
+    qcActionScope={reportDate:String(r.reportDate).slice(0,10),snapshotId:String(r.snapshotId),
+      truncated:Number(r.summary?.actionable||0)>raw.length||raw.length>=5000};
+    qcActionPage=0;
+    setText('v768TotalActionable',fmt(Number(r.summary?.actionable??qcActionRows.length)));
+    setText('exPendingGap',fmt(qcActionRows.filter(x=>x.pendingNonContinuous===true).length));
+    setText('v768Oc2',fmt(qcActionRows.filter(x=>x.oc2Plus===true).length));
+    setText('exShopStay',fmt(qcActionRows.filter(x=>x.shopArrivedCurrent===true).length));
+    setText('v768ExceptionEvidence','来源日报：'+qcActionScope.reportDate+' · 快照 '+qcActionScope.snapshotId.slice(0,16)
+      +' · 以已保存的有效轨迹识别；责任部门为建议，尚未记录下发/处理回执'
+      +(qcActionScope.truncated?' · 结果仅覆盖接口返回的前5,000票':''));
+    renderExceptionRows();
+  }catch(e){
+    if(generation!==qcActionGeneration)return;
+    qcActionRows=[];qcActionScope=null;qcActionPage=0;
+    for(const id of ['v768TotalActionable','exPendingGap','v768Oc2','exShopStay'])setText(id,'—');
+    const tbody=byId('v625ExceptionRows');
+    if(tbody){tbody.replaceChildren();const tr=document.createElement('tr'),td=document.createElement('td');
+      td.colSpan=9;td.textContent='读取失败：'+String(e?.message||e);tr.appendChild(td);tbody.appendChild(tr)}
+    setText('v625ExceptionMeta','未取得可信运单结果');
+    setText('v768ExceptionEvidence','核验失败；未更新运单状态，也未启动重复扫描');
+    for(const id of ['v768CopySelected','v768CopyCurrent','v768CheckAll'])if(byId(id))byId(id).disabled=true;
+  }finally{if(generation===qcActionGeneration&&btn)btn.disabled=false}
 }
 
 let reportPeriod='daily',generated=[],v652ExportJobId='',v652ExportBusy=false;
@@ -2323,6 +2478,29 @@ function bind(){
   qa('[data-open-filter]').forEach(btn=>btn.addEventListener('click',()=>{v626OpenFilter=btn.dataset.openFilter;qa('[data-open-filter]').forEach(x=>x.classList.toggle('active',x===btn));renderOpenPodRows()}));
   byId('v625TrackSearch')?.addEventListener('click',queryTrack);byId('v625TrackReset')?.addEventListener('click',()=>{byId('v625TrackCode').value='';byId('v625TrackTimeline').innerHTML='<div class="v625-empty-state">暂无轨迹数据</div>'});
   byId('v625ExceptionSearch')?.addEventListener('click',loadExceptions);
+  if(byId('v625ExceptionDate')&&selectedReportDate())byId('v625ExceptionDate').value=selectedReportDate();
+  for(const id of ['v625ExceptionType','v625ExceptionBusiness','v768ExceptionKeyword']){
+    const element=byId(id);
+    element?.addEventListener(id==='v768ExceptionKeyword'?'input':'change',()=>{qcActionPage=0;renderExceptionRows()});
+  }
+  byId('v768CheckAll')?.addEventListener('change',event=>{
+    qa('#v625ExceptionRows input[data-qc-case]').forEach(item=>item.checked=event.target.checked);
+    qcActionUpdateSelection();
+  });
+  byId('v768PreviousPage')?.addEventListener('click',()=>{qcActionPage=Math.max(0,qcActionPage-1);renderExceptionRows()});
+  byId('v768NextPage')?.addEventListener('click',()=>{qcActionPage++;renderExceptionRows()});
+  byId('v768CopySelected')?.addEventListener('click',async()=>{
+    const list=qcActionFilter().slice(qcActionPage*QC_ACTION_PAGE_SIZE,(qcActionPage+1)*QC_ACTION_PAGE_SIZE);
+    const checked=new Set(qa('#v625ExceptionRows input[data-qc-case]:checked').map(i=>i.dataset.qcCase));
+    const rows=list.filter(row=>checked.has(row.shipmentCode));
+    const ok=await qcCopyText(rows.map(qcActionLine).join('\n'));
+    setText('v768ExceptionEvidence',ok?'已复制 '+rows.length+' 票待处理清单（不代表处理完成）':'复制失败，请检查剪贴板权限');
+  });
+  byId('v768CopyCurrent')?.addEventListener('click',async()=>{
+    const rows=qcActionFilter().slice(qcActionPage*QC_ACTION_PAGE_SIZE,(qcActionPage+1)*QC_ACTION_PAGE_SIZE);
+    const ok=await qcCopyText(rows.map(qcActionLine).join('\n'));
+    setText('v768ExceptionEvidence',ok?'已复制当前页 '+rows.length+' 票待处理清单（不代表已下发或已闭环）':'复制失败，请检查剪贴板权限');
+  });
   qa('.v625-tabs button[data-period]').forEach(b=>b.addEventListener('click',()=>{qa('.v625-tabs button[data-period]').forEach(x=>x.classList.toggle('active',x===b));reportPeriod=b.dataset.period}));
   byId('v625GenerateReport')?.addEventListener('click',generateReport);
   qa('#v625SettingsTabs [data-settings-tab]').forEach(btn=>btn.addEventListener('click',()=>switchSettingsTab(btn.dataset.settingsTab)));
