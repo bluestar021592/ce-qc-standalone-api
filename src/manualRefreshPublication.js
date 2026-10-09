@@ -11,6 +11,13 @@ function dateKey(value=''){const m=String(value||'').match(/(\d{4})[-\/]?(\d{2})
 function membershipKey(bill,type){return `${text(type).toUpperCase()}|${text(bill).toUpperCase()}`;}
 function terminalOf(row={}){
   const payload=safeJson(row.stateJson,{});
+  // Shipment STATUS from TMS is a separate field from trajectory eventCode.
+  // 60=POD, 81=completed return, 80=return in progress (not terminal).
+  // Never reinterpret an eventCode of 60/80/81 as shipmentStatus.
+  const code=text(payload.shipmentStatus||payload?.shipmentTrack?.shipmentStatus);
+  if(code==='60')return{terminal:true,pod:true,returned:false,cancelled:false,reason:'POD'};
+  if(code==='81')return{terminal:true,pod:false,returned:true,cancelled:false,reason:'RETURNED'};
+  if(code==='80')return{terminal:false,pod:false,returned:false,cancelled:false,reason:''};
   return classifyV246Terminal({state:row.state||payload.currentState||payload.scanNormalizedState||'',stateJson:payload});
 }
 
