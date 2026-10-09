@@ -120,7 +120,7 @@ async function main(){
     set('qcdBusiness',d.businessType);
     set('qcdDate','日报：'+d.reportDate+' · 来源快照：'+d.snapshotId);
     set('qcdNotice',d.notice);
-    set('qcdSourceFlag',d.evidence.source?'日报已验证':'仅保存处理记录');
+    set('qcdSourceFlag',d.source.classificationConflict?'跨业务分类冲突':d.evidence.source?'日报成员已核实':'仅保存处理记录');
     set('qcdScanFlag',d.evidence.scan?'已保存':'缺失待核验');
     set('qcdTrackFlag',d.evidence.trackEvents?'节点 '+d.evidence.trackEvents:d.evidence.shipmentTrack?'有TMS查询':'缺失待核验');
     set('qcdFinalFlag',d.evidence.final?'有最终记录':'缺失待核验');
