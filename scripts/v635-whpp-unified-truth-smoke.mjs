@@ -9,7 +9,14 @@ const js=fs.readFileSync(path.join(root,'public','v625-shell.js'),'utf8');
 const html=fs.readFileSync(path.join(root,'public','v625-shell.html'),'utf8');
 
 assert.match(home,/function dedicatedWhppCount\(reportDate=''/,'dedicated WHPP home count resolver missing');
-assert.match(home,/if\(whppDedicated>0\)counts\.WHPP=whppDedicated/,'home WHPP must use dedicated WHPP membership when available');
+assert.match(home,/if\(whppDedicated>0\)counts\.WHPP=Math\.max\(counts\.WHPP,whppDedicated\)/,
+  'home WHPP must retain dedicated membership without replacing a larger verified unified source');
+assert.match(home,/const balanced=sourceTotal>0&&sourceClassified===sourceTotal&&classified===sourceTotal/,
+  'displayed seven-business total must not self-assert conservation when separate WHPP adds members');
+assert.match(home,/requiresSourceMembershipVerification:/,
+  'separately saved WHPP members must be marked as requiring exact identity verification');
+assert.match(js,/\/api\/import\/source-reconciliation/,
+  'import page must reconcile exact WHPP source membership before claiming total');
 assert.match(home,/const total=classified>0\?classified:sourceTotal/,'home grand total must reconcile all seven displayed businesses');
 assert.match(home,/loadWhppCanonicalTruth\(reportDate,snapshotId\|\|''\)/,'WHPP timing must use canonical WHPP truth');
 assert.match(home,/whpp_recovered_snapshot/,'WHPP timing must accept exact-member recovered snapshot track evidence');
