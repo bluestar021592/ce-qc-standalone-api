@@ -12,7 +12,39 @@ export function qcDetailRead(db,{reportDate='',shipmentCode='',businessType='',s
   if(!batch)return {ok:false,code:'QC_DETAIL_SNAPSHOT_MISSING',status:404,error:'此日期没有匹配的有效日报快照'};
   const src=db.prepare("SELECT shipmentCode,businessType,reportDate,snapshotId,regionCode,recipientNormalized,sheetName,rowNumber,classificationReason,rowJson FROM unified_import_rows WHERE batchId=? AND shipmentCode=? AND businessType=? LIMIT 1")
     .get(batch.batchId,bill,business);
-  if(!src)return {ok:false,code:'QC_DETAIL_MEMBER_MISSING',status:404,error:'该运单不在所选日期和业务的日报来源中，请核对日期与业务'};
+  // Action-center WHPP members may come from the separate WHPP ledger.
+  // Bind every source to exact reportDate + WHPP + shipmentCode; saved
+  // processing records alone must never be described as verified import.
+  const whppDaily=business==='WHPP'?db.prepare(
+    "SELECT sheetName,rowNumber,source_row_number,recipient_normalized,createdAt FROM business_daily_parse_rows WHERE businessType='WHPP' AND reportDate=? AND UPPER(TRIM(shipmentCode))=? ORDER BY id DESC LIMIT 3"
+  ).all(date,bill):[];
+  function safeStateJson(raw){try{return JSON.parse(String(raw||'{}'))||{}}catch{return {}}}
+  function matchingWhppSaved(payload,kind,whppSnapshotId=''){
+    const state=payload?.state&&typeof payload.state==='object'?payload.state:payload;
+    if(!state||String(state.reportDate||'').slice(0,10)!==date)return null;
+    const final=(state.finalRows||[]).find(r=>
+      String(r.shipmentCode||r.运单号||r.waybill||'').trim().toUpperCase()===bill
+      && (!r.reportDate||String(r.reportDate).slice(0,10)===date)
+      && (!r.businessType||String(r.businessType).toUpperCase()==='WHPP'));
+    return final?{state,final,kind,whppSnapshotId}:null;
+  }
+  let whppSaved=null;
+  if(business==='WHPP'){
+    const row=db.prepare("SELECT valueJson FROM business_states WHERE businessType='WHPP'").get();
+    if(row)whppSaved=matchingWhppSaved(safeStateJson(row.valueJson),'WHPP_CURRENT');
+    if(!whppSaved){
+      const saved=db.prepare("SELECT snapshotId,payloadJson FROM business_export_snapshots WHERE businessType='WHPP' AND reportDate=? ORDER BY id DESC LIMIT 4").all(date);
+      for(const candidate of saved){
+        whppSaved=matchingWhppSaved(safeStateJson(candidate.payloadJson),'WHPP_ARCHIVED',candidate.snapshotId);
+        if(whppSaved)break;
+      }
+    }
+  }
+  if(!src&&!whppDaily.length&&!whppSaved)return{
+    ok:false,code:'QC_DETAIL_MEMBER_MISSING',status:404,
+    error:'统一日报、WHPP独立日报及该日期已保存的WHPP处理记录中均未找到这票'};
+  const sourceVerified=Boolean(src||whppDaily.length);
+  const sourceKind=src?'UNIFIED_IMPORT':whppDaily.length?'WHPP_DAILY_PARSE':'WHPP_FINAL_ONLY';
   function safeJson(input){
     try{return input&&typeof input==='string'?JSON.parse(input):input&&typeof input==='object'?input:{}}catch{return {}}
   }
