@@ -1801,7 +1801,38 @@ app.get('/api/tracking-workspace', async (req, res) => {
     else if(['CE','CEAF','TBKH','ALI1688'].includes(requestedBusinessType))states=[loadLightweightUnifiedBusinessState(requestedBusinessType,snapshotId)];
     else states = [await loadState(), loadBusinessState(SHOPEE), loadWhppState()];
   }
-  const allRows = states.flatMap(state => workspaceRows(state, state.businessType || 'CCSL'));
+  const dailyRows = states.flatMap(state => workspaceRows(state, state.businessType || 'CCSL'));
+  const historicalCarryRows=[];
+  let historicalCarryError='';
+  if(scope==='open'&&reportDate){
+    try{
+      const oldCarry=getDb().prepare(`SELECT o.shipmentCode,o.businessType,o.sourceReportDate,
+          o.stateJson,o.apiStatus,q.currentState,q.lastEventTime,q.lastCheckedAt
+        FROM carryover_open_items o
+        LEFT JOIN qc_tracking_ledger q ON q.shipmentCode=o.shipmentCode
+        WHERE o.status='OPEN' AND o.sourceReportDate<? AND
+          (q.shipmentCode IS NULL OR (q.trackingStatus='OPEN' AND
+            UPPER(COALESCE(q.terminalReason,'')) NOT IN ('POD','RETURNED','ORDER_CANCELLED')))
+        ORDER BY o.sourceReportDate,o.shipmentCode`).all(reportDate);
+      const dailySet=new Set(dailyRows.map(row=>String(row.businessType||'').toUpperCase()+'|'+String(row.shipmentCode||'').toUpperCase()));
+      for(const row of oldCarry){
+        const type=String(row.businessType||'').toUpperCase(),bill=String(row.shipmentCode||'').toUpperCase();
+        if(!bill||dailySet.has(type+'|'+bill))continue;
+        let state={};
+        try{state=JSON.parse(String(row.stateJson||'{}'))||{}}catch{}
+        historicalCarryRows.push({
+          shipmentCode:bill,businessType:type,reportDate:row.sourceReportDate,
+          sourceReportDate:row.sourceReportDate,historicalCarry:true,isClosed:false,isActionable:true,
+          currentState:String(row.currentState||state.currentState||state.scanNormalizedState||'未完结'),
+          category:String(state.primaryCategory||state.currentMainCategory||'历史未完结'),
+          lastEventTime:String(row.lastEventTime||row.lastCheckedAt||''),
+          lastCheckedAt:String(row.lastCheckedAt||''),queryStatus:String(row.apiStatus||'需更新'),
+          pendingNonContinuous:false,oc2Plus:false,shopArrivedCurrent:false
+        });
+      }
+    }catch(error){historicalCarryError=String(error?.message||error);}
+  }
+  const allRows=[...dailyRows,...historicalCarryRows];
   const priority = row => row.queryStatus === '待重试' ? 0 : row.isActionable ? 1 : 2;
   allRows.sort((a, b) => priority(a) - priority(b) || String(a.businessType).localeCompare(String(b.businessType)) || String(a.shipmentCode).localeCompare(String(b.shipmentCode)));
   const rows = scope === 'all' ? allRows : scope === 'pod' ? allRows.filter(row => row.isClosed)
@@ -1891,12 +1922,13 @@ app.get('/api/tracking-workspace', async (req, res) => {
       const whppBills=db.prepare(`SELECT DISTINCT shipmentCode FROM business_daily_parse_rows
         WHERE businessType='WHPP' AND reportDate=?`).all(reportDate);
       for(const row of whppBills)required.add('WHPP|'+String(row.shipmentCode||'').trim().toUpperCase());
-      const found=new Set(allRows.map(row=>String(row.businessType||'').toUpperCase()+'|'+String(row.shipmentCode||'').trim().toUpperCase()));
+      const found=new Set(dailyRows.map(row=>String(row.businessType||'').toUpperCase()+'|'+String(row.shipmentCode||'').trim().toUpperCase()));
       const missing=[...required].filter(key=>!found.has(key));
       const extra=[...found].filter(key=>!required.has(key));
       openSourceCoverage={expected:required.size,observed:found.size,missing:missing.length,extra:extra.length,
-        complete:required.size>0&&missing.length===0&&extra.length===0,
-        basis:'EXACT_7BUSINESS_WAYBILL_AND_DATED_WHPP'};
+        historicalCarryCount:historicalCarryRows.length,historicalCarryError,
+        complete:required.size>0&&missing.length===0&&extra.length===0&&!historicalCarryError,
+        basis:'EXACT_7BUSINESS_WAYBILL_AND_DATED_WHPP_PLUS_HISTORICAL_OPEN_LEDGER'};
     }catch(error){
       openSourceCoverage={complete:false,error:String(error?.message||error),basis:'EXACT_SOURCE_READ_FAILED'};
     }
