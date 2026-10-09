@@ -19,6 +19,8 @@ assert.match(shell,/qcActionCase\(item\)/,'action classification must come from 
 assert.match(shell,/row\.isActionable===true&&row\.isClosed!==true/,'terminal shipments cannot be sent to actions');
 assert.match(shell,/latestNode:String\(row\.latestNode\|\|''\)/,'cannot invent a latest event from category');
 assert.match(shell,/new Set\(\)/,'duplicate/checked cases must use stable sets');
+assert.match(shell,/check\.dataset\.qcCase=row\.businessType\+'\\|'\+row\.shipmentCode/,'checkboxes must distinguish repeated shipment codes across businesses');
+assert.match(shell,/checked\.has\(row\.businessType\+'\\|'\+row\.shipmentCode\)/,'copy must not pull a sibling business with the same waybill');
 assert.match(server,/const qcActionMode=String\(req\.query\.qcAction\|\|''\)==='1'/,'QC mode must be explicit');
 assert.match(server,/QC_SOURCE_DATE_MISMATCH/,'historical dates must fail closed');
 assert.match(server,/if \(!qcActionMode&&!states\.some\(/,'QC must not fallback to latest batch');
