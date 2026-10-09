@@ -80,6 +80,19 @@ export function qcDetailRead(db,{reportDate='',shipmentCode='',businessType='',s
     return {eventTime:e.eventTime,eventCode:e.eventCode,
       description:String(parsed.description||parsed.eventDesc||parsed.statusText||parsed.remark||parsed.轨迹描述||'').slice(0,350)};
   });
+  // WHPP saves some history in the exact-dated state rather than event SQL.
+  // Never borrow events from a later date or a different waybill.
+  if(events.length===0&&whppSaved){
+    for(const event of whppSaved.state.trackEvents||[]){
+      if(String(event.shipmentCode||event.运单号||event.waybill||'').trim().toUpperCase()!==bill)continue;
+      if(event.reportDate&&String(event.reportDate).slice(0,10)!==date)continue;
+      events.push({eventTime:String(event.eventTime||event.time||event.时间||''),
+        eventCode:String(event.eventCode||event.statusCode||''),
+        description:String(event.description||event.eventDesc||event.statusText||event.轨迹描述||'').slice(0,350)});
+      if(events.length>=50)break;
+    }
+    events.sort((a,b)=>String(b.eventTime).localeCompare(String(a.eventTime)));
+  }
   const daily=business==='WHPP'?whppDaily:db.prepare("SELECT sheetName,rowNumber,source_row_number,recipient_normalized,createdAt FROM business_daily_parse_rows WHERE businessType=? AND reportDate=? AND shipmentCode=? ORDER BY id DESC LIMIT 3").all(...exact);
   const current=db.prepare('SELECT reportDate,snapshotId,state,apiStatus,lastEventTime,updatedAt FROM shipment_current_state WHERE shipmentCode=? AND businessType=? LIMIT 1').get(bill,business)||null;
   const dailySource=whppDaily[0]||{};
