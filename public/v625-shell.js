@@ -2037,6 +2037,8 @@ async function loadExceptions(){
   const urlSnapshot=String(currentParams().get('snapshotId')||'');
   const urlDate=String(selectedReportDate()||'').slice(0,10);
   const query=new URLSearchParams({scope:'actionable',qcAction:'1'});
+  const businessScope=String(byId('v625ExceptionBusiness')?.value||'').toUpperCase();
+  if(businessScope)query.set('businessType',businessScope);
   if(date)query.set('reportDate',date);
   if(date&&date===urlDate&&urlSnapshot)query.set('snapshotId',urlSnapshot);
   const btn=byId('v625ExceptionSearch');if(btn)btn.disabled=true;
