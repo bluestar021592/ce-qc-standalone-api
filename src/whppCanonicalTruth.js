@@ -1,4 +1,5 @@
 import { getDb } from './db.js';
+import { trustedWhppPodTime } from './whppPodTimeEvidence.js';
 
 export function loadWhppCanonicalTruth(reportDate='', snapshotId='', dbOverride=null){
   const db=dbOverride||getDb();
@@ -94,8 +95,7 @@ export function loadWhppCanonicalTruth(reportDate='', snapshotId='', dbOverride=
       (savedStatus==='81'&&['RETURNED','RETURN_COMPLETED'].includes(savedState)&&returned&&!pod)
     );
     const savedLock=pod?podLockMap.get(code):null;
-    const savedPodDate=savedLock&&isTrustedWhppPodLock(savedLock,date)
-      ?String(savedLock.podTime||'').trim():'';
+    const savedPodDate=pod?trustedWhppPodTime(savedLock,date):'';
     if(savedPodDate){
       // Keep the original timestamp; do not claim it is a TMS 60 proof.
       // A trusted track POD eventCode=80 is not shipmentStatus=80.
@@ -218,18 +218,6 @@ function normalizeCurrent(row,date){
 function normalizeScan(row,date){
   const raw=safeJson(row.rawJson);
   return {...raw,shipmentCode:String(row.shipmentCode||'').trim().toUpperCase(),运单号:String(row.shipmentCode||'').trim().toUpperCase(),businessType:'WHPP',reportDate:date,orderStatus:String(row.orderStatus??raw.orderStatus??''),scanIsPod:Number(row.isPod||0)};
-}
-function isTrustedWhppPodLock(lock,date){
-  const source=String(lock?.source||'').trim().toLowerCase();
-  if(!['whpp_strict_track_event','whpp_saved_scan_pod_time','whpp_saved_final_pod_time'].includes(source))
-    return false;
-  const text=String(lock?.podTime||'').trim();
-  const m=/^(\d{4})-(\d{2})-(\d{2})(?:[ T](?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d{1,6})?)?(?:Z|[+-](?:[01]\d|2[0-3]):?[0-5]\d)?)?$/.exec(text);
-  if(!m)return false;
-  const y=Number(m[1]),month=Number(m[2]),d=Number(m[3]);
-  const parsed=new Date(Date.UTC(y,month-1,d));
-  if(parsed.getUTCFullYear()!==y||parsed.getUTCMonth()!==month-1||parsed.getUTCDate()!==d)return false;
-  return text.slice(0,10)>=date;
 }
 function isPodEvidence(final,current,scan,row){
   const currentStatus=String(current?.shipmentStatus||current?.shipmentTrack?.shipmentStatus||'').trim();

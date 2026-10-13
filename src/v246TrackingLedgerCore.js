@@ -1,5 +1,6 @@
 import { getDb, nowIso } from './db.js';
 import { v246PositivePodText } from './shopeeAttemptCycleV246.js';
+import { loadWhppTrustedPodTime } from './whppPodTimeEvidence.js';
 
 export const V246_TRACKING_LEDGER_ID = '2026-08-23-v246-qc-tracking-ledger-v2';
 export const V419_STRICT_SIGNING_TRUTH_ID = '2026-09-03-v419-strict-start-signing-truth-v1';
@@ -324,7 +325,10 @@ export function reconcileV246TrackingLedger(selection, { db = getDb(), reason = 
       const lastImportedDate = maxDate(oldLedger?.lastImportedDate, source.lastImportedDate, carry?.lastReportDate) || source.lastImportedDate;
       const sourceSnapshotId = text(oldLedger?.sourceSnapshotId || carry?.sourceSnapshotId || source.anySnapshotId || 'V246-RECOVERED');
       const lastSnapshotId = text(current?.snapshotId || carry?.lastSnapshotId || source.anySnapshotId || sourceSnapshotId);
-      const podDate = cls.returnInProgress||cls.stateConflict||cls.returned?'':text(oldLedger?.podDate)||extractPodDate(payload,cls)||'';
+      const podDate = cls.returnInProgress||cls.stateConflict||cls.returned?''
+        :text(oldLedger?.podDate)
+          ||(type==='WHPP'&&cls.pod?v246DateKey(loadWhppTrustedPodTime(db,bill,firstReportDate)):'')
+          ||extractPodDate(payload,cls)||'';
       const oldStrict = strictAttemptSource(oldLedger?.attemptSource);
       const observedAttempt = directAttempt(payload);
       const attemptNo = oldStrict ? Number(oldLedger?.attemptNo || 0) : observedAttempt;

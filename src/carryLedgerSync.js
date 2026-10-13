@@ -1,4 +1,5 @@
 import { getDb, nowIso } from './db.js';
+import { loadWhppTrustedPodTime } from './whppPodTimeEvidence.js';
 import {
   ensureV246TrackingSchema,
   classifyV246Terminal,
@@ -331,7 +332,10 @@ export function syncCarryRowsToV246Ledger(rows = [], {
         : classification.stateConflict ? '终态矛盾待核验'
         : text(payload.primaryCategory || payload.currentMainCategory || payload.主分类 || payload.异常分类 || currentState);
       const podDate = (explicitlyReturnInProgress||terminalReason==='RETURNED') ? '' :
-        terminalReason === 'POD' ? podDateOf(payload, classification, old || {}) : text(old?.podDate || '');
+        terminalReason === 'POD'
+          ? (podDateOf(payload,classification,old||{}) ||
+              (businessType==='WHPP'?v246DateKey(loadWhppTrustedPodTime(db,bill,firstReportDate)):''))
+          : text(old?.podDate || '');
       const strictAttempt = strictAttemptSource(old?.attemptSource);
       const attemptNo = strictAttempt ? Number(old?.attemptNo || 0) : observedAttempt(payload);
       const attemptSource = strictAttempt ? text(old?.attemptSource) : (attemptNo ? text(payload.attemptSource || payload.attemptStatus || 'CARRY_RESULT') : '');
