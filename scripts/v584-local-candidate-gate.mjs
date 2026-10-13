@@ -138,6 +138,7 @@ const TASKS=[
   ['node',['scripts/v788-board-status-donut-smoke.mjs']],
   ['node',['scripts/v788-whpp-real-readonly-audit-smoke.mjs']],
   ['node',['scripts/v788-ledger-tms-precedence-smoke.mjs']],
+  ['node',['scripts/v788-actual-excel-date-ownership-smoke.mjs']],
   ['node',['scripts/v776-qc-closed-waybill-lookup-smoke.mjs']],
   ['node',['scripts/v773-local-admin-reset-smoke.mjs']],
   ['node',['--test',
