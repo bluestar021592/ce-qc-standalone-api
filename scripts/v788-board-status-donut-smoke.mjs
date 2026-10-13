@@ -26,4 +26,19 @@ const overlap=run('WHPP',{total:156,pod:124,returned:32,delivery:20,pending:0,ab
 assert.match(overlap.v625BusinessLegend.textContent,/分类存在重叠/);
 const ce=run('CE',{total:10,pod:8,returned:0,delivery:2,pending:0,abnormal:0,otherNormal:0});
 assert.doesNotMatch(ce.v625BusinessLegend.innerHTML,/已退回/);
+// Cover every business board, not just WHPP, with mutually exclusive sample states.
+for(const type of ['CE','CEAF','TBKH','ALI1688']){
+  const board=run(type,{total:12,pod:7,delivery:3,pending:1,abnormal:1,returned:0,otherNormal:0});
+  assert.doesNotMatch(board.v625BusinessLegend.innerHTML,/已退回/,`${type} must not invent return category`);
+  assert.doesNotMatch(board.v625BusinessLegend.innerHTML,/待核验/,`${type} must conserve sample total`);
+}
+for(const type of ['SHOPEECN','SHOPEEVN']){
+  const board=run(type,{total:20,pod:10,returned:5,delivery:2,pending:2,abnormal:1,otherNormal:0});
+  assert.match(board.v625BusinessLegend.innerHTML,/已退回 5（25.00%）/,`${type} must include returned parcels`);
+  assert.doesNotMatch(board.v625BusinessLegend.innerHTML,/待核验/,`${type} must conserve sample total`);
+}
+const other=run('WHPP',{total:10,pod:7,returned:1,delivery:0,pending:0,abnormal:0,otherNormal:2});
+assert.match(other.v625BusinessLegend.innerHTML,/其他正常状态 2（20.00%）/);
+assert.ok(source.includes("fullTimingQuery.delete('fast')"),'full date signing evidence must not remain in compact-only source');
+assert.ok(source.includes('full?.timing?.[business]?.overall?.avgDays'),'signing KPI must share full timing evidence source with overview');
 console.log('[V788 BOARD DONUT] WHPP POD124 return32, missing category guard, overlap guard, CE category scope PASS');
