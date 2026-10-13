@@ -223,6 +223,24 @@ assert.equal(newlyFinished[1].currentState,'RETURNED',
   'late status81 must close previously OPEN member, not fabricate a terminal conflict');
 assert.equal(newlyFinished[1].是否退回,'是');
 assert.equal(newlyFinished[1].terminalEvidenceStatus,'STRICT_TMS');
+// Dashboard unresolved carry uses precisely the same final terminal
+// overlay as export. Late terminal proof must clear it from OPEN counters
+// without mutating the old persisted carry row.
+const filterStart=src.indexOf('function filterActiveCarryMembers(');
+const filterEnd=src.indexOf('// Read-only export overlay.',filterStart);
+assert.ok(filterStart>=0&&filterEnd>filterStart);
+const filterCarry=new Function('overlaySavedTerminalExportTruth','getDb',
+  src.slice(filterStart,filterEnd)+'\nreturn filterActiveCarryMembers;')(overlay,()=>db);
+assert.deepEqual(filterCarry([latePod,lateReturn,status80Bill],'WHPP','2026-07-02',db),
+  [status80Bill],'late POD and returned must leave historical OPEN counts; conflicting return80 remains');
+assert.equal(db.prepare("SELECT trackingStatus FROM qc_tracking_ledger WHERE shipmentCode=?")
+  .get(latePod).trackingStatus,'OPEN','dashboard read must not silently modify the historic ledger');
+assert.equal(db.prepare("SELECT trackingStatus FROM qc_tracking_ledger WHERE shipmentCode=?")
+  .get(lateReturn).trackingStatus,'OPEN','dashboard read must keep original evidence unchanged');
+const openUnknown='CE020726UNRESOLVED';
+put.run(openUnknown,'WHPP','PENDING_SCAN','{}','');
+assert.deepEqual(filterCarry([openUnknown,latePod,lateReturn],'WHPP','2026-07-02',db),
+  [openUnknown],'missing evidence must remain visible in unresolved queue');
 const oppositePod='CE020726OPPOSITEPOD';
 put.run(oppositePod,'WHPP','RETURNED',JSON.stringify({shipmentStatus:'60'}),'2026-07-05');
 const opposite=overlay([{shipmentCode:oppositePod,businessType:'WHPP',
