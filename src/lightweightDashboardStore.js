@@ -831,7 +831,7 @@ function overlaySavedTerminalExportTruth(rows=[],db=getDb()){
       }
       return {...row,isPod:1,是否POD:'是',POD状态:'POD',currentState:'POD',
         primaryCategory:'POD闭环',退回状态:'',是否退回:'否',
-        podTime:selectedTime,podDate:String(selectedTime).slice(0,10),
+        podTime:selectedTime,podDate:verifiedWhppTime?verifiedWhppTime.slice(0,10):String(selectedTime),
         ...(verifiedWhppTime?{
           POD时间:verifiedWhppTime,signingDays:verifiedSigningDays,签收天数:verifiedSigningDays,
           podTimeEvidenceSource:row.podTimeEvidenceSource

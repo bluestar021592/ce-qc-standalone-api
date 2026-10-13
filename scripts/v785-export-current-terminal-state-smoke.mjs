@@ -39,6 +39,8 @@ assert.equal(rows[1].是否退回,'否');
 assert.equal(rows[1].退回状态,'退回中');
 assert.equal(rows[2].currentState,'RETURNED');
 assert.equal(rows[2].是否退回,'是');
+assert.equal(rows[1].podDate,'','returning 80 must not carry stale POD date');
+assert.equal(rows[2].signingDays,null,'returned 81 must not be part of signing average');
 assert.equal(rows[3].currentState,'POD');
 assert.equal(rows[3].是否POD,'是');
 assert.ok(rows.every(r=>r.reportDate==='2026-07-02'),'historical source membership must remain unchanged');
@@ -162,6 +164,28 @@ assert.equal(isoTruth.evidence.trustedSavedPodTimeRows,2);
 assert.equal(isoTruth.rows.find(row=>row.shipmentCode==='CE020726LABEL02').podTime,'2026-07-04T09:30:00.000Z');
 assert.equal(labelExport('V788-NO-TMS','2026-07-02','WHPP').find(
   row=>row.shipmentCode==='CE020726LABEL02').podDate,'2026-07-04');
+// Check final export overlay (not just canonical source): an older ledger
+// date must never overwrite member-matched POD lock provenance.
+labelDb.exec("CREATE TABLE qc_tracking_ledger(shipmentCode TEXT,businessType TEXT,trackingStatus TEXT,terminalReason TEXT,podDate TEXT,lastEventTime TEXT)");
+labelDb.prepare("INSERT INTO qc_tracking_ledger VALUES(?,'WHPP','TERMINAL','POD','2026-07-03','')")
+  .run('CE020726LABEL01');
+labelDb.prepare("INSERT INTO qc_tracking_ledger VALUES(?,'WHPP','TERMINAL','POD','2026-07-03','')")
+  .run('CE020726LABEL02');
+labelDb.prepare("INSERT INTO qc_tracking_ledger VALUES(?,'WHPP','TERMINAL','RETURNED','','')")
+  .run('CE020726LABEL03');
+const trueProjection=overlay(labelExport('V788-NO-TMS','2026-07-02','WHPP'),labelDb);
+assert.equal(trueProjection.length,3);
+assert.equal(trueProjection.find(row=>row.shipmentCode==='CE020726LABEL01').podTime,
+  '2026-07-03 08:30:00','verified timestamp must outrank outdated ledger only');
+assert.equal(trueProjection.find(row=>row.shipmentCode==='CE020726LABEL01').signingDays,2);
+assert.equal(trueProjection.find(row=>row.shipmentCode==='CE020726LABEL02').podTime,
+  '2026-07-04T09:30:00.000Z','ISO saved time must outrank outdated ledger');
+assert.equal(trueProjection.find(row=>row.shipmentCode==='CE020726LABEL02').signingDays,3);
+const returnedProjected=trueProjection.find(row=>row.shipmentCode==='CE020726LABEL03');
+assert.equal(returnedProjected.currentState,'RETURNED');
+assert.equal(returnedProjected.podTime,'','returned member must not retain old POD time');
+assert.equal(returnedProjected.podDate,'');
+assert.equal(returnedProjected.signingDays,null);
 labelDb.close();
 
 // V788: stale ledger TERMINAL must not override an exact newer TMS status80.
