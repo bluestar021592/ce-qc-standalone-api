@@ -1632,7 +1632,17 @@ async function loadBusiness(options={}){
     if(returnCapable){setText('kpiReturned',fmt(m.returned||0));setText('kpiReturnRate',pct(m.total?Number(m.returned||0)*100/Number(m.total):0))}
     if(byId('kpiOtherCard')){byId('kpiOtherCard').hidden=false;setText('kpiOtherNormal',fmt(m.otherNormal||0))}
     if(byId('kpiUnprocessedCard')){byId('kpiUnprocessedCard').hidden=true;setText('kpiUnprocessed',fmt(0))}
-    renderDonut({total:m.total,delivery:m.delivery||0,pod:m.pod||0,returned:m.returned||0,pending:m.pending||0,abnormal:m.oc||0,otherNormal:m.otherNormal||0});
+    // Prefer disjoint exact-member accounting. OC and Pending KPIs can be
+    // overlapping risk flags, so they must not be summed into a status donut.
+    const disjointKinds=['delivery','pod','returned','pending','abnormal','otherNormal','unprocessed'];
+    const exactRows=a.rowsByKind||{};
+    const hasExactRows=disjointKinds.some(key=>Array.isArray(exactRows[key])&&exactRows[key].length>0);
+    const exactCounts=Object.fromEntries(disjointKinds.map(key=>[key,Array.isArray(exactRows[key])?exactRows[key].length:0]));
+    const exactSum=disjointKinds.reduce((sum,key)=>sum+exactCounts[key],0);
+    const verifiedAccounting=hasExactRows&&exactSum===Number(m.total||0);
+    renderDonut(verifiedAccounting
+      ? {total:m.total,delivery:exactCounts.delivery,pod:exactCounts.pod,returned:exactCounts.returned,pending:exactCounts.pending,abnormal:exactCounts.abnormal,otherNormal:exactCounts.otherNormal+exactCounts.unprocessed}
+      : {total:m.total,delivery:0,pod:m.pod||0,returned:m.returned||0,pending:0,abnormal:0,otherNormal:0});
 
     // Fast summary/timing updates are useful, but never gate the board's first paint.
     void summaryPromise.then(summary=>{
