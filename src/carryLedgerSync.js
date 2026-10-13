@@ -45,8 +45,8 @@ function strictAttemptSource(value = '') {
 function preferredState(payload = {}, currentState = '') {
   const shipmentStatus=text(payload.shipmentStatus||payload.shipmentTrack?.shipmentStatus);
   if(shipmentStatus==='80')return 'RETURN_IN_PROGRESS';
-  if(shipmentStatus==='60')return 'POD';
-  if(shipmentStatus==='81')return 'RETURNED';
+  // 60/81 are decided by the strict classifier below so a contradictory
+  // saved current state is detected instead of silently overwritten.
   const evidence = [
     payload.currentState,payload.scanNormalizedState,payload.退回状态,payload.primaryCategory,
     payload.currentMainCategory,payload.主分类,payload.异常分类,payload.latestEventDesc,payload.最后节点
@@ -325,9 +325,10 @@ export function syncCarryRowsToV246Ledger(rows = [], {
       const lastEventTime = text(current?.lastEventTime || payload.latestEventTime || payload.最后节点时间 || old?.lastEventTime || '');
       const currentState = isTerminal
         ? (terminalReason === 'POD' ? 'POD' : terminalReason === 'RETURNED' ? 'RETURNED' : 'ORDER_CANCELLED')
-        : classifyState;
+        : classification.stateConflict ? 'PENDING_VERIFICATION' : classifyState;
       const currentCategory = isTerminal
         ? (terminalReason === 'POD' ? 'POD' : terminalReason === 'RETURNED' ? '退回' : '订单取消')
+        : classification.stateConflict ? '终态矛盾待核验'
         : text(payload.primaryCategory || payload.currentMainCategory || payload.主分类 || payload.异常分类 || currentState);
       const podDate = explicitlyReturnInProgress ? '' :
         terminalReason === 'POD' ? podDateOf(payload, classification, old || {}) : text(old?.podDate || '');
