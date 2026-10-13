@@ -833,9 +833,12 @@ function overlaySavedTerminalExportTruth(rows=[],db=getDb()){
         // shipmentStatus 80 is RETURNING and must not masquerade as a
         // completed return when older exported classifications say "退回".
         // Never use eventCode 80 as a shipment terminal fact.
+        // A later exact 60/81 status may legitimately close a former
+        // OPEN/PENDING/OC member. Conflict only with a contradictory
+        // *explicit* terminal state, never with an unfinished state.
         const contradiction=(status==='80'&&['POD','RETURNED','RETURN_COMPLETED'].includes(state))
-          ||(status==='60'&&state!=='POD')
-          ||(status==='81'&&!['RETURNED','RETURN_COMPLETED'].includes(state));
+          ||(status==='60'&&['RETURNED','RETURN_COMPLETED','RETURN_IN_PROGRESS','RETURNING'].includes(state))
+          ||(status==='81'&&['POD','RETURN_IN_PROGRESS','RETURNING'].includes(state));
         const outcome=contradiction?'CONFLICT':
           status==='80'?'RETURNING':
           status==='60'?'POD':
