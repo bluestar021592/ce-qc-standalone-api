@@ -675,12 +675,37 @@ export function listLightweightCompletedUnifiedSnapshots(fromDate, toDate, busin
     if(!EXPORT_BUSINESS_TYPES.includes(type))throw new Error('不支持的报表业务类型');
     return type;
   }))];
-  return listLatestValidRangeBatches(range.from, range.to, true).map(batch => ({
-    snapshotId: batch.snapshotId,
-    reportDate: batch.reportDate,
-    createdAt: batch.createdAt,
-    payload: {
-      finalRows: types.flatMap(type => loadLightweightExportRows(batch.snapshotId, batch.reportDate, type))
+  const byDate=new Map(listLatestValidRangeBatches(range.from,range.to,true)
+    .map(batch=>[batch.reportDate,{...batch,unifiedCompleted:true}]));
+  // WHPP is imported through business_daily_parse_rows, independently of
+  // unified_import_batches. Its valid selected day must not disappear just
+  // because the six other businesses had no unified batch that day.
+  if(types.includes('WHPP')){
+    const db=getDb();
+    const hasSource=Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='business_daily_parse_rows'").get());
+    if(hasSource){
+      const whppDates=db.prepare(`
+        SELECT DISTINCT reportDate FROM business_daily_parse_rows
+        WHERE businessType='WHPP' AND reportDate BETWEEN ? AND ?
+        ORDER BY reportDate
+      `).all(range.from,range.to);
+      for(const row of whppDates){
+        const date=String(row.reportDate||'');
+        if(!byDate.has(date))byDate.set(date,{
+          snapshotId:'WHPP_INDEPENDENT_'+date,reportDate:date,
+          createdAt:'',unifiedCompleted:false
+        });
+      }
+    }
+  }
+  return [...byDate.values()].sort((a,b)=>a.reportDate.localeCompare(b.reportDate)).map(batch=>({
+    snapshotId:batch.snapshotId,
+    reportDate:batch.reportDate,
+    createdAt:batch.createdAt,
+    payload:{
+      finalRows:types.flatMap(type=>
+        type==='WHPP'||batch.unifiedCompleted
+          ?loadLightweightExportRows(batch.snapshotId,batch.reportDate,type):[])
     }
   }));
 }
