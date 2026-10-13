@@ -3,7 +3,7 @@ import fs from 'node:fs';
 
 const shell=fs.readFileSync('public/v625-shell.js','utf8');
 
-assert.match(shell,/post\('\/api\/whpp\/run\/'\+\(mode==='resume'\?'resume':'start'\),\{reportDate\},0\)/,
+assert.match(shell,/post\('\/api\/whpp\/run\/'\+\(runMode==='resume'\?'resume':'start'\),\{reportDate:day\},0\)/,
   'WHPP long-run start/resume must be unbounded on the browser side');
 assert.doesNotMatch(shell,/renderLiveProgress\(\{ccsl:\{\},shopee:\{\},whpp:/,
   'WHPP terminal waiter must not wipe completed CCSL/SHOPEE progress');
