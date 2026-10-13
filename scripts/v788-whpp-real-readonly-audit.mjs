@@ -1,10 +1,11 @@
 import fs from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
+import { trustedWhppPodTime } from '../src/whppPodTimeEvidence.js';
 
 // V788 read-only acceptance audit. Never prints shipment identifiers, names,
 // phone numbers, addresses, raw JSON or the database path. No writes, API calls,
 // cache regeneration, VACUUM, or application startup side effects.
-const VERSION='V788_WHPP_REAL_READONLY_AUDIT_V2';
+const VERSION='V788_WHPP_REAL_READONLY_AUDIT_V3';
 
 function safeObject(value){
   try { const v=JSON.parse(String(value||'{}')); return v&&typeof v==='object'?v:{}; }
@@ -39,7 +40,11 @@ function emptyDay(date){
     matchedPODAgainstScanOrFinal:0,matchedReturnAgainstFinal:0,
     conflictingTerminalEvidence:0,explicitPODTimeFromSavedEvidence:0,
     tms60InOtherEvidence:0,tms81InOtherEvidence:0,
-    hasFullMembershipNotVerifiedOutcome:false};
+    hasFullMembershipNotVerifiedOutcome:false,
+    savedPodLockMembers:0,trustedPodLockOnPOD:0,rejectedPodLockOnPOD:0,
+    trustedPodLockOnNonPOD:0,ledgerOpenWithNormalizedTerminal:0,
+    ledgerTerminalWithNonterminal:0,ledgerTerminalContradictingTms:0,
+    trustedPodTimeCoveragePct:null,podLockTablePresent:false};
 }
 function fullDateFromEvidence(value){
   const s=String(value||'').trim();
@@ -73,6 +78,8 @@ export function auditV788Readonly(db){
   const findLedger=db.prepare("SELECT trackingStatus,terminalReason FROM qc_tracking_ledger WHERE shipmentCode=? AND businessType='WHPP'");
   const findScan=db.prepare("SELECT isPod,orderStatus,rawJson FROM business_scan_results WHERE shipmentCode=? AND businessType='WHPP' AND reportDate=? LIMIT 1");
   const findFinal=db.prepare("SELECT isPod,primaryCategory,rawJson FROM business_final_rows WHERE shipmentCode=? AND businessType='WHPP' AND reportDate=? LIMIT 1");
+  const podLockTablePresent=Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='business_pod_locks'").get());
+  const findPodLock=podLockTablePresent?db.prepare("SELECT podTime,source FROM business_pod_locks WHERE businessType='WHPP' AND shipmentCode=? LIMIT 1"):null;
   const days=new Map();
   for(const row of rows){
     const day=String(row.reportDate||'');
@@ -100,6 +107,14 @@ export function auditV788Readonly(db){
     if(normalizedPOD)d.normalizedPOD++;
     else if(normalizedReturned)d.normalizedReturned++;
     else d.normalizedNonterminal++;
+    d.podLockTablePresent=podLockTablePresent;
+    const lock=findPodLock?.get(row.shipmentCode);
+    const trustedLock=lock?trustedWhppPodTime(lock,day):'';
+    if(lock)d.savedPodLockMembers++;
+    if(normalizedPOD){
+      if(trustedLock)d.trustedPodLockOnPOD++;
+      else if(lock)d.rejectedPodLockOnPOD++;
+    }else if(trustedLock)d.trustedPodLockOnNonPOD++;
     const scanPOD=Boolean(scan)&&(Number(scan.isPod||0)===1||String(scan.orderStatus||'')==='85');
     const finalPOD=Boolean(final)&&Number(final.isPod||0)===1;
     const finalReturned=Boolean(final)&&isFinalCompletedReturn({...finalRaw,primaryCategory:final.primaryCategory});
@@ -117,6 +132,17 @@ export function auditV788Readonly(db){
     if(terminalStatusFrom(scanRaw)==='81'||terminalStatusFrom(finalRaw)==='81')
       d.tms81InOtherEvidence++;
     const ledger=findLedger.get(row.shipmentCode);
+    const ledgerState=String(ledger?.trackingStatus||'').toUpperCase();
+    const ledgerReason=String(ledger?.terminalReason||'').toUpperCase();
+    if(ledgerState==='OPEN'&&(normalizedPOD||normalizedReturned))
+      d.ledgerOpenWithNormalizedTerminal++;
+    if(ledgerState==='TERMINAL'&&!normalizedPOD&&!normalizedReturned)
+      d.ledgerTerminalWithNonterminal++;
+    if(ledgerState==='TERMINAL'&&(
+      bucket==='contradiction'||bucket==='returning80'
+      ||(ledgerReason==='POD'&&normalizedReturned)
+      ||(ledgerReason==='RETURNED'&&normalizedPOD)))
+      d.ledgerTerminalContradictingTms++;
     if((bucket==='strictPOD'||bucket==='strictReturned')&&String(ledger?.trackingStatus||'').toUpperCase()==='OPEN')
       d.ledgerOpenWithStrictTerminal++;
   }
@@ -126,6 +152,8 @@ export function auditV788Readonly(db){
     d.allStrictTerminalEvidence=d.sourceMembers>0&&(d.strictPOD+d.strictReturned)===d.sourceMembers;
     d.eligibleForStrictExportFallback=d.allStrictTerminalEvidence&&!d.scanAndFinalComplete;
     d.hasFullMembershipNotVerifiedOutcome=d.scanAndFinalComplete&&!d.allStrictTerminalEvidence;
+    d.trustedPodTimeCoveragePct=d.normalizedPOD>0
+      ?Math.round(d.trustedPodLockOnPOD/d.normalizedPOD*10000)/100:null;
   }
   const totals=emptyDay('ALL');
   for(const d of byDate){
@@ -135,15 +163,21 @@ export function auditV788Readonly(db){
       'normalizedNonterminal','scanPOD','finalPOD','finalReturnCompleted',
       'matchedPODAgainstScanOrFinal','matchedReturnAgainstFinal',
       'conflictingTerminalEvidence','explicitPODTimeFromSavedEvidence',
-      'tms60InOtherEvidence','tms81InOtherEvidence'])totals[key]+=d[key];
+      'tms60InOtherEvidence','tms81InOtherEvidence',
+      'savedPodLockMembers','trustedPodLockOnPOD','rejectedPodLockOnPOD',
+      'trustedPodLockOnNonPOD','ledgerOpenWithNormalizedTerminal',
+      'ledgerTerminalWithNonterminal','ledgerTerminalContradictingTms'])totals[key]+=d[key];
   }
   totals.scanAndFinalComplete=totals.sourceMembers>0&&totals.scannedMembers===totals.sourceMembers
     &&totals.finalizedMembers===totals.sourceMembers;
   totals.allStrictTerminalEvidence=totals.sourceMembers>0&&(totals.strictPOD+totals.strictReturned)===totals.sourceMembers;
   totals.eligibleForStrictExportFallback=totals.allStrictTerminalEvidence&&!totals.scanAndFinalComplete;
   totals.hasFullMembershipNotVerifiedOutcome=totals.scanAndFinalComplete&&!totals.allStrictTerminalEvidence;
+  totals.podLockTablePresent=podLockTablePresent;
+  totals.trustedPodTimeCoveragePct=totals.normalizedPOD>0
+    ?Math.round(totals.trustedPodLockOnPOD/totals.normalizedPOD*10000)/100:null;
   return {version:VERSION,readOnly:true,source:'local-database-copy',
-    limitations:'Counts show saved labels and locally stored scan/final evidence separately; record presence is not proof that API scans succeeded, and no TMS 60/81 means strict terminal status is unverified. Explicit times are only date-format-checked and do not prove valid signing duration.',
+    limitations:'Counts show saved labels and locally stored scan/final evidence separately; record presence is not proof that API scans succeeded, and no TMS 60/81 means strict terminal status is unverified. Saved POD-lock coverage counts only member-matched POD records with whitelisted evidence provenance, valid timestamp and a date on or after their daily source date. It does not establish external TMS confirmation or full signature-time accuracy.',
     active72,whpp:{byDate,totals}};
 }
 export function auditDatabaseFile(dbFile){

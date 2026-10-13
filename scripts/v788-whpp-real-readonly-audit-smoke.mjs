@@ -10,6 +10,7 @@ try{
   db.exec("CREATE TABLE qc_tracking_ledger(shipmentCode TEXT,businessType TEXT,trackingStatus TEXT,terminalReason TEXT)");
   db.exec("CREATE TABLE business_scan_results(shipmentCode TEXT,businessType TEXT,reportDate TEXT,isPod INTEGER,orderStatus TEXT,rawJson TEXT)");
   db.exec("CREATE TABLE business_final_rows(shipmentCode TEXT,businessType TEXT,reportDate TEXT,isPod INTEGER,primaryCategory TEXT,rawJson TEXT)");
+  db.exec("CREATE TABLE business_pod_locks(businessType TEXT,shipmentCode TEXT,podTime TEXT,source TEXT)");
   const members=Array.from({length:72},(_,i)=>({code:'CP'+String(100001+i),name:'Shop '+(i+1)}));
   db.prepare('INSERT INTO app_meta VALUES(?,?)').run('shop_current_complete_codes_v780',JSON.stringify({mode:'COMPLETE',members}));
   const insertMember=db.prepare("INSERT INTO business_daily_parse_rows VALUES(?,'WHPP',?)");
@@ -30,6 +31,11 @@ try{
   db.prepare("INSERT INTO business_final_rows VALUES('A1','WHPP','2026-07-01',1,'POD','{}')").run();
   db.prepare("INSERT INTO business_scan_results VALUES('A2','WHPP','2026-07-01',0,'','{}')").run();
   db.prepare("INSERT INTO business_final_rows VALUES('A2','WHPP','2026-07-01',0,'已退回','{}')").run();
+  const insertLock=db.prepare("INSERT INTO business_pod_locks VALUES('WHPP',?,?,?)");
+  insertLock.run('A1','2026-07-03 08:30:00','whpp_strict_track_event');
+  insertLock.run('A2','2026-07-03 08:30:00','whpp_saved_final_pod_time');
+  insertLock.run('B2','2026-07-03 08:30:00','NOT_VERIFIED_SOURCE');
+  insertLock.run('B3','2026-07-01 08:30:00','whpp_saved_scan_pod_time');
   const audit=auditV788Readonly(db);
   assert.equal(audit.active72.status,'ACTIVE_72');
   assert.equal(audit.whpp.totals.sourceMembers,5);
@@ -50,6 +56,17 @@ try{
   assert.equal(audit.whpp.totals.scanPOD,1);
   assert.equal(audit.whpp.totals.finalReturnCompleted,1);
   assert.equal(audit.whpp.totals.hasFullMembershipNotVerifiedOutcome,false);
+  assert.equal(audit.whpp.totals.podLockTablePresent,true);
+  assert.equal(audit.whpp.totals.savedPodLockMembers,4);
+  assert.equal(audit.whpp.totals.trustedPodLockOnPOD,1);
+  assert.equal(audit.whpp.totals.trustedPodLockOnNonPOD,1);
+  assert.equal(audit.whpp.totals.rejectedPodLockOnPOD,2);
+  assert.equal(audit.whpp.totals.trustedPodTimeCoveragePct,33.33);
+  assert.equal(audit.whpp.totals.ledgerOpenWithNormalizedTerminal,4);
+  assert.equal(audit.whpp.totals.ledgerTerminalWithNonterminal,0);
+  assert.equal(audit.whpp.totals.ledgerTerminalContradictingTms,0);
+  assert.equal(audit.whpp.byDate[0].trustedPodTimeCoveragePct,100);
+  assert.equal(audit.whpp.byDate[1].trustedPodTimeCoveragePct,0);
 
   assert.equal(audit.whpp.byDate[0].scanAndFinalComplete,true,'July1 fixture has full scan/final source coverage');
   assert.equal(audit.whpp.byDate[0].eligibleForStrictExportFallback,false,'full scan/final uses the primary export gate, not alternative TMS fallback');
