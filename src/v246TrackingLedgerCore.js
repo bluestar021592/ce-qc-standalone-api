@@ -290,6 +290,7 @@ export function reconcileV246TrackingLedger(selection, { db = getDb(), reason = 
       evidenceJson=CASE WHEN qc_tracking_ledger.attemptSource LIKE 'V246_STRICT_TRACK%' THEN qc_tracking_ledger.evidenceJson ELSE excluded.evidenceJson END,
       currentStateJson=excluded.currentStateJson,lastCheckedAt=CASE WHEN excluded.lastCheckedAt<>'' THEN excluded.lastCheckedAt ELSE qc_tracking_ledger.lastCheckedAt END,
       lastRepairReason=excluded.lastRepairReason,updatedAt=excluded.updatedAt`);
+  const resetStaleTerminal=db.prepare("UPDATE qc_tracking_ledger SET trackingStatus='OPEN',terminalReason='',terminalAt='',podDate='',signingDays=NULL WHERE shipmentCode=?");
   const auditInsert = db.prepare('INSERT INTO qc_tracking_audit(shipmentCode,businessType,action,reason,beforeJson,afterJson,createdAt) VALUES(?,?,?,?,?,?,?)');
   const now = nowIso();
   let missingLedger = 0, missingCarry = 0, reopened = 0, terminal = 0, open = 0;
@@ -307,38 +308,54 @@ export function reconcileV246TrackingLedger(selection, { db = getDb(), reason = 
       const payload = { ...carryJson, ...currentJson, shipmentCode: bill, 运单号: bill, businessType: type };
       const clsCurrent = classifyV246Terminal({ state: current?.state, stateJson: currentJson });
       const clsCarry = classifyV246Terminal({ closeReason: carry?.closeReason, stateJson: carryJson });
-      const cls = clsCurrent.terminal ? clsCurrent : clsCarry;
+      // Current exact TMS 60/80/81 evidence outranks a stale saved carry
+      // label. In particular a former TERMINAL cannot hide a newer TMS 80.
+      const currentTmsStatus=text(currentJson.shipmentStatus||currentJson.shipmentTrack?.shipmentStatus);
+      const cls=['60','80','81'].includes(currentTmsStatus)||clsCurrent.stateConflict
+        ? clsCurrent : (clsCurrent.terminal?clsCurrent:clsCarry);
+      const forceReset=Boolean(oldLedger&&(
+        ((cls.returnInProgress||cls.stateConflict)&&
+          (text(oldLedger.terminalReason)||text(oldLedger.podDate)||oldLedger.signingDays!=null||oldLedger.trackingStatus==='TERMINAL'))
+        ||(['60','81'].includes(currentTmsStatus)&&oldLedger.trackingStatus==='TERMINAL'
+          &&text(oldLedger.terminalReason)!==cls.reason)
+      ));
+      if(forceReset)resetStaleTerminal.run(bill);
       const firstReportDate = minDate(oldLedger?.firstReportDate, carry?.sourceReportDate, source.firstReportDate) || source.firstReportDate;
       const lastImportedDate = maxDate(oldLedger?.lastImportedDate, source.lastImportedDate, carry?.lastReportDate) || source.lastImportedDate;
       const sourceSnapshotId = text(oldLedger?.sourceSnapshotId || carry?.sourceSnapshotId || source.anySnapshotId || 'V246-RECOVERED');
       const lastSnapshotId = text(current?.snapshotId || carry?.lastSnapshotId || source.anySnapshotId || sourceSnapshotId);
-      const podDate = text(oldLedger?.podDate) || extractPodDate(payload, cls) || '';
+      const podDate = cls.returnInProgress||cls.stateConflict?'':text(oldLedger?.podDate)||extractPodDate(payload,cls)||'';
       const oldStrict = strictAttemptSource(oldLedger?.attemptSource);
       const observedAttempt = directAttempt(payload);
       const attemptNo = oldStrict ? Number(oldLedger?.attemptNo || 0) : observedAttempt;
       const attemptSource = oldStrict ? text(oldLedger?.attemptSource) : (attemptNo ? text(payload.attemptSource || payload.attemptStatus || '现有派次证据') : '');
-      const signingDays = oldStrict ? (oldLedger?.signingDays ?? null) : (podDate ? v246InclusiveDays(firstReportDate,podDate) : null);
-      const stateName = text(current?.state || payload.currentState || payload.scanNormalizedState || payload.primaryCategory || payload.主分类 || 'OPEN');
-      const category = text(payload.primaryCategory || payload.currentMainCategory || payload.主分类 || payload.异常分类 || stateName);
+      const signingDays = cls.returnInProgress||cls.stateConflict?null:
+        oldStrict?(oldLedger?.signingDays??null):(podDate?v246InclusiveDays(firstReportDate,podDate):null);
+      const stateName = cls.returnInProgress?'RETURN_IN_PROGRESS':cls.stateConflict?'PENDING_VERIFICATION':
+        text(current?.state || payload.currentState || payload.scanNormalizedState || payload.primaryCategory || payload.主分类 || 'OPEN');
+      const category = cls.returnInProgress?'退回中':cls.stateConflict?'终态矛盾待核验':
+        text(payload.primaryCategory || payload.currentMainCategory || payload.主分类 || payload.异常分类 || stateName);
       const lastEventTime = text(current?.lastEventTime || payload.latestEventTime || payload.最后节点时间 || '');
       const trackingStatus = cls.terminal ? 'TERMINAL' : 'OPEN';
       const closeReason = cls.reason;
       if (!oldLedger) missingLedger += 1;
       if (!carry) missingCarry += 1;
-      if (!cls.terminal && carry && (text(carry.status).toUpperCase() === 'CLOSED' || text(carry.closeReason))) reopened += 1;
+      if (!cls.terminal && (forceReset || (carry && (text(carry.status).toUpperCase() === 'CLOSED' || text(carry.closeReason))))) reopened += 1;
       if (cls.terminal) terminal += 1; else open += 1;
       const apiStatus = text(current?.apiStatus || carry?.apiStatus || 'PENDING_SCAN');
       const before = compactLedger(oldLedger || carry || {});
-      carryUpsert.run(bill,type,firstReportDate,lastImportedDate,sourceSnapshotId,lastSnapshotId,trackingStatus === 'TERMINAL' ? 'CLOSED' : 'OPEN',apiStatus,closeReason,JSON.stringify(payload),carry?.createdAt || now,now);
+      const ledgerPayload={...payload,currentState:stateName,
+        shipmentStatusConflict:Boolean(cls.stateConflict||payload.shipmentStatusConflict===true)};
+      carryUpsert.run(bill,type,firstReportDate,lastImportedDate,sourceSnapshotId,lastSnapshotId,trackingStatus === 'TERMINAL' ? 'CLOSED' : 'OPEN',apiStatus,closeReason,JSON.stringify(ledgerPayload),carry?.createdAt || now,now);
       ledgerUpsert.run(
         bill,type,firstReportDate,lastImportedDate,sourceSnapshotId,lastSnapshotId,trackingStatus,closeReason,
         cls.terminal ? (text(oldLedger?.terminalAt) || lastEventTime || now) : '',stateName,category,lastEventTime,podDate,attemptNo,attemptSource,signingDays,
         oldStrict ? text(oldLedger?.evidenceJson || '{}') : JSON.stringify({ source:'V246_RECONCILE', reason, sourceFirstReportDate:source.firstReportDate, sourceLastImportedDate:source.lastImportedDate }),
-        JSON.stringify(payload),text(oldLedger?.lastCheckedAt || current?.updatedAt || carry?.updatedAt || ''),reason,oldLedger?.createdAt || carry?.createdAt || now,now
+        JSON.stringify(ledgerPayload),text(oldLedger?.lastCheckedAt || current?.updatedAt || carry?.updatedAt || ''),reason,oldLedger?.createdAt || carry?.createdAt || now,now
       );
-      if (!oldLedger || !carry || (!cls.terminal && carry && (text(carry.status).toUpperCase() === 'CLOSED' || text(carry.closeReason)))) {
+      if (!oldLedger || !carry || forceReset || (!cls.terminal && carry && (text(carry.status).toUpperCase() === 'CLOSED' || text(carry.closeReason)))) {
         const after = compactLedger(ledgerGet.get(bill) || {});
-        const action = !oldLedger ? 'ADD_LEDGER' : !carry ? 'RECOVER_CARRY' : 'REOPEN_NON_TERMINAL';
+        const action = !oldLedger ? 'ADD_LEDGER' : !carry ? 'RECOVER_CARRY' : forceReset ? 'RECONCILE_TMS_TERMINAL_OVERRIDE' : 'REOPEN_NON_TERMINAL';
         auditInsert.run(bill,type,action,reason,JSON.stringify(before),JSON.stringify(after),now);
         if (repairedSamples.length < 20) repairedSamples.push(bill);
       }
