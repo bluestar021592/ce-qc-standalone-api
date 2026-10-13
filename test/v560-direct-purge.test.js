@@ -151,6 +151,20 @@ test('V561 queues direct purge immediately and reports detached worker progress 
 });
 
 
+test('V788 full reset cleans historical sources but never deletes protected data folders',()=>{
+  const store=fs.readFileSync('src/store.js','utf8');
+  const purge=fs.readFileSync('src/directDataPurge.js','utf8');
+  const tables=['shopee_delivery_tracking','shopee_delivery_tracking_daily',
+    'v207_daily_ownership','v209_import_source_archive','v328_attempt_daily_cache',
+    'v329_three_business_daily_cache','v334_generic_history_cache',
+    'qc_tracking_ledger','shipment_current_state','unified_import_rows'];
+  for(const table of tables)assert.match(store,new RegExp(`['"]${table}['"]`),`missing historical purge table: ${table}`);
+  assert.match(purge,/for\\(const dir of \\[cfg\\.exportsDir,cfg\\.importsDir,cfg\\.longJsonExportsDir,cfg\\.evidenceArchiveDir\\]\\)/,
+    'file cleanup must be explicitly limited to regenerable artifacts');
+  assert.doesNotMatch(purge,/for\\(const dir of \\[[^\\]]*(?:cfg\\.tokenDir|cfg\\.backupsDir)/,
+    'file cleanup must never include authentication or existing backups');
+});
+
 test('post-purge empty bootstrap clears stale browser business state instead of merging pre-clear snapshots',()=>{
   const app=fs.readFileSync('public/app.js','utf8');
   const html=fs.readFileSync('public/index.html','utf8');
