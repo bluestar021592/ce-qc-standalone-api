@@ -265,14 +265,37 @@ function renderMiniTrend(rootId,points=[],tone='#1677f2'){
 }
 
 function renderDonut(m){
-  const total=Math.max(1,m.total);
+  // Keep mutually exclusive status slices; dashboard overlays (OC/Pending gaps)
+  // must never be added as extra parcels on top of the same shipment.
+  const total=Math.max(0,Number(m.total)||0);
+  const count=value=>Math.max(0,Math.trunc(Number(value)||0));
+  const returnCapable=['WHPP','SHOPEECN','SHOPEEVN'].includes(business);
   const parts=[
-    ['派送中',m.delivery,'#1677f2'],['已签收',m.pod,'#20b979'],['Pending',m.pending,'#f5a623'],['异常',m.unresolved,'#ef4b50']
+    ['派送中',count(m.delivery),'#1677f2'],
+    ['已签收',count(m.pod),'#20b979'],
+    ...(returnCapable?[['已退回',count(m.returned),'#e98945']]:[]),
+    ['Pending',count(m.pending),'#f5a623'],
+    ['异常',count(m.abnormal),'#ef4b50'],
+    ['其他正常状态',count(m.otherNormal),'#8c9bab']
   ];
+  const accounted=parts.reduce((sum,item)=>sum+item[1],0);
+  const donut=byId('v625BusinessDonut');
+  const legend=byId('v625BusinessLegend');
+  if(accounted>total){
+    if(donut)donut.style.background='var(--v625-border,#dce5ef)';
+    if(legend)legend.textContent='状态分类存在重叠：已分类 '+fmt(accounted)+' / 总票 '+fmt(total)+'，等待核验';
+    return;
+  }
+  if(accounted<total)parts.push(['待核验',total-accounted,'#c5cfdb']);
+  const denominator=Math.max(1,total);
   let at=0;const stops=[];
-  for(const[,value,color]of parts){const next=at+(value/total*100);stops.push(color+' '+at+'% '+next+'%');at=next}
-  const donut=byId('v625BusinessDonut');if(donut)donut.style.background='conic-gradient('+stops.join(',')+')';
-  const legend=byId('v625BusinessLegend');if(legend)legend.innerHTML=parts.map(([name,value,color])=>'<div><i style="background:'+color+'"></i><span>'+esc(name)+' '+fmt(value)+'（'+pct(value/total*100)+'）</span></div>').join('');
+  for(const[,value,color]of parts){
+    const next=at+(value/denominator*100);
+    if(value>0)stops.push(color+' '+at+'% '+next+'%');
+    at=next;
+  }
+  if(donut)donut.style.background=stops.length?'conic-gradient('+stops.join(',')+')':'var(--v625-border,#dce5ef)';
+  if(legend)legend.innerHTML=parts.map(([name,value,color])=>'<div><i style="background:'+color+'"></i><span>'+esc(name)+' '+fmt(value)+'（'+pct(value/denominator*100)+'）</span></div>').join('');
 }
 async function loadSession(){
   try{
@@ -1609,7 +1632,7 @@ async function loadBusiness(options={}){
     if(returnCapable){setText('kpiReturned',fmt(m.returned||0));setText('kpiReturnRate',pct(m.total?Number(m.returned||0)*100/Number(m.total):0))}
     if(byId('kpiOtherCard')){byId('kpiOtherCard').hidden=false;setText('kpiOtherNormal',fmt(m.otherNormal||0))}
     if(byId('kpiUnprocessedCard')){byId('kpiUnprocessedCard').hidden=true;setText('kpiUnprocessed',fmt(0))}
-    renderDonut({total:m.total,delivery:m.delivery||0,pod:m.pod||0,pending:m.pending||0,unresolved:m.unresolved||0});
+    renderDonut({total:m.total,delivery:m.delivery||0,pod:m.pod||0,returned:m.returned||0,pending:m.pending||0,abnormal:m.oc||0,otherNormal:m.otherNormal||0});
 
     // Fast summary/timing updates are useful, but never gate the board's first paint.
     void summaryPromise.then(summary=>{
