@@ -1,0 +1,44 @@
+import assert from 'node:assert/strict';
+import { DatabaseSync } from 'node:sqlite';
+import { auditV788Readonly } from './v788-whpp-real-readonly-audit.mjs';
+
+const db=new DatabaseSync(':memory:');
+try{
+  db.exec("CREATE TABLE app_meta(key TEXT PRIMARY KEY,value TEXT)");
+  db.exec("CREATE TABLE business_daily_parse_rows(reportDate TEXT,businessType TEXT,shipmentCode TEXT)");
+  db.exec("CREATE TABLE shipment_current_state(shipmentCode TEXT,businessType TEXT,reportDate TEXT,state TEXT,stateJson TEXT)");
+  db.exec("CREATE TABLE qc_tracking_ledger(shipmentCode TEXT,businessType TEXT,trackingStatus TEXT,terminalReason TEXT)");
+  db.exec("CREATE TABLE business_scan_results(shipmentCode TEXT,businessType TEXT,reportDate TEXT)");
+  db.exec("CREATE TABLE business_final_rows(shipmentCode TEXT,businessType TEXT,reportDate TEXT)");
+  const members=Array.from({length:72},(_,i)=>({code:'CP'+String(100001+i),name:'Shop '+(i+1)}));
+  db.prepare('INSERT INTO app_meta VALUES(?,?)').run('shop_current_complete_codes_v780',JSON.stringify({mode:'COMPLETE',members}));
+  const insertMember=db.prepare("INSERT INTO business_daily_parse_rows VALUES(?,'WHPP',?)");
+  const insertCurrent=db.prepare("INSERT INTO shipment_current_state VALUES(?,'WHPP',?,?,?)");
+  const insertLedger=db.prepare("INSERT INTO qc_tracking_ledger VALUES(?,'WHPP','OPEN','PENDING_SCAN')");
+  for(const [day,code,state,status,extra] of [
+    ['2026-07-01','A1','POD','60',{podTime:'2026-07-03 09:00:00'}],
+    ['2026-07-01','A2','RETURNED','81',{}],
+    ['2026-07-02','B1','RETURNING','80',{}],
+    ['2026-07-02','B2','POD','81',{}],
+    ['2026-07-02','B3','POD','',{}]
+  ]){
+    insertMember.run(day,code);
+    insertCurrent.run(code,day,state,JSON.stringify({shipmentStatus:status,...extra}));
+    insertLedger.run(code);
+  }
+  const audit=auditV788Readonly(db);
+  assert.equal(audit.active72.status,'ACTIVE_72');
+  assert.equal(audit.whpp.totals.sourceMembers,5);
+  assert.equal(audit.whpp.totals.strictPOD,1);
+  assert.equal(audit.whpp.totals.strictReturned,1);
+  assert.equal(audit.whpp.totals.returning80,1);
+  assert.equal(audit.whpp.totals.contradiction,1);
+  assert.equal(audit.whpp.totals.labelOnlyTerminal,1);
+  assert.equal(audit.whpp.totals.ledgerOpenWithStrictTerminal,2);
+  assert.equal(audit.whpp.totals.withExplicitPodTime,1);
+  assert.equal(audit.whpp.byDate[0].eligibleForStrictExportFallback,true);
+  assert.equal(audit.whpp.byDate[1].eligibleForStrictExportFallback,false);
+  assert.ok(!JSON.stringify(audit).includes('A1')&&!JSON.stringify(audit).includes('B1'));
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM shipment_current_state').get().n,5,'audit must not mutate shipment rows');
+  console.log('[V788 READONLY] strict 60/81, status 80, contradictions, label-only, CP72 and privacy checks PASS');
+}finally{db.close()}

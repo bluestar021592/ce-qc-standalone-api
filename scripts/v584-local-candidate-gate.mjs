@@ -136,6 +136,7 @@ const TASKS=[
   ['node',['scripts/v786-whpp-export-closure-smoke.mjs']],
   ['node',['scripts/v787-july02-whpp-first-start-recovery-smoke.mjs']],
   ['node',['scripts/v788-board-status-donut-smoke.mjs']],
+  ['node',['scripts/v788-whpp-real-readonly-audit-smoke.mjs']],
   ['node',['scripts/v776-qc-closed-waybill-lookup-smoke.mjs']],
   ['node',['scripts/v773-local-admin-reset-smoke.mjs']],
   ['node',['--test',
