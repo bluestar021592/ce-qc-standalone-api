@@ -20,6 +20,11 @@ try{
   `);
   const day='2026-07-02', snap='SNAP-v786';
   const bills=Array.from({length:156},(_,i)=>'CE020726'+String(i+1).padStart(5,'0'));
+  // V788: WHPP-only day union is sourced from an actual independent
+  // business_daily_parse_rows membership, not from a fake unified batch.
+  db.exec("CREATE TABLE business_daily_parse_rows(businessType TEXT,reportDate TEXT,shipmentCode TEXT)");
+  const putIndependent=db.prepare("INSERT INTO business_daily_parse_rows VALUES('WHPP',?,?)");
+  for(const code of bills)putIndependent.run(day,code);
   const raw=bills.map(shipmentCode=>({
     shipmentCode,regionCode:'PP',reportDate:day,
     isPod:0,truthEvidence:{scan:true,final:true,pod:false,returned:false},currentState:'PENDING'
