@@ -762,7 +762,21 @@ function loadLightweightExportRows(snapshotId, reportDate, type) {
     }];
   }));
   const state = loadLightweightUnifiedBusinessState(type, snapshotId, { includeHistory: false });
-  return overlaySavedTerminalExportTruth((state.finalRows || []).map(row => {
+  // Validate before Map/Excel deduplication can conceal missing members. A
+  // finalized six-business workbook must conserve the exact source set.
+  const sourceBills=sourceRows.map(row=>String(row.shipmentCode||'').trim().toUpperCase());
+  const finalRows=state.finalRows||[];
+  const finalBills=finalRows.map(billOf);
+  const sourceSet=new Set(sourceBills),finalSet=new Set(finalBills);
+  const validBills=list=>list.every(Boolean)&&new Set(list).size===list.length;
+  if(!validBills(sourceBills)||!validBills(finalBills)
+      ||sourceSet.size!==finalSet.size
+      ||[...sourceSet].some(bill=>!finalSet.has(bill))){
+    throw new Error(type+' '+reportDate+
+      ' 导出来源与最终明细运单不一致（来源'+sourceRows.length+
+      '票，明细'+finalRows.length+'票），存在重复、缺失或多余成员；禁止生成漏票报表');
+  }
+  return overlaySavedTerminalExportTruth(finalRows.map(row => {
     const bill = billOf(row);
     return {
       ...(sourceByBill.get(bill) || {}),
