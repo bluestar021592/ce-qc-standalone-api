@@ -48,7 +48,7 @@ try {
     return bill;
   };
   const ret80=seed('80','RETURNED','80','RETURNED');
-  const pod60=seed('60','PENDING_SCAN','60');
+  const pod60=seed('60','PENDING_SCAN','60','POD');
   db.prepare("INSERT INTO business_pod_locks VALUES('WHPP',?,?,?)")
     .run(pod60,'2026-07-04 12:30:00','whpp_strict_track_event');
   const ret81=seed('81','PENDING_SCAN','81');
@@ -70,7 +70,7 @@ try {
   assert.equal(current(ret80).state,'RETURN_IN_PROGRESS');
   assert.equal(state(pod60).trackingStatus,'TERMINAL');
   assert.equal(state(pod60).terminalReason,'POD');
-  assert.equal(state(pod60).podDate,'2026-07-04','daily sync must recover proven WHPP POD time');
+  assert.equal(state(pod60).podDate,'2026-07-04','trusted POD lock must replace an older stored ledger POD date');
   assert.equal(state(pod60).signingDays,3,'July2 intake to July4 POD is three inclusive days');
   assert.equal(state(ret81).terminalReason,'RETURNED');
   assert.equal(state(mismatch).trackingStatus,'OPEN');
@@ -81,6 +81,7 @@ try {
   assert.equal(state(mismatch).trackingStatus,'OPEN','second sync cannot close a persisted conflict');
   assert.equal(state(ret80).terminalReason,'');
   assert.equal(state(ret81).trackingStatus,'TERMINAL');
+  assert.equal(state(pod60).podDate,'2026-07-04','daily repeat must preserve verified replacement POD date');
   assert.ok(Number(db.prepare('SELECT COUNT(*) n FROM qc_tracking_audit').get().n)>0);
   // Separate V246 historical rebuilding must not resurrect stale TERMINAL
   // even when an old ledger has a real-looking POD date and signing duration.
@@ -119,7 +120,7 @@ try {
     const h80=addCase('80','RETURNED','80','RETURNED');
     const h81=addCase('81','RETURNED','81','POD');
     const hBad=addCase('BAD','POD','81','POD');
-    const h60=addCase('60','PENDING_SCAN','60');
+    const h60=addCase('60','PENDING_SCAN','60','POD');
     const lockInsert=hist.prepare("INSERT INTO business_pod_locks VALUES('WHPP',?,?,?)");
     lockInsert.run(h60,'2026-07-04 13:20:00','whpp_saved_scan_pod_time');
     lockInsert.run(hBad,'2026-07-04 13:20:00','whpp_strict_track_event');
@@ -142,7 +143,7 @@ try {
     assert.equal(row(hBad).currentState,'PENDING_VERIFICATION');
     assert.equal(row(h60).trackingStatus,'TERMINAL');
     assert.equal(row(h60).currentState,'POD');
-    assert.equal(row(h60).podDate,'2026-07-04','historical reconcile reads exact saved POD lock time');
+    assert.equal(row(h60).podDate,'2026-07-04','historical reconcile must replace older POD dates with trusted locks');
     assert.equal(row(h60).signingDays,3);
     assert.equal(row(hBad).podDate,'','conflicting return cannot inherit a POD lock');
     assert.equal(row(h80).podDate,'','return in progress cannot inherit a POD lock');
@@ -150,6 +151,7 @@ try {
     assert.equal(row(h80).trackingStatus,'OPEN','second historical rebuild cannot restore stale return terminal');
     assert.equal(row(hBad).trackingStatus,'OPEN','second historical rebuild cannot silently close conflicting 81');
     assert.equal(row(h81).terminalReason,'RETURNED');
+    assert.equal(row(h60).podDate,'2026-07-04','historical repeat must retain verified replacement POD date');
   }finally{hist.close();}
 
   console.log('[V788 LEDGER] 80 reopens old terminal and clears POD time; 60/81 strict; conflict stays OPEN over two syncs PASS');
