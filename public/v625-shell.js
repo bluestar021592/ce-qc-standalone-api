@@ -1793,7 +1793,7 @@ async function waitWhppTerminal(reportDate,timeoutMs=1800000){
 // the independently persisted 156-row WHPP daily source.
 function v787WhppRecoveryAction(proof={},requestedDate='',requestedSnapshot=''){
   const day=String(requestedDate||'').slice(0,10);
-  if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(day)
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(day)
     ||String(proof?.reportDate||'').slice(0,10)!==day
     ||!requestedSnapshot||String(proof?.snapshotId||'')!==String(requestedSnapshot))
     throw new Error('WHPP恢复诊断日期/来源快照不一致，已阻止操作');
@@ -1806,10 +1806,11 @@ function v787WhppRecoveryAction(proof={},requestedDate='',requestedSnapshot=''){
     throw new Error('WHPP独立日报运单未完整识别，不能重新处理');
   if(scanned>total||finalized>total)
     throw new Error('WHPP扫描/最终记录超过来源成员，必须先修复来源守恒');
-  if(data.locked===true&&data.processingEvidenceVerified===true)return {action:'DONE',total,scanned,finalized};
-  // A previous date's current runtime cannot be mistaken for today. Only
-  // a verified full snapshot+membership may be trusted as completed.
-  if(data.locked===true&&data.unifiedWhppCompleted===true)return {action:'DONE',total,scanned,finalized};
+  // "COMPLETED" without dated scan/final member proof is never enough to
+  // skip processing (legacy unified WHPP child can be zero while daily=156).
+  if(data.locked===true&&scanned===total&&finalized===total
+     &&(data.processingEvidenceVerified===true||data.terminalEvidenceVerified===true))
+    return {action:'DONE',total,scanned,finalized};
   return {action:scanned===0&&finalized===0?'START':'RESUME',total,scanned,finalized};
 }
 async function v787WhppRecoveryProof(reportDate){
