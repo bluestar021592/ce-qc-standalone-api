@@ -777,7 +777,12 @@ function overlaySavedTerminalExportTruth(rows=[],db=getDb()){
         FROM shipment_current_state WHERE shipmentCode IN (${marks})`).all(...chunk);
       for(const row of states){
         const bill=String(row.shipmentCode||'').toUpperCase();
-        if(closed.has(bill))continue;
+        // Exact saved 60/80/81 statuses supersede stale ledger terminals.
+        // Without a numeric TMS status, retain any verified ledger terminal.
+        // 80 can never close POD or return, even if the old normalized label
+        // or ledger still says RETURNED/POD.
+        const hasStrictStatus=['60','80','81'].includes(String(raw.shipmentStatus||raw?.shipmentTrack?.shipmentStatus||'').trim());
+        if(closed.has(bill)&&!hasStrictStatus)continue;
         let raw={};try{raw=JSON.parse(String(row.stateJson||'{}'))||{}}catch{}
         // ONLY shipmentStatus may use TMS numeric codes; eventCode must
         // never be confused with shipmentStatus 60/80/81.
@@ -786,28 +791,41 @@ function overlaySavedTerminalExportTruth(rows=[],db=getDb()){
         // shipmentStatus 80 is RETURNING and must not masquerade as a
         // completed return when older exported classifications say "退回".
         // Never use eventCode 80 as a shipment terminal fact.
-        const outcome=status==='60'||state==='POD'?'POD':
-          status==='81'||['RETURNED','RETURN_COMPLETED'].includes(state)?'RETURNED':
+        const contradiction=(status==='80'&&['POD','RETURNED','RETURN_COMPLETED'].includes(state))
+          ||(status==='60'&&state!=='POD')
+          ||(status==='81'&&!['RETURNED','RETURN_COMPLETED'].includes(state));
+        const outcome=contradiction?'CONFLICT':
           status==='80'?'RETURNING':
+          status==='60'?'POD':
+          status==='81'?'RETURNED':
+          state==='POD'?'POD':
+          ['RETURNED','RETURN_COMPLETED'].includes(state)?'RETURNED':
           state==='ORDER_CANCELLED'?'ORDER_CANCELLED':'';
         if(outcome)closed.set(bill,{outcome,businessType:String(row.businessType||'').toUpperCase(),
-          podTime:String(raw.podTime||raw.POD时间||''),eventTime:String(row.lastEventTime||'')});
+          podTime:String(raw.podTime||raw.POD时间||''),eventTime:String(row.lastEventTime||''),
+          strictTms:!contradiction&&(status==='60'||status==='81'),contradiction});
       }
     }catch{}
   }
   return rows.map(row=>{
     const fact=closed.get(billOf(row));
     if(!fact||fact.businessType&&fact.businessType!==String(row.businessType||'').toUpperCase())return row;
+    if(fact.outcome==='CONFLICT')return {...row,isPod:0,是否POD:'否',是否退回:'否',
+      currentState:'PENDING_VERIFICATION',primaryCategory:'终态矛盾待核验',
+      退回状态:'待核验',terminalEvidenceStatus:'CONFLICT',terminalEvidenceSource:'SAVED_TMS_STATUS_CONFLICT'};
     if(fact.outcome==='POD')return {...row,isPod:1,是否POD:'是',POD状态:'POD',currentState:'POD',
       primaryCategory:'POD闭环',退回状态:'',是否退回:'否',
       podTime:fact.podTime||row.podTime||'',podDate:fact.podTime||row.podDate||'',
-      lastEventTime:fact.eventTime||row.lastEventTime||'',terminalEvidenceSource:'SAVED_STRICT_POD'};
+      lastEventTime:fact.eventTime||row.lastEventTime||'',
+      terminalEvidenceStatus:fact.strictTms?'STRICT_TMS':'NORMALIZED_LABEL_ONLY',
+      terminalEvidenceSource:fact.strictTms?'SAVED_STRICT_POD':'SAVED_NORMALIZED_POD_LABEL'};
     if(fact.outcome==='RETURNED')return {...row,isPod:0,是否POD:'否',是否退回:'是',退回状态:'已退回',
       currentState:'RETURNED',primaryCategory:'已退回',
-      terminalEvidenceSource:'SAVED_STRICT_RETURNED'};
+      terminalEvidenceStatus:fact.strictTms?'STRICT_TMS':'NORMALIZED_LABEL_ONLY',
+      terminalEvidenceSource:fact.strictTms?'SAVED_STRICT_RETURNED':'SAVED_NORMALIZED_RETURNED_LABEL'};
     if(fact.outcome==='RETURNING')return {...row,isPod:0,是否POD:'否',是否退回:'否',
       退回状态:'退回中',订单取消:'否',currentState:'RETURNING',primaryCategory:'退回中',
-      terminalEvidenceSource:'SAVED_STATUS_80_NONTERMINAL'};
+      terminalEvidenceStatus:'NONTERMINAL_80',terminalEvidenceSource:'SAVED_STATUS_80_NONTERMINAL'};
     return {...row,isPod:0,是否POD:'否',订单取消:'是',
       currentState:'ORDER_CANCELLED',primaryCategory:'订单取消',terminalEvidenceSource:'SAVED_STRICT_CANCELLED'};
   });
