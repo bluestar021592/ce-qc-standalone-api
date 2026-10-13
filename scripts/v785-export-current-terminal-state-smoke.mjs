@@ -43,5 +43,53 @@ assert.equal(rows[3].currentState,'POD');
 assert.equal(rows[3].是否POD,'是');
 assert.ok(rows.every(r=>r.reportDate==='2026-07-02'),'historical source membership must remain unchanged');
 assert.ok(original[0].是否POD==='否'&&original[1].退回状态==='已退回','read-only export overlay must not change saved source rows');
+
+// V788: actual WHPP canonical source reads 60/81 terminal status from the
+// exact selected-day current-state member, even with stale ledger OPEN and
+// missing scan/final evidence. Status 80 or contradictory current evidence
+// must NEVER open an unverified export.
+const {loadWhppCanonicalTruth}=await import('../src/whppCanonicalTruth.js');
+const whppDb=new DatabaseSync(':memory:');
+whppDb.exec(`
+  CREATE TABLE business_daily_parse_rows(businessType TEXT,reportDate TEXT,shipmentCode TEXT,rowNumber INTEGER,rowJson TEXT);
+  CREATE TABLE shipment_current_state(shipmentCode TEXT,businessType TEXT,reportDate TEXT,state TEXT,apiStatus TEXT,lastEventTime TEXT,stateJson TEXT);
+  CREATE TABLE business_final_rows(businessType TEXT,reportDate TEXT,shipmentCode TEXT,isPod INTEGER,primaryCategory TEXT,apiStatus TEXT,carryStatus TEXT,latestEventTime TEXT,latestEventDesc TEXT,latestNode TEXT,rawJson TEXT);
+`);
+const putWhpp=whppDb.prepare("INSERT INTO business_daily_parse_rows VALUES('WHPP','2026-07-02',?,?,'{}')");
+const putWhppCurrent=whppDb.prepare("INSERT INTO shipment_current_state VALUES(?,'WHPP','2026-07-02',?,'success','',?)");
+putWhpp.run('CE020726TEST01',1);putWhpp.run('CE020726TEST02',2);
+putWhppCurrent.run('CE020726TEST01','POD',JSON.stringify({shipmentStatus:'60',podTime:'2026-07-03 11:00:00'}));
+putWhppCurrent.run('CE020726TEST02','RETURNED',JSON.stringify({shipmentStatus:'81'}));
+// A stale legacy final event code cannot downgrade a newer current 81.
+whppDb.prepare("INSERT INTO business_final_rows VALUES('WHPP','2026-07-02','CE020726TEST02',0,'退回中','success','','','','',?)")
+  .run(JSON.stringify({shipmentStatus:'80',currentState:'RETURNING'}));
+const proof=loadWhppCanonicalTruth('2026-07-02','',whppDb);
+assert.equal(proof.total,2);
+assert.equal(proof.evidence.scanRows,0);
+assert.equal(proof.evidence.finalRows,1);
+assert.equal(proof.evidence.currentRows,2);
+assert.ok(proof.rows.every(row=>row.truthEvidence.currentTerminalStrict===true),'60/81 saved current facts must be independently verifiable');
+assert.equal(proof.rows.find(row=>row.shipmentCode==='CE020726TEST02').currentState,'RETURNED','new saved 81 must override stale final 80');
+const whppStart=src.indexOf('function loadLightweightExportRows(');
+const whppEnd=src.indexOf('// Read-only export overlay.',whppStart);
+assert.ok(whppStart>=0&&whppEnd>whppStart);
+const whppExport=new Function('getDb','loadWhppCanonicalTruth','billOf','overlaySavedTerminalExportTruth',
+ src.slice(whppStart,whppEnd)+'\nreturn loadLightweightExportRows;')(
+ ()=>whppDb,loadWhppCanonicalTruth,row=>String(row.shipmentCode||''),(rows)=>rows
+);
+const exported=whppExport('V788-SNAPSHOT','2026-07-02','WHPP');
+assert.equal(exported.length,2,'verified current-state terminal coverage may substitute for missing WHPP scan/final rows');
+assert.equal(exported.filter(row=>row.currentState==='POD').length,1);
+assert.equal(exported.filter(row=>row.currentState==='RETURNED').length,1);
+assert.ok(exported.every(row=>row.reportDate==='2026-07-02'));
+putWhpp.run('CE020726TEST03',3);
+putWhppCurrent.run('CE020726TEST03','RETURNING',JSON.stringify({shipmentStatus:'80'}));
+assert.throws(()=>whppExport('V788-SNAPSHOT','2026-07-02','WHPP'),/TMS 60\/81终态证据/,
+ 'return-in-progress 80 must never be counted as completed return');
+whppDb.prepare("UPDATE shipment_current_state SET state='POD' WHERE shipmentCode='CE020726TEST03'").run();
+assert.throws(()=>whppExport('V788-SNAPSHOT','2026-07-02','WHPP'),/TMS 60\/81终态证据/,
+ 'current POD label contradicting saved TMS 80 must never bypass export gate');
+whppDb.close();
+
 console.log('[V785 EXPORT] saved TMS status 60(POD)/80(return-in-progress)/81(return-completed), WHPP and Shopee, historical-date preservation and read-only overlay PASS');
 db.close();
