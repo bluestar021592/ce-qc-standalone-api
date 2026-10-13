@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import ExcelJS from 'exceljs';
+import {DatabaseSync} from 'node:sqlite';
 import {createShopeeTemplateWorkbook} from '../src/shopeeTemplateExporter.js';
 
 // Actual Excel workbook generation/readback. Assert export members rather
