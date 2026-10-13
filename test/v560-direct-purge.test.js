@@ -126,6 +126,22 @@ test('V560 direct purge clears business data without creating a backup or purge 
     assert.equal(Number(stageDb.prepare('SELECT COUNT(*) c FROM unified_import_rows').get()?.c||0),6,'first 7/1 import must contain only six fresh unified sample members');
     assert.equal(Number(stageDb.prepare('SELECT COUNT(*) c FROM shipment_daily_snapshots').get()?.c||0),6,'new snapshot membership must match fresh sample');
     assert.equal(Number(stageDb.prepare("SELECT COUNT(*) c FROM shipment_current_state WHERE state='PENDING_SCAN'").get()?.c||0),6,'new members must not inherit stale POD/return terminals');
+    // WHPP's daily membership is deliberately independent of unified intake.
+    // Exercise the real WHPP source route as the seventh business board.
+    const {saveWhppDailyImport}=await import('../src/whppStore.js');
+    const whppFresh=saveWhppDailyImport({
+      reportDate:'2026-07-01',sourceName:'V788_WHPP_SYNTHETIC',
+      batchId:'V788-WHPP-FRESH',snapshotId:'V788-WHPP-FRESH',
+      rows:[{shipmentCode:'CE01072690001',sheetName:'V788-FIXTURE',rowNumber:8,
+        recipientRaw:'',recipientNormalized:''}]
+    });
+    assert.equal(whppFresh.reportDate,'2026-07-01','WHPP independent daily import must accept a fresh 7/1 source');
+    assert.equal(Number(stageDb.prepare("SELECT COUNT(*) c FROM business_daily_parse_rows WHERE businessType='WHPP' AND reportDate='2026-07-01'").get()?.c||0),1,
+      'WHPP fresh source must persist exactly one independent member');
+    assert.equal(Number(stageDb.prepare("SELECT COUNT(*) c FROM shipment_current_state WHERE businessType='WHPP' AND state='PENDING_SCAN'").get()?.c||0),1,
+      'WHPP fresh member must not inherit stale terminal evidence');
+    assert.equal(Number(stageDb.prepare("SELECT COUNT(*) c FROM shipment_current_state WHERE state='PENDING_SCAN'").get()?.c||0),7,
+      'seven business sources must start only with fresh unprocessed members');
     assert.equal(getActiveCompleteShopSet(stageDb)?.members?.length,72,'new import must retain all 72 current CP names');
     assert.equal(getShopCodeMap().size,72,'new import must not merge the retired historical whitelist');
     for(const table of staleTargets) {
