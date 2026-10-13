@@ -28,19 +28,20 @@ export async function createShopeeTemplateWorkbook({ type, periodType, range, sn
   // A single shipment can appear in separate daily source reports. Never
   // collapse separate report dates, and never silently lose a cross-business
   // collision within one source day on the combined workbook.
-  if(type==='ALL'){
-    for(const snapshot of snapshots){
-      const sourceRows=normalizeRows(snapshot.payload?.finalRows);
-      const owners=new Map();
-      for(const row of sourceRows){
-        const code=bill(row),owner=String(row.businessType||'').trim().toUpperCase();
-        if(!code||!owner)continue;
-        const previous=owners.get(code);
-        if(previous&&previous!==owner)throw new Error(
-          '七业务导出冲突：'+snapshot.reportDate+' 的运单 '+code+
-          ' 同时归属于 '+previous+' 与 '+owner+'，请先修正业务归类后再导出');
-        owners.set(code,owner);
-      }
+  for(const snapshot of snapshots){
+    const sourceRows=normalizeRows(snapshot.payload?.finalRows);
+    const owners=new Map();
+    for(const row of sourceRows){
+      const code=bill(row),owner=String(row.businessType||'').trim().toUpperCase();
+      if(!code||!owner||(type!=='ALL'&&owner!==type))continue;
+      const previous=owners.get(code);
+      if(previous&&previous!==owner)throw new Error(
+        '七业务导出冲突：'+snapshot.reportDate+' 的运单 '+code+
+        ' 同时归属于 '+previous+' 与 '+owner+'，请先修正业务归类后再导出');
+      if(previous===owner)throw new Error(
+        '报表来源重复：'+snapshot.reportDate+' 的 '+owner+' 运单 '+code+
+        ' 在同一业务快照出现多次，请先核对重复来源');
+      owners.set(code,owner);
     }
   }
   const datedRows = snapshots.map(snapshot => ({

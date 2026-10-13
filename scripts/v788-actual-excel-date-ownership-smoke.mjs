@@ -117,5 +117,16 @@ try{
     /七业务导出冲突/,
     'same-day cross-business duplicate must fail instead of silently discarding a shipment'
   );
+  await assert.rejects(
+    ()=>createShopeeTemplateWorkbook({
+      type:'CE',periodType:'daily',
+      range:{from:'2026-07-01',to:'2026-07-01'},
+      snapshots:[{snapshotId:'DUPLICATE',reportDate:'2026-07-01',
+        payload:{finalRows:[day1[0],{...day1[0]}]}}],
+      outputDir:temp
+    }),
+    /报表来源重复/,
+    'two identical same-day business memberships cannot silently collapse into one Excel row'
+  );
   console.log('[V788 XLSX] seven businesses, 2 daily sources, same bill across dates and conflicting owner fail-closed PASS');
 }finally{await fs.rm(temp,{recursive:true,force:true});}
