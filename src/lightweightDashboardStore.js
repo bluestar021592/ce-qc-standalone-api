@@ -28,17 +28,21 @@ export function loadLightweightUnifiedBusinessState(businessType, snapshotId = '
 
   const dailyRows = loadDailyRows(db, batch.snapshotId, type);
   const bills = dailyRows.map(billOf).filter(Boolean);
-  const finalRows = mergeBusinessRows(
+  // Merge scan/final/current members first, then project the newest
+  // authoritative terminal truth. Otherwise a stale finalized row can
+  // overwrite a newer 60/81 completion on the dashboard while Excel
+  // correctly shows the updated POD/return.
+  const finalRows = overlaySavedTerminalExportTruth(mergeBusinessRows(
     dailyRows,
     loadCurrentStateRows(db, batch.snapshotId, type),
     loadFinalRows(db, batch, type)
-  );
+  ).map(row=>({...row,reportDate:batch.reportDate})),db);
   const scanResults = loadScanRows(db, batch, type);
   const carryBills = filterActiveCarryMembers(db.prepare(`
     SELECT shipmentCode FROM carryover_open_items
     WHERE businessType=? AND status='OPEN' AND lastReportDate<=?
     ORDER BY shipmentCode
-  `).all(type, batch.reportDate).map(row => row.shipmentCode),type,batch.reportDate,db);
+  `).all(type, batch.reportDate).map(row => row.shipmentCode),type,batch.reportDate,db,finalRows);
   const podLocks = db.prepare(`
     SELECT c.shipmentCode
     FROM shipment_current_state c
@@ -796,14 +800,24 @@ function loadLightweightExportRows(snapshotId, reportDate, type) {
 // completed return, or cancellation must disappear from unresolved dashboard
 // counts and follow-up queues, without destructively rewriting historical
 // carry evidence. The exact same terminal projection governs exports.
-function filterActiveCarryMembers(bills=[],businessType='',reportDate='',db=getDb()){
+function filterActiveCarryMembers(bills=[],businessType='',reportDate='',db=getDb(),projectedDailyRows=[]){
   if(!bills.length)return [];
   const type=String(businessType||'').toUpperCase();
-  return overlaySavedTerminalExportTruth(
-    bills.map(shipmentCode=>({shipmentCode,businessType:type,reportDate})),db)
-    .filter(row=>!['POD','RETURNED','ORDER_CANCELLED'].includes(
-      String(row.currentState||'').toUpperCase()))
-    .map(row=>String(row.shipmentCode||'').toUpperCase());
+  // Reuse projected daily rows rather than re-querying the same current
+  // status and ledger facts for every business dashboard switch.
+  const byBill=new Map(projectedDailyRows.map(row=>[billOf(row),row]));
+  const missing=[...new Set(bills.map(v=>String(v||'').trim().toUpperCase())
+    .filter(bill=>bill&&!byBill.has(bill)))];
+  if(missing.length){
+    const projected=overlaySavedTerminalExportTruth(
+      missing.map(shipmentCode=>({shipmentCode,businessType:type,reportDate})),db);
+    for(const row of projected)byBill.set(billOf(row),row);
+  }
+  return bills.filter(code=>{
+    const row=byBill.get(String(code||'').trim().toUpperCase());
+    return !['POD','RETURNED','ORDER_CANCELLED'].includes(
+      String(row?.currentState||'').toUpperCase());
+  }).map(code=>String(code||'').trim().toUpperCase());
 }
 
 // Read-only export overlay. Current terminal evidence may arrive after the
