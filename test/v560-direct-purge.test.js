@@ -38,6 +38,21 @@ test('V560 direct purge clears business data without creating a backup or purge 
     db.prepare('INSERT INTO v788_cp_store_whitelist_guard(cpCode) VALUES(?)').run('CP-VALID-PRESERVE');
     const preservedTables=['v788_cp_store_whitelist_guard','app_meta','audit_logs'];
     for(const name of preservedTables)assert.ok(!BUSINESS_DATA_TABLES.includes(name),`protected configuration table may not be purged: ${name}`);
+    // V788: exercise the REAL 72-code activation path. A synthetic sentinel
+    // table alone cannot prove the active-only CP list survives the reset.
+    const {getActiveCompleteShopSet,getShopCodeMap}=await import('../src/shopCodes.js');
+    const activeMembers=Array.from({length:72},(_,i)=>({
+      code:'CP'+String(i+100001).padStart(6,'0'),name:'Active CP '+(i+1)
+    }));
+    const activeConfig={mode:'COMPLETE',members:activeMembers,sourceFile:'acceptance-fixture.xlsx'};
+    const activeBefore=JSON.stringify(activeConfig);
+    db.prepare("INSERT INTO app_meta(key,value,updatedAt) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updatedAt=excluded.updatedAt")
+      .run('shop_current_complete_codes_v780',activeBefore,new Date().toISOString());
+    assert.equal(getActiveCompleteShopSet(db)?.members?.length,72,'pre-clear active CP list must validate as 72');
+    assert.equal(getShopCodeMap().size,72,'current CP detector must use only activated 72 members');
+    for(const name of ['shop_cp_codes','shop_cp_import_snapshots','shop_active_code_set_history']){
+      assert.ok(!BUSINESS_DATA_TABLES.includes(name),`historical CP configuration may not be cleared: ${name}`);
+    }
     const auditBefore=Number(db.prepare('SELECT COUNT(*) count FROM audit_logs').get()?.count||0);
     const preClearDir=path.join(cfg.backupsDir,'pre_clear');
     fs.mkdirSync(preClearDir,{recursive:true});
@@ -68,6 +83,10 @@ test('V560 direct purge clears business data without creating a backup or purge 
       assert.equal(Number(check.prepare('SELECT COUNT(*) count FROM v334_generic_history_cache').get()?.count||0),0,'full purge must clear generic derived history cache');
       assert.equal(Number(check.prepare('SELECT COUNT(*) count FROM audit_logs').get()?.count||0),auditBefore,'audit history must be preserved');
       assert.equal(check.prepare('SELECT cpCode FROM v788_cp_store_whitelist_guard').get()?.cpCode,'CP-VALID-PRESERVE','protected CP configuration sentinel must survive direct business purge');
+      assert.equal(check.prepare("SELECT value FROM app_meta WHERE key='shop_current_complete_codes_v780'").get()?.value,activeBefore,'exact 72-code CP activation record must survive direct purge');
+      assert.equal(getActiveCompleteShopSet(check)?.members?.length,72,'post-clear CP list must remain structurally valid');
+      assert.equal(getShopCodeMap().size,72,'post-clear CP detection must not fall back to historical 95 codes');
+
       for(const table of staleTargets){
         const exists=check.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table);
         if(exists)assert.equal(Number(check.prepare(`SELECT COUNT(*) count FROM "${table}"`).get()?.count||0),0,`full direct purge must leave ${table} empty`);
