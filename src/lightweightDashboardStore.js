@@ -781,9 +781,9 @@ function overlaySavedTerminalExportTruth(rows=[],db=getDb()){
         // Without a numeric TMS status, retain any verified ledger terminal.
         // 80 can never close POD or return, even if the old normalized label
         // or ledger still says RETURNED/POD.
+        let raw={};try{raw=JSON.parse(String(row.stateJson||'{}'))||{}}catch{}
         const hasStrictStatus=['60','80','81'].includes(String(raw.shipmentStatus||raw?.shipmentTrack?.shipmentStatus||'').trim());
         if(closed.has(bill)&&!hasStrictStatus)continue;
-        let raw={};try{raw=JSON.parse(String(row.stateJson||'{}'))||{}}catch{}
         // ONLY shipmentStatus may use TMS numeric codes; eventCode must
         // never be confused with shipmentStatus 60/80/81.
         const status=String(raw.shipmentStatus||raw?.shipmentTrack?.shipmentStatus||'');
