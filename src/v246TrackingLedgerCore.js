@@ -283,10 +283,10 @@ export function reconcileV246TrackingLedger(selection, { db = getDb(), reason = 
       terminalReason=CASE WHEN qc_tracking_ledger.trackingStatus='TERMINAL' AND qc_tracking_ledger.terminalReason<>'' THEN qc_tracking_ledger.terminalReason ELSE excluded.terminalReason END,
       terminalAt=CASE WHEN qc_tracking_ledger.trackingStatus='TERMINAL' AND qc_tracking_ledger.terminalAt<>'' THEN qc_tracking_ledger.terminalAt ELSE excluded.terminalAt END,
       currentState=excluded.currentState,currentCategory=excluded.currentCategory,lastEventTime=excluded.lastEventTime,
-      podDate=CASE WHEN qc_tracking_ledger.podDate<>'' THEN qc_tracking_ledger.podDate ELSE excluded.podDate END,
+      podDate=CASE WHEN excluded.currentState IN ('RETURN_IN_PROGRESS','PENDING_VERIFICATION') OR excluded.terminalReason='RETURNED' THEN '' WHEN qc_tracking_ledger.podDate<>'' THEN qc_tracking_ledger.podDate ELSE excluded.podDate END,
       attemptNo=CASE WHEN qc_tracking_ledger.attemptSource LIKE 'V246_STRICT_TRACK%' THEN qc_tracking_ledger.attemptNo ELSE excluded.attemptNo END,
       attemptSource=CASE WHEN qc_tracking_ledger.attemptSource LIKE 'V246_STRICT_TRACK%' THEN qc_tracking_ledger.attemptSource ELSE excluded.attemptSource END,
-      signingDays=CASE WHEN qc_tracking_ledger.attemptSource LIKE 'V246_STRICT_TRACK%' THEN qc_tracking_ledger.signingDays WHEN excluded.signingDays IS NOT NULL THEN excluded.signingDays ELSE qc_tracking_ledger.signingDays END,
+      signingDays=CASE WHEN excluded.currentState IN ('RETURN_IN_PROGRESS','PENDING_VERIFICATION') OR excluded.terminalReason='RETURNED' THEN NULL WHEN qc_tracking_ledger.attemptSource LIKE 'V246_STRICT_TRACK%' THEN qc_tracking_ledger.signingDays WHEN excluded.signingDays IS NOT NULL THEN excluded.signingDays ELSE qc_tracking_ledger.signingDays END,
       evidenceJson=CASE WHEN qc_tracking_ledger.attemptSource LIKE 'V246_STRICT_TRACK%' THEN qc_tracking_ledger.evidenceJson ELSE excluded.evidenceJson END,
       currentStateJson=excluded.currentStateJson,lastCheckedAt=CASE WHEN excluded.lastCheckedAt<>'' THEN excluded.lastCheckedAt ELSE qc_tracking_ledger.lastCheckedAt END,
       lastRepairReason=excluded.lastRepairReason,updatedAt=excluded.updatedAt`);
@@ -324,12 +324,12 @@ export function reconcileV246TrackingLedger(selection, { db = getDb(), reason = 
       const lastImportedDate = maxDate(oldLedger?.lastImportedDate, source.lastImportedDate, carry?.lastReportDate) || source.lastImportedDate;
       const sourceSnapshotId = text(oldLedger?.sourceSnapshotId || carry?.sourceSnapshotId || source.anySnapshotId || 'V246-RECOVERED');
       const lastSnapshotId = text(current?.snapshotId || carry?.lastSnapshotId || source.anySnapshotId || sourceSnapshotId);
-      const podDate = cls.returnInProgress||cls.stateConflict?'':text(oldLedger?.podDate)||extractPodDate(payload,cls)||'';
+      const podDate = cls.returnInProgress||cls.stateConflict||cls.returned?'':text(oldLedger?.podDate)||extractPodDate(payload,cls)||'';
       const oldStrict = strictAttemptSource(oldLedger?.attemptSource);
       const observedAttempt = directAttempt(payload);
       const attemptNo = oldStrict ? Number(oldLedger?.attemptNo || 0) : observedAttempt;
       const attemptSource = oldStrict ? text(oldLedger?.attemptSource) : (attemptNo ? text(payload.attemptSource || payload.attemptStatus || '现有派次证据') : '');
-      const signingDays = cls.returnInProgress||cls.stateConflict?null:
+      const signingDays = cls.returnInProgress||cls.stateConflict||cls.returned?null:
         oldStrict?(oldLedger?.signingDays??null):(podDate?v246InclusiveDays(firstReportDate,podDate):null);
       const stateName = cls.returnInProgress?'RETURN_IN_PROGRESS':cls.stateConflict?'PENDING_VERIFICATION':
         text(current?.state || payload.currentState || payload.scanNormalizedState || payload.primaryCategory || payload.主分类 || 'OPEN');
