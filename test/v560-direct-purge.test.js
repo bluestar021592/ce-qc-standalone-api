@@ -32,6 +32,12 @@ test('V560 direct purge clears business data without creating a backup or purge 
     const staleTargets=['shopee_delivery_tracking','shopee_delivery_tracking_daily','v207_daily_ownership','v209_import_source_archive','v328_attempt_daily_cache'];
     const {BUSINESS_DATA_TABLES}=await import('../src/store.js');
     for(const name of staleTargets)assert.ok(BUSINESS_DATA_TABLES.includes(name),`missing direct purge target: ${name}`);
+    // Protected configuration must survive a business-only reset. This
+    // sentinel guards accidental expansion of BUSINESS_DATA_TABLES.
+    db.exec('CREATE TABLE IF NOT EXISTS v788_cp_store_whitelist_guard(cpCode TEXT PRIMARY KEY)');
+    db.prepare('INSERT INTO v788_cp_store_whitelist_guard(cpCode) VALUES(?)').run('CP-VALID-PRESERVE');
+    const preservedTables=['v788_cp_store_whitelist_guard','app_meta','audit_logs'];
+    for(const name of preservedTables)assert.ok(!BUSINESS_DATA_TABLES.includes(name),`protected configuration table may not be purged: ${name}`);
     const auditBefore=Number(db.prepare('SELECT COUNT(*) count FROM audit_logs').get()?.count||0);
     const preClearDir=path.join(cfg.backupsDir,'pre_clear');
     fs.mkdirSync(preClearDir,{recursive:true});
@@ -61,6 +67,7 @@ test('V560 direct purge clears business data without creating a backup or purge 
       assert.equal(Number(check.prepare('SELECT COUNT(*) count FROM v329_three_business_daily_cache').get()?.count||0),0,'full purge must clear three-business derived history cache');
       assert.equal(Number(check.prepare('SELECT COUNT(*) count FROM v334_generic_history_cache').get()?.count||0),0,'full purge must clear generic derived history cache');
       assert.equal(Number(check.prepare('SELECT COUNT(*) count FROM audit_logs').get()?.count||0),auditBefore,'audit history must be preserved');
+      assert.equal(check.prepare('SELECT cpCode FROM v788_cp_store_whitelist_guard').get()?.cpCode,'CP-VALID-PRESERVE','protected CP configuration sentinel must survive direct business purge');
       assert.equal(check.prepare("SELECT value FROM app_meta WHERE key='data_purge_block_until'").get(),undefined,'direct purge must not leave a V505 safety block');
       assert.equal(check.prepare("SELECT value FROM app_meta WHERE key='data_purge_last_commit_receipt'").get(),undefined,'direct purge must not leave a V505 commit receipt');
       assert.equal(String(check.prepare("SELECT value FROM app_meta WHERE key='last_processed_report_date'").get()?.value||''),'');
