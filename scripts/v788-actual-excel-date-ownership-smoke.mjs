@@ -76,6 +76,33 @@ try{
   for(let column=1;column<=19;column++)
     assert.equal(mock.getRow(2).getCell(column).value,null,
       'export template column '+column+' must be cleared, including 16-19');
+  // An overlay CONFLICT must be nonterminal in the *actual XLSX*, even
+  // when raw row fields still contain original scan POD or TMS=81.
+  const conflicted=[
+    {businessType:'WHPP',shipmentCode:'V788CONFLICTPOD',reportDate:'2026-07-02',
+      isPod:0,是否POD:'否',currentState:'PENDING_VERIFICATION',
+      shipmentStatus:'60',truthEvidence:{pod:true,returned:false},
+      terminalEvidenceStatus:'CONFLICT'},
+    {businessType:'WHPP',shipmentCode:'V788CONFLICTRET',reportDate:'2026-07-02',
+      isPod:0,是否POD:'否',是否退回:'否',currentState:'PENDING_VERIFICATION',
+      shipmentStatus:'81',truthEvidence:{pod:false,returned:true},
+      terminalEvidenceStatus:'CONFLICT'}
+  ];
+  const conflictedFile=await createShopeeTemplateWorkbook({
+    type:'WHPP',periodType:'daily',
+    range:{from:'2026-07-02',to:'2026-07-02'},
+    snapshots:[{snapshotId:'C-2026-07-02',reportDate:'2026-07-02',payload:{finalRows:conflicted}}],
+    outputDir:temp
+  });
+  const conflictedBook=new ExcelJS.Workbook();
+  await conflictedBook.xlsx.readFile(conflictedFile.file);
+  assert.equal(getSheetBills(conflictedBook,'全部明细').length,2);
+  assert.equal(getSheetBills(conflictedBook,'POD明细').length,0,
+    'saved contradictory status 60 must not leak into POD sheet');
+  assert.equal(getSheetBills(conflictedBook,'退回明细').length,0,
+    'saved contradictory status 81 must not leak into returned sheet');
+  assert.equal(getSheetBills(conflictedBook,'未POD明细').length,2,
+    'all conflicted records must remain visible as unresolved');
   const collision=[
     {...day1[0]},
     {...day1[0],businessType:'SHOPEECN'}
