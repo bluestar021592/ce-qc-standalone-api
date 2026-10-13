@@ -68,6 +68,10 @@ test('V560 direct purge clears business data without creating a backup or purge 
       assert.equal(Number(check.prepare('SELECT COUNT(*) count FROM v334_generic_history_cache').get()?.count||0),0,'full purge must clear generic derived history cache');
       assert.equal(Number(check.prepare('SELECT COUNT(*) count FROM audit_logs').get()?.count||0),auditBefore,'audit history must be preserved');
       assert.equal(check.prepare('SELECT cpCode FROM v788_cp_store_whitelist_guard').get()?.cpCode,'CP-VALID-PRESERVE','protected CP configuration sentinel must survive direct business purge');
+      for(const table of staleTargets){
+        const exists=check.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table);
+        if(exists)assert.equal(Number(check.prepare(`SELECT COUNT(*) count FROM "${table}"`).get()?.count||0),0,`full direct purge must leave ${table} empty`);
+      }
       assert.equal(check.prepare("SELECT value FROM app_meta WHERE key='data_purge_block_until'").get(),undefined,'direct purge must not leave a V505 safety block');
       assert.equal(check.prepare("SELECT value FROM app_meta WHERE key='data_purge_last_commit_receipt'").get(),undefined,'direct purge must not leave a V505 commit receipt');
       assert.equal(String(check.prepare("SELECT value FROM app_meta WHERE key='last_processed_report_date'").get()?.value||''),'');
