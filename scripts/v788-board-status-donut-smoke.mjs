@@ -5,7 +5,8 @@ const source=fs.readFileSync(new URL('../public/v625-shell.js',import.meta.url),
 assert.ok(source.includes('returned:m.returned||0'),'business view must pass return members to chart');
 assert.ok(source.includes('otherNormal:exactCounts.otherNormal+exactCounts.unprocessed'),'disjoint accounting must preserve other states and unprocessed members');
 assert.ok(source.includes('exactSum===Number(m.total||0)'),'only complete disjoint accounting can drive risk category slices');
-assert.ok(source.includes('pending:0,abnormal:0,otherNormal:0'),'incomplete accounting must not invent overlapping Pending or abnormal status');
+assert.ok(source.includes('pending:0,abnormal:0,otherNormal:0'),'compact first paint must not invent overlapping Pending or abnormal status');
+assert.ok(source.includes('if(verifiedAccounting)renderDonut('),'verified exact-member data must supersede provisional state');
 const start=source.indexOf('function renderDonut(m){');
 const end=source.indexOf('\nasync function loadSession()',start);
 assert.ok(start>=0&&end>start,'business donut source must exist');

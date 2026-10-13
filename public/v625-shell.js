@@ -1640,9 +1640,15 @@ async function loadBusiness(options={}){
     const exactCounts=Object.fromEntries(disjointKinds.map(key=>[key,Array.isArray(exactRows[key])?exactRows[key].length:0]));
     const exactSum=disjointKinds.reduce((sum,key)=>sum+exactCounts[key],0);
     const verifiedAccounting=hasExactRows&&exactSum===Number(m.total||0);
-    renderDonut(verifiedAccounting
-      ? {total:m.total,delivery:exactCounts.delivery,pod:exactCounts.pod,returned:exactCounts.returned,pending:exactCounts.pending,abnormal:exactCounts.abnormal,otherNormal:exactCounts.otherNormal+exactCounts.unprocessed}
-      : {total:m.total,delivery:0,pod:m.pod||0,returned:m.returned||0,pending:0,abnormal:0,otherNormal:0});
+    // Preserve V636 compact first paint while detail/accounting hydrates.
+    // Risk indicators are deliberately not included in provisional slices.
+    renderDonut({total:m.total,delivery:m.delivery||0,pod:m.pod||0,returned:m.returned||0,pending:0,abnormal:0,otherNormal:0});
+    if(verifiedAccounting)renderDonut({
+      total:m.total,delivery:exactCounts.delivery,pod:exactCounts.pod,
+      returned:exactCounts.returned,pending:exactCounts.pending,
+      abnormal:exactCounts.abnormal,
+      otherNormal:exactCounts.otherNormal+exactCounts.unprocessed
+    });
 
     // Fast summary/timing updates are useful, but never gate the board's first paint.
     void summaryPromise.then(summary=>{
