@@ -221,11 +221,19 @@ function clearDataRows(sheet, startRow) {
 }
 
 function detailValues(row) {
+  const outcomeEvidence=String(row.terminalEvidenceStatus||'').toUpperCase();
+  const projected=['STRICT_TMS','NORMALIZED_LABEL_ONLY','CONFLICT','NONTERMINAL_80'].includes(outcomeEvidence);
+  // Do not print an obsolete raw Y/R status from the source row after the
+  // current terminal projection has already corrected its POD/return result.
+  const statusMark=projected
+    ?(isPod(row)?'Y':isReturned(row)?'R':
+      outcomeEvidence==='CONFLICT'?'待核验':outcomeEvidence==='NONTERMINAL_80'?'80':'')
+    :(row.statusCode||row.状态标识||(isReturned(row)?'R':isPod(row)?'Y':''));
   return [
     row.reportDate||'',
     bill(row),
     row.orderTime||row.下单时间||'',
-    row.statusCode||row.状态标识||(isReturned(row)?'R':isPod(row)?'Y':''),
+    statusMark,
     row.statusDesc||row.状态说明||row.currentState||row.primaryCategory||'',
     row.recipientProvince||row.收件省份||'',
     regionLabel(row),
