@@ -60,6 +60,22 @@ try{
   assert.equal(getSheetBills(ceBook,'全部明细').length,2,
     'per-business export must preserve selected daily source ownership');
   assert.equal(getSheetBills(ceBook,'POD明细').length,1);
+  // The user's detail master has 19 columns, not 15. Source data may
+  // contain fewer rows than the template; no stale field 16-19 may survive.
+  const source=await fs.readFile(new URL('../src/shopeeTemplateExporter.js',import.meta.url),'utf8');
+  const begin=source.indexOf('function clearDataRows(sheet, startRow) {');
+  const end=source.indexOf('function detailValues(row) {',begin);
+  assert.ok(begin>=0&&end>begin);
+  const clearDataRows=new Function('DETAIL_HEADERS',
+    source.slice(begin,end)+'\nreturn clearDataRows;')(
+      Array.from({length:19},(_,i)=>'Column '+i));
+  const mockBook=new ExcelJS.Workbook();
+  const mock=mockBook.addWorksheet('DETAILS');
+  for(let column=1;column<=19;column++)mock.getRow(2).getCell(column).value='STALE';
+  clearDataRows(mock,2);
+  for(let column=1;column<=19;column++)
+    assert.equal(mock.getRow(2).getCell(column).value,null,
+      'export template column '+column+' must be cleared, including 16-19');
   const collision=[
     {...day1[0]},
     {...day1[0],businessType:'SHOPEECN'}

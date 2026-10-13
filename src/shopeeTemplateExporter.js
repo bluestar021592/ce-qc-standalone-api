@@ -215,7 +215,7 @@ function appendPvOpenDetailPrepared(workbook, name, range, prepared, bucketKey) 
 function clearDataRows(sheet, startRow) {
   for (let rowNumber = startRow; rowNumber <= sheet.rowCount; rowNumber += 1) {
     const row = sheet.getRow(rowNumber);
-    for (let column = 1; column <= 15; column += 1) row.getCell(column).value = null;
+    for (let column = 1; column <= DETAIL_HEADERS.length; column += 1) row.getCell(column).value = null;
   }
 }
 
