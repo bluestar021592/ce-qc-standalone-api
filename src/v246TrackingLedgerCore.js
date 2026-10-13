@@ -87,6 +87,25 @@ function firstStrictStartDate(value = []) {
 export function classifyV246Terminal({ closeReason = '', state = '', stateJson = {} } = {}) {
   const payload = safeJson(stateJson, {});
   const stateName = text(state || payload.currentState || payload.scanNormalizedState || payload.state || payload.primaryCategory || payload.主分类).toUpperCase();
+  // shipmentStatus belongs to the TMS shipment-status endpoint. It must not
+  // be confused with scan orderStatus or tracking eventCode (event 80 = POD).
+  const shipmentStatus = text(payload.shipmentStatus || payload.shipmentTrack?.shipmentStatus);
+  if (shipmentStatus === '80') return {
+    terminal:false,pod:false,returned:false,cancelled:false,reason:'',
+    returnInProgress:true,source:'TMS_80_RETURN_IN_PROGRESS'
+  };
+  if (shipmentStatus === '60' || shipmentStatus === '81') {
+    const conflict=shipmentStatus === '60'
+      ? ['RETURNED','RETURN_COMPLETED','RETURN_IN_PROGRESS','RETURNING'].includes(stateName)
+      : ['POD','RETURN_IN_PROGRESS','RETURNING'].includes(stateName);
+    if (conflict) return {
+      terminal:false,pod:false,returned:false,cancelled:false,reason:'',
+      stateConflict:true,source:'TMS_TERMINAL_STATE_CONFLICT'
+    };
+    const pod=shipmentStatus==='60';
+    return {terminal:true,pod,returned:!pod,cancelled:false,reason:pod?'POD':'RETURNED',
+      source:pod?'TMS_60_POD':'TMS_81_RETURNED'};
+  }
   const orderStatus = text(payload.orderStatus);
   const latestCode = latestCodeOf(payload);
   const evidence = [stateName,payload.退回状态,payload.primaryCategory,payload.currentMainCategory,payload.主分类,payload.异常分类,payload.latestEventDesc,payload.最后节点,payload.QC判断]

@@ -43,6 +43,10 @@ function strictAttemptSource(value = '') {
   return /^V246_STRICT_TRACK/i.test(source) || /严格START|严格派送/i.test(source);
 }
 function preferredState(payload = {}, currentState = '') {
+  const shipmentStatus=text(payload.shipmentStatus||payload.shipmentTrack?.shipmentStatus);
+  if(shipmentStatus==='80')return 'RETURN_IN_PROGRESS';
+  if(shipmentStatus==='60')return 'POD';
+  if(shipmentStatus==='81')return 'RETURNED';
   const evidence = [
     payload.currentState,payload.scanNormalizedState,payload.退回状态,payload.primaryCategory,
     payload.currentMainCategory,payload.主分类,payload.异常分类,payload.latestEventDesc,payload.最后节点
@@ -273,10 +277,10 @@ export function syncCarryRowsToV246Ledger(rows = [], {
       lastSnapshotId=CASE WHEN excluded.lastSnapshotId<>'' THEN excluded.lastSnapshotId ELSE qc_tracking_ledger.lastSnapshotId END,
       trackingStatus=excluded.trackingStatus,terminalReason=excluded.terminalReason,terminalAt=excluded.terminalAt,
       currentState=excluded.currentState,currentCategory=excluded.currentCategory,lastEventTime=excluded.lastEventTime,
-      podDate=CASE WHEN qc_tracking_ledger.podDate<>'' THEN qc_tracking_ledger.podDate ELSE excluded.podDate END,
+      podDate=CASE WHEN excluded.currentState='RETURN_IN_PROGRESS' THEN '' WHEN qc_tracking_ledger.podDate<>'' THEN qc_tracking_ledger.podDate ELSE excluded.podDate END,
       attemptNo=CASE WHEN qc_tracking_ledger.attemptSource LIKE 'V246_STRICT_TRACK%' OR qc_tracking_ledger.attemptSource LIKE '%严格START%' OR qc_tracking_ledger.attemptSource LIKE '%严格派送%' THEN qc_tracking_ledger.attemptNo ELSE excluded.attemptNo END,
       attemptSource=CASE WHEN qc_tracking_ledger.attemptSource LIKE 'V246_STRICT_TRACK%' OR qc_tracking_ledger.attemptSource LIKE '%严格START%' OR qc_tracking_ledger.attemptSource LIKE '%严格派送%' THEN qc_tracking_ledger.attemptSource ELSE excluded.attemptSource END,
-      signingDays=CASE WHEN qc_tracking_ledger.attemptSource LIKE 'V246_STRICT_TRACK%' OR qc_tracking_ledger.attemptSource LIKE '%严格START%' OR qc_tracking_ledger.attemptSource LIKE '%严格派送%' THEN qc_tracking_ledger.signingDays WHEN excluded.signingDays IS NOT NULL THEN excluded.signingDays ELSE qc_tracking_ledger.signingDays END,
+      signingDays=CASE WHEN excluded.currentState='RETURN_IN_PROGRESS' THEN NULL WHEN qc_tracking_ledger.attemptSource LIKE 'V246_STRICT_TRACK%' OR qc_tracking_ledger.attemptSource LIKE '%严格START%' OR qc_tracking_ledger.attemptSource LIKE '%严格派送%' THEN qc_tracking_ledger.signingDays WHEN excluded.signingDays IS NOT NULL THEN excluded.signingDays ELSE qc_tracking_ledger.signingDays END,
       evidenceJson=CASE WHEN qc_tracking_ledger.attemptSource LIKE 'V246_STRICT_TRACK%' OR qc_tracking_ledger.attemptSource LIKE '%严格START%' OR qc_tracking_ledger.attemptSource LIKE '%严格派送%' THEN qc_tracking_ledger.evidenceJson ELSE excluded.evidenceJson END,
       currentStateJson=excluded.currentStateJson,lastCheckedAt=excluded.lastCheckedAt,
       lastRepairReason=excluded.lastRepairReason,updatedAt=excluded.updatedAt`);
@@ -303,9 +307,11 @@ export function syncCarryRowsToV246Ledger(rows = [], {
       const classifyState = preferredState(payload, current?.state);
       const classification = classifyV246Terminal({ closeReason:carry?.closeReason || '', state:classifyState, stateJson:payload });
       const oldReason = text(old?.terminalReason).toUpperCase();
-      const explicitlyReturnInProgress = classifyState === 'RETURN_IN_PROGRESS';
+      const tmsStatus=text(payload.shipmentStatus||payload.shipmentTrack?.shipmentStatus);
+      const explicitlyReturnInProgress = classifyState === 'RETURN_IN_PROGRESS' || tmsStatus==='80';
       const oldExactTerminal = old?.trackingStatus === 'TERMINAL'
         && EXACT_TERMINAL_REASONS.has(oldReason)
+        && !['60','80','81'].includes(tmsStatus)
         && !(oldReason === 'RETURNED' && explicitlyReturnInProgress);
       const terminalReason = oldExactTerminal ? oldReason : (classification.terminal ? classification.reason : '');
       const isTerminal = Boolean(terminalReason);
@@ -323,11 +329,13 @@ export function syncCarryRowsToV246Ledger(rows = [], {
       const currentCategory = isTerminal
         ? (terminalReason === 'POD' ? 'POD' : terminalReason === 'RETURNED' ? '退回' : '订单取消')
         : text(payload.primaryCategory || payload.currentMainCategory || payload.主分类 || payload.异常分类 || currentState);
-      const podDate = terminalReason === 'POD' ? podDateOf(payload, classification, old || {}) : text(old?.podDate || '');
+      const podDate = explicitlyReturnInProgress ? '' :
+        terminalReason === 'POD' ? podDateOf(payload, classification, old || {}) : text(old?.podDate || '');
       const strictAttempt = strictAttemptSource(old?.attemptSource);
       const attemptNo = strictAttempt ? Number(old?.attemptNo || 0) : observedAttempt(payload);
       const attemptSource = strictAttempt ? text(old?.attemptSource) : (attemptNo ? text(payload.attemptSource || payload.attemptStatus || 'CARRY_RESULT') : '');
-      const signingDays = strictAttempt ? (old?.signingDays ?? null) : (podDate ? v246InclusiveDays(firstReportDate,podDate) : (old?.signingDays ?? null));
+      const signingDays = explicitlyReturnInProgress ? null :
+        strictAttempt ? (old?.signingDays ?? null) : (podDate ? v246InclusiveDays(firstReportDate,podDate) : (old?.signingDays ?? null));
       const terminalAt = isTerminal ? (text(old?.terminalAt) || lastEventTime || now) : '';
       const before = compact(old || {});
       const canonicalPayload = normalizeCanonicalPayload({ ...payload, businessType },terminalReason,currentState,currentCategory,podDate,attemptNo);
