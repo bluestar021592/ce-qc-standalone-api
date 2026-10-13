@@ -127,5 +127,38 @@ assert.equal(labelRows.filter(row=>row.currentState==='RETURNED').length,1);
 assert.ok(labelRows.every(row=>!row.podDate),'missing POD timestamps must remain missing');
 labelDb.close();
 
+// V788: stale ledger TERMINAL must not override an exact newer TMS status80.
+// A normalized POD/RETURNED label without original 60/81 may appear in an
+// export but must NOT be advertised as a strict TMS terminal.
+const status80Bill='CE020726STATUS80';
+put.run(status80Bill,'WHPP','RETURNED',JSON.stringify({shipmentStatus:'80'}),'2026-07-04 08:00:00');
+insertLedger.run(status80Bill,'WHPP','TERMINAL','RETURNED',null,'2026-07-03 00:00:00');
+const conflict=overlay([{shipmentCode:status80Bill,businessType:'WHPP',reportDate:'2026-07-02',
+  isPod:1,POD状态:'POD',是否退回:'是',退回状态:'已退回'}],db)[0];
+assert.equal(conflict.currentState,'PENDING_VERIFICATION','status80/normalized terminal contradiction must remain unresolved');
+assert.equal(conflict.是否POD,'否');
+assert.equal(conflict.POD状态,'');
+assert.equal(conflict.是否退回,'否');
+assert.equal(conflict.terminalEvidenceStatus,'CONFLICT');
+const labelOnlyBill='CE020726LABELONLY';
+put.run(labelOnlyBill,'WHPP','RETURNED','{}','');
+const labelOnly=overlay([{shipmentCode:labelOnlyBill,businessType:'WHPP',reportDate:'2026-07-02'}],db)[0];
+assert.equal(labelOnly.currentState,'RETURNED','legacy label remains visible for audit');
+assert.equal(labelOnly.terminalEvidenceStatus,'NORMALIZED_LABEL_ONLY',
+  'an already saved RETURNED state is not proof of original TMS 81');
+assert.equal(labelOnly.terminalEvidenceSource,'SAVED_NORMALIZED_RETURNED_LABEL');
+const storeSource=fs.readFileSync(new URL('../src/whppStore.js',import.meta.url),'utf8');
+const returnStart=storeSource.indexOf('function isReturned(row = {}) {');
+const returnEnd=storeSource.indexOf('function categoryOf(row = {})',returnStart);
+assert.ok(returnStart>=0&&returnEnd>returnStart);
+const whppIsReturned=new Function(storeSource.slice(returnStart,returnEnd)+'\nreturn isReturned;')();
+assert.equal(whppIsReturned({primaryCategory:'退回'}),false,
+  'legacy text category 退回 cannot finalize an unverified return');
+assert.equal(whppIsReturned({primaryCategory:'退回',shipmentStatus:'80'}),false);
+assert.equal(whppIsReturned({shipmentStatus:'81'}),true);
+assert.equal(whppIsReturned({退回状态:'已退回',shipmentStatus:'80'}),false);
+assert.equal(whppIsReturned({退回状态:'已退回'}),true,
+  'explicit previously saved completed return remains compatible');
+
 console.log('[V785 EXPORT] saved TMS status 60(POD)/80(return-in-progress)/81(return-completed), WHPP and Shopee, historical-date preservation and read-only overlay PASS');
 db.close();
