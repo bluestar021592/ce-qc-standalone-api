@@ -201,6 +201,35 @@ assert.equal(conflict.是否POD,'否');
 assert.equal(conflict.POD状态,'');
 assert.equal(conflict.是否退回,'否');
 assert.equal(conflict.terminalEvidenceStatus,'CONFLICT');
+// Late TMS terminal updates must close a previously OPEN or Pending
+// member. Only two contradictory terminal states require investigation.
+const latePod='CE020726LATEPOD',lateReturn='CE020726LATERET';
+put.run(latePod,'WHPP','PENDING_SCAN',
+  JSON.stringify({shipmentStatus:'60',podTime:'2026-07-05 11:20:00'}),'2026-07-05 11:20:00');
+put.run(lateReturn,'WHPP','OPEN',JSON.stringify({shipmentStatus:'81'}),'2026-07-05 12:30:00');
+insertLedger.run(latePod,'WHPP','OPEN','',null,null);
+insertLedger.run(lateReturn,'WHPP','OPEN','',null,null);
+const newlyFinished=overlay([
+ {shipmentCode:latePod,businessType:'WHPP',reportDate:'2026-07-02',
+   currentState:'PENDING_SCAN',pendingDays:3,是否POD:'否',primaryCategory:'Pending'},
+ {shipmentCode:lateReturn,businessType:'WHPP',reportDate:'2026-07-02',
+   currentState:'OPEN',pendingDays:3,是否POD:'否',primaryCategory:'Pending'}
+],db);
+assert.equal(newlyFinished[0].currentState,'POD',
+  'late status60 must close previously pending member, not fabricate a terminal conflict');
+assert.equal(newlyFinished[0].是否POD,'是');
+assert.equal(newlyFinished[0].terminalEvidenceStatus,'STRICT_TMS');
+assert.equal(newlyFinished[1].currentState,'RETURNED',
+  'late status81 must close previously OPEN member, not fabricate a terminal conflict');
+assert.equal(newlyFinished[1].是否退回,'是');
+assert.equal(newlyFinished[1].terminalEvidenceStatus,'STRICT_TMS');
+const oppositePod='CE020726OPPOSITEPOD';
+put.run(oppositePod,'WHPP','RETURNED',JSON.stringify({shipmentStatus:'60'}),'2026-07-05');
+const opposite=overlay([{shipmentCode:oppositePod,businessType:'WHPP',
+  reportDate:'2026-07-02',currentState:'RETURNED',是否退回:'是'}],db)[0];
+assert.equal(opposite.currentState,'PENDING_VERIFICATION',
+  'strict60 opposite a saved explicit returned terminal must remain a conflict');
+assert.equal(opposite.terminalEvidenceStatus,'CONFLICT');
 const labelOnlyBill='CE020726LABELONLY';
 put.run(labelOnlyBill,'WHPP','RETURNED','{}','');
 const labelOnly=overlay([{shipmentCode:labelOnlyBill,businessType:'WHPP',reportDate:'2026-07-02'}],db)[0];
