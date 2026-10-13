@@ -51,7 +51,8 @@ try{
   assert.equal(audit.whpp.totals.finalReturnCompleted,1);
   assert.equal(audit.whpp.totals.hasFullMembershipNotVerifiedOutcome,false);
 
-  assert.equal(audit.whpp.byDate[0].eligibleForStrictExportFallback,true);
+  assert.equal(audit.whpp.byDate[0].scanAndFinalComplete,true,'July1 fixture has full scan/final source coverage');
+  assert.equal(audit.whpp.byDate[0].eligibleForStrictExportFallback,false,'full scan/final uses the primary export gate, not alternative TMS fallback');
   assert.equal(audit.whpp.byDate[1].eligibleForStrictExportFallback,false);
   assert.ok(!JSON.stringify(audit).includes('A1')&&!JSON.stringify(audit).includes('B1'));
   assert.equal(db.prepare('SELECT COUNT(*) n FROM shipment_current_state').get().n,5,'audit must not mutate shipment rows');
