@@ -17,7 +17,7 @@ assert.match(shell,/if\(action==='START'\)/,'missing run may be first started on
 assert.match(shell,/if\(action==='RESUME'\)/,'interrupted run must resume, not restart');
 assert.match(shell,/if\(action==='WAIT'\)/,'existing running business must be awaited');
 assert.match(shell,/if\(action==='DONE'\|\|action==='ZERO_TICKET'\)/,'completed and 0-ticket families must never be rerun');
-assert.match(shell,/if\(familyComplete\(current\.whpp\)\)/,'completed WHPP must remain untouched');
+assert.match(shell,/const decision=await v787WhppRecoveryProof\(day\)/,'WHPP must use exact dated 156-member proof before skipping a completed run');
 const resumeBody=shell.slice(shell.indexOf('const proof=await v761FamilyRecoveryProof(reportDate)'),shell.indexOf('const verified=await v760VerifyAllFamilies(reportDate,counts)'));
 assert.ok(resumeBody.length>0,'V761 resume branch must exist');
 assert.doesNotMatch(resumeBody,/RUN_NOT_RECOVERABLE/,'no-run must not be silently ignored by selected-date resume');
