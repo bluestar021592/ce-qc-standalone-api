@@ -278,10 +278,15 @@ export function syncCarryRowsToV246Ledger(rows = [], {
       lastSnapshotId=CASE WHEN excluded.lastSnapshotId<>'' THEN excluded.lastSnapshotId ELSE qc_tracking_ledger.lastSnapshotId END,
       trackingStatus=excluded.trackingStatus,terminalReason=excluded.terminalReason,terminalAt=excluded.terminalAt,
       currentState=excluded.currentState,currentCategory=excluded.currentCategory,lastEventTime=excluded.lastEventTime,
-      podDate=CASE WHEN excluded.currentState IN ('RETURN_IN_PROGRESS','RETURNED') THEN '' WHEN qc_tracking_ledger.podDate<>'' THEN qc_tracking_ledger.podDate ELSE excluded.podDate END,
+      podDate=CASE WHEN excluded.currentState IN ('RETURN_IN_PROGRESS','RETURNED') THEN ''
+        WHEN instr(excluded.currentStateJson,'"podTimeEvidenceSource":"WHPP_SAVED_POD_LOCK"')>0 THEN excluded.podDate
+        WHEN qc_tracking_ledger.podDate<>'' THEN qc_tracking_ledger.podDate ELSE excluded.podDate END,
       attemptNo=CASE WHEN qc_tracking_ledger.attemptSource LIKE 'V246_STRICT_TRACK%' OR qc_tracking_ledger.attemptSource LIKE '%严格START%' OR qc_tracking_ledger.attemptSource LIKE '%严格派送%' THEN qc_tracking_ledger.attemptNo ELSE excluded.attemptNo END,
       attemptSource=CASE WHEN qc_tracking_ledger.attemptSource LIKE 'V246_STRICT_TRACK%' OR qc_tracking_ledger.attemptSource LIKE '%严格START%' OR qc_tracking_ledger.attemptSource LIKE '%严格派送%' THEN qc_tracking_ledger.attemptSource ELSE excluded.attemptSource END,
-      signingDays=CASE WHEN excluded.currentState IN ('RETURN_IN_PROGRESS','RETURNED') THEN NULL WHEN qc_tracking_ledger.attemptSource LIKE 'V246_STRICT_TRACK%' OR qc_tracking_ledger.attemptSource LIKE '%严格START%' OR qc_tracking_ledger.attemptSource LIKE '%严格派送%' THEN qc_tracking_ledger.signingDays WHEN excluded.signingDays IS NOT NULL THEN excluded.signingDays ELSE qc_tracking_ledger.signingDays END,
+      signingDays=CASE WHEN excluded.currentState IN ('RETURN_IN_PROGRESS','RETURNED') THEN NULL
+        WHEN qc_tracking_ledger.attemptSource LIKE 'V246_STRICT_TRACK%' OR qc_tracking_ledger.attemptSource LIKE '%严格START%' OR qc_tracking_ledger.attemptSource LIKE '%严格派送%' THEN qc_tracking_ledger.signingDays
+        WHEN instr(excluded.currentStateJson,'"podTimeEvidenceSource":"WHPP_SAVED_POD_LOCK"')>0 THEN excluded.signingDays
+        WHEN excluded.signingDays IS NOT NULL THEN excluded.signingDays ELSE qc_tracking_ledger.signingDays END,
       evidenceJson=CASE WHEN qc_tracking_ledger.attemptSource LIKE 'V246_STRICT_TRACK%' OR qc_tracking_ledger.attemptSource LIKE '%严格START%' OR qc_tracking_ledger.attemptSource LIKE '%严格派送%' THEN qc_tracking_ledger.evidenceJson ELSE excluded.evidenceJson END,
       currentStateJson=excluded.currentStateJson,lastCheckedAt=excluded.lastCheckedAt,
       lastRepairReason=excluded.lastRepairReason,updatedAt=excluded.updatedAt`);
