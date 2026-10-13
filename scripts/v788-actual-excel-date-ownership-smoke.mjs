@@ -71,11 +71,16 @@ const latestBatch=new Function('getDb',
   sourceText.slice(batchesStart,batchesEnd)+'\nreturn listLatestValidRangeBatches;')(
   ()=>({prepare:()=>({all:()=>availableBatches})}));
 assert.equal(latestBatch('2026-07-01','2026-07-01',false)[0].snapshotId,'NEW-RUNNING');
-assert.throws(()=>latestBatch('2026-07-01','2026-07-01',true),
-  /最新有效日报尚未处理完成/,'new valid processing batch may not be replaced by older completed export');
+assert.deepEqual(latestBatch('2026-07-01','2026-07-01',true),[],
+  'historical dashboard must skip unfinished latest day, not show old completed source');
+assert.throws(()=>latestBatch('2026-07-01','2026-07-01',true,true),
+  /最新有效日报尚未处理完成/,
+  'export must reject new processing batch, never substitute older completed source');
 availableBatches[0]={...availableBatches[0],snapshotStatus:'COMPLETED'};
 assert.equal(latestBatch('2026-07-01','2026-07-01',true)[0].snapshotId,'NEW-RUNNING',
   'completed latest batch must win over older completed');
+assert.equal(latestBatch('2026-07-01','2026-07-01',true,true)[0].snapshotId,'NEW-RUNNING',
+  'strict export accepts a finished newest source');
 
 
 const temp=await fs.mkdtemp(path.join(os.tmpdir(),'v788-excel-members-'));
