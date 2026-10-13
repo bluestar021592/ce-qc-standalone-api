@@ -236,5 +236,55 @@ try{
     /导出来源与最终明细运单不一致/,
     'duplicate source bills must be rejected before Map deduplication');
 
+  // Check export-record history against the generated workbook audit, not
+  // the unrelated ALL total. A single-business export must also be recorded.
+  const periodSource=await fs.readFile(new URL('../src/periodExporter.js',import.meta.url),'utf8');
+  const periodStart=periodSource.indexOf('export async function exportPeriodReports(');
+  const periodEnd=periodSource.indexOf('async function createManagementWorkbook(',periodStart);
+  assert.ok(periodStart>=0&&periodEnd>periodStart);
+  const records=[];
+  let managementOffset=0;
+  const reportSource=mergedSnapshots;
+  const exportPeriod=new Function('BUSINESSES','customPeriodRange','periodRange',
+    'listLightweightCompletedUnifiedSnapshots','normalizeBusiness','getRuntimeConfig',
+    'fs','path','createBusinessWorkbook','createManagementWorkbook','zipFiles',
+    'recordExport','fileHash','stamp',
+    periodSource.slice(periodStart,periodEnd).replace('export async function','async function')+
+      '\nreturn exportPeriodReports;')(
+    types,()=>range,()=>range,()=>reportSource,x=>x,()=>({exportsDir:'/virtual'}),
+    {mkdir:async()=>{}},path,
+    async ({type})=>({
+      file:'/virtual/'+type+'.xlsx',
+      audit:{rows:reportSource.reduce((sum,item)=>sum+
+        item.payload.finalRows.filter(row=>row.businessType===type).length,0)}
+    }),
+    async ()=>({
+      file:'/virtual/ALL.xlsx',
+      audit:{rows:reportSource.reduce((sum,item)=>sum+item.payload.finalRows.length,0)+managementOffset}
+    }),
+    async()=>{},record=>records.push(record),()=> 'MOCK_HASH',()=> 'STATIC'
+  );
+  const allPeriod=await exportPeriod({periodType:'custom',businessType:'ALL'});
+  assert.equal(allPeriod.files.length,8,'ALL report has seven business workbooks and a management book');
+  assert.equal(records.length,9,'ALL export must record seven business files, management file and ZIP');
+  assert.equal(records.find(row=>row.summary.businessType==='WHPP').rowCount,2,
+    'WHPP-only extra source day must be reflected in its own export history');
+  assert.equal(records.find(row=>row.summary.businessType==='CE').rowCount,1,
+    'individual CE file cannot be logged as seven-business total');
+  assert.equal(records.find(row=>row.exportType==='custom:all-zip').rowCount,8,
+    'ZIP record must reflect distinct day-owned source members');
+  records.length=0;
+  const whppPeriod=await exportPeriod({periodType:'custom',businessType:'WHPP'});
+  assert.equal(whppPeriod.files.length,1);
+  assert.equal(records.length,1,'single-business Excel must create a recorded export entry');
+  assert.equal(records[0].rowCount,2);
+  assert.equal(records[0].summary.businessType,'WHPP');
+  records.length=0;
+  managementOffset=-1;
+  await assert.rejects(()=>exportPeriod({periodType:'custom',businessType:'ALL'}),
+    /七业务综合导出与来源成员总数不一致/,
+    'a mismatched aggregate workbook must block ZIP publish');
+  assert.equal(records.length,0,'rejected aggregate publish must not log PASSED export records');
+
   console.log('[V788 XLSX] seven businesses, 2 daily sources, same bill across dates and conflicting owner fail-closed PASS');
 }finally{await fs.rm(temp,{recursive:true,force:true});}
