@@ -177,6 +177,45 @@ test('V560 direct purge clears business data without creating a backup or purge 
       .run('shop_current_complete_codes_v780',activeBefore,new Date().toISOString());
 
 
+
+    // V788: a second distinct reporting day must ADD only new membership.
+    // Daily WHPP uses its own import path, unlike the six unified groups.
+    const nextRows=freshRows.map((row,i)=>({
+      ...row,shipmentCode:'V788020726'+String(i+1).padStart(5,'0'),rowNumber:i+2
+    }));
+    const nextBatch=saveUnifiedImport({
+      reportDate:'2026-07-02',fileHash:'v788-post-purge-synthetic-day2',
+      dateDetectionSource:'SYNTHETIC_TEST',dateCandidates:['2026-07-02'],
+      dateWasManuallyCorrected:false,containerFormat:'TEST',
+      classificationCounts,
+      sourceReconciliation:{balanced:true,validUniqueWaybills:6,classifiedWaybills:6},
+      regionCounts:{},summary:{validUniqueWaybills:6},
+      sheetDiagnostics:[],warnings:[],rows:nextRows
+    },'V788_SYNTHETIC_DAY2');
+    assert.equal(nextBatch.sameDateOverwrite,false,'July 2 must be a new batch, not an overwrite of July 1');
+    assert.notEqual(nextBatch.snapshotId,staged.snapshotId,'two source days must have different snapshot identity');
+    const secondWhpp=saveWhppDailyImport({
+      reportDate:'2026-07-02',sourceName:'V788_WHPP_SYNTHETIC_DAY2',
+      batchId:'V788-WHPP-DAY2',snapshotId:'V788-WHPP-DAY2',
+      rows:[{shipmentCode:'CE02072690001',sheetName:'V788-FIXTURE',rowNumber:8,
+        recipientRaw:'',recipientNormalized:''}]
+    });
+    assert.equal(secondWhpp.reportDate,'2026-07-02');
+    assert.equal(Number(stageDb.prepare("SELECT COUNT(*) c FROM unified_import_rows WHERE reportDate='2026-07-01'").get()?.c||0),6,
+      'July 1 unified members must remain immutable after July 2');
+    assert.equal(Number(stageDb.prepare("SELECT COUNT(*) c FROM unified_import_rows WHERE reportDate='2026-07-02'").get()?.c||0),6,
+      'July 2 unified members must include only their own source');
+    assert.equal(Number(stageDb.prepare("SELECT COUNT(*) c FROM business_daily_parse_rows WHERE businessType='WHPP' AND reportDate='2026-07-01'").get()?.c||0),1,
+      'July 1 WHPP members must survive July 2 independent source');
+    assert.equal(Number(stageDb.prepare("SELECT COUNT(*) c FROM business_daily_parse_rows WHERE businessType='WHPP' AND reportDate='2026-07-02'").get()?.c||0),1,
+      'July 2 WHPP must remain independently owned');
+    assert.equal(Number(stageDb.prepare("SELECT COUNT(*) c FROM shipment_current_state WHERE state='PENDING_SCAN'").get()?.c||0),14,
+      'two-day seven-business import must not reintroduce old POD/return statuses');
+    assert.equal(Number(stageDb.prepare("SELECT COUNT(DISTINCT businessType) c FROM shipment_current_state").get()?.c||0),7,
+      'fresh two-day data must cover exactly seven business groups');
+    assert.equal(getActiveCompleteShopSet(stageDb)?.members?.length,72,
+      'activated current CP whitelist must remain valid through consecutive daily uploads');
+
     const preClearAfter=fs.existsSync(preClearDir)?fs.readdirSync(preClearDir).length:0;
     assert.ok(preClearBefore>0,'fixture must contain one legacy backup');
     assert.equal(preClearAfter,preClearBefore,'direct purge must preserve existing CE QC backups; clearing business data is independent from backup retention');
