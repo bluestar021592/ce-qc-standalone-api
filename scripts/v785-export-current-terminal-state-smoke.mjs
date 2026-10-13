@@ -23,6 +23,13 @@ const original=[
  {shipmentCode:'CE26070200003',businessType:'WHPP',reportDate:'2026-07-02',是否退回:'否',primaryCategory:'Pending'},
  {shipmentCode:'CE26070200004',businessType:'SHOPEEVN',reportDate:'2026-07-02',是否POD:'否',primaryCategory:'Pending'}
 ];
+// Real V788 acceptance condition: historical WHPP ledger can remain OPEN /
+// PENDING_SCAN while the exact shipment current state is strictly terminal.
+// Exports must honor terminal source evidence rather than regress to OPEN.
+const insertLedger=db.prepare('INSERT INTO qc_tracking_ledger VALUES(?,?,?,?,?,?)');
+for(const bill of ['CE26070200001','CE26070200002','CE26070200003']){
+  insertLedger.run(bill,'WHPP','OPEN','PENDING_SCAN',null,null);
+}
 const rows=overlay(original,db);
 assert.equal(rows[0].currentState,'POD');
 assert.equal(rows[0].是否POD,'是');
