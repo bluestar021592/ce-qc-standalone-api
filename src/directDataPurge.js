@@ -114,7 +114,7 @@ function readProtectedActiveShopSet(db){
   const normalized=members.map(m=>String(m?.code||'').trim().toUpperCase());
   const valid= config?.mode==='COMPLETE' && members.length===72
     && new Set(normalized).size===72
-    && members.every((m,i)=>/^(?:(?:CP|FS)\\d{6}|(?:PV|PNH)\\d{3})$/.test(normalized[i])
+    && members.every((m,i)=>/^(?:(?:CP|FS)\d{6}|(?:PV|PNH)\d{3})$/.test(normalized[i])
       && String(m?.name||'').trim().length>0);
   if(!valid)throw new Error('V788_PURGE_CP72_INVALID: 当前有效门店名单不是72个唯一有效编码，已拒绝清空');
   return value;
