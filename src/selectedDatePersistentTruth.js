@@ -297,6 +297,11 @@ export function persistentWhppCompletionTruth(db,reportDate=''){
     &&Number(canonical?.evidence?.finalRows||0)===canonicalTotal
     &&membershipMatches&&(snapshotLocked||dailyLocked||historyLocked)
   );
+  // The imported WHPP source count may be zero when all 156 real WHPP
+  // members live in independent daily-parse rows. Zero is NOT "zero source".
+  const missingScans=Math.max(0,canonicalTotal-Number(canonical?.evidence?.scanRows||0));
+  const missingFinals=Math.max(0,canonicalTotal-Number(canonical?.evidence?.finalRows||0));
+  const processingEvidenceMissing=canonicalTotal>0&&(missingScans>0||missingFinals>0);
   const locked=unifiedWhppCompleted||terminalEvidenceVerified||processingEvidenceVerified;
   const completionSource=unifiedWhppCompleted?'UNIFIED_VERIFIED_WHPP_CHILD'
     :terminalEvidenceVerified?'EXACT_WHPP_TERMINAL_SCAN_FINAL_EVIDENCE'
@@ -307,6 +312,8 @@ export function persistentWhppCompletionTruth(db,reportDate=''){
 
   return{
     locked,finalized:locked,reportDate:date,sourceCount,finalCount,
+    importedWhppCount:sourceCount,independentWhppCount:canonicalTotal,
+    missingScans,missingFinals,processingEvidenceMissing,
     canonicalTotal,canonicalResolved,unifiedCompleted,unifiedWhppCompleted,
     snapshotLocked,dailyLocked,historyLocked,membershipMatches,
     terminalEvidenceVerified,processingEvidenceVerified,
@@ -323,6 +330,7 @@ export function persistentWhppCompletionTruth(db,reportDate=''){
     finalizedAt:String(dailySummary.finalizedAt||snapshot?.generatedAt||snapshot?.createdAt||unifiedSnapshot?.createdAt||history?.updatedAt||''),
     completionSource,
     reason:locked?'PERSISTED_WHPP_COMPLETED'
+      :processingEvidenceMissing?'WHPP_SCAN_FINAL_EVIDENCE_MISSING'
       :terminalEvidenceGaps.length&&(snapshotLocked||dailyLocked||historyLocked)?'WHPP_TERMINAL_EVIDENCE_GAP'
       :sourceCount&&finalCount!==sourceCount?'SOURCE_FINAL_MEMBERSHIP_MISMATCH'
       :'PERSISTED_WHPP_INCOMPLETE'
