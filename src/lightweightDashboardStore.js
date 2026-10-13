@@ -881,17 +881,28 @@ function overlaySavedTerminalExportTruth(rows=[],db=getDb()){
 
 function listLatestValidRangeBatches(fromDate, toDate, completedOnly = false) {
   const db = getDb();
-  const statusClause = completedOnly ? "AND s.status='COMPLETED'" : '';
   const rows = db.prepare(`
     SELECT b.snapshotId,b.batchId,b.reportDate,b.sourceName,b.createdAt,s.status AS snapshotStatus
     FROM unified_import_batches b
     INNER JOIN unified_snapshots s ON s.snapshotId=b.snapshotId
-    WHERE b.status='VALID' AND b.reportDate BETWEEN ? AND ? ${statusClause}
-    ORDER BY b.reportDate ASC,b.createdAt DESC
+    WHERE b.status='VALID' AND b.reportDate BETWEEN ? AND ?
+    ORDER BY b.reportDate ASC,b.createdAt DESC,b.batchId DESC
   `).all(fromDate, toDate);
+  // Select the NEWEST valid source for each date BEFORE checking completion.
+  // Filtering completed snapshots first silently exported an older day after
+  // a newer upload was still being processed.
   const byDate = new Map();
   for (const row of rows) if (!byDate.has(row.reportDate)) byDate.set(row.reportDate, row);
-  return [...byDate.values()];
+  const latest=[...byDate.values()];
+  if(completedOnly){
+    const incomplete=latest.filter(row=>String(row.snapshotStatus||'').toUpperCase()!=='COMPLETED');
+    if(incomplete.length){
+      const dates=incomplete.map(row=>row.reportDate).slice(0,5).join('、');
+      throw new Error('最新有效日报尚未处理完成（'+dates+
+        '），不能使用旧完成快照代替当前上传数据导出；请完成处理后再导出');
+    }
+  }
+  return latest;
 }
 
 function validateDateRange(fromDate, toDate, maxDays = 180) {
