@@ -33,40 +33,58 @@ export async function exportPeriodReports({ periodType = 'daily', date, fromDate
   if (!snapshots.length) throw new Error(`${range.from} 至 ${range.to} 没有当前有效且已完成的日报数据，不能导出。`);
   const outputDir = getRuntimeConfig().exportsDir;
   await fs.mkdir(outputDir, { recursive: true });
-  const files = [];
-  for (let index=0; index<types.length; index+=1) {
+  const files = [], rowsByFile=new Map(), scopeByFile=new Map();
+  const snapshotIds=snapshots.map(item=>item.snapshotId);
+  const sourceTotal=snapshots.reduce((sum,item)=>sum+Number(item.payload?.finalRows?.length||0),0);
+  const noteExport=(file,scope,kind='workbook')=>{
+    const count=rowsByFile.get(file);
+    if(!Number.isSafeInteger(count)||count<0)
+      throw new Error('导出数量缺少验收记录：'+path.basename(file));
+    recordExport({
+      reportDate:range.to,exportType:`${periodType}:${kind}`,
+      fileName:path.basename(file),fileHash:fileHash(file),rowCount:count,
+      summary:{periodType,range,snapshotIds,businessType:scope,sourceTotal,
+        workbookDetailRows:count},
+      consistency:{status:'PASSED',validationStatus:'VALID',reconciliationStatus:'COMPLETED'}
+    });
+  };
+  for(let index=0;index<types.length;index+=1){
     const type=types[index];
     const startProgress=20+Math.round(index/Math.max(1,types.length)*65);
     reportProgress(startProgress,'GENERATING',`正在生成 ${type} Excel报表（${index+1}/${types.length}）`);
-    const file = await createBusinessWorkbook({ type, periodType, range, snapshots, outputDir });
-    files.push(file);
-    reportProgress(20+Math.round((index+1)/Math.max(1,types.length)*65),'GENERATING',`${type} Excel报表生成完成`);
+    const generated=await createBusinessWorkbook({type,periodType,range,snapshots,outputDir});
+    files.push(generated.file);
+    rowsByFile.set(generated.file,Number(generated.audit?.rows));
+    scopeByFile.set(generated.file,type);
+    reportProgress(20+Math.round((index+1)/Math.max(1,types.length)*65),
+      'GENERATING',`${type} Excel报表生成完成`);
   }
-  if (types.length === 1) { reportProgress(100,'COMPLETED','报表文件已生成'); return { file: files[0], files, range, snapshots: snapshots.map(item => item.snapshotId) }; }
+  if(types.length===1){
+    noteExport(files[0],types[0]);
+    reportProgress(100,'COMPLETED','报表文件已生成');
+    return {file:files[0],files,range,snapshots:snapshotIds};
+  }
   reportProgress(88,'PACKAGING','正在生成综合管理报表');
-  const managementFile = await createManagementWorkbook({ periodType, range, snapshots, outputDir });
+  const management=await createManagementWorkbook({periodType,range,snapshots,outputDir});
+  const managementFile=management.file;
   files.unshift(managementFile);
-  const zipFile = path.join(outputDir, `CE_QC_${periodType}_${range.key}_七业务_${stamp()}.zip`);
+  rowsByFile.set(managementFile,Number(management.audit?.rows));
+  scopeByFile.set(managementFile,'ALL');
+  if(rowsByFile.get(managementFile)!==sourceTotal)
+    throw new Error('七业务综合导出与来源成员总数不一致：来源'+sourceTotal+
+      '票，实际'+rowsByFile.get(managementFile)+'票；禁止打包发布');
+  const zipFile=path.join(outputDir,`CE_QC_${periodType}_${range.key}_七业务_${stamp()}.zip`);
   reportProgress(94,'PACKAGING','正在打包全部业务报表');
-  await zipFiles(files, zipFile);
-  const snapshotIds = snapshots.map(item => item.snapshotId);
-  for (const file of [...files, zipFile]) {
-    recordExport({
-      reportDate: range.to,
-      exportType: `${periodType}:${path.basename(file).startsWith('CE_QC_') ? 'all-zip' : 'workbook'}`,
-      fileName: path.basename(file),
-      fileHash: fileHash(file),
-      rowCount: snapshots.reduce((sum, item) => sum + Number(item.payload?.finalRows?.length || 0), 0),
-      summary: { periodType, range, snapshotIds },
-      consistency: { status: 'PASSED', validationStatus: 'VALID', reconciliationStatus: 'COMPLETED' }
-    });
-  }
+  await zipFiles(files,zipFile);
+  rowsByFile.set(zipFile,sourceTotal);
+  for(const file of files)noteExport(file,scopeByFile.get(file));
+  noteExport(zipFile,'ALL','all-zip');
   reportProgress(100,'COMPLETED','报表文件已生成');
-  return { file: zipFile, files, range, snapshots: snapshots.map(item => item.snapshotId) };
+  return {file:zipFile,files,range,snapshots:snapshotIds};
 }
 
 async function createManagementWorkbook({ periodType, range, snapshots, outputDir }) {
-  return (await createShopeeTemplateWorkbook({ type: 'ALL', periodType, range, snapshots, outputDir })).file;
+  return createShopeeTemplateWorkbook({ type: 'ALL', periodType, range, snapshots, outputDir });
 }
 
 function addManagementSheet(workbook, name, rows, snapshots, range) {
@@ -132,7 +150,7 @@ function addManagementDashboard(sheet, rows, snapshots, range) {
 }
 
 async function createBusinessWorkbook({ type, periodType, range, snapshots, outputDir }) {
-  return (await createShopeeTemplateWorkbook({ type, periodType, range, snapshots, outputDir })).file;
+  return createShopeeTemplateWorkbook({ type, periodType, range, snapshots, outputDir });
   /* Legacy template writer retained below temporarily for compatibility audit.
   const template = path.join(TEMPLATE_DIR, `${type}_商务蓝白浅框线版_指标独立明细跳转.xlsx`);
   const zip = await JSZip.loadAsync(await fs.readFile(template));
