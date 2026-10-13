@@ -29,6 +29,9 @@ test('V560 direct purge clears business data without creating a backup or purge 
       .run('admin@example.test','ADMIN','TEST_PRESERVE','','','','{}','127.0.0.1','2026-09-20T00:00:00Z');
     db.prepare("INSERT INTO app_meta(key,value,updatedAt) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updatedAt=excluded.updatedAt")
       .run('data_purge_block_until',String(Date.now()+60_000),new Date().toISOString());
+    const staleTargets=['shopee_delivery_tracking','shopee_delivery_tracking_daily','v207_daily_ownership','v209_import_source_archive','v328_attempt_daily_cache'];
+    const {BUSINESS_DATA_TABLES}=await import('../src/store.js');
+    for(const name of staleTargets)assert.ok(BUSINESS_DATA_TABLES.includes(name),`missing direct purge target: ${name}`);
     const auditBefore=Number(db.prepare('SELECT COUNT(*) count FROM audit_logs').get()?.count||0);
     const preClearDir=path.join(cfg.backupsDir,'pre_clear');
     fs.mkdirSync(preClearDir,{recursive:true});
