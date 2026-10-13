@@ -197,11 +197,12 @@ try{
   const staleFlags=[
     {businessType:'WHPP',shipmentCode:'V788STALEPODNOWRETURN',reportDate:'2026-07-02',
       isPod:0,是否POD:'否',是否退回:'是',退回状态:'已退回',
-      currentState:'RETURNED',shipmentStatus:'60',orderStatus:'85',
+      currentState:'RETURNED',shipmentStatus:'60',orderStatus:'85',statusCode:'Y',statusDesc:'已退回',
       truthEvidence:{pod:true,returned:false},terminalEvidenceStatus:'STRICT_TMS'},
     {businessType:'WHPP',shipmentCode:'V788STALERETURNOWPOD',reportDate:'2026-07-02',
       isPod:1,是否POD:'是',是否退回:'否',
-      currentState:'POD',shipmentStatus:'81',truthEvidence:{pod:false,returned:true},
+      currentState:'POD',shipmentStatus:'81',statusCode:'R',statusDesc:'POD闭环',
+      truthEvidence:{pod:false,returned:true},
       terminalEvidenceStatus:'STRICT_TMS'}
   ];
   const staleWorkbook=await createShopeeTemplateWorkbook({
@@ -218,6 +219,10 @@ try{
     'the newer strictly confirmed return must override an old source POD85 flag');
   assert.equal(getSheetBills(staleBook,'未POD明细').length,0,
     'both corrected terminal members must leave unresolved rows');
+  assert.equal(staleBook.getWorksheet('POD明细').getRow(2).getCell(4).value,'Y',
+    'final POD detail must not print an obsolete R status marker');
+  assert.equal(staleBook.getWorksheet('退回明细').getRow(2).getCell(4).value,'R',
+    'final returned detail must not print an obsolete Y status marker');
   const collision=[
     {...day1[0]},
     {...day1[0],businessType:'SHOPEECN'}
