@@ -216,6 +216,20 @@ test('V560 direct purge clears business data without creating a backup or purge 
     assert.equal(getActiveCompleteShopSet(stageDb)?.members?.length,72,
       'activated current CP whitelist must remain valid through consecutive daily uploads');
 
+    // Source-truth endpoint must include separately imported WHPP exactly
+    // once per selected day without carrying forward the other day's rows.
+    const {readSelectedDateBusinessSourceTruth}=await import('../src/v783SevenBusinessSourceTruth.js');
+    for(const [day,snapshot] of [['2026-07-01',staged.snapshotId],['2026-07-02',nextBatch.snapshotId]]){
+      const truth=readSelectedDateBusinessSourceTruth(stageDb,{reportDate:day,snapshotId:snapshot});
+      assert.equal(truth.source.validUniqueWaybills,6,`unified source total mismatch for ${day}`);
+      assert.equal(truth.source.classifiedTotal,6,`unified six-group conservation mismatch for ${day}`);
+      assert.equal(truth.whppIndependent.total,1,`separate WHPP membership mismatch for ${day}`);
+      assert.equal(truth.whppIndependent.crossBusinessOverlap,0,`WHPP must not overlap other groups on ${day}`);
+      assert.equal(truth.display.distinctUnion,7,`seven-group displayed total must include independent WHPP once on ${day}`);
+      assert.equal(truth.display.hasUnresolvedConflict,false,`valid selected-day membership must not be marked conflicting on ${day}`);
+    }
+
+
     const preClearAfter=fs.existsSync(preClearDir)?fs.readdirSync(preClearDir).length:0;
     assert.ok(preClearBefore>0,'fixture must contain one legacy backup');
     assert.equal(preClearAfter,preClearBefore,'direct purge must preserve existing CE QC backups; clearing business data is independent from backup retention');
