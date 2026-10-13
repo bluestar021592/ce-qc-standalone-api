@@ -332,8 +332,10 @@ export function reconcileV246TrackingLedger(selection, { db = getDb(), reason = 
       const signingDays = cls.returnInProgress||cls.stateConflict||cls.returned?null:
         oldStrict?(oldLedger?.signingDays??null):(podDate?v246InclusiveDays(firstReportDate,podDate):null);
       const stateName = cls.returnInProgress?'RETURN_IN_PROGRESS':cls.stateConflict?'PENDING_VERIFICATION':
+        cls.pod?'POD':cls.returned?'RETURNED':cls.cancelled?'ORDER_CANCELLED':
         text(current?.state || payload.currentState || payload.scanNormalizedState || payload.primaryCategory || payload.主分类 || 'OPEN');
       const category = cls.returnInProgress?'退回中':cls.stateConflict?'终态矛盾待核验':
+        cls.pod?'POD':cls.returned?'退回':cls.cancelled?'订单取消':
         text(payload.primaryCategory || payload.currentMainCategory || payload.主分类 || payload.异常分类 || stateName);
       const lastEventTime = text(current?.lastEventTime || payload.latestEventTime || payload.最后节点时间 || '');
       const trackingStatus = cls.terminal ? 'TERMINAL' : 'OPEN';
