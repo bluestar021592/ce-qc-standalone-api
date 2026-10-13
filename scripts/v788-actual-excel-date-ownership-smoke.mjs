@@ -21,6 +21,41 @@ const snapshots=[
   {snapshotId:'S-2026-07-01',reportDate:'2026-07-01',payload:{finalRows:day1}},
   {snapshotId:'S-2026-07-02',reportDate:'2026-07-02',payload:{finalRows:day2}}
 ];
+// The production snapshot list must include WHPP-only reporting dates.
+const sourceText=await fs.readFile(new URL('../src/lightweightDashboardStore.js',import.meta.url),'utf8');
+const listStart=sourceText.indexOf('export function listLightweightCompletedUnifiedSnapshots(');
+const listEnd=sourceText.indexOf('function loadLightweightExportRows(',listStart);
+assert.ok(listStart>=0&&listEnd>listStart);
+const sourceDb=new DatabaseSync(':memory:');
+sourceDb.exec("CREATE TABLE business_daily_parse_rows(businessType TEXT,reportDate TEXT,shipmentCode TEXT)");
+sourceDb.prepare("INSERT INTO business_daily_parse_rows VALUES('WHPP',?,?)").run('2026-07-01','V788WHPPDAY01');
+sourceDb.prepare("INSERT INTO business_daily_parse_rows VALUES('WHPP',?,?)").run('2026-07-02','V788WHPPDAY02');
+const readSnapshots=new Function('getDb','validateDateRange','EXPORT_BUSINESS_TYPES',
+  'listLatestValidRangeBatches','loadLightweightExportRows',
+  sourceText.slice(listStart,listEnd).replace('export function','function')+
+  '\nreturn listLightweightCompletedUnifiedSnapshots;')(
+  ()=>sourceDb,(from,to)=>({from,to}),types,
+  ()=>[{snapshotId:'S-2026-07-01',reportDate:'2026-07-01',createdAt:'2026-07-01T12:00:00Z'}],
+  (snapshotId,reportDate,businessType)=>{
+    if(businessType!=='WHPP'&&reportDate==='2026-07-02')
+      throw new Error('WHPP-only day cannot invoke other business export without source');
+    return [{businessType,reportDate,
+      shipmentCode:businessType==='WHPP'?'V788WHPPDAY'+reportDate.slice(-2):
+        'V788ONLY'+businessType,
+      currentState:'POD',isPod:1,是否POD:'是',regionCode:'PP'}];
+  });
+const whppOnlySnapshots=readSnapshots('2026-07-01','2026-07-02',['WHPP']);
+assert.deepEqual(whppOnlySnapshots.map(x=>x.reportDate),['2026-07-01','2026-07-02']);
+assert.deepEqual(whppOnlySnapshots.map(x=>x.payload.finalRows.length),[1,1]);
+const sixOnlySnapshots=readSnapshots('2026-07-01','2026-07-02',['CE']);
+assert.deepEqual(sixOnlySnapshots.map(x=>x.reportDate),['2026-07-01'],
+  'no independent WHPP-only date may leak into a CE-only report');
+const mergedSnapshots=readSnapshots('2026-07-01','2026-07-02',types);
+assert.equal(mergedSnapshots.length,2,'ALL export must include independent WHPP-only day');
+assert.deepEqual(mergedSnapshots.map(x=>x.payload.finalRows.length),[7,1],
+  'only WHPP contributes members on the WHPP-only day');
+sourceDb.close();
+
 const temp=await fs.mkdtemp(path.join(os.tmpdir(),'v788-excel-members-'));
 const range={from:'2026-07-01',to:'2026-07-02'};
 function getSheetBills(workbook,name){
@@ -36,6 +71,17 @@ function getSheetBills(workbook,name){
   return rows;
 }
 try{
+  const independentResult=await createShopeeTemplateWorkbook({
+    type:'ALL',periodType:'custom',range,snapshots:mergedSnapshots,outputDir:temp
+  });
+  assert.equal(independentResult.audit.rows,8);
+  const independentBook=new ExcelJS.Workbook();
+  await independentBook.xlsx.readFile(independentResult.file);
+  const independentBills=getSheetBills(independentBook,'全部明细');
+  assert.equal(independentBills.length,8);
+  assert.equal(independentBills.filter(x=>x.date==='2026-07-02').length,1,
+    'WHPP-only day should be present once, not skipped or filled with fake unified rows');
+  assert.equal(independentBills.find(x=>x.date==='2026-07-02').bill,'V788WHPPDAY02');
   const out=await createShopeeTemplateWorkbook({
     type:'ALL',periodType:'custom',range,snapshots,outputDir:temp
   });
