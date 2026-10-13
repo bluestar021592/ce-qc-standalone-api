@@ -8,8 +8,8 @@ try{
   db.exec("CREATE TABLE business_daily_parse_rows(reportDate TEXT,businessType TEXT,shipmentCode TEXT)");
   db.exec("CREATE TABLE shipment_current_state(shipmentCode TEXT,businessType TEXT,reportDate TEXT,state TEXT,stateJson TEXT)");
   db.exec("CREATE TABLE qc_tracking_ledger(shipmentCode TEXT,businessType TEXT,trackingStatus TEXT,terminalReason TEXT)");
-  db.exec("CREATE TABLE business_scan_results(shipmentCode TEXT,businessType TEXT,reportDate TEXT)");
-  db.exec("CREATE TABLE business_final_rows(shipmentCode TEXT,businessType TEXT,reportDate TEXT)");
+  db.exec("CREATE TABLE business_scan_results(shipmentCode TEXT,businessType TEXT,reportDate TEXT,isPod INTEGER,orderStatus TEXT,rawJson TEXT)");
+  db.exec("CREATE TABLE business_final_rows(shipmentCode TEXT,businessType TEXT,reportDate TEXT,isPod INTEGER,primaryCategory TEXT,rawJson TEXT)");
   const members=Array.from({length:72},(_,i)=>({code:'CP'+String(100001+i),name:'Shop '+(i+1)}));
   db.prepare('INSERT INTO app_meta VALUES(?,?)').run('shop_current_complete_codes_v780',JSON.stringify({mode:'COMPLETE',members}));
   const insertMember=db.prepare("INSERT INTO business_daily_parse_rows VALUES(?,'WHPP',?)");
@@ -26,6 +26,10 @@ try{
     insertCurrent.run(code,day,state,JSON.stringify({shipmentStatus:status,...extra}));
     insertLedger.run(code);
   }
+  db.prepare("INSERT INTO business_scan_results VALUES('A1','WHPP','2026-07-01',1,'85','{}')").run();
+  db.prepare("INSERT INTO business_final_rows VALUES('A1','WHPP','2026-07-01',1,'POD','{}')").run();
+  db.prepare("INSERT INTO business_scan_results VALUES('A2','WHPP','2026-07-01',0,'','{}')").run();
+  db.prepare("INSERT INTO business_final_rows VALUES('A2','WHPP','2026-07-01',0,'已退回','{}')").run();
   const audit=auditV788Readonly(db);
   assert.equal(audit.active72.status,'ACTIVE_72');
   assert.equal(audit.whpp.totals.sourceMembers,5);
@@ -40,8 +44,11 @@ try{
   assert.equal(audit.whpp.totals.normalizedReturned,1);
   assert.equal(audit.whpp.totals.normalizedNonterminal,1);
   assert.equal(audit.whpp.totals.explicitPODTimeFromSavedEvidence,1);
-  assert.equal(audit.whpp.totals.matchedPODAgainstScanOrFinal,0);
-  assert.equal(audit.whpp.totals.matchedReturnAgainstFinal,0);
+  assert.equal(audit.whpp.totals.matchedPODAgainstScanOrFinal,1);
+  assert.equal(audit.whpp.totals.matchedReturnAgainstFinal,1);
+  assert.equal(audit.whpp.totals.finalPOD,1);
+  assert.equal(audit.whpp.totals.scanPOD,1);
+  assert.equal(audit.whpp.totals.finalReturnCompleted,1);
   assert.equal(audit.whpp.totals.hasFullMembershipNotVerifiedOutcome,false);
 
   assert.equal(audit.whpp.byDate[0].eligibleForStrictExportFallback,true);
