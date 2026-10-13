@@ -195,5 +195,45 @@ try{
     /报表来源重复/,
     'two identical same-day business memberships cannot silently collapse into one Excel row'
   );
+  // Six unified businesses must be checked at the raw source-to-final merge,
+  // before a per-bill Map or Excel uniqueRows can hide a missing member.
+  const loadStart=sourceText.indexOf('function loadLightweightExportRows(');
+  const loadEnd=sourceText.indexOf('// Read-only export overlay.',loadStart);
+  assert.ok(loadStart>=0&&loadEnd>loadStart);
+  let rawSource=[
+    {shipmentCode:'V788SOURCE01',rowJson:'{}',regionCode:'PP',recipientRaw:'',recipientNormalized:''},
+    {shipmentCode:'V788SOURCE02',rowJson:'{}',regionCode:'PV',recipientRaw:'',recipientNormalized:''}
+  ];
+  let finals=[
+    {shipmentCode:'V788SOURCE01',businessType:'CE',currentState:'POD'},
+    {shipmentCode:'V788SOURCE02',businessType:'CE',currentState:'PENDING_SCAN'}
+  ];
+  const readUnified=new Function('getDb','loadWhppCanonicalTruth','billOf',
+    'overlaySavedTerminalExportTruth','compactSourceRow','loadLightweightUnifiedBusinessState',
+    sourceText.slice(loadStart,loadEnd)+'\nreturn loadLightweightExportRows;')(
+    ()=>({prepare:()=>({all:()=>rawSource})}),()=>({}),
+    row=>String(row.shipmentCode||'').trim().toUpperCase(),
+    rows=>rows,row=>row,()=>({finalRows:finals}));
+  assert.equal(readUnified('UNIFIED-S1','2026-07-01','CE').length,2);
+  finals=finals.slice(0,1);
+  assert.throws(()=>readUnified('UNIFIED-S1','2026-07-01','CE'),
+    /导出来源与最终明细运单不一致/,
+    'final row missing one source bill must not silently export fewer rows');
+  finals=[
+    {shipmentCode:'V788SOURCE01',businessType:'CE'},
+    {shipmentCode:'V788SOURCE03',businessType:'CE'}
+  ];
+  assert.throws(()=>readUnified('UNIFIED-S1','2026-07-01','CE'),
+    /导出来源与最终明细运单不一致/,
+    'equal total counts cannot hide a replaced source member');
+  finals=[
+    {shipmentCode:'V788SOURCE01',businessType:'CE'},
+    {shipmentCode:'V788SOURCE02',businessType:'CE'}
+  ];
+  rawSource=[rawSource[0],{...rawSource[0]}];
+  assert.throws(()=>readUnified('UNIFIED-S1','2026-07-01','CE'),
+    /导出来源与最终明细运单不一致/,
+    'duplicate source bills must be rejected before Map deduplication');
+
   console.log('[V788 XLSX] seven businesses, 2 daily sources, same bill across dates and conflicting owner fail-closed PASS');
 }finally{await fs.rm(temp,{recursive:true,force:true});}
