@@ -229,8 +229,9 @@ assert.equal(newlyFinished[1].terminalEvidenceStatus,'STRICT_TMS');
 const filterStart=src.indexOf('function filterActiveCarryMembers(');
 const filterEnd=src.indexOf('// Read-only export overlay.',filterStart);
 assert.ok(filterStart>=0&&filterEnd>filterStart);
-const filterCarry=new Function('overlaySavedTerminalExportTruth','getDb',
-  src.slice(filterStart,filterEnd)+'\nreturn filterActiveCarryMembers;')(overlay,()=>db);
+const filterCarry=new Function('overlaySavedTerminalExportTruth','getDb','billOf',
+  src.slice(filterStart,filterEnd)+'\nreturn filterActiveCarryMembers;')(
+    overlay,()=>db,row=>String(row.shipmentCode||'').toUpperCase());
 assert.deepEqual(filterCarry([latePod,lateReturn,status80Bill],'WHPP','2026-07-02',db),
   [status80Bill],'late POD and returned must leave historical OPEN counts; conflicting return80 remains');
 assert.equal(db.prepare("SELECT trackingStatus FROM qc_tracking_ledger WHERE shipmentCode=?")
@@ -241,6 +242,19 @@ const openUnknown='CE020726UNRESOLVED';
 put.run(openUnknown,'WHPP','PENDING_SCAN','{}','');
 assert.deepEqual(filterCarry([openUnknown,latePod,lateReturn],'WHPP','2026-07-02',db),
   [openUnknown],'missing evidence must remain visible in unresolved queue');
+const knownDailyRows=overlay([
+  {shipmentCode:latePod,businessType:'WHPP',reportDate:'2026-07-02'},
+  {shipmentCode:lateReturn,businessType:'WHPP',reportDate:'2026-07-02'},
+  {shipmentCode:openUnknown,businessType:'WHPP',reportDate:'2026-07-02'}
+],db);
+assert.deepEqual(filterCarry([openUnknown,latePod,lateReturn],'WHPP','2026-07-02',db,knownDailyRows),
+  [openUnknown],'dashboard should reuse already-projected daily rows for carry');
+const noRepeatedQuery=(rows)=>{throw new Error('daily terminal facts must be reused');};
+const reuseFn=new Function('overlaySavedTerminalExportTruth','getDb','billOf',
+  src.slice(filterStart,filterEnd)+'\nreturn filterActiveCarryMembers;')(
+    noRepeatedQuery,()=>db,row=>String(row.shipmentCode||'').toUpperCase());
+assert.deepEqual(reuseFn([latePod,lateReturn,openUnknown],'WHPP','2026-07-02',db,knownDailyRows),
+  [openUnknown],'no redundant SQLite terminal query for carry bills already in daily rows');
 const oppositePod='CE020726OPPOSITEPOD';
 put.run(oppositePod,'WHPP','RETURNED',JSON.stringify({shipmentStatus:'60'}),'2026-07-05');
 const opposite=overlay([{shipmentCode:oppositePod,businessType:'WHPP',
