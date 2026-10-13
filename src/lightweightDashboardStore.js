@@ -34,11 +34,11 @@ export function loadLightweightUnifiedBusinessState(businessType, snapshotId = '
     loadFinalRows(db, batch, type)
   );
   const scanResults = loadScanRows(db, batch, type);
-  const carryBills = db.prepare(`
+  const carryBills = filterActiveCarryMembers(db.prepare(`
     SELECT shipmentCode FROM carryover_open_items
     WHERE businessType=? AND status='OPEN' AND lastReportDate<=?
     ORDER BY shipmentCode
-  `).all(type, batch.reportDate).map(row => row.shipmentCode);
+  `).all(type, batch.reportDate).map(row => row.shipmentCode),type,batch.reportDate,db);
   const podLocks = db.prepare(`
     SELECT c.shipmentCode
     FROM shipment_current_state c
@@ -790,6 +790,20 @@ function loadLightweightExportRows(snapshotId, reportDate, type) {
       reportDate: row.reportDate || reportDate
     };
   }),db);
+}
+
+// Reconcile stale persisted OPEN carry labels at *read time*. A late POD,
+// completed return, or cancellation must disappear from unresolved dashboard
+// counts and follow-up queues, without destructively rewriting historical
+// carry evidence. The exact same terminal projection governs exports.
+function filterActiveCarryMembers(bills=[],businessType='',reportDate='',db=getDb()){
+  if(!bills.length)return [];
+  const type=String(businessType||'').toUpperCase();
+  return overlaySavedTerminalExportTruth(
+    bills.map(shipmentCode=>({shipmentCode,businessType:type,reportDate})),db)
+    .filter(row=>!['POD','RETURNED','ORDER_CANCELLED'].includes(
+      String(row.currentState||'').toUpperCase()))
+    .map(row=>String(row.shipmentCode||'').toUpperCase());
 }
 
 // Read-only export overlay. Current terminal evidence may arrive after the
