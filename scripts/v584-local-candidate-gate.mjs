@@ -134,6 +134,7 @@ const TASKS=[
   ['node',['scripts/v785-export-current-terminal-state-smoke.mjs']],
   ['node',['scripts/v785-july2-whpp-pod-return-carry-smoke.mjs']],
   ['node',['scripts/v786-whpp-export-closure-smoke.mjs']],
+  ['node',['scripts/v787-july02-whpp-first-start-recovery-smoke.mjs']],
   ['node',['scripts/v776-qc-closed-waybill-lookup-smoke.mjs']],
   ['node',['scripts/v773-local-admin-reset-smoke.mjs']],
   ['node',['--test',
