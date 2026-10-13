@@ -1626,7 +1626,7 @@ async function loadBusiness(options={}){
     setText('v631AccountingMeta',state.snapshotStatus==='COMPLETED'
       ?('当前日报 '+fmt(m.total)+' 票 · 快速看板已就绪')
       :'正式结果仍在处理中');
-    setText('kpiAvgDays',m.avgDays==null?'—':Number(m.avgDays).toFixed(2).replace(/\.00$/,''));
+    setText('kpiAvgDays',m.avgDays==null||(m.pod>0&&Number(m.avgDays)<=0)?'—':Number(m.avgDays).toFixed(2).replace(/\.00$/,''));
     const returnCapable=['WHPP','SHOPEECN','SHOPEEVN'].includes(business);
     if(byId('kpiReturnedCard'))byId('kpiReturnedCard').hidden=!returnCapable;if(byId('kpiReturnRateCard'))byId('kpiReturnRateCard').hidden=!returnCapable;
     if(returnCapable){setText('kpiReturned',fmt(m.returned||0));setText('kpiReturnRate',pct(m.total?Number(m.returned||0)*100/Number(m.total):0))}
@@ -1642,7 +1642,22 @@ async function loadBusiness(options={}){
       if(evidenceState==='RUNNING'||timingRepairRunning)scheduleHistoricalEvidenceRefresh('business');
       else if(evidenceState==='COMPLETED'||summary?.timingEvidenceRepair)stopHistoricalEvidenceRefresh();
       const timing=summary?.reportDate===reportDate?summary?.timing?.[business]:null;
-      if(timing?.overall?.avgDays!=null)setText('kpiAvgDays',Number(timing.overall.avgDays).toFixed(2).replace(/\.00$/,''));
+      if(timing?.overall?.avgDays!=null&&Number.isFinite(Number(timing.overall.avgDays))){
+        setText('kpiAvgDays',Number(timing.overall.avgDays).toFixed(2).replace(/\.00$/,''));
+      }else if(m.pod>0&&['TBKH','WHPP','SHOPEECN','SHOPEEVN'].includes(business)){
+        // The compact/fast home response may omit signing timing. The main board
+        // must use the same full selected-date timing source as the overview,
+        // without blocking the initial business-card render.
+        const fullTimingQuery=new URLSearchParams(summaryQuery);
+        fullTimingQuery.delete('fast');
+        void json('/api/home-quality-summary?'+fullTimingQuery.toString(),25000).then(full=>{
+          const sameDate=full?.reportDate===reportDate;
+          const currentDate=String(byId('v625FromDate')?.value||'').slice(0,10)===reportDate;
+          const days=sameDate?full?.timing?.[business]?.overall?.avgDays:null;
+          if(currentDate&&days!=null&&Number.isFinite(Number(days)))
+            setText('kpiAvgDays',Number(days).toFixed(2).replace(/\.00$/,''));
+        }).catch(()=>{});
+      }
     });
 
     // V765: the business summary is already visible. Run 5,000-row
