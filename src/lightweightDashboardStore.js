@@ -876,7 +876,8 @@ function overlaySavedTerminalExportTruth(rows=[],db=getDb()){
           state==='ORDER_CANCELLED'?'ORDER_CANCELLED':'';
         if(outcome)closed.set(bill,{outcome,businessType:String(row.businessType||'').toUpperCase(),
           podTime:String(raw.podTime||raw.POD时间||''),eventTime:String(row.lastEventTime||''),
-          strictTms:!contradiction&&(status==='60'||status==='81'),contradiction});
+          strictTms:!contradiction&&(status==='60'||status==='81'),
+          terminalCode:status,contradiction});
       }
     }catch{}
   }
@@ -886,6 +887,7 @@ function overlaySavedTerminalExportTruth(rows=[],db=getDb()){
     if(fact.outcome==='CONFLICT')return {...row,isPod:0,是否POD:'否',POD状态:'',是否退回:'否',
       currentState:'PENDING_VERIFICATION',primaryCategory:'终态矛盾待核验',
       退回状态:'待核验',podTime:'',podDate:'',POD时间:'',signingDays:null,签收天数:null,
+      truthEvidence:{...(row.truthEvidence||{}),pod:false,returned:false,currentTerminalStrict:false},
       terminalEvidenceStatus:'CONFLICT',terminalEvidenceSource:'SAVED_TMS_STATUS_CONFLICT'};
     if(fact.outcome==='POD'){
       // A persisted WHPP POD lock backed by an accepted source is stronger
@@ -903,7 +905,10 @@ function overlaySavedTerminalExportTruth(rows=[],db=getDb()){
           verifiedSigningDays=Math.floor((signed-first)/86400000)+1;
       }
       return {...row,isPod:1,是否POD:'是',POD状态:'POD',currentState:'POD',
-        primaryCategory:'POD闭环',退回状态:'',是否退回:'否',
+        primaryCategory:'POD闭环',statusDesc:'POD闭环',状态说明:'POD闭环',
+        shipmentStatus:fact.strictTms?'60':'',退回状态:'',是否退回:'否',
+        truthEvidence:{...(row.truthEvidence||{}),pod:true,returned:false,
+          currentTerminalStrict:fact.strictTms===true},
         podTime:selectedTime,podDate:verifiedWhppTime?verifiedWhppTime.slice(0,10):String(selectedTime),
         ...(verifiedWhppTime?{
           POD时间:verifiedWhppTime,signingDays:verifiedSigningDays,签收天数:verifiedSigningDays,
@@ -914,16 +919,24 @@ function overlaySavedTerminalExportTruth(rows=[],db=getDb()){
         terminalEvidenceSource:fact.strictTms?'SAVED_STRICT_POD':'SAVED_NORMALIZED_POD_LABEL'};
     }
     if(fact.outcome==='RETURNED')return {...row,isPod:0,是否POD:'否',POD状态:'',是否退回:'是',退回状态:'已退回',
-      currentState:'RETURNED',primaryCategory:'已退回',podTime:'',podDate:'',POD时间:'',
+      currentState:'RETURNED',primaryCategory:'已退回',statusDesc:'已退回',状态说明:'已退回',
+      shipmentStatus:fact.strictTms?'81':'',podTime:'',podDate:'',POD时间:'',
       signingDays:null,签收天数:null,
+      truthEvidence:{...(row.truthEvidence||{}),pod:false,returned:true,
+        currentTerminalStrict:fact.strictTms===true},
       terminalEvidenceStatus:fact.strictTms?'STRICT_TMS':'NORMALIZED_LABEL_ONLY',
       terminalEvidenceSource:fact.strictTms?'SAVED_STRICT_RETURNED':'SAVED_NORMALIZED_RETURNED_LABEL'};
     if(fact.outcome==='RETURNING')return {...row,isPod:0,是否POD:'否',POD状态:'',是否退回:'否',
       退回状态:'退回中',订单取消:'否',currentState:'RETURNING',primaryCategory:'退回中',
+      shipmentStatus:'80',statusDesc:'退回中',状态说明:'退回中',
       podTime:'',podDate:'',POD时间:'',signingDays:null,签收天数:null,
+      truthEvidence:{...(row.truthEvidence||{}),pod:false,returned:false,currentTerminalStrict:false},
       terminalEvidenceStatus:'NONTERMINAL_80',terminalEvidenceSource:'SAVED_STATUS_80_NONTERMINAL'};
-    return {...row,isPod:0,是否POD:'否',订单取消:'是',
-      currentState:'ORDER_CANCELLED',primaryCategory:'订单取消',terminalEvidenceSource:'SAVED_STRICT_CANCELLED'};
+    return {...row,isPod:0,是否POD:'否',是否退回:'否',订单取消:'是',
+      currentState:'ORDER_CANCELLED',primaryCategory:'订单取消',statusDesc:'订单取消',状态说明:'订单取消',
+      shipmentStatus:'',podTime:'',podDate:'',POD时间:'',signingDays:null,签收天数:null,
+      truthEvidence:{...(row.truthEvidence||{}),pod:false,returned:false,currentTerminalStrict:false},
+      terminalEvidenceSource:'SAVED_STRICT_CANCELLED'};
   });
 }
 

@@ -352,7 +352,10 @@ function detailUrl(row = {}) {
 function isPod(row = {}) {
   // Never re-close a shipment that the final export overlay explicitly
   // marked contradictory, even if old scan/JSON proof still says POD.
-  if(['CONFLICT','NONTERMINAL_80'].includes(String(row.terminalEvidenceStatus||'').toUpperCase()))return false;
+  const terminalStatus=String(row.terminalEvidenceStatus||'').toUpperCase();
+  if(['CONFLICT','NONTERMINAL_80'].includes(terminalStatus))return false;
+  if(['STRICT_TMS','NORMALIZED_LABEL_ONLY'].includes(terminalStatus))
+    return String(row.currentState||'').toUpperCase()==='POD';
   const status=String(row.shipmentStatus||'').trim();
   if(status==='80'||status==='81')return false;
   return status==='60'||row.truthEvidence?.pod===true||Number(row.isPod||0)===1
@@ -360,7 +363,10 @@ function isPod(row = {}) {
     ||String(row.orderStatus||'')==='85'||row.是否POD==='是';
 }
 function isReturned(row = {}) {
-  if(['CONFLICT','NONTERMINAL_80'].includes(String(row.terminalEvidenceStatus||'').toUpperCase()))return false;
+  const terminalStatus=String(row.terminalEvidenceStatus||'').toUpperCase();
+  if(['CONFLICT','NONTERMINAL_80'].includes(terminalStatus))return false;
+  if(['STRICT_TMS','NORMALIZED_LABEL_ONLY'].includes(terminalStatus))
+    return String(row.currentState||'').toUpperCase()==='RETURNED';
   if(isPod(row))return false;
   const status=String(row.shipmentStatus||'').trim();
   if(status==='80')return false;
