@@ -2532,11 +2532,18 @@ async function runV758WhppReadOnlyDiagnostic(){
         unifiedWhppCompleted:truth.unifiedWhppCompleted===true
       }
     };
-    const summary='WHPP '+(truth.locked===true?'证据校验完成':'仍缺完成证据')+
-      ' · 原始 '+Number(truth.sourceCount||0)+'票 · 扫描 '+Number(coverage.scanRows||0)+
-      '票 · 最终记录 '+Number(coverage.finalRows||0)+'票 · POD '+Number(coverage.podRows||0)+
-      '票 · 退回 '+Number(coverage.returnedRows||0)+'票 · 未确认 '+Number(coverage.unverifiedRows||0)+'票\n原因：'+String(truth.reason||'未知')+
-      '\n完成依据：'+String(truth.completionSource||'无')+'\n\n';
+    const whppCount=Number(truth.canonicalTotal||0);
+    const scans=Number(coverage.scanRows||0),finals=Number(coverage.finalRows||0);
+    const missingScans=Math.max(0,whppCount-scans),missingFinals=Math.max(0,whppCount-finals);
+    const processingMissing=missingScans>0||missingFinals>0;
+    const summary='WHPP '+(truth.locked===true?'处理证据核验通过':'仍缺处理证据')+
+      ' · 独立日报 '+whppCount+'票（统一导入WHPP分区 '+Number(truth.sourceCount||0)+'票）'+
+      ' · 已扫描 '+scans+'票 · 已保存最终记录 '+finals+'票'+
+      ' · 缺扫描 '+missingScans+'票 · 缺最终记录 '+missingFinals+'票'+
+      ' · POD '+Number(coverage.podRows||0)+'票 · 已退回 '+Number(coverage.returnedRows||0)+'票'+
+      (processingMissing?'\\n缺失的是扫描/处理证据，不能将未确认成员直接归为Pending；从原日报继续处理即可。':'\\n扫描与最终记录完整；尚未POD/退回的运单继续追踪。')+
+      '\\n原因：'+String(truth.reason||'未知')+
+      '\\n完成依据：'+String(truth.completionSource||'无')+'\\n\\n';
     view.textContent=summary+JSON.stringify(report,null,2);
   }catch(error){
     const status=Number(error?.status||0),code=String(error?.payload?.code||error?.code||'');
