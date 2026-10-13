@@ -149,6 +149,20 @@ test('V560 direct purge clears business data without creating a backup or purge 
       if(exists)assert.equal(Number(stageDb.prepare(`SELECT COUNT(*) c FROM "${table}"`).get()?.c||0),0,`new import must not revive old cache: ${table}`);
     }
 
+    // Fail closed: an incomplete CP whitelist must never permit a second
+    // destructive clear and must not remove freshly imported July members.
+    stageDb.prepare("UPDATE app_meta SET value=? WHERE key='shop_current_complete_codes_v780'")
+      .run(JSON.stringify({...activeConfig,members:activeMembers.slice(0,71)}));
+    await assert.rejects(
+      ()=>executeDirectDataPurge({phrase:DIRECT_PURGE_PHRASE,user:{email:'admin@example.test',role:'ADMIN'}}),
+      /V788_PURGE_CP72_INVALID/,
+      'incomplete active 72-code CP list must block irreversible purge');
+    assert.equal(Number(stageDb.prepare('SELECT COUNT(*) c FROM unified_import_rows').get()?.c||0),6,
+      'rejected purge must preserve fresh unified members');
+    assert.equal(Number(stageDb.prepare("SELECT COUNT(*) c FROM business_daily_parse_rows WHERE businessType='WHPP'").get()?.c||0),1,
+      'rejected purge must preserve fresh WHPP source');
+    stageDb.prepare("UPDATE app_meta SET value=? WHERE key='shop_current_complete_codes_v780'").run(activeBefore);
+
     const preClearAfter=fs.existsSync(preClearDir)?fs.readdirSync(preClearDir).length:0;
     assert.ok(preClearBefore>0,'fixture must contain one legacy backup');
     assert.equal(preClearAfter,preClearBefore,'direct purge must preserve existing CE QC backups; clearing business data is independent from backup retention');

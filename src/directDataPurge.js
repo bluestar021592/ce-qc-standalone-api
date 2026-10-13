@@ -101,6 +101,25 @@ async function clearRegenerableFiles(){
   }
   return warnings;
 }
+// The current activated 72-code CP whitelist is authoritative. If it is
+// corrupt, abort BEFORE clearing any business data, rather than falling back
+// to the retired historical shop list on the next import.
+function readProtectedActiveShopSet(db){
+  const row=db.prepare("SELECT value FROM app_meta WHERE key='shop_current_complete_codes_v780'").get();
+  if(!row)return null; // Preserve legacy installations without an activated 72-code set.
+  const value=String(row.value||'');
+  let config;
+  try{config=JSON.parse(value)}catch{throw new Error('V788_PURGE_CP72_INVALID: 当前72码配置无法解析，已拒绝清空');}
+  const members=Array.isArray(config?.members)?config.members:[];
+  const normalized=members.map(m=>String(m?.code||'').trim().toUpperCase());
+  const valid= config?.mode==='COMPLETE' && members.length===72
+    && new Set(normalized).size===72
+    && members.every((m,i)=>/^(?:(?:CP|FS)\\d{6}|(?:PV|PNH)\\d{3})$/.test(normalized[i])
+      && String(m?.name||'').trim().length>0);
+  if(!valid)throw new Error('V788_PURGE_CP72_INVALID: 当前有效门店名单不是72个唯一有效编码，已拒绝清空');
+  return value;
+}
+
 function directResetTransaction(db,onProgress=()=>{}){
   const now=nowIso();
   const existing=new Set(db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(row=>String(row.name||'')));
@@ -113,6 +132,7 @@ function directResetTransaction(db,onProgress=()=>{}){
     onProgress({status:'RUNNING',stage:'WAITING_DB_LOCK',message:'正在取得数据库写锁。'});
     db.exec('BEGIN IMMEDIATE');
     transactionStarted=true;
+    const protectedShopSet=readProtectedActiveShopSet(db);
     onProgress({status:'RUNNING',stage:'DELETE_TABLES',message:'已取得数据库写锁，开始清空业务表。',completedTables:0,totalTables:clearTargets.length});
     for(let index=0;index<clearTargets.length;index+=1){
       const table=clearTargets[index];
@@ -127,6 +147,8 @@ function directResetTransaction(db,onProgress=()=>{}){
       after[table]=remaining;
       if(remaining!==0)throw new Error(`业务表清空校验失败：${table} 仍有 ${remaining} 行。`);
     }
+    if(readProtectedActiveShopSet(db)!==protectedShopSet)
+      throw new Error('V788_PURGE_CP72_CHANGED: 清空过程改变了已激活72码名单，已回滚');
     db.prepare(`INSERT INTO app_state(key,valueJson,updatedAt) VALUES('current',?,?) ON CONFLICT(key) DO UPDATE SET valueJson=excluded.valueJson,updatedAt=excluded.updatedAt`).run(JSON.stringify({logs:[]}),now);
     const meta=db.prepare(`INSERT INTO app_meta(key,value,updatedAt) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updatedAt=excluded.updatedAt`);
     meta.run('last_processed_report_date','',now);
