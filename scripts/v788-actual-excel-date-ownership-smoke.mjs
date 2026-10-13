@@ -55,6 +55,27 @@ assert.equal(mergedSnapshots.length,2,'ALL export must include independent WHPP-
 assert.deepEqual(mergedSnapshots.map(x=>x.payload.finalRows.length),[7,1],
   'only WHPP contributes members on the WHPP-only day');
 sourceDb.close();
+// The latest VALID upload must be selected first. A newer PROCESSING batch
+// must block export; the older COMPLETED version is not a safe substitute.
+const batchesStart=sourceText.indexOf('function listLatestValidRangeBatches(');
+const batchesEnd=sourceText.indexOf('function validateDateRange(',batchesStart);
+assert.ok(batchesStart>=0&&batchesEnd>batchesStart);
+let availableBatches=[
+ {reportDate:'2026-07-01',snapshotId:'NEW-RUNNING',batchId:'B2',
+  createdAt:'2026-07-01T14:00:00Z',snapshotStatus:'PROCESSING'},
+ {reportDate:'2026-07-01',snapshotId:'OLD-COMPLETE',batchId:'B1',
+  createdAt:'2026-07-01T12:00:00Z',snapshotStatus:'COMPLETED'}
+];
+const latestBatch=new Function('getDb',
+  sourceText.slice(batchesStart,batchesEnd)+'\nreturn listLatestValidRangeBatches;')(
+  ()=>({prepare:()=>({all:()=>availableBatches})}));
+assert.equal(latestBatch('2026-07-01','2026-07-01',false)[0].snapshotId,'NEW-RUNNING');
+assert.throws(()=>latestBatch('2026-07-01','2026-07-01',true),
+  /最新有效日报尚未处理完成/,'new valid processing batch may not be replaced by older completed export');
+availableBatches[0]={...availableBatches[0],snapshotStatus:'COMPLETED'};
+assert.equal(latestBatch('2026-07-01','2026-07-01',true)[0].snapshotId,'NEW-RUNNING',
+  'completed latest batch must win over older completed');
+
 
 const temp=await fs.mkdtemp(path.join(os.tmpdir(),'v788-excel-members-'));
 const range={from:'2026-07-01',to:'2026-07-02'};
