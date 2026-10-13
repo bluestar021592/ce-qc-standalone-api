@@ -95,11 +95,12 @@ try{
   const listBody=between(loader,'export function listLightweightCompletedUnifiedSnapshots(', 'function loadLightweightExportRows(')
     .replace('export function','function');
   const getList=new Function('EXPORT_BUSINESS_TYPES','validateDateRange','listLatestValidRangeBatches',
-    'loadLightweightExportRows',listBody+'\nreturn listLightweightCompletedUnifiedSnapshots;')(
+    'loadLightweightExportRows','getDb',listBody+'\nreturn listLightweightCompletedUnifiedSnapshots;')(
     ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP'],
     ()=>({from:day,to:day}),
-    ()=>[{reportDate:day,snapshotId:snap,createdAt:''}],
-    (snapshot,date,type)=>type==='WHPP'?source(snapshot,date,type):[]);
+    ()=>[{reportDate:day,snapshotId:snap,createdAt:'',unifiedCompleted:true}],
+    (snapshot,date,type)=>type==='WHPP'?source(snapshot,date,type):[],
+    ()=>db);
   const accepted=getList(day,day,['WHPP']);
   assert.equal(accepted[0].payload.finalRows.length,156,
     'WHPP-only formal report must accept WHPP as a business and include all 156');
