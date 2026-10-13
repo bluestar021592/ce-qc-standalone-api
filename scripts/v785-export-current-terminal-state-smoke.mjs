@@ -348,6 +348,15 @@ const returnStart=storeSource.indexOf('function isReturned(row = {}) {');
 const returnEnd=storeSource.indexOf('function categoryOf(row = {})',returnStart);
 assert.ok(returnStart>=0&&returnEnd>returnStart);
 const whppIsReturned=new Function(storeSource.slice(returnStart,returnEnd)+'\nreturn isReturned;')();
+const podStart=storeSource.indexOf('function isPod(row = {}) {');
+assert.ok(podStart>=0&&returnStart>podStart);
+const whppIsPod=new Function(storeSource.slice(podStart,returnStart)+'\nreturn isPod;')();
+assert.equal(whppIsPod({shipmentStatus:'60'}),true,
+  'current WHPP numeric60 must identify POD without requiring a stale label');
+assert.equal(whppIsPod({shipmentStatus:'80',POD状态:'POD',是否POD:'是'}),false,
+  'current 80 cannot be overridden by old POD label');
+assert.equal(whppIsPod({shipmentStatus:'81',POD状态:'POD',是否POD:'是'}),false,
+  'current 81 must count as returned, not old POD');
 assert.equal(whppIsReturned({primaryCategory:'退回'}),false,
   'legacy text category 退回 cannot finalize an unverified return');
 assert.equal(whppIsReturned({primaryCategory:'退回',shipmentStatus:'80'}),false);
