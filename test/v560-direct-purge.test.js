@@ -159,10 +159,11 @@ test('V788 full reset cleans historical sources but never deletes protected data
     'v329_three_business_daily_cache','v334_generic_history_cache',
     'qc_tracking_ledger','shipment_current_state','unified_import_rows'];
   for(const table of tables)assert.match(store,new RegExp(`['"]${table}['"]`),`missing historical purge table: ${table}`);
-  assert.match(purge,/for\\(const dir of \\[cfg\\.exportsDir,cfg\\.importsDir,cfg\\.longJsonExportsDir,cfg\\.evidenceArchiveDir\\]\\)/,
-    'file cleanup must be explicitly limited to regenerable artifacts');
-  assert.doesNotMatch(purge,/for\\(const dir of \\[[^\\]]*(?:cfg\\.tokenDir|cfg\\.backupsDir)/,
-    'file cleanup must never include authentication or existing backups');
+  const fileCleanup=purge.slice(purge.indexOf('async function clearRegenerableFiles()'),purge.indexOf('function directResetTransaction('));
+  assert.ok(fileCleanup.includes('for(const dir of [cfg.exportsDir,cfg.importsDir,cfg.longJsonExportsDir,cfg.evidenceArchiveDir])'),
+    'file cleanup must stay limited to regenerable artifact folders');
+  assert.ok(!fileCleanup.includes('cfg.tokenDir')&&!fileCleanup.includes('cfg.backupsDir'),
+    'file cleanup must not include token or backup folders');
 });
 
 test('post-purge empty bootstrap clears stale browser business state instead of merging pre-clear snapshots',()=>{
