@@ -702,7 +702,7 @@ function loadLightweightExportRows(snapshotId, reportDate, type) {
     const fullStrictCurrentTerminals=truth.rows.length===truth.total
       &&truth.rows.every(row=>row.truthEvidence?.currentTerminalStrict===true);
     if(!fullScanFinal&&!fullStrictCurrentTerminals)
-      throw new Error('WHPP '+reportDate+' 的 '+truth.total+' 票独立日报仍缺扫描/最终记录，且未全部取得TMS 60/81终态证据；请完成核验后再导出，不能生成漏票报表');
+      throw new Error('WHPP '+reportDate+' 的 '+truth.total+' 票独立日报仍缺扫描或最终记录，且未全部取得TMS 60/81终态证据；请完成核验后再导出，不能生成漏票报表');
     const rows=truth.rows.map(row=>({
       ...row,shipmentCode:billOf(row),businessType:'WHPP',
       reportDate,regionCode:String(row.regionCode||'').toUpperCase(),
