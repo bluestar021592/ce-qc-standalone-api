@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {DatabaseSync} from 'node:sqlite';
-import {classifyV246Terminal,ensureV246TrackingSchema} from '../src/v246TrackingLedgerCore.js';
+import {classifyV246Terminal,ensureV246TrackingSchema,reconcileV246TrackingLedger} from '../src/v246TrackingLedgerCore.js';
 import {syncCarryRowsToV246Ledger} from '../src/carryLedgerSync.js';
 
 function tms(state,code,extra={}) {
@@ -77,5 +77,67 @@ try {
   assert.equal(state(ret80).terminalReason,'');
   assert.equal(state(ret81).trackingStatus,'TERMINAL');
   assert.ok(Number(db.prepare('SELECT COUNT(*) n FROM qc_tracking_audit').get().n)>0);
+  // Separate V246 historical rebuilding must not resurrect stale TERMINAL
+  // even when an old ledger has a real-looking POD date and signing duration.
+  // This uses the actual reconciler against isolated SQLite tables.
+  const hist=new DatabaseSync(':memory:');
+  try{
+    hist.exec("CREATE TABLE unified_import_batches(snapshotId TEXT,reportDate TEXT,createdAt TEXT,batchId TEXT,status TEXT);"+
+      "CREATE TABLE unified_snapshots(snapshotId TEXT,status TEXT);"+
+      "CREATE TABLE unified_import_rows(snapshotId TEXT,reportDate TEXT,businessType TEXT,shipmentCode TEXT);"+
+      "CREATE TABLE business_daily_parse_rows(businessType TEXT,reportDate TEXT,shipmentCode TEXT);"+
+      "CREATE TABLE carryover_open_items("+
+      "shipmentCode TEXT PRIMARY KEY,businessType TEXT,sourceReportDate TEXT,lastReportDate TEXT,"+
+      "sourceSnapshotId TEXT,lastSnapshotId TEXT,status TEXT,apiStatus TEXT,closeReason TEXT,"+
+      "stateJson TEXT,createdAt TEXT,updatedAt TEXT);"+
+      "CREATE TABLE shipment_current_state("+
+      "shipmentCode TEXT PRIMARY KEY,businessType TEXT,reportDate TEXT,snapshotId TEXT,state TEXT,"+
+      "apiStatus TEXT,lastEventTime TEXT,stateJson TEXT,updatedAt TEXT);");
+    ensureV246TrackingSchema(hist);
+    const addCase=(suffix,state,code,oldReason='')=>{
+      const bill='V788HIST'+suffix;
+      const raw=JSON.stringify({shipmentStatus:code,currentState:state,businessType:'WHPP'});
+      hist.prepare("INSERT INTO business_daily_parse_rows VALUES('WHPP',?,?)").run(day,bill);
+      hist.prepare("INSERT INTO shipment_current_state VALUES(?,?,?,?,?,?,?,?,?)").run(
+        bill,'WHPP',day,'V788-HIST-SNAP',state,'SUCCESS','',raw,now);
+      hist.prepare("INSERT INTO carryover_open_items VALUES(?,?,?,?,?,?,?,?,?,?,?,?)").run(
+        bill,'WHPP',day,day,'V788-HIST-SNAP','V788-HIST-SNAP',
+        oldReason?'CLOSED':'OPEN','SUCCESS',oldReason,raw,now,now);
+      if(oldReason)hist.prepare("INSERT INTO qc_tracking_ledger("+
+        "shipmentCode,businessType,firstReportDate,lastImportedDate,trackingStatus,terminalReason,"+
+        "terminalAt,currentState,currentCategory,podDate,signingDays,createdAt,updatedAt)"+
+        "VALUES(?,?,?,?,'TERMINAL',?,?,?,?,?,4,?,?)").run(
+        bill,'WHPP',day,day,oldReason,day,oldReason,oldReason,day,now,now);
+      return bill;
+    };
+    const h80=addCase('80','RETURNED','80','RETURNED');
+    const h81=addCase('81','RETURNED','81','POD');
+    const hBad=addCase('BAD','POD','81','POD');
+    const h60=addCase('60','PENDING_SCAN','60');
+    const select={businessType:'WHPP',fromDate:day,toDate:day};
+    const historical=()=>reconcileV246TrackingLedger(select,{db:hist,reason:'V788_HIST_REGRESSION'});
+    const firstHist=historical();
+    assert.ok(firstHist,'historical reconcile must return a status');
+    const row=bill=>hist.prepare('SELECT * FROM qc_tracking_ledger WHERE shipmentCode=?').get(bill);
+    assert.equal(row(h80).trackingStatus,'OPEN');
+    assert.equal(row(h80).currentState,'RETURN_IN_PROGRESS');
+    assert.equal(row(h80).podDate,'');
+    assert.equal(row(h80).signingDays,null);
+    assert.equal(row(h81).trackingStatus,'TERMINAL');
+    assert.equal(row(h81).terminalReason,'RETURNED');
+    assert.equal(row(h81).currentState,'RETURNED');
+    assert.equal(row(h81).podDate,'');
+    assert.equal(row(h81).signingDays,null);
+    assert.equal(row(hBad).trackingStatus,'OPEN');
+    assert.equal(row(hBad).currentState,'PENDING_VERIFICATION');
+    assert.equal(row(h60).trackingStatus,'TERMINAL');
+    assert.equal(row(h60).currentState,'POD');
+    assert.equal(row(h60).podDate,'','no actual POD timestamp must not be invented');
+    historical();
+    assert.equal(row(h80).trackingStatus,'OPEN','second historical rebuild cannot restore stale return terminal');
+    assert.equal(row(hBad).trackingStatus,'OPEN','second historical rebuild cannot silently close conflicting 81');
+    assert.equal(row(h81).terminalReason,'RETURNED');
+  }finally{hist.close();}
+
   console.log('[V788 LEDGER] 80 reopens old terminal and clears POD time; 60/81 strict; conflict stays OPEN over two syncs PASS');
 } finally { db.close(); }
