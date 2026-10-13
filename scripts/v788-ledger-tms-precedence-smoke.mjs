@@ -27,6 +27,7 @@ try {
     "shipmentCode TEXT PRIMARY KEY,businessType TEXT,reportDate TEXT,snapshotId TEXT,state TEXT,"+
     "apiStatus TEXT,lastEventTime TEXT,stateJson TEXT,updatedAt TEXT);");
   ensureV246TrackingSchema(db);
+  db.exec("CREATE TABLE business_pod_locks(businessType TEXT,shipmentCode TEXT,podTime TEXT,source TEXT)");
   const day='2026-07-02',now='2026-10-13T00:00:00Z';
   const seed=(id,state,code,oldReason='')=>{
     const bill='V788LEDGER'+id;
@@ -48,6 +49,8 @@ try {
   };
   const ret80=seed('80','RETURNED','80','RETURNED');
   const pod60=seed('60','PENDING_SCAN','60');
+  db.prepare("INSERT INTO business_pod_locks VALUES('WHPP',?,?,?)")
+    .run(pod60,'2026-07-04 12:30:00','whpp_strict_track_event');
   const ret81=seed('81','PENDING_SCAN','81');
   const mismatch=seed('BAD','POD','81','POD');
   const bills=[ret80,pod60,ret81,mismatch];
@@ -67,6 +70,8 @@ try {
   assert.equal(current(ret80).state,'RETURN_IN_PROGRESS');
   assert.equal(state(pod60).trackingStatus,'TERMINAL');
   assert.equal(state(pod60).terminalReason,'POD');
+  assert.equal(state(pod60).podDate,'2026-07-04','daily sync must recover proven WHPP POD time');
+  assert.equal(state(pod60).signingDays,3,'July2 intake to July4 POD is three inclusive days');
   assert.equal(state(ret81).terminalReason,'RETURNED');
   assert.equal(state(mismatch).trackingStatus,'OPEN');
   assert.equal(state(mismatch).currentState,'PENDING_VERIFICATION');
@@ -86,6 +91,7 @@ try {
       "CREATE TABLE unified_snapshots(snapshotId TEXT,status TEXT);"+
       "CREATE TABLE unified_import_rows(snapshotId TEXT,reportDate TEXT,businessType TEXT,shipmentCode TEXT);"+
       "CREATE TABLE business_daily_parse_rows(businessType TEXT,reportDate TEXT,shipmentCode TEXT);"+
+      "CREATE TABLE business_pod_locks(businessType TEXT,shipmentCode TEXT,podTime TEXT,source TEXT);"+
       "CREATE TABLE carryover_open_items("+
       "shipmentCode TEXT PRIMARY KEY,businessType TEXT,sourceReportDate TEXT,lastReportDate TEXT,"+
       "sourceSnapshotId TEXT,lastSnapshotId TEXT,status TEXT,apiStatus TEXT,closeReason TEXT,"+
@@ -114,6 +120,10 @@ try {
     const h81=addCase('81','RETURNED','81','POD');
     const hBad=addCase('BAD','POD','81','POD');
     const h60=addCase('60','PENDING_SCAN','60');
+    const lockInsert=hist.prepare("INSERT INTO business_pod_locks VALUES('WHPP',?,?,?)");
+    lockInsert.run(h60,'2026-07-04 13:20:00','whpp_saved_scan_pod_time');
+    lockInsert.run(hBad,'2026-07-04 13:20:00','whpp_strict_track_event');
+    lockInsert.run(h80,'2026-07-04 13:20:00','whpp_strict_track_event');
     const select={businessType:'WHPP',fromDate:day,toDate:day};
     const historical=()=>reconcileV246TrackingLedger(select,{db:hist,reason:'V788_HIST_REGRESSION'});
     const firstHist=historical();
@@ -132,7 +142,10 @@ try {
     assert.equal(row(hBad).currentState,'PENDING_VERIFICATION');
     assert.equal(row(h60).trackingStatus,'TERMINAL');
     assert.equal(row(h60).currentState,'POD');
-    assert.equal(row(h60).podDate,'','no actual POD timestamp must not be invented');
+    assert.equal(row(h60).podDate,'2026-07-04','historical reconcile reads exact saved POD lock time');
+    assert.equal(row(h60).signingDays,3);
+    assert.equal(row(hBad).podDate,'','conflicting return cannot inherit a POD lock');
+    assert.equal(row(h80).podDate,'','return in progress cannot inherit a POD lock');
     historical();
     assert.equal(row(h80).trackingStatus,'OPEN','second historical rebuild cannot restore stale return terminal');
     assert.equal(row(hBad).trackingStatus,'OPEN','second historical rebuild cannot silently close conflicting 81');
