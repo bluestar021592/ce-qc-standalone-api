@@ -217,7 +217,8 @@ function isReturnEvidence(final,current,scan,row){
   if(status==='80')return false;
   if(status==='81')return true;
   const values=[current?.currentState,final?.currentState,final?.primaryCategory,row?.退回状态,row?.primaryCategory,scan?.currentState].map(v=>String(v||'').trim().toUpperCase());
-  return values.some(v=>['RETURN','RETURNED','RETURN_COMPLETED','已退回','退回','退回完成'].includes(v));
+  // A generic "退回" is not proof of a completed return (80 vs 81).
+  return values.some(v=>['RETURNED','RETURN_COMPLETED','已退回','退回完成'].includes(v));
 }
 function uniqueRows(rows=[]){
   const out=new Map();for(const row of rows){const bill=billOf(row);if(bill&&!out.has(bill))out.set(bill,row);}return [...out.values()];
