@@ -91,5 +91,41 @@ assert.throws(()=>whppExport('V788-SNAPSHOT','2026-07-02','WHPP'),/TMS 60\/81终
  'current POD label contradicting saved TMS 80 must never bypass export gate');
 whppDb.close();
 
+// The 7/1-7/2 real-copy pattern: every WHPP member has a scan and a final
+// record, but normalized labels have no original shipmentStatus=60/81.
+// Export membership can pass; no TMS proof or POD timestamps are invented.
+const labelDb=new DatabaseSync(':memory:');
+labelDb.exec("CREATE TABLE business_daily_parse_rows(businessType TEXT,reportDate TEXT,shipmentCode TEXT,rowNumber INTEGER,rowJson TEXT);"+
+ "CREATE TABLE business_scan_results(businessType TEXT,reportDate TEXT,shipmentCode TEXT,isPod INTEGER,orderStatus TEXT,rawJson TEXT);"+
+ "CREATE TABLE business_final_rows(businessType TEXT,reportDate TEXT,shipmentCode TEXT,isPod INTEGER,primaryCategory TEXT,apiStatus TEXT,carryStatus TEXT,latestEventTime TEXT,latestEventDesc TEXT,latestNode TEXT,rawJson TEXT);"+
+ "CREATE TABLE shipment_current_state(shipmentCode TEXT,businessType TEXT,reportDate TEXT,state TEXT,apiStatus TEXT,lastEventTime TEXT,stateJson TEXT);");
+for(const [bill,state,pod,cat] of [
+ ['CE020726LABEL01','POD',1,'POD'],
+ ['CE020726LABEL02','POD',1,'POD'],
+ ['CE020726LABEL03','RETURNED',0,'已退回']
+]){
+ labelDb.prepare("INSERT INTO business_daily_parse_rows VALUES('WHPP','2026-07-02',?,1,'{}')").run(bill);
+ labelDb.prepare("INSERT INTO business_scan_results VALUES('WHPP','2026-07-02',?,?,?, '{}')").run(bill,pod,pod?'85':'');
+ labelDb.prepare("INSERT INTO business_final_rows VALUES('WHPP','2026-07-02',?,?,?,'success','','','','','{}')").run(bill,pod,cat);
+ labelDb.prepare("INSERT INTO shipment_current_state VALUES(?,'WHPP','2026-07-02',?,'success','','{}')").run(bill,state);
+}
+const labelTruth=loadWhppCanonicalTruth('2026-07-02','',labelDb);
+assert.equal(labelTruth.total,3);
+assert.equal(labelTruth.evidence.scanRows,3);
+assert.equal(labelTruth.evidence.finalRows,3);
+assert.equal(labelTruth.evidence.podRows,2);
+assert.equal(labelTruth.evidence.returnedRows,1);
+assert.equal(labelTruth.rows.filter(row=>row.truthEvidence?.currentTerminalStrict).length,0,
+  'saved normalized states cannot masquerade as strict 60/81 TMS proof');
+const labelExport=new Function('getDb','loadWhppCanonicalTruth','billOf','overlaySavedTerminalExportTruth',
+ src.slice(whppStart,whppEnd)+'\nreturn loadLightweightExportRows;')(
+ ()=>labelDb,loadWhppCanonicalTruth,row=>String(row.shipmentCode||''),(rows)=>rows);
+const labelRows=labelExport('V788-NO-TMS','2026-07-02','WHPP');
+assert.equal(labelRows.length,3,'complete scan+final coverage permits source-member export');
+assert.equal(labelRows.filter(row=>row.currentState==='POD').length,2);
+assert.equal(labelRows.filter(row=>row.currentState==='RETURNED').length,1);
+assert.ok(labelRows.every(row=>!row.podDate),'missing POD timestamps must remain missing');
+labelDb.close();
+
 console.log('[V785 EXPORT] saved TMS status 60(POD)/80(return-in-progress)/81(return-completed), WHPP and Shopee, historical-date preservation and read-only overlay PASS');
 db.close();
