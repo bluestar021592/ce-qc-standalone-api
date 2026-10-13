@@ -325,10 +325,11 @@ export function reconcileV246TrackingLedger(selection, { db = getDb(), reason = 
       const lastImportedDate = maxDate(oldLedger?.lastImportedDate, source.lastImportedDate, carry?.lastReportDate) || source.lastImportedDate;
       const sourceSnapshotId = text(oldLedger?.sourceSnapshotId || carry?.sourceSnapshotId || source.anySnapshotId || 'V246-RECOVERED');
       const lastSnapshotId = text(current?.snapshotId || carry?.lastSnapshotId || source.anySnapshotId || sourceSnapshotId);
-      const podDate = cls.returnInProgress||cls.stateConflict||cls.returned?''
-        :text(oldLedger?.podDate)
-          ||(type==='WHPP'&&cls.pod?v246DateKey(loadWhppTrustedPodTime(db,bill,firstReportDate)):'')
-          ||extractPodDate(payload,cls)||'';
+      const verifiedWhppPodTime=(type==='WHPP'&&cls.pod)
+        ?loadWhppTrustedPodTime(db,bill,firstReportDate):'';
+      const podDate=cls.returnInProgress||cls.stateConflict||cls.returned?''
+        :(verifiedWhppPodTime?v246DateKey(verifiedWhppPodTime):'')
+          ||text(oldLedger?.podDate)||extractPodDate(payload,cls)||'';
       const oldStrict = strictAttemptSource(oldLedger?.attemptSource);
       const observedAttempt = directAttempt(payload);
       const attemptNo = oldStrict ? Number(oldLedger?.attemptNo || 0) : observedAttempt;
@@ -351,7 +352,9 @@ export function reconcileV246TrackingLedger(selection, { db = getDb(), reason = 
       const apiStatus = text(current?.apiStatus || carry?.apiStatus || 'PENDING_SCAN');
       const before = compactLedger(oldLedger || carry || {});
       const ledgerPayload={...payload,currentState:stateName,
-        shipmentStatusConflict:Boolean(cls.stateConflict||payload.shipmentStatusConflict===true)};
+        shipmentStatusConflict:Boolean(cls.stateConflict||payload.shipmentStatusConflict===true),
+        ...(verifiedWhppPodTime?{POD时间:verifiedWhppPodTime,podTime:verifiedWhppPodTime,
+          podTimeEvidenceSource:'WHPP_SAVED_POD_LOCK'}:{})};
       carryUpsert.run(bill,type,firstReportDate,lastImportedDate,sourceSnapshotId,lastSnapshotId,trackingStatus === 'TERMINAL' ? 'CLOSED' : 'OPEN',apiStatus,closeReason,JSON.stringify(ledgerPayload),carry?.createdAt || now,now);
       ledgerUpsert.run(
         bill,type,firstReportDate,lastImportedDate,sourceSnapshotId,lastSnapshotId,trackingStatus,closeReason,

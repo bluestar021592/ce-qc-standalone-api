@@ -331,10 +331,12 @@ export function syncCarryRowsToV246Ledger(rows = [], {
         ? (terminalReason === 'POD' ? 'POD' : terminalReason === 'RETURNED' ? '退回' : '订单取消')
         : classification.stateConflict ? '终态矛盾待核验'
         : text(payload.primaryCategory || payload.currentMainCategory || payload.主分类 || payload.异常分类 || currentState);
+      const verifiedWhppPodTime=(businessType==='WHPP'&&terminalReason==='POD')
+        ?loadWhppTrustedPodTime(db,bill,firstReportDate):'';
       const podDate = (explicitlyReturnInProgress||terminalReason==='RETURNED') ? '' :
         terminalReason === 'POD'
-          ? (podDateOf(payload,classification,old||{}) ||
-              (businessType==='WHPP'?v246DateKey(loadWhppTrustedPodTime(db,bill,firstReportDate)):''))
+          ? ((verifiedWhppPodTime?v246DateKey(verifiedWhppPodTime):'')
+            ||podDateOf(payload,classification,old||{}))
           : text(old?.podDate || '');
       const strictAttempt = strictAttemptSource(old?.attemptSource);
       const attemptNo = strictAttempt ? Number(old?.attemptNo || 0) : observedAttempt(payload);
@@ -347,6 +349,11 @@ export function syncCarryRowsToV246Ledger(rows = [], {
         ...payload,businessType,
         shipmentStatusConflict: Boolean(classification.stateConflict || payload.shipmentStatusConflict === true)
       },terminalReason,currentState,currentCategory,podDate,attemptNo);
+      if(verifiedWhppPodTime){
+        canonicalPayload.POD时间=verifiedWhppPodTime;
+        canonicalPayload.podTime=verifiedWhppPodTime;
+        canonicalPayload.podTimeEvidenceSource='WHPP_SAVED_POD_LOCK';
+      }
       const canonicalJson = JSON.stringify(canonicalPayload);
       const refreshEvidenceJson = JSON.stringify({source:CARRY_LEDGER_SYNC_ID,reason,snapshotId:lastSnapshotId,checkedAt:now});
 
