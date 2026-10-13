@@ -58,6 +58,14 @@ export function loadWhppCanonicalTruth(reportDate='', snapshotId='', dbOverride=
     FROM business_scan_results
     WHERE businessType='WHPP' AND reportDate=? AND shipmentCode IN (__MARKS__)
   `,[date],row=>normalizeScan(row,date));
+  // Only saved WHPP POD timestamps with explicit evidence provenance may
+  // enrich an exact-day POD member. This is read-only and never infers POD
+  // time from job/export/row timestamps.
+  const podLockMap=queryRows(db,bills,`
+    SELECT shipmentCode,podTime,source
+    FROM business_pod_locks
+    WHERE businessType='WHPP' AND shipmentCode IN (__MARKS__)
+  `,[],row=>({...row,shipmentCode:billOf(row)}));
 
   // Current normalized tables remain authoritative. A member-attested historical
   // snapshot only fills evidence that a destructive same-day reimport removed.
@@ -85,6 +93,17 @@ export function loadWhppCanonicalTruth(reportDate='', snapshotId='', dbOverride=
       (savedStatus==='60'&&savedState==='POD'&&pod&&!returned)||
       (savedStatus==='81'&&['RETURNED','RETURN_COMPLETED'].includes(savedState)&&returned&&!pod)
     );
+    const savedLock=pod?podLockMap.get(code):null;
+    const savedPodDate=savedLock&&isTrustedWhppPodLock(savedLock,date)
+      ?String(savedLock.podTime||'').trim():'';
+    if(savedPodDate){
+      // Keep the original timestamp; do not claim it is a TMS 60 proof.
+      // A trusted track POD eventCode=80 is not shipmentStatus=80.
+      row.podTime=savedPodDate;
+      row.POD时间=savedPodDate;
+      row.podDate=savedPodDate.slice(0,10);
+      row.podTimeEvidenceSource=String(savedLock.source||'');
+    }
     if(pod){
       row.isPod=1;row.是否POD='是';row.POD状态='POD';row.currentState='POD';
       if(!String(row.primaryCategory||'').trim())row.primaryCategory='POD';
@@ -98,6 +117,8 @@ export function loadWhppCanonicalTruth(reportDate='', snapshotId='', dbOverride=
       final:Boolean(finalMap.has(code)),
       current:Boolean(currentMap.has(code)),
       currentTerminalStrict,
+      trustedSavedPodTime:Boolean(savedPodDate),
+      savedPodTimeSource:savedPodDate?String(savedLock.source||''):'',
       scan:Boolean(scanMap.has(code)),
       pod,
       returned
@@ -114,6 +135,7 @@ export function loadWhppCanonicalTruth(reportDate='', snapshotId='', dbOverride=
       scanRows:rows.filter(row=>row.truthEvidence.scan).length,
       podRows:rows.filter(row=>row.truthEvidence.pod).length,
       returnedRows:rows.filter(row=>row.truthEvidence.returned).length,
+      trustedSavedPodTimeRows:rows.filter(row=>row.truthEvidence.trustedSavedPodTime).length,
       snapshotRecoveredFinalRows:Number(snapshotEvidence.finalRows?.length||0),
       snapshotRecoveredScanRows:Number(snapshotEvidence.scanResults?.length||0),
       snapshotId:snapshotEvidence.snapshotId||''
@@ -196,6 +218,18 @@ function normalizeCurrent(row,date){
 function normalizeScan(row,date){
   const raw=safeJson(row.rawJson);
   return {...raw,shipmentCode:String(row.shipmentCode||'').trim().toUpperCase(),运单号:String(row.shipmentCode||'').trim().toUpperCase(),businessType:'WHPP',reportDate:date,orderStatus:String(row.orderStatus??raw.orderStatus??''),scanIsPod:Number(row.isPod||0)};
+}
+function isTrustedWhppPodLock(lock,date){
+  const source=String(lock?.source||'').trim().toLowerCase();
+  if(!['whpp_strict_track_event','whpp_saved_scan_pod_time','whpp_saved_final_pod_time'].includes(source))
+    return false;
+  const text=String(lock?.podTime||'').trim();
+  const m=/^(\\d{4})-(\\d{2})-(\\d{2})(?:[ T](?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d)?)?$/.exec(text);
+  if(!m)return false;
+  const y=Number(m[1]),month=Number(m[2]),d=Number(m[3]);
+  const parsed=new Date(Date.UTC(y,month-1,d));
+  if(parsed.getUTCFullYear()!==y||parsed.getUTCMonth()!==month-1||parsed.getUTCDate()!==d)return false;
+  return text.slice(0,10)>=date;
 }
 function isPodEvidence(final,current,scan,row){
   const currentStatus=String(current?.shipmentStatus||current?.shipmentTrack?.shipmentStatus||'').trim();
