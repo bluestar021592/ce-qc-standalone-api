@@ -36,6 +36,14 @@ try{
   assert.equal(audit.whpp.totals.labelOnlyTerminal,1);
   assert.equal(audit.whpp.totals.ledgerOpenWithStrictTerminal,2);
   assert.equal(audit.whpp.totals.withExplicitPodTime,1);
+  assert.equal(audit.whpp.totals.normalizedPOD,3);
+  assert.equal(audit.whpp.totals.normalizedReturned,1);
+  assert.equal(audit.whpp.totals.normalizedNonterminal,1);
+  assert.equal(audit.whpp.totals.explicitPODTimeFromSavedEvidence,1);
+  assert.equal(audit.whpp.totals.matchedPODAgainstScanOrFinal,0);
+  assert.equal(audit.whpp.totals.matchedReturnAgainstFinal,0);
+  assert.equal(audit.whpp.totals.hasFullMembershipNotVerifiedOutcome,false);
+
   assert.equal(audit.whpp.byDate[0].eligibleForStrictExportFallback,true);
   assert.equal(audit.whpp.byDate[1].eligibleForStrictExportFallback,false);
   assert.ok(!JSON.stringify(audit).includes('A1')&&!JSON.stringify(audit).includes('B1'));

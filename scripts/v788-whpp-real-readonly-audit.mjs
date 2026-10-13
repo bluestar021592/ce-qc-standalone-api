@@ -4,7 +4,7 @@ import { DatabaseSync } from 'node:sqlite';
 // V788 read-only acceptance audit. Never prints shipment identifiers, names,
 // phone numbers, addresses, raw JSON or the database path. No writes, API calls,
 // cache regeneration, VACUUM, or application startup side effects.
-const VERSION='V788_WHPP_REAL_READONLY_AUDIT_V1';
+const VERSION='V788_WHPP_REAL_READONLY_AUDIT_V2';
 
 function safeObject(value){
   try { const v=JSON.parse(String(value||'{}')); return v&&typeof v==='object'?v:{}; }
@@ -33,7 +33,37 @@ function emptyDay(date){
     contradiction:0,labelOnlyTerminal:0,otherUnverified:0,
     scannedMembers:0,finalizedMembers:0,withExplicitPodTime:0,
     ledgerOpenWithStrictTerminal:0,scanAndFinalComplete:false,
-    allStrictTerminalEvidence:false,eligibleForStrictExportFallback:false};
+    allStrictTerminalEvidence:false,eligibleForStrictExportFallback:false,
+    normalizedPOD:0,normalizedReturned:0,normalizedNonterminal:0,
+    scanPOD:0,finalPOD:0,finalReturnCompleted:0,
+    matchedPODAgainstScanOrFinal:0,matchedReturnAgainstFinal:0,
+    conflictingTerminalEvidence:0,explicitPODTimeFromSavedEvidence:0,
+    tms60InOtherEvidence:0,tms81InOtherEvidence:0,
+    hasFullMembershipNotVerifiedOutcome:false};
+}
+function fullDateFromEvidence(value){
+  const s=String(value||'').trim();
+  const match=s.match(/^(\d{4})[-/](\d{2})[-/](\d{2})(?:[ T].*)?$/);
+  if(!match)return false;
+  const year=Number(match[1]),month=Number(match[2]),day=Number(match[3]);
+  const probe=new Date(Date.UTC(year,month-1,day));
+  return probe.getUTCFullYear()===year&&probe.getUTCMonth()+1===month&&probe.getUTCDate()===day;
+}
+function explicitPODDate(...payloads){
+  const keys=['POD时间','podTime','podDate','podAt','podClosedAt',
+    'deliveredAt','deliveryCompletedAt','签收时间'];
+  for(const payload of payloads){
+    if(!payload||typeof payload!=='object')continue;
+    for(const key of keys)if(fullDateFromEvidence(payload[key]))return true;
+  }
+  return false;
+}
+function terminalStatusFrom(row={}){
+  return String(row.shipmentStatus||row?.shipmentTrack?.shipmentStatus||'').trim();
+}
+function isFinalCompletedReturn(row={}){
+  return ['已退回','退回完成','RETURNED','RETURN_COMPLETED']
+    .includes(String(row.primaryCategory||row['退回状态']||row.currentState||'').trim().toUpperCase());
 }
 export function auditV788Readonly(db){
   db.exec('PRAGMA query_only=ON');
@@ -41,8 +71,8 @@ export function auditV788Readonly(db){
   const rows=db.prepare("SELECT DISTINCT reportDate, UPPER(TRIM(shipmentCode)) shipmentCode FROM business_daily_parse_rows WHERE businessType='WHPP' AND TRIM(COALESCE(shipmentCode,''))<>'' ORDER BY reportDate,shipmentCode").all();
   const findCurrent=db.prepare("SELECT state,stateJson FROM shipment_current_state WHERE shipmentCode=? AND businessType='WHPP' AND reportDate=?");
   const findLedger=db.prepare("SELECT trackingStatus,terminalReason FROM qc_tracking_ledger WHERE shipmentCode=? AND businessType='WHPP'");
-  const hasScan=db.prepare("SELECT 1 ok FROM business_scan_results WHERE shipmentCode=? AND businessType='WHPP' AND reportDate=? LIMIT 1");
-  const hasFinal=db.prepare("SELECT 1 ok FROM business_final_rows WHERE shipmentCode=? AND businessType='WHPP' AND reportDate=? LIMIT 1");
+  const findScan=db.prepare("SELECT isPod,orderStatus,rawJson FROM business_scan_results WHERE shipmentCode=? AND businessType='WHPP' AND reportDate=? LIMIT 1");
+  const findFinal=db.prepare("SELECT isPod,primaryCategory,rawJson FROM business_final_rows WHERE shipmentCode=? AND businessType='WHPP' AND reportDate=? LIMIT 1");
   const days=new Map();
   for(const row of rows){
     const day=String(row.reportDate||'');
@@ -59,8 +89,33 @@ export function auditV788Readonly(db){
       const podTime=String(raw.podTime||raw['POD时间']||raw.podAt||raw.deliveredAt||'').trim();
       if(podTime)d.withExplicitPodTime++;
     }
-    if(hasScan.get(row.shipmentCode,day))d.scannedMembers++;
-    if(hasFinal.get(row.shipmentCode,day))d.finalizedMembers++;
+    const scan=findScan.get(row.shipmentCode,day);
+    const final=findFinal.get(row.shipmentCode,day);
+    const scanRaw=safeObject(scan?.rawJson);
+    const finalRaw=safeObject(final?.rawJson);
+    if(scan)d.scannedMembers++;
+    if(final)d.finalizedMembers++;
+    const normalizedPOD=state==='POD';
+    const normalizedReturned=['RETURNED','RETURN_COMPLETED'].includes(state);
+    if(normalizedPOD)d.normalizedPOD++;
+    else if(normalizedReturned)d.normalizedReturned++;
+    else d.normalizedNonterminal++;
+    const scanPOD=Boolean(scan)&&(Number(scan.isPod||0)===1||String(scan.orderStatus||'')==='85');
+    const finalPOD=Boolean(final)&&Number(final.isPod||0)===1;
+    const finalReturned=Boolean(final)&&isFinalCompletedReturn({...finalRaw,primaryCategory:final.primaryCategory});
+    if(scanPOD)d.scanPOD++;
+    if(finalPOD)d.finalPOD++;
+    if(finalReturned)d.finalReturnCompleted++;
+    if(normalizedPOD&&(scanPOD||finalPOD))d.matchedPODAgainstScanOrFinal++;
+    if(normalizedReturned&&finalReturned)d.matchedReturnAgainstFinal++;
+    if((normalizedPOD&&finalReturned)||(normalizedReturned&&(scanPOD||finalPOD)))
+      d.conflictingTerminalEvidence++;
+    if(normalizedPOD&&explicitPODDate(raw,scanRaw,finalRaw))
+      d.explicitPODTimeFromSavedEvidence++;
+    if(terminalStatusFrom(scanRaw)==='60'||terminalStatusFrom(finalRaw)==='60')
+      d.tms60InOtherEvidence++;
+    if(terminalStatusFrom(scanRaw)==='81'||terminalStatusFrom(finalRaw)==='81')
+      d.tms81InOtherEvidence++;
     const ledger=findLedger.get(row.shipmentCode);
     if((bucket==='strictPOD'||bucket==='strictReturned')&&String(ledger?.trackingStatus||'').toUpperCase()==='OPEN')
       d.ledgerOpenWithStrictTerminal++;
@@ -70,19 +125,25 @@ export function auditV788Readonly(db){
     d.scanAndFinalComplete=d.sourceMembers>0&&d.scannedMembers===d.sourceMembers&&d.finalizedMembers===d.sourceMembers;
     d.allStrictTerminalEvidence=d.sourceMembers>0&&(d.strictPOD+d.strictReturned)===d.sourceMembers;
     d.eligibleForStrictExportFallback=d.allStrictTerminalEvidence&&!d.scanAndFinalComplete;
+    d.hasFullMembershipNotVerifiedOutcome=d.scanAndFinalComplete&&!d.allStrictTerminalEvidence;
   }
   const totals=emptyDay('ALL');
   for(const d of byDate){
     for(const key of ['sourceMembers','withCurrent','strictPOD','strictReturned','returning80',
       'contradiction','labelOnlyTerminal','otherUnverified','scannedMembers','finalizedMembers',
-      'withExplicitPodTime','ledgerOpenWithStrictTerminal'])totals[key]+=d[key];
+      'withExplicitPodTime','ledgerOpenWithStrictTerminal','normalizedPOD','normalizedReturned',
+      'normalizedNonterminal','scanPOD','finalPOD','finalReturnCompleted',
+      'matchedPODAgainstScanOrFinal','matchedReturnAgainstFinal',
+      'conflictingTerminalEvidence','explicitPODTimeFromSavedEvidence',
+      'tms60InOtherEvidence','tms81InOtherEvidence'])totals[key]+=d[key];
   }
   totals.scanAndFinalComplete=totals.sourceMembers>0&&totals.scannedMembers===totals.sourceMembers
     &&totals.finalizedMembers===totals.sourceMembers;
   totals.allStrictTerminalEvidence=totals.sourceMembers>0&&(totals.strictPOD+totals.strictReturned)===totals.sourceMembers;
   totals.eligibleForStrictExportFallback=totals.allStrictTerminalEvidence&&!totals.scanAndFinalComplete;
+  totals.hasFullMembershipNotVerifiedOutcome=totals.scanAndFinalComplete&&!totals.allStrictTerminalEvidence;
   return {version:VERSION,readOnly:true,source:'local-database-copy',
-    limitations:'terminal status and explicit POD-time coverage only; not proof that actual remote scans or API calls succeeded',
+    limitations:'Counts show saved labels and locally stored scan/final evidence separately; record presence is not proof that API scans succeeded, and no TMS 60/81 means strict terminal status is unverified. Explicit times are only date-format-checked and do not prove valid signing duration.',
     active72,whpp:{byDate,totals}};
 }
 export function auditDatabaseFile(dbFile){
