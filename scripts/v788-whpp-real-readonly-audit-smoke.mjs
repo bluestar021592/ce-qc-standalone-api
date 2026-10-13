@@ -13,6 +13,17 @@ try{
   db.exec("CREATE TABLE business_pod_locks(businessType TEXT,shipmentCode TEXT,podTime TEXT,source TEXT)");
   const members=Array.from({length:72},(_,i)=>({code:'CP'+String(100001+i),name:'Shop '+(i+1)}));
   db.prepare('INSERT INTO app_meta VALUES(?,?)').run('shop_current_complete_codes_v780',JSON.stringify({mode:'COMPLETE',members}));
+  db.exec("CREATE TABLE unified_import_batches(snapshotId TEXT,reportDate TEXT,createdAt TEXT,batchId TEXT,status TEXT)");
+  db.exec("CREATE TABLE unified_snapshots(snapshotId TEXT,status TEXT)");
+  db.exec("CREATE TABLE unified_import_rows(snapshotId TEXT,businessType TEXT,shipmentCode TEXT)");
+  db.prepare("INSERT INTO unified_import_batches VALUES('S1','2026-07-01','2026-07-01 10:00:00','B1','VALID')").run();
+  db.prepare("INSERT INTO unified_snapshots VALUES('S1','COMPLETED')").run();
+  db.prepare("INSERT INTO unified_import_rows VALUES('S1','CE','Z1')").run();
+  db.prepare("INSERT INTO unified_import_rows VALUES('S1','CEAF','Z2')").run();
+  db.prepare("INSERT INTO unified_import_rows VALUES('S1','SHOPEEVN','Z3')").run();
+  db.prepare("INSERT INTO unified_import_batches VALUES('S0','2026-07-01','2026-07-01 09:00:00','B0','VALID')").run();
+  db.prepare("INSERT INTO unified_snapshots VALUES('S0','COMPLETED')").run();
+  db.prepare("INSERT INTO unified_import_rows VALUES('S0','CE','DEPRECATED_OLD_MEMBER')").run();
   const insertMember=db.prepare("INSERT INTO business_daily_parse_rows VALUES(?,'WHPP',?)");
   const insertCurrent=db.prepare("INSERT INTO shipment_current_state VALUES(?,'WHPP',?,?,?)");
   const insertLedger=db.prepare("INSERT INTO qc_tracking_ledger VALUES(?,'WHPP','OPEN','PENDING_SCAN')");
@@ -65,6 +76,16 @@ try{
   assert.equal(audit.whpp.totals.ledgerOpenWithNormalizedTerminal,4);
   assert.equal(audit.whpp.totals.ledgerTerminalWithNonterminal,0);
   assert.equal(audit.whpp.totals.ledgerTerminalContradictingTms,0);
+  assert.equal(audit.sevenBusinessSource.available,true);
+  assert.equal(audit.sevenBusinessSource.datesChecked,2);
+  assert.equal(audit.sevenBusinessSource.byDate[0].sixBusinessRows,3);
+  assert.equal(audit.sevenBusinessSource.byDate[0].whppIndependentSourceMembers,2);
+  assert.equal(audit.sevenBusinessSource.byDate[0].sevenBusinessSourceSum,5);
+  assert.equal(audit.sevenBusinessSource.byDate[0].sevenBusinessDistinctUnion,5);
+  assert.equal(audit.sevenBusinessSource.byDate[0].reconciled,true);
+  assert.equal(audit.sevenBusinessSource.byDate[1].whppIndependentSourceMembers,3);
+  assert.equal(audit.sevenBusinessSource.byDate[1].completedValidUnifiedBatch,false);
+  assert.equal(audit.sevenBusinessSource.byDate[1].sevenBusinessDistinctUnion,3);
   assert.equal(audit.whpp.byDate[0].trustedPodTimeCoveragePct,100);
   assert.equal(audit.whpp.byDate[1].trustedPodTimeCoveragePct,0);
 

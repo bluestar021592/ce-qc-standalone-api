@@ -70,6 +70,62 @@ function isFinalCompletedReturn(row={}){
   return ['已退回','退回完成','RETURNED','RETURN_COMPLETED']
     .includes(String(row.primaryCategory||row['退回状态']||row.currentState||'').trim().toUpperCase());
 }
+const GROUPS=['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN'];
+// Same newest completed VALID batch selection as the seven-business export.
+// These are source-membership counts, NOT claims that API terminal evidence
+// or the exported file's row-level contents have been verified.
+function sevenBusinessSourceConservation(db,whppRows=[]){
+  const table=n=>Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(n));
+  if(!['unified_import_batches','unified_snapshots','unified_import_rows'].every(table))
+    return {available:false,reason:'UNIFIED_SOURCE_TABLES_MISSING',byDate:[]};
+  const latest=new Map();
+  const batches=db.prepare("SELECT b.reportDate,b.snapshotId,b.createdAt,b.batchId FROM unified_import_batches b "+
+    "JOIN unified_snapshots s ON s.snapshotId=b.snapshotId "+
+    "WHERE b.status='VALID' AND s.status='COMPLETED' ORDER BY b.reportDate ASC,b.createdAt DESC,b.batchId DESC").all();
+  for(const b of batches)if(!latest.has(b.reportDate))latest.set(b.reportDate,b);
+  const whppByDate=new Map();
+  for(const row of whppRows){
+    const date=String(row.reportDate||'');
+    if(!whppByDate.has(date))whppByDate.set(date,new Set());
+    whppByDate.get(date).add(String(row.shipmentCode||'').trim().toUpperCase());
+  }
+  const dates=[...new Set([...latest.keys(),...whppByDate.keys()])].sort();
+  const sourceBySnapshot=db.prepare("SELECT businessType,UPPER(TRIM(shipmentCode)) code FROM unified_import_rows WHERE snapshotId=?");
+  const byDate=dates.map(date=>{
+    const batch=latest.get(date);
+    const whpp=whppByDate.get(date)||new Set();
+    const groups=Object.fromEntries(GROUPS.map(x=>[x,0]));
+    const seenByGroup=new Set(),unifiedCodes=new Set();
+    let unifiedRows=0,duplicateBusinessRows=0,outOfScopeRows=0;
+    if(batch){
+      for(const row of sourceBySnapshot.all(batch.snapshotId)){
+        const group=String(row.businessType||'').trim().toUpperCase();
+        const bill=String(row.code||'').trim().toUpperCase();
+        if(!GROUPS.includes(group)||!bill){outOfScopeRows++;continue}
+        unifiedRows++;
+        const key=group+'|'+bill;
+        if(seenByGroup.has(key)){duplicateBusinessRows++;continue}
+        seenByGroup.add(key);
+        groups[group]++;
+        unifiedCodes.add(bill);
+      }
+    }
+    const uniqueBusinessEntries=Object.values(groups).reduce((a,b)=>a+b,0);
+    const crossBusinessDuplicates=uniqueBusinessEntries-unifiedCodes.size;
+    const whppOverlap=[...whpp].filter(bill=>unifiedCodes.has(bill)).length;
+    const union=new Set([...unifiedCodes,...whpp]).size;
+    const sourceSum=uniqueBusinessEntries+whpp.size;
+    return {date,completedValidUnifiedBatch:Boolean(batch),sixBusinessRows:unifiedRows,
+      sixBusinessCounts:groups,sixBusinessUniqueWithinGroups:uniqueBusinessEntries,
+      duplicateBusinessRows,crossBusinessDuplicates,outOfScopeRows,
+      whppIndependentSourceMembers:whpp.size,whppOverlapWithSix:whppOverlap,
+      sevenBusinessSourceSum:sourceSum,sevenBusinessDistinctUnion:union,
+      reconciled:sourceSum===union&&duplicateBusinessRows===0&&outOfScopeRows===0};
+  });
+  return {available:true,scope:'LATEST_VALID_COMPLETED_SOURCE_MEMBERSHIP_ONLY',
+    caveat:'Source conservation does not verify actual exported file contents, POD completion or signing timing.',
+    datesChecked:byDate.length,byDate};
+}
 export function auditV788Readonly(db){
   db.exec('PRAGMA query_only=ON');
   const active72=validateActive72(db);
@@ -178,7 +234,8 @@ export function auditV788Readonly(db){
     ?Math.round(totals.trustedPodLockOnPOD/totals.normalizedPOD*10000)/100:null;
   return {version:VERSION,readOnly:true,source:'local-database-copy',
     limitations:'Counts show saved labels and locally stored scan/final evidence separately; record presence is not proof that API scans succeeded, and no TMS 60/81 means strict terminal status is unverified. Saved POD-lock coverage counts only member-matched POD records with whitelisted evidence provenance, valid timestamp and a date on or after their daily source date. It does not establish external TMS confirmation or full signature-time accuracy.',
-    active72,whpp:{byDate,totals}};
+    active72,whpp:{byDate,totals},
+    sevenBusinessSource:sevenBusinessSourceConservation(db,rows)};
 }
 export function auditDatabaseFile(dbFile){
   if(!dbFile||!fs.existsSync(dbFile))throw Error('请通过 --db= 指定存在的验收数据库副本文件；正式数据库不会被自动探测');
