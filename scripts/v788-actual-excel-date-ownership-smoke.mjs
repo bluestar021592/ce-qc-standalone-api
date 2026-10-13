@@ -55,6 +55,24 @@ const mergedSnapshots=readSnapshots('2026-07-01','2026-07-02',types);
 assert.equal(mergedSnapshots.length,2,'ALL export must include independent WHPP-only day');
 assert.deepEqual(mergedSnapshots.map(x=>x.payload.finalRows.length),[7,1],
   'only WHPP contributes members on the WHPP-only day');
+const whppDuringUnifiedProcessing=new Function(
+  'getDb','validateDateRange','EXPORT_BUSINESS_TYPES',
+  'listLatestValidRangeBatches','loadLightweightExportRows',
+  sourceText.slice(listStart,listEnd).replace('export function','function')+
+    '\nreturn listLightweightCompletedUnifiedSnapshots;')(
+  ()=>sourceDb,(from,to)=>({from,to}),types,
+  ()=>{throw new Error('UNIFIED_STILL_PROCESSING')},
+  (snapshotId,reportDate,businessType)=>[{
+    shipmentCode:'V788INDEPENDENT'+reportDate.slice(-2),
+    businessType,reportDate,currentState:'POD',isPod:1
+  }]);
+assert.deepEqual(whppDuringUnifiedProcessing('2026-07-01','2026-07-02',['WHPP'])
+  .map(item=>item.payload.finalRows.length),[1,1],
+  'independent WHPP-only export must not require an unrelated unified batch to finish');
+assert.throws(()=>whppDuringUnifiedProcessing('2026-07-01','2026-07-02',types),
+  /UNIFIED_STILL_PROCESSING/,
+  'ALL seven-business export must still fail closed when its unified source is unfinished');
+
 sourceDb.close();
 // The latest VALID upload must be selected first. A newer PROCESSING batch
 // must block export; the older COMPLETED version is not a safe substitute.
