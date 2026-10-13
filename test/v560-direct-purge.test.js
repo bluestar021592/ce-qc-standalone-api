@@ -223,6 +223,13 @@ test('V561 queues direct purge immediately and reports detached worker progress 
   try{
     const db=getDb();
     db.prepare('INSERT INTO daily_reports(reportDate) VALUES(?)').run('2026-09-20');
+    // V788: the detached-worker test needs a valid activated CP72 config.
+    // No-backup purge MUST refuse missing activation in actual deployments.
+    const cpMembers=Array.from({length:72},(_,i)=>({
+      code:'CP'+String(200001+i).padStart(6,'0'),name:'Async CP '+(i+1)
+    }));
+    db.prepare("INSERT INTO app_meta(key,value,updatedAt) VALUES(?,?,?)")
+      .run('shop_current_complete_codes_v780',JSON.stringify({mode:'COMPLETE',members:cpMembers}),new Date().toISOString());
     closeDb();
 
     const started=Date.now();
@@ -246,6 +253,8 @@ test('V561 queues direct purge immediately and reports detached worker progress 
     const check=new DatabaseSync(process.env.DB_FILE);
     try{
       assert.equal(Number(check.prepare('SELECT COUNT(*) count FROM daily_reports').get()?.count||0),0);
+      const active=check.prepare("SELECT value FROM app_meta WHERE key='shop_current_complete_codes_v780'").get();
+      assert.equal(JSON.parse(active?.value||'{}')?.members?.length,72,'detached direct purge must retain 72 active CP members');
     }finally{check.close();}
   }finally{
     try{closeDb();}catch{}
