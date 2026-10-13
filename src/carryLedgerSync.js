@@ -339,7 +339,10 @@ export function syncCarryRowsToV246Ledger(rows = [], {
         strictAttempt ? (old?.signingDays ?? null) : (podDate ? v246InclusiveDays(firstReportDate,podDate) : (old?.signingDays ?? null));
       const terminalAt = isTerminal ? (text(old?.terminalAt) || lastEventTime || now) : '';
       const before = compact(old || {});
-      const canonicalPayload = normalizeCanonicalPayload({ ...payload, businessType },terminalReason,currentState,currentCategory,podDate,attemptNo);
+      const canonicalPayload = normalizeCanonicalPayload({
+        ...payload,businessType,
+        shipmentStatusConflict: Boolean(classification.stateConflict || payload.shipmentStatusConflict === true)
+      },terminalReason,currentState,currentCategory,podDate,attemptNo);
       const canonicalJson = JSON.stringify(canonicalPayload);
       const refreshEvidenceJson = JSON.stringify({source:CARRY_LEDGER_SYNC_ID,reason,snapshotId:lastSnapshotId,checkedAt:now});
 

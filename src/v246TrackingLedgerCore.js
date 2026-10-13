@@ -90,6 +90,12 @@ export function classifyV246Terminal({ closeReason = '', state = '', stateJson =
   // shipmentStatus belongs to the TMS shipment-status endpoint. It must not
   // be confused with scan orderStatus or tracking eventCode (event 80 = POD).
   const shipmentStatus = text(payload.shipmentStatus || payload.shipmentTrack?.shipmentStatus);
+  // A prior contradictory 60/81 state stays under manual verification
+  // across repeated syncs. Otherwise replacing POD with PENDING_VERIFICATION
+  // would make a second sync incorrectly appear compatible with status 81.
+  if (payload.shipmentStatusConflict === true && ['60','81'].includes(shipmentStatus))
+    return {terminal:false,pod:false,returned:false,cancelled:false,reason:'',
+      stateConflict:true,source:'TMS_TERMINAL_PERSISTED_CONFLICT'};
   if (shipmentStatus === '80') return {
     terminal:false,pod:false,returned:false,cancelled:false,reason:'',
     returnInProgress:true,source:'TMS_80_RETURN_IN_PROGRESS'
