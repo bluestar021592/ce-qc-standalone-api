@@ -262,6 +262,27 @@ const opposite=overlay([{shipmentCode:oppositePod,businessType:'WHPP',
 assert.equal(opposite.currentState,'PENDING_VERIFICATION',
   'strict60 opposite a saved explicit returned terminal must remain a conflict');
 assert.equal(opposite.terminalEvidenceStatus,'CONFLICT');
+// A new strict returned or POD state must replace *all* contradictory old
+// source flags. Excel must not read an obsolete source shipmentStatus first.
+const newlyReturned='CE020726LATERETSWAP',newlyPod='CE020726LATEPODSWAP';
+put.run(newlyReturned,'WHPP','RETURNED',JSON.stringify({shipmentStatus:'81'}),'2026-07-06');
+put.run(newlyPod,'WHPP','POD',JSON.stringify({shipmentStatus:'60'}),'2026-07-06');
+const switched=overlay([
+  {shipmentCode:newlyReturned,businessType:'WHPP',reportDate:'2026-07-02',
+    currentState:'POD',shipmentStatus:'60',orderStatus:'85',isPod:1,是否POD:'是',
+    truthEvidence:{pod:true,returned:false}},
+  {shipmentCode:newlyPod,businessType:'WHPP',reportDate:'2026-07-02',
+    currentState:'RETURNED',shipmentStatus:'81',isPod:0,是否退回:'是',
+    truthEvidence:{pod:false,returned:true}}
+],db);
+assert.equal(switched[0].currentState,'RETURNED');
+assert.equal(switched[0].shipmentStatus,'81');
+assert.equal(switched[0].truthEvidence.pod,false);
+assert.equal(switched[0].truthEvidence.returned,true);
+assert.equal(switched[1].currentState,'POD');
+assert.equal(switched[1].shipmentStatus,'60');
+assert.equal(switched[1].truthEvidence.pod,true);
+assert.equal(switched[1].truthEvidence.returned,false);
 const labelOnlyBill='CE020726LABELONLY';
 put.run(labelOnlyBill,'WHPP','RETURNED','{}','');
 const labelOnly=overlay([{shipmentCode:labelOnlyBill,businessType:'WHPP',reportDate:'2026-07-02'}],db)[0];

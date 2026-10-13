@@ -194,6 +194,30 @@ try{
     'saved contradictory status 81 must not leak into returned sheet');
   assert.equal(getSheetBills(conflictedBook,'未POD明细').length,2,
     'all conflicted records must remain visible as unresolved');
+  const staleFlags=[
+    {businessType:'WHPP',shipmentCode:'V788STALEPODNOWRETURN',reportDate:'2026-07-02',
+      isPod:0,是否POD:'否',是否退回:'是',退回状态:'已退回',
+      currentState:'RETURNED',shipmentStatus:'60',orderStatus:'85',
+      truthEvidence:{pod:true,returned:false},terminalEvidenceStatus:'STRICT_TMS'},
+    {businessType:'WHPP',shipmentCode:'V788STALERETURNOWPOD',reportDate:'2026-07-02',
+      isPod:1,是否POD:'是',是否退回:'否',
+      currentState:'POD',shipmentStatus:'81',truthEvidence:{pod:false,returned:true},
+      terminalEvidenceStatus:'STRICT_TMS'}
+  ];
+  const staleWorkbook=await createShopeeTemplateWorkbook({
+    type:'WHPP',periodType:'daily',range:{from:'2026-07-02',to:'2026-07-02'},
+    snapshots:[{snapshotId:'STALE-2026-07-02',reportDate:'2026-07-02',
+      payload:{finalRows:staleFlags}}],outputDir:temp
+  });
+  const staleBook=new ExcelJS.Workbook();
+  await staleBook.xlsx.readFile(staleWorkbook.file);
+  assert.equal(getSheetBills(staleBook,'全部明细').length,2);
+  assert.equal(getSheetBills(staleBook,'POD明细')[0].bill,'V788STALERETURNOWPOD',
+    'the newer strictly confirmed POD must override an old source 81 field');
+  assert.equal(getSheetBills(staleBook,'退回明细')[0].bill,'V788STALEPODNOWRETURN',
+    'the newer strictly confirmed return must override an old source POD85 flag');
+  assert.equal(getSheetBills(staleBook,'未POD明细').length,0,
+    'both corrected terminal members must leave unresolved rows');
   const collision=[
     {...day1[0]},
     {...day1[0],businessType:'SHOPEECN'}
