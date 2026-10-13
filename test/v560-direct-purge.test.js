@@ -97,6 +97,42 @@ test('V560 direct purge clears business data without creating a backup or purge 
       assert.ok(String(check.prepare("SELECT value FROM app_meta WHERE key='last_full_clear_at'").get()?.value||''));
     }finally{check.close();}
 
+    // V788: exercising the actual import store after the direct reset proves
+    // the 7/1 workflow starts from empty membership (not old 8/17 caches).
+    // WHPP has a separate daily-source route; test the six unified types here.
+    const {saveUnifiedImport}=await import('../src/unifiedImportStore.js');
+    const reimportTypes=['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN'];
+    const freshRows=reimportTypes.map((type,i)=>({
+      shipmentCode:'V788010726'+String(i+1).padStart(5,'0'),
+      businessType:type,regionCode:type==='SHOPEEVN'?'PV':'PP',
+      recipientRaw:'',recipientNormalized:'',sheetName:'V788-FIXTURE',
+      rowNumber:i+2,classificationReason:'AFTER_PURGE_FIXTURE',
+      classificationSource:'TEST_ONLY',classificationMatchedValue:'',
+      classificationWarning:''
+    }));
+    const classificationCounts=Object.fromEntries(reimportTypes.map(type=>[type,1]));
+    const staged=saveUnifiedImport({
+      reportDate:'2026-07-01',fileHash:'v788-post-purge-synthetic',
+      dateDetectionSource:'SYNTHETIC_TEST',dateCandidates:['2026-07-01'],
+      dateWasManuallyCorrected:false,containerFormat:'TEST',
+      classificationCounts,
+      sourceReconciliation:{balanced:true,validUniqueWaybills:6,classifiedWaybills:6},
+      regionCounts:{},summary:{validUniqueWaybills:6},
+      sheetDiagnostics:[],warnings:[],rows:freshRows
+    },'V788_SYNTHETIC_ACCEPTANCE');
+    assert.equal(staged.reportDate,'2026-07-01');
+    assert.equal(staged.sameDateOverwrite,false,'first reimport after purge cannot reuse a stale July batch');
+    const stageDb=getDb();
+    assert.equal(Number(stageDb.prepare('SELECT COUNT(*) c FROM unified_import_rows').get()?.c||0),6,'first 7/1 import must contain only six fresh unified sample members');
+    assert.equal(Number(stageDb.prepare('SELECT COUNT(*) c FROM shipment_daily_snapshots').get()?.c||0),6,'new snapshot membership must match fresh sample');
+    assert.equal(Number(stageDb.prepare("SELECT COUNT(*) c FROM shipment_current_state WHERE state='PENDING_SCAN'").get()?.c||0),6,'new members must not inherit stale POD/return terminals');
+    assert.equal(getActiveCompleteShopSet(stageDb)?.members?.length,72,'new import must retain all 72 current CP names');
+    assert.equal(getShopCodeMap().size,72,'new import must not merge the retired historical whitelist');
+    for(const table of staleTargets) {
+      const exists=stageDb.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table);
+      if(exists)assert.equal(Number(stageDb.prepare(`SELECT COUNT(*) c FROM "${table}"`).get()?.c||0),0,`new import must not revive old cache: ${table}`);
+    }
+
     const preClearAfter=fs.existsSync(preClearDir)?fs.readdirSync(preClearDir).length:0;
     assert.ok(preClearBefore>0,'fixture must contain one legacy backup');
     assert.equal(preClearAfter,preClearBefore,'direct purge must preserve existing CE QC backups; clearing business data is independent from backup retention');
