@@ -675,7 +675,7 @@ export function listLightweightCompletedUnifiedSnapshots(fromDate, toDate, busin
     if(!EXPORT_BUSINESS_TYPES.includes(type))throw new Error('不支持的报表业务类型');
     return type;
   }))];
-  const byDate=new Map(listLatestValidRangeBatches(range.from,range.to,true)
+  const byDate=new Map(listLatestValidRangeBatches(range.from,range.to,true,true)
     .map(batch=>[batch.reportDate,{...batch,unifiedCompleted:true}]));
   // WHPP is imported through business_daily_parse_rows, independently of
   // unified_import_batches. Its valid selected day must not disappear just
@@ -893,7 +893,7 @@ function overlaySavedTerminalExportTruth(rows=[],db=getDb()){
   });
 }
 
-function listLatestValidRangeBatches(fromDate, toDate, completedOnly = false) {
+function listLatestValidRangeBatches(fromDate, toDate, completedOnly = false, strictLatest = false) {
   const db = getDb();
   const rows = db.prepare(`
     SELECT b.snapshotId,b.batchId,b.reportDate,b.sourceName,b.createdAt,s.status AS snapshotStatus
@@ -910,11 +910,14 @@ function listLatestValidRangeBatches(fromDate, toDate, completedOnly = false) {
   const latest=[...byDate.values()];
   if(completedOnly){
     const incomplete=latest.filter(row=>String(row.snapshotStatus||'').toUpperCase()!=='COMPLETED');
-    if(incomplete.length){
+    if(strictLatest&&incomplete.length){
       const dates=incomplete.map(row=>row.reportDate).slice(0,5).join('、');
       throw new Error('最新有效日报尚未处理完成（'+dates+
         '），不能使用旧完成快照代替当前上传数据导出；请完成处理后再导出');
     }
+    // Historical range dashboards can still show other completed days while
+    // a new day is processing. Do not fall back to that day's stale batch.
+    return latest.filter(row=>String(row.snapshotStatus||'').toUpperCase()==='COMPLETED');
   }
   return latest;
 }
