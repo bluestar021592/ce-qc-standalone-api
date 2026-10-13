@@ -1788,16 +1788,65 @@ async function waitWhppTerminal(reportDate,timeoutMs=1800000){
   }
   throw new Error('WHPP处理等待超时');
 }
+// V787: inspect the EXACT selected-day durable WHPP proof before deciding
+// START vs RESUME. A unified 515-row import saying WHPP=0 does not override
+// the independently persisted 156-row WHPP daily source.
+function v787WhppRecoveryAction(proof={},requestedDate='',requestedSnapshot=''){
+  const day=String(requestedDate||'').slice(0,10);
+  if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(day)
+    ||String(proof?.reportDate||'').slice(0,10)!==day
+    ||!requestedSnapshot||String(proof?.snapshotId||'')!==String(requestedSnapshot))
+    throw new Error('WHPP恢复诊断日期/来源快照不一致，已阻止操作');
+  const data=proof?.whppCompletion||{};
+  const total=Number(data.canonicalTotal||0);
+  const observed=Number(data.canonicalResolved||0);
+  const evidence=data.terminalEvidenceCoverage||{};
+  const scanned=Number(evidence.scanRows||0),finalized=Number(evidence.finalRows||0);
+  if(!Number.isSafeInteger(total)||total<=0||observed!==total||data.membershipMatches!==true)
+    throw new Error('WHPP独立日报运单未完整识别，不能重新处理');
+  if(scanned>total||finalized>total)
+    throw new Error('WHPP扫描/最终记录超过来源成员，必须先修复来源守恒');
+  if(data.locked===true&&data.processingEvidenceVerified===true)return {action:'DONE',total,scanned,finalized};
+  // A previous date's current runtime cannot be mistaken for today. Only
+  // a verified full snapshot+membership may be trusted as completed.
+  if(data.locked===true&&data.unifiedWhppCompleted===true)return {action:'DONE',total,scanned,finalized};
+  return {action:scanned===0&&finalized===0?'START':'RESUME',total,scanned,finalized};
+}
+async function v787WhppRecoveryProof(reportDate){
+  const day=String(reportDate||'').slice(0,10);
+  const snapshot=String(v626LatestImport?.snapshotId||'');
+  if(!day||day!==String(v626LatestImport?.reportDate||'').slice(0,10)||!snapshot)
+    throw new Error('请先选择正在查看的有效日报，WHPP不允许跨日期恢复');
+  const proof=await json('/api/whpp/completion-proof?reportDate='+encodeURIComponent(day),20000);
+  return v787WhppRecoveryAction(proof,day,snapshot);
+}
 async function safeWhppRun(mode,reportDate){
+  const day=String(reportDate||'').slice(0,10);
+  const decision=await v787WhppRecoveryProof(day);
+  if(decision.action==='DONE'){
+    appendLiveLog('WHPP来源 '+fmt(decision.total)+'票、处理证据已完成，无需重复扫描');
+    return {ok:true,skipped:true,reason:'EXACT_WHPP_COMPLETED'};
+  }
+  const runMode=mode==='resume'?decision.action:'start';
+  appendLiveLog('WHPP '+day+' '+fmt(decision.total)+'票 · 已扫描'+fmt(decision.scanned)+'票，已生成最终记录'+fmt(decision.finalized)+'票；'+
+    (runMode==='start'?'首次启动扫描':'从现有记录继续处理'));
   try{
-    const r=await post('/api/whpp/run/'+(mode==='resume'?'resume':'start'),{reportDate},0);
-    if(r.runtime?.active||r.active)await waitWhppTerminal(reportDate);
+    const r=await post('/api/whpp/run/'+(runMode==='resume'?'resume':'start'),{reportDate:day},0);
+    if(r.runtime?.active||r.active)await waitWhppTerminal(day);
     return r;
   }catch(error){
     const code=String(error.payload?.code||'');
-    if(code==='WHPP_ALREADY_FINALIZED')return{ok:true,skipped:true,code};
-    const countTruth=v755ImportCountTruth.get(String(reportDate||'').slice(0,10))||null;
-    if(code==='WHPP_REPORT_MISSING'&&countTruth&&Number(countTruth.counts?.WHPP||0)===0)return{ok:true,skipped:true,code:'WHPP_ZERO_TICKET'};
+    if(code==='WHPP_ALREADY_FINALIZED'){
+      const after=await v787WhppRecoveryProof(day);
+      if(after.action==='DONE')return {ok:true,skipped:true,reason:'EXACT_WHPP_COMPLETED'};
+      throw new Error('WHPP旧状态声称完成，但来源'+fmt(after.total)+'票仅有'+fmt(after.scanned)+'票扫描、'+fmt(after.finalized)+'票最终记录；已阻止错误跳过');
+    }
+    if(code==='WHPP_RUN_ALREADY_ACTIVE'){
+      appendLiveLog('WHPP后台已有任务，等待原任务完成，不重复启动');
+      return await waitWhppTerminal(day);
+    }
+    // Never suppress a missing WHPP normalized daily merely because the
+    // 515-row unified partition itself says WHPP=0.
     throw error;
   }
 }
@@ -1925,12 +1974,10 @@ async function runTask(mode,explicitReportDate='',explicitImportData=null){
         try{await v761ContinueFamily(type,proof?.businesses?.[type],reportDate)}
         catch(error){const message=String(error?.message||error);appendLiveLog(type+'恢复受阻：'+message);failures.push(message)}
       }
-      const current=await fetchLiveProgress(reportDate);
-      if(familyComplete(current.whpp)){
-        appendLiveLog('WHPP已完成，恢复时自动跳过');
-      }else if(Number(counts.WHPP||0)>0){
-        // WHPP has a separate immutable completion and safe-resume owner.
-        appendLiveLog('WHPP尚未完成，尝试原有受保护恢复流程');
+      // Never trust an old 3/3 visual projection. Exact dated 156-member
+      // WHPP evidence determines whether to start fresh, resume, or skip.
+      if(Number(counts.WHPP||0)>0){
+        appendLiveLog('检查独立WHPP来源及扫描/最终记录证据');
         try{await safeWhppRun('resume',reportDate)}
         catch(error){failures.push('WHPP：'+String(error?.message||error))}
       }
