@@ -224,7 +224,7 @@ function isTrustedWhppPodLock(lock,date){
   if(!['whpp_strict_track_event','whpp_saved_scan_pod_time','whpp_saved_final_pod_time'].includes(source))
     return false;
   const text=String(lock?.podTime||'').trim();
-  const m=/^(\d{4})-(\d{2})-(\d{2})(?:[ T](?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?)?$/.exec(text);
+  const m=/^(\d{4})-(\d{2})-(\d{2})(?:[ T](?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d{1,6})?)?(?:Z|[+-](?:[01]\d|2[0-3]):?[0-5]\d)?)?$/.exec(text);
   if(!m)return false;
   const y=Number(m[1]),month=Number(m[2]),d=Number(m[3]);
   const parsed=new Date(Date.UTC(y,month-1,d));

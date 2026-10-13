@@ -150,6 +150,18 @@ assert.equal(recoveredExport.find(row=>row.shipmentCode==='CE020726LABEL01').pod
   '2026-07-03 08:30:00','evidence-qualified POD time must enter export');
 assert.ok(!recoveredExport.find(row=>row.shipmentCode==='CE020726LABEL02').podTime);
 assert.ok(!recoveredExport.find(row=>row.shipmentCode==='CE020726LABEL03').podTime);
+// ISO timestamps with time zone are also real saved event times. Unknown
+// provenance remains ignored even when it looks like a valid timestamp.
+labelDb.prepare("UPDATE business_pod_locks SET podTime=?,source=? WHERE shipmentCode=?")
+  .run('2026-07-04T09:30:00.000Z','USER_EDIT','CE020726LABEL02');
+assert.equal(loadWhppCanonicalTruth('2026-07-02','',labelDb).evidence.trustedSavedPodTimeRows,1);
+labelDb.prepare("UPDATE business_pod_locks SET source=? WHERE shipmentCode=?")
+  .run('whpp_saved_final_pod_time','CE020726LABEL02');
+const isoTruth=loadWhppCanonicalTruth('2026-07-02','',labelDb);
+assert.equal(isoTruth.evidence.trustedSavedPodTimeRows,2);
+assert.equal(isoTruth.rows.find(row=>row.shipmentCode==='CE020726LABEL02').podTime,'2026-07-04T09:30:00.000Z');
+assert.equal(labelExport('V788-NO-TMS','2026-07-02','WHPP').find(
+  row=>row.shipmentCode==='CE020726LABEL02').podDate,'2026-07-04');
 labelDb.close();
 
 // V788: stale ledger TERMINAL must not override an exact newer TMS status80.
