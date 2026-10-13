@@ -76,17 +76,28 @@ export function loadWhppCanonicalTruth(reportDate='', snapshotId='', dbOverride=
     const row={...member,...scan,...current,...final,shipmentCode:code,运单号:code,businessType:'WHPP',reportDate:date};
     const pod=isPodEvidence(final,current,scan,row);
     const returned=isReturnEvidence(final,current,scan,row);
+    // A saved TMS shipmentStatus (60/81) is terminal proof only when the
+    // normalized current state agrees. Never count 80 as completed return.
+    // The original scan/final evidence remains tracked separately.
+    const savedStatus=String(current?.shipmentStatus||current?.shipmentTrack?.shipmentStatus||'').trim();
+    const savedState=String(current?.currentState||'').trim().toUpperCase();
+    const currentTerminalStrict=Boolean(currentMap.has(code))&&(
+      (savedStatus==='60'&&savedState==='POD'&&pod&&!returned)||
+      (savedStatus==='81'&&['RETURNED','RETURN_COMPLETED'].includes(savedState)&&returned&&!pod)
+    );
     if(pod){
       row.isPod=1;row.是否POD='是';row.POD状态='POD';row.currentState='POD';
       if(!String(row.primaryCategory||'').trim())row.primaryCategory='POD';
     }else{
       row.isPod=0;row.是否POD='否';
-      if(returned&&!String(row.currentState||'').trim())row.currentState='RETURNED';
+      if(returned&&savedStatus==='81'){row.currentState='RETURNED';row.退回状态='已退回';}
+      else if(returned&&!String(row.currentState||'').trim())row.currentState='RETURNED';
     }
     row.finalRowAvailable=Boolean(finalMap.has(code)||currentMap.has(code)||scanMap.has(code));
     row.truthEvidence={
       final:Boolean(finalMap.has(code)),
       current:Boolean(currentMap.has(code)),
+      currentTerminalStrict,
       scan:Boolean(scanMap.has(code)),
       pod,
       returned
@@ -187,6 +198,9 @@ function normalizeScan(row,date){
   return {...raw,shipmentCode:String(row.shipmentCode||'').trim().toUpperCase(),运单号:String(row.shipmentCode||'').trim().toUpperCase(),businessType:'WHPP',reportDate:date,orderStatus:String(row.orderStatus??raw.orderStatus??''),scanIsPod:Number(row.isPod||0)};
 }
 function isPodEvidence(final,current,scan,row){
+  const currentStatus=String(current?.shipmentStatus||current?.shipmentTrack?.shipmentStatus||'').trim();
+  if(currentStatus==='80'||currentStatus==='81')return false;
+  if(currentStatus==='60')return String(current?.currentState||'').toUpperCase()==='POD';
   if(Number(final?.isPod||0)===1||Number(scan?.scanIsPod||0)===1)return true;
   if(String(scan?.orderStatus||'')==='85')return true;
   const state=String(current?.currentState||row?.currentState||'').toUpperCase();
@@ -194,6 +208,9 @@ function isPodEvidence(final,current,scan,row){
   return row?.是否POD==='是'||row?.POD状态==='POD';
 }
 function isReturnEvidence(final,current,scan,row){
+  const currentStatus=String(current?.shipmentStatus||current?.shipmentTrack?.shipmentStatus||'').trim();
+  if(currentStatus==='80'||currentStatus==='60')return false;
+  if(currentStatus==='81')return ['RETURNED','RETURN_COMPLETED'].includes(String(current?.currentState||'').toUpperCase());
   // Do not turn a newer TMS shipmentStatus=80 (return in progress) into
   // completed return merely because the legacy category says "退回".
   const status=String(row?.shipmentStatus||final?.shipmentStatus||current?.shipmentStatus||scan?.shipmentStatus||'').trim();

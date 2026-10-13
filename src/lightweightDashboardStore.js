@@ -693,9 +693,16 @@ function loadLightweightExportRows(snapshotId, reportDate, type) {
     // Never export a falsely complete WHPP child based only on a 515-ticket
     // unified import snapshot. Every one of the 156 separate daily members
     // must have actually been scanned and finalized before reporting.
-    if(Number(truth.evidence?.scanRows||0)!==truth.total
-      ||Number(truth.evidence?.finalRows||0)!==truth.total)
-      throw new Error('WHPP '+reportDate+' 的 '+truth.total+' 票独立日报仍缺扫描或最终记录；请完成WHPP处理后再导出，不能生成漏票报表');
+    const fullScanFinal=Number(truth.evidence?.scanRows||0)===truth.total
+      &&Number(truth.evidence?.finalRows||0)===truth.total;
+    // Alternate narrow acceptance: EVERY exact-day WHPP member has saved
+    // current TMS shipmentStatus=60/81 consistent with its normalized state.
+    // A historical OPEN ledger cannot override verified terminal evidence.
+    // Mixed or missing evidence (including status 80) must fail closed.
+    const fullStrictCurrentTerminals=truth.rows.length===truth.total
+      &&truth.rows.every(row=>row.truthEvidence?.currentTerminalStrict===true);
+    if(!fullScanFinal&&!fullStrictCurrentTerminals)
+      throw new Error('WHPP '+reportDate+' 的 '+truth.total+' 票独立日报仍缺扫描/最终记录，且未全部取得TMS 60/81终态证据；请完成核验后再导出，不能生成漏票报表');
     const rows=truth.rows.map(row=>({
       ...row,shipmentCode:billOf(row),businessType:'WHPP',
       reportDate,regionCode:String(row.regionCode||'').toUpperCase(),
