@@ -675,7 +675,10 @@ export function listLightweightCompletedUnifiedSnapshots(fromDate, toDate, busin
     if(!EXPORT_BUSINESS_TYPES.includes(type))throw new Error('不支持的报表业务类型');
     return type;
   }))];
-  const byDate=new Map(listLatestValidRangeBatches(range.from,range.to,true,true)
+  const unifiedRequested=types.some(type=>type!=='WHPP');
+  const completedUnified=unifiedRequested
+    ?listLatestValidRangeBatches(range.from,range.to,true,true):[];
+  const byDate=new Map(completedUnified
     .map(batch=>[batch.reportDate,{...batch,unifiedCompleted:true}]));
   // WHPP is imported through business_daily_parse_rows, independently of
   // unified_import_batches. Its valid selected day must not disappear just
