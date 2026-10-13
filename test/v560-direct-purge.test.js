@@ -162,6 +162,20 @@ test('V560 direct purge clears business data without creating a backup or purge 
     assert.equal(Number(stageDb.prepare("SELECT COUNT(*) c FROM business_daily_parse_rows WHERE businessType='WHPP'").get()?.c||0),1,
       'rejected purge must preserve fresh WHPP source');
     stageDb.prepare("UPDATE app_meta SET value=? WHERE key='shop_current_complete_codes_v780'").run(activeBefore);
+    // Absent active CP72 activation must also fail closed. Otherwise the
+    // subsequent import could silently revive the retired 95-code whitelist.
+    stageDb.prepare("DELETE FROM app_meta WHERE key='shop_current_complete_codes_v780'").run();
+    await assert.rejects(
+      ()=>executeDirectDataPurge({phrase:DIRECT_PURGE_PHRASE,user:{email:'admin@example.test',role:'ADMIN'}}),
+      /V788_PURGE_CP72_MISSING/,
+      'missing activated 72-code set must block irreversible purge');
+    assert.equal(Number(stageDb.prepare('SELECT COUNT(*) c FROM unified_import_rows').get()?.c||0),6,
+      'rejected missing-CP purge must leave July reimport intact');
+    assert.equal(Number(stageDb.prepare("SELECT COUNT(*) c FROM business_daily_parse_rows WHERE businessType='WHPP'").get()?.c||0),1,
+      'rejected missing-CP purge must leave WHPP reimport intact');
+    stageDb.prepare("INSERT INTO app_meta(key,value,updatedAt) VALUES(?,?,?)")
+      .run('shop_current_complete_codes_v780',activeBefore,new Date().toISOString());
+
 
     const preClearAfter=fs.existsSync(preClearDir)?fs.readdirSync(preClearDir).length:0;
     assert.ok(preClearBefore>0,'fixture must contain one legacy backup');

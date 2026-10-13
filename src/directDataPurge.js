@@ -106,7 +106,7 @@ async function clearRegenerableFiles(){
 // to the retired historical shop list on the next import.
 function readProtectedActiveShopSet(db){
   const row=db.prepare("SELECT value FROM app_meta WHERE key='shop_current_complete_codes_v780'").get();
-  if(!row)return null; // Preserve legacy installations without an activated 72-code set.
+  if(!row)throw new Error('V788_PURGE_CP72_MISSING: 当前72码门店名单尚未激活，禁止清空并回退旧白名单');
   const value=String(row.value||'');
   let config;
   try{config=JSON.parse(value)}catch{throw new Error('V788_PURGE_CP72_INVALID: 当前72码配置无法解析，已拒绝清空');}
