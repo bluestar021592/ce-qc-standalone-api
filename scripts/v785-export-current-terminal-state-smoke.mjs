@@ -283,6 +283,59 @@ assert.equal(switched[1].currentState,'POD');
 assert.equal(switched[1].shipmentStatus,'60');
 assert.equal(switched[1].truthEvidence.pod,true);
 assert.equal(switched[1].truthEvidence.returned,false);
+// Integration exercise of the production six-business dashboard reader:
+// final_rows may still say PENDING after newer current-state 60/81 proof,
+// and carryover_open_items may still say OPEN. Both displayed outputs must
+// agree with the export projection without mutating persisted evidence.
+const cePod='CE020726DASHPOD',ceReturned='CE020726DASHRETURN',
+  ceOpen='CE020726DASHOPEN';
+put.run(cePod,'CE','POD',JSON.stringify({shipmentStatus:'60'}),'2026-07-06');
+put.run(ceReturned,'CE','RETURNED',JSON.stringify({shipmentStatus:'81'}),'2026-07-06');
+put.run(ceOpen,'CE','PENDING_SCAN','{}','');
+const liveMergeStart=src.indexOf('function mergeBusinessRows(');
+const liveMergeEnd=src.indexOf('function loadRun(',liveMergeStart);
+assert.ok(liveMergeStart>=0&&liveMergeEnd>liveMergeStart);
+const liveMerge=new Function('billOf',src.slice(liveMergeStart,liveMergeEnd)+
+  '\nreturn mergeBusinessRows;')(row=>String(row.shipmentCode||'').toUpperCase());
+const dayRows=[cePod,ceReturned,ceOpen].map(shipmentCode=>({
+  shipmentCode,businessType:'CE',reportDate:'2026-07-02',
+  currentState:'PENDING_SCAN',isPod:0,是否POD:'否'
+}));
+const carryRows=[cePod,ceReturned,ceOpen].map(shipmentCode=>({shipmentCode}));
+const fakeDb={
+  prepare(sql){
+    if(sql.includes('FROM carryover_open_items'))return {all:()=>carryRows};
+    if(sql.includes('SELECT c.shipmentCode'))return {all:()=>[]};
+    return db.prepare(sql);
+  }
+};
+const readerStart=src.indexOf('export function loadLightweightUnifiedBusinessState(');
+const readerEnd=src.indexOf('export function loadLightweightAggregateState(',readerStart);
+assert.ok(readerStart>=0&&readerEnd>readerStart);
+const dashboardReader=new Function(
+  'normalizeBusinessType','getDb','selectBatch','emptyState','loadDailyRows','billOf',
+  'mergeBusinessRows','loadCurrentStateRows','loadFinalRows','overlaySavedTerminalExportTruth',
+  'loadScanRows','filterActiveCarryMembers','loadRun','listLightweightBusinessHistory',
+  'isPodRow','SHOPEE_TYPES',
+  src.slice(readerStart,readerEnd).replace('export function','function')+
+    '\nreturn loadLightweightUnifiedBusinessState;')(
+  x=>x,()=>fakeDb,()=>({snapshotId:'V788-INTEGRATION',reportDate:'2026-07-02',
+    snapshotStatus:'COMPLETED'}),
+  ()=>({}),()=>dayRows.map(r=>({...r})),
+  row=>String(row.shipmentCode||'').toUpperCase(),
+  liveMerge,()=>dayRows.map(r=>({...r})),
+  ()=>dayRows.map(r=>({...r})),overlay,()=>[],
+  filterCarry,()=>null,()=>[],()=>false,new Set());
+const dashboardState=dashboardReader('CE','V788-INTEGRATION',{includeHistory:false});
+assert.equal(dashboardState.finalRows.length,3);
+assert.equal(dashboardState.finalRows.find(r=>r.shipmentCode===cePod).currentState,'POD',
+  'a stale persisted final row must not hide late current TMS POD on dashboard');
+assert.equal(dashboardState.finalRows.find(r=>r.shipmentCode===ceReturned).currentState,'RETURNED',
+  'a stale persisted final row must not hide late current TMS return on dashboard');
+assert.deepEqual(dashboardState.carryBills,[ceOpen],
+  'dashboard unresolved queue must contain only truly unfinished member');
+assert.deepEqual(dashboardState.nextCarryBills,[ceOpen],
+  'next carry queue uses same effective open members');
 const labelOnlyBill='CE020726LABELONLY';
 put.run(labelOnlyBill,'WHPP','RETURNED','{}','');
 const labelOnly=overlay([{shipmentCode:labelOnlyBill,businessType:'WHPP',reportDate:'2026-07-02'}],db)[0];
