@@ -125,6 +125,31 @@ assert.equal(labelRows.length,3,'complete scan+final coverage permits source-mem
 assert.equal(labelRows.filter(row=>row.currentState==='POD').length,2);
 assert.equal(labelRows.filter(row=>row.currentState==='RETURNED').length,1);
 assert.ok(labelRows.every(row=>!row.podDate),'missing POD timestamps must remain missing');
+// Persisted POD locks can recover a signed timestamp ONLY for the matching
+// POD member and ONLY with trusted provenance and valid event date.
+labelDb.exec("CREATE TABLE business_pod_locks(businessType TEXT,shipmentCode TEXT,podTime TEXT,source TEXT)");
+const addLock=labelDb.prepare("INSERT INTO business_pod_locks VALUES('WHPP',?,?,?)");
+addLock.run('CE020726LABEL01','2026-07-03 08:30:00','whpp_strict_track_event');
+addLock.run('CE020726LABEL02','2026-07-01 22:00:00','whpp_saved_scan_pod_time');
+addLock.run('CE020726LABEL03','2026-07-03 12:00:00','whpp_strict_track_event');
+const recovered=loadWhppCanonicalTruth('2026-07-02','',labelDb);
+assert.equal(recovered.evidence.trustedSavedPodTimeRows,1,
+  'only valid and exact-member saved POD timing can be restored');
+const r01=recovered.rows.find(row=>row.shipmentCode==='CE020726LABEL01');
+assert.equal(r01.podTime,'2026-07-03 08:30:00');
+assert.equal(r01.podDate,'2026-07-03');
+assert.equal(r01.truthEvidence.savedPodTimeSource,'whpp_strict_track_event');
+assert.equal(r01.truthEvidence.currentTerminalStrict,false,
+  'track POD event does not constitute TMS shipmentStatus=60');
+assert.equal(recovered.rows.find(row=>row.shipmentCode==='CE020726LABEL02').podTime,undefined,
+  'POD lock dated before source intake must not be used');
+assert.equal(recovered.rows.find(row=>row.shipmentCode==='CE020726LABEL03').podTime,undefined,
+  'a return must never inherit an unrelated stored POD lock');
+const recoveredExport=labelExport('V788-NO-TMS','2026-07-02','WHPP');
+assert.equal(recoveredExport.find(row=>row.shipmentCode==='CE020726LABEL01').podTime,
+  '2026-07-03 08:30:00','evidence-qualified POD time must enter export');
+assert.ok(!recoveredExport.find(row=>row.shipmentCode==='CE020726LABEL02').podTime);
+assert.ok(!recoveredExport.find(row=>row.shipmentCode==='CE020726LABEL03').podTime);
 labelDb.close();
 
 // V788: stale ledger TERMINAL must not override an exact newer TMS status80.
