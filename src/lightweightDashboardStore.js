@@ -812,19 +812,42 @@ function overlaySavedTerminalExportTruth(rows=[],db=getDb()){
     if(!fact||fact.businessType&&fact.businessType!==String(row.businessType||'').toUpperCase())return row;
     if(fact.outcome==='CONFLICT')return {...row,isPod:0,是否POD:'否',POD状态:'',是否退回:'否',
       currentState:'PENDING_VERIFICATION',primaryCategory:'终态矛盾待核验',
-      退回状态:'待核验',terminalEvidenceStatus:'CONFLICT',terminalEvidenceSource:'SAVED_TMS_STATUS_CONFLICT'};
-    if(fact.outcome==='POD')return {...row,isPod:1,是否POD:'是',POD状态:'POD',currentState:'POD',
-      primaryCategory:'POD闭环',退回状态:'',是否退回:'否',
-      podTime:fact.podTime||row.podTime||'',podDate:fact.podTime||row.podDate||'',
-      lastEventTime:fact.eventTime||row.lastEventTime||'',
-      terminalEvidenceStatus:fact.strictTms?'STRICT_TMS':'NORMALIZED_LABEL_ONLY',
-      terminalEvidenceSource:fact.strictTms?'SAVED_STRICT_POD':'SAVED_NORMALIZED_POD_LABEL'};
+      退回状态:'待核验',podTime:'',podDate:'',POD时间:'',signingDays:null,签收天数:null,
+      terminalEvidenceStatus:'CONFLICT',terminalEvidenceSource:'SAVED_TMS_STATUS_CONFLICT'};
+    if(fact.outcome==='POD'){
+      // A persisted WHPP POD lock backed by an accepted source is stronger
+      // than a stale historical ledger date. Never calculate timing when a
+      // verified timestamp is absent.
+      const verifiedWhppTime=String(row.businessType||'').toUpperCase()==='WHPP'
+        &&row.truthEvidence?.trustedSavedPodTime===true
+        ?String(row.podTime||'').trim():'';
+      const selectedTime=verifiedWhppTime||fact.podTime||row.podTime||row.podDate||'';
+      let verifiedSigningDays=null;
+      if(verifiedWhppTime){
+        const first=Date.parse(String(row.reportDate||'').slice(0,10)+'T00:00:00Z');
+        const signed=Date.parse(verifiedWhppTime.slice(0,10)+'T00:00:00Z');
+        if(Number.isFinite(first)&&Number.isFinite(signed)&&signed>=first)
+          verifiedSigningDays=Math.floor((signed-first)/86400000)+1;
+      }
+      return {...row,isPod:1,是否POD:'是',POD状态:'POD',currentState:'POD',
+        primaryCategory:'POD闭环',退回状态:'',是否退回:'否',
+        podTime:selectedTime,podDate:String(selectedTime).slice(0,10),
+        ...(verifiedWhppTime?{
+          POD时间:verifiedWhppTime,signingDays:verifiedSigningDays,签收天数:verifiedSigningDays,
+          podTimeEvidenceSource:row.podTimeEvidenceSource
+        }:{}),
+        lastEventTime:fact.eventTime||row.lastEventTime||'',
+        terminalEvidenceStatus:fact.strictTms?'STRICT_TMS':'NORMALIZED_LABEL_ONLY',
+        terminalEvidenceSource:fact.strictTms?'SAVED_STRICT_POD':'SAVED_NORMALIZED_POD_LABEL'};
+    }
     if(fact.outcome==='RETURNED')return {...row,isPod:0,是否POD:'否',POD状态:'',是否退回:'是',退回状态:'已退回',
-      currentState:'RETURNED',primaryCategory:'已退回',
+      currentState:'RETURNED',primaryCategory:'已退回',podTime:'',podDate:'',POD时间:'',
+      signingDays:null,签收天数:null,
       terminalEvidenceStatus:fact.strictTms?'STRICT_TMS':'NORMALIZED_LABEL_ONLY',
       terminalEvidenceSource:fact.strictTms?'SAVED_STRICT_RETURNED':'SAVED_NORMALIZED_RETURNED_LABEL'};
     if(fact.outcome==='RETURNING')return {...row,isPod:0,是否POD:'否',POD状态:'',是否退回:'否',
       退回状态:'退回中',订单取消:'否',currentState:'RETURNING',primaryCategory:'退回中',
+      podTime:'',podDate:'',POD时间:'',signingDays:null,签收天数:null,
       terminalEvidenceStatus:'NONTERMINAL_80',terminalEvidenceSource:'SAVED_STATUS_80_NONTERMINAL'};
     return {...row,isPod:0,是否POD:'否',订单取消:'是',
       currentState:'ORDER_CANCELLED',primaryCategory:'订单取消',terminalEvidenceSource:'SAVED_STRICT_CANCELLED'};
