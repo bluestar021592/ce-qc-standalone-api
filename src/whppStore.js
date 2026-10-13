@@ -503,7 +503,13 @@ function terminalReason(row = {}) {
 }
 
 function isPod(row = {}) {
-  return row.是否POD === '是' || row.POD状态 === 'POD' || String(row.currentState || '').toUpperCase() === 'POD';
+  // Latest shipmentStatus 60/80/81 outranks old POD text and scan flags.
+  // A RETURNING(80) or RETURNED(81) member must never re-close as POD.
+  const code=String(row.shipmentStatus??row.shipmentTrack?.shipmentStatus??'').trim();
+  if(code==='80'||code==='81')return false;
+  if(code==='60')return true;
+  return row.是否POD === '是' || row.POD状态 === 'POD'
+    ||String(row.currentState||'').toUpperCase()==='POD';
 }
 function isReturned(row = {}) {
   // V788: a broad "退回" category means return-related, NOT completed
