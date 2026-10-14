@@ -11,6 +11,7 @@ import { recipientGroupOf } from './recipientGroup.js';
 import { normalizeV485TrackRows, archiveV485TrackQueryResponse } from './v485StrictTrackEvidence.js';
 import { persistentSelectedDatePodTruth } from './selectedDatePersistentTruth.js';
 import { classifyShipmentStatus, shipmentStatusTime } from './shipmentStatusTruth.js';
+import { explicitWhppTms60PodTime } from './whppPodTimeEvidence.js';
 import { extractV498SavedShopeePodEvidence } from './v498SavedShopeePodEvidence.js';
 
 export const V645_SELECTED_DATE_TIMING_REPAIR_ID='2026-10-05-v645-selected-date-pod-track-repair-v1';
@@ -223,8 +224,8 @@ function confirmTimingEvidence(row={}){
   return extractV498SavedShopeePodEvidence({shipmentCode:code,orderStatus:String(row.orderStatus??''),rawJson:JSON.stringify(row)},'business_scan_results');
 }
 
-function persistShipmentStatusRows(type,date,rows=[]){
-  const owner=storageType(type),db=getDb(),stamp=now(),latest=new Map();
+export function persistShipmentStatusRows(type,date,rows=[],dbOverride=null){
+  const owner=storageType(type),db=dbOverride||getDb(),stamp=now(),latest=new Map();
   for(const raw of rows||[]){
     const code=billOf(raw);if(!code)continue;
     latest.set(code,{...raw,shipmentCode:code,reportDate:date});
@@ -232,12 +233,34 @@ function persistShipmentStatusRows(type,date,rows=[]){
   if(!latest.size)return 0;
   const del=db.prepare('DELETE FROM business_shipment_tracks WHERE businessType=? AND reportDate=? AND shipmentCode=?');
   const ins=db.prepare('INSERT INTO business_shipment_tracks(businessType,shipmentCode,reportDate,shipmentStatus,statusText,apiStatus,rawJson,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?)');
+  // Preserve previously verified locks. A new strict TMS 60 timestamp may
+  // replace only missing/untrusted prior values, never overwrite older
+  // independently attested signing timestamps or non-POD member histories.
+  const lockPod=owner==='WHPP'?db.prepare(`INSERT INTO business_pod_locks
+    (businessType,shipmentCode,podTime,source,createdAt,updatedAt)
+    VALUES('WHPP',?,?,'whpp_shipment_status_60_explicit_pod_time',?,?)
+    ON CONFLICT(businessType,shipmentCode) DO UPDATE SET
+      podTime=CASE WHEN LOWER(TRIM(COALESCE(business_pod_locks.source,''))) IN
+        ('whpp_strict_track_event','whpp_saved_scan_pod_time',
+         'whpp_saved_final_pod_time','whpp_shipment_status_60_explicit_pod_time')
+        AND TRIM(COALESCE(business_pod_locks.podTime,''))<>'' THEN business_pod_locks.podTime
+        ELSE excluded.podTime END,
+      source=CASE WHEN LOWER(TRIM(COALESCE(business_pod_locks.source,''))) IN
+        ('whpp_strict_track_event','whpp_saved_scan_pod_time',
+         'whpp_saved_final_pod_time','whpp_shipment_status_60_explicit_pod_time')
+        AND TRIM(COALESCE(business_pod_locks.podTime,''))<>'' THEN business_pod_locks.source
+        ELSE excluded.source END,
+      updatedAt=excluded.updatedAt`):null;
   let saved=0;
   db.exec('BEGIN IMMEDIATE');
   try{
     for(const [code,row] of latest){
       del.run(owner,date,code);
       ins.run(owner,code,date,String(row.shipmentStatus??''),String(row.statusText||row.shipmentStatusDesc||''),String(row.apiStatus||'success'),JSON.stringify(row),stamp,stamp);
+      if(lockPod){
+        const podTime=explicitWhppTms60PodTime(row,date);
+        if(podTime)lockPod.run(code,podTime,stamp,stamp);
+      }
       saved++;
     }
     db.exec('COMMIT');
@@ -362,7 +385,13 @@ async function runOne(type,date,snapshotId=''){
           const truth=classifyShipmentStatus(row);
           if(!truth.pod)continue;
           status60++;
-          if(shipmentStatusTime(row)){status60WithTime++;statusTimedBills.add(code);}
+          // WHPP only: generic lastUpdateDate/updateTime is never a signed
+          // timestamp. Continue the event query unless strict 60 provides an
+          // explicit POD/delivery completion date that was saved above.
+          const verifiedTime=type==='WHPP'
+            ?explicitWhppTms60PodTime(row,date)
+            :shipmentStatusTime(row);
+          if(verifiedTime){status60WithTime++;statusTimedBills.add(code);}
           else status60WithoutTime++;
         }
       }
