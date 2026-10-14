@@ -34,6 +34,12 @@ export function acceptanceText(audit,verdict){
     'WHPP POD时间可信覆盖：'+Number(totals.trustedPodLockOnPOD||0)+' / '+
       Number(totals.normalizedPOD||0)+'（'+(totals.trustedPodTimeCoveragePct??'无POD基数')+'%）',
     '账本OPEN但当前POD/已退回：'+Number(totals.ledgerOpenWithNormalizedTerminal||0),
+    '独立TMS记录覆盖：'+Number(totals.savedTmsTrackMembers||0)+' / '+Number(totals.sourceMembers||0),
+    '独立TMS状态：60(POD)='+Number(totals.savedTms60||0)
+      +'，80(退回中)='+Number(totals.savedTms80||0)
+      +'，81(已退回)='+Number(totals.savedTms81||0)
+      +'，其他='+Number(totals.savedTmsUnknown||0),
+    '独立TMS与当前状态冲突：'+Number(totals.savedTmsCurrentConflict||0),
     '历史TMS补证记录（只读诊断）：',
     ...(audit.savedTimingStopSummary?.byDate||[]).map(item=>
       item.date+'：'+(item.savedDurableStop
