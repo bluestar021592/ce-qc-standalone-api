@@ -17,6 +17,7 @@ try{
   db.exec("CREATE TABLE business_scan_results(shipmentCode TEXT,businessType TEXT,reportDate TEXT,isPod INTEGER,orderStatus TEXT,rawJson TEXT)");
   db.exec("CREATE TABLE business_final_rows(shipmentCode TEXT,businessType TEXT,reportDate TEXT,isPod INTEGER,primaryCategory TEXT,rawJson TEXT)");
   db.exec("CREATE TABLE business_pod_locks(businessType TEXT,shipmentCode TEXT,podTime TEXT,source TEXT)");
+  db.exec("CREATE TABLE business_shipment_tracks(businessType TEXT,shipmentCode TEXT,reportDate TEXT,shipmentStatus TEXT,rawJson TEXT)");
   const members=Array.from({length:72},(_,i)=>({code:'CP'+String(100001+i),name:'Shop '+(i+1)}));
   db.prepare('INSERT INTO app_meta VALUES(?,?)').run('shop_current_complete_codes_v780',JSON.stringify({mode:'COMPLETE',members}));
   db.exec("CREATE TABLE unified_import_batches(snapshotId TEXT,reportDate TEXT,createdAt TEXT,batchId TEXT,status TEXT)");
@@ -53,7 +54,13 @@ try{
   insertLock.run('A2','2026-07-03 08:30:00','whpp_saved_final_pod_time');
   insertLock.run('B2','2026-07-03 08:30:00','NOT_VERIFIED_SOURCE');
   insertLock.run('B3','2026-07-01 08:30:00','whpp_saved_scan_pod_time');
+  // Independently saved TMS evidence overrides missing legacy stateJson status.
+  db.prepare("UPDATE shipment_current_state SET stateJson='{}' WHERE shipmentCode='A1'").run();
+  db.prepare("INSERT INTO business_shipment_tracks VALUES('WHPP','A1','2026-07-01','60','{}')").run();
   const audit=auditV788Readonly(db);
+  assert.equal(audit.whpp.totals.savedTmsTrackMembers,1);
+  assert.equal(audit.whpp.totals.savedTms60,1);
+  assert.equal(audit.whpp.totals.savedTmsCurrentConflict,0);
   assert.equal(audit.active72.status,'ACTIVE_72');
   assert.equal(audit.whpp.totals.sourceMembers,5);
   assert.equal(audit.whpp.totals.strictPOD,1);
