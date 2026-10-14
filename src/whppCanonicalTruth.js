@@ -62,6 +62,19 @@ export function loadWhppCanonicalTruth(reportDate='', snapshotId='', dbOverride=
   // Only saved WHPP POD timestamps with explicit evidence provenance may
   // enrich an exact-day POD member. This is read-only and never infers POD
   // time from job/export/row timestamps.
+  // Exact-day TMS shipment-status responses are persisted separately by
+  // selectedDateTimingEvidenceRepair. The source is independent of the
+  // normalized current state; reading it must never fabricate a status 60/81.
+  const savedTmsMap=queryRows(db,bills,`
+    SELECT shipmentCode,shipmentStatus,rawJson
+    FROM business_shipment_tracks
+    WHERE businessType='WHPP' AND reportDate=? AND shipmentCode IN (__MARKS__)
+    ORDER BY updatedAt ASC
+  `,[date],entry=>({
+    shipmentCode:String(entry.shipmentCode||'').trim().toUpperCase(),
+    shipmentStatus:String(entry.shipmentStatus||'').trim(),
+    rawJson:entry.rawJson
+  }));
   const podLockMap=queryRows(db,bills,`
     SELECT shipmentCode,podTime,source
     FROM business_pod_locks
@@ -83,16 +96,33 @@ export function loadWhppCanonicalTruth(reportDate='', snapshotId='', dbOverride=
     const current=currentMap.get(code)||{};
     const final=finalMap.get(code)||{};
     const row={...member,...scan,...current,...final,shipmentCode:code,运单号:code,businessType:'WHPP',reportDate:date};
-    const pod=isPodEvidence(final,current,scan,row);
-    const returned=isReturnEvidence(final,current,scan,row);
+    let pod=isPodEvidence(final,current,scan,row);
+    let returned=isReturnEvidence(final,current,scan,row);
+    const savedTms=savedTmsMap.get(code)||null;
+    const originalState=String(current?.currentState||'').toUpperCase();
+    const latestTmsCode=String(savedTms?.shipmentStatus||'').trim();
+    const tmsContradiction=
+      (latestTmsCode==='60'&&['RETURNED','RETURN_COMPLETED','RETURN_IN_PROGRESS','RETURNING'].includes(originalState))
+      ||(latestTmsCode==='81'&&['POD','RETURN_IN_PROGRESS','RETURNING'].includes(originalState))
+      ||(latestTmsCode==='80'&&['POD','RETURNED','RETURN_COMPLETED'].includes(originalState));
+    if(['60','80','81'].includes(latestTmsCode)){
+      // 80 is return-in-progress; old scan POD flags are not a terminal.
+      // A conflicting old explicit terminal must remain unresolved.
+      pod=!tmsContradiction&&latestTmsCode==='60';
+      returned=!tmsContradiction&&latestTmsCode==='81';
+      row.shipmentStatus=latestTmsCode;
+      row.shipmentStatusEvidenceSource='SAVED_WHPP_EXACT_DATE_TMS_TRACK';
+    }
     // A saved TMS shipmentStatus (60/81) is terminal proof only when the
     // normalized current state agrees. Never count 80 as completed return.
     // The original scan/final evidence remains tracked separately.
-    const savedStatus=String(current?.shipmentStatus||current?.shipmentTrack?.shipmentStatus||'').trim();
+    const savedStatus=latestTmsCode||String(current?.shipmentStatus||current?.shipmentTrack?.shipmentStatus||'').trim();
     const savedState=String(current?.currentState||'').trim().toUpperCase();
-    const currentTerminalStrict=Boolean(currentMap.has(code))&&(
-      (savedStatus==='60'&&savedState==='POD'&&pod&&!returned)||
-      (savedStatus==='81'&&['RETURNED','RETURN_COMPLETED'].includes(savedState)&&returned&&!pod)
+    const currentTerminalStrict=!tmsContradiction&&Boolean(
+      (savedStatus==='60'&&pod&&!returned&&
+        (latestTmsCode==='60'||(currentMap.has(code)&&savedState==='POD')))||
+      (savedStatus==='81'&&returned&&!pod&&
+        (latestTmsCode==='81'||(currentMap.has(code)&&['RETURNED','RETURN_COMPLETED'].includes(savedState)))
     );
     const savedLock=pod?podLockMap.get(code):null;
     const savedPodDate=pod?trustedWhppPodTime(savedLock,date):'';
@@ -108,15 +138,28 @@ export function loadWhppCanonicalTruth(reportDate='', snapshotId='', dbOverride=
       row.isPod=1;row.是否POD='是';row.POD状态='POD';row.currentState='POD';
       if(!String(row.primaryCategory||'').trim())row.primaryCategory='POD';
     }else{
-      row.isPod=0;row.是否POD='否';
-      if(returned&&savedStatus==='81'){row.currentState='RETURNED';row.退回状态='已退回';}
-      else if(returned&&!String(row.currentState||'').trim())row.currentState='RETURNED';
+      row.isPod=0;row.是否POD='否';row.POD状态='';
+      if(tmsContradiction){
+        row.currentState='PENDING_VERIFICATION';
+        row.primaryCategory='终态矛盾待核验';
+        row.退回状态='待核验';
+        row.podTime='';row.podDate='';row.POD时间='';row.signingDays=null;
+      }else if(savedStatus==='80'){
+        row.currentState='RETURN_IN_PROGRESS';row.退回状态='退回中';
+        row.podTime='';row.podDate='';row.POD时间='';row.signingDays=null;
+      }else if(returned&&savedStatus==='81'){
+        row.currentState='RETURNED';row.退回状态='已退回';
+        row.podTime='';row.podDate='';row.POD时间='';row.signingDays=null;
+      }else if(returned&&!String(row.currentState||'').trim())row.currentState='RETURNED';
     }
     row.finalRowAvailable=Boolean(finalMap.has(code)||currentMap.has(code)||scanMap.has(code));
     row.truthEvidence={
       final:Boolean(finalMap.has(code)),
       current:Boolean(currentMap.has(code)),
       currentTerminalStrict,
+      exactDayTmsSaved:Boolean(savedTms),
+      exactDayTmsStatus:latestTmsCode,
+      tmsContradiction,
       trustedSavedPodTime:Boolean(savedPodDate),
       savedPodTimeSource:savedPodDate?String(savedLock.source||''):'',
       scan:Boolean(scanMap.has(code)),
@@ -136,6 +179,9 @@ export function loadWhppCanonicalTruth(reportDate='', snapshotId='', dbOverride=
       podRows:rows.filter(row=>row.truthEvidence.pod).length,
       returnedRows:rows.filter(row=>row.truthEvidence.returned).length,
       trustedSavedPodTimeRows:rows.filter(row=>row.truthEvidence.trustedSavedPodTime).length,
+      exactDayTmsRows:rows.filter(row=>row.truthEvidence.exactDayTmsSaved).length,
+      exactDayTmsTerminalRows:rows.filter(row=>row.truthEvidence.currentTerminalStrict&&row.truthEvidence.exactDayTmsSaved).length,
+      exactDayTmsConflicts:rows.filter(row=>row.truthEvidence.tmsContradiction).length,
       snapshotRecoveredFinalRows:Number(snapshotEvidence.finalRows?.length||0),
       snapshotRecoveredScanRows:Number(snapshotEvidence.scanResults?.length||0),
       snapshotId:snapshotEvidence.snapshotId||''
