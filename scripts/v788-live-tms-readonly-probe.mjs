@@ -89,10 +89,6 @@ export async function runV788LiveTmsProbe({execute=false,samplePerDate=3,clientF
   fs.writeFileSync(target,JSON.stringify(result,null,2)+'\n','utf8');
   return {status:result.status,report:target,queries:result.queries};
 }
-if(process.argv[1]&&path.resolve(process.argv[1])===new URL(import.meta.url).pathname){
-  // Windows file URLs have a leading slash. Use fileURLToPath below in the
-  // outer CLI entrypoint guard rather than comparing platform-raw pathnames.
-}
 import {fileURLToPath} from 'node:url';
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
   const execute=process.argv.includes('--execute');
