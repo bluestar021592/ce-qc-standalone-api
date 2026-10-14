@@ -86,6 +86,21 @@ try{
   assert.equal(audit.sevenBusinessSource.byDate[1].whppIndependentSourceMembers,3);
   assert.equal(audit.sevenBusinessSource.byDate[1].completedValidUnifiedBatch,false);
   assert.equal(audit.sevenBusinessSource.byDate[1].sevenBusinessDistinctUnion,3);
+  // Newer VALID but PROCESSING must not fall back to previous complete S1.
+  db.prepare("INSERT INTO unified_import_batches VALUES('S2','2026-07-01','2026-07-01 11:00:00','B2','VALID')").run();
+  db.prepare("INSERT INTO unified_snapshots VALUES('S2','PROCESSING')").run();
+  db.prepare("INSERT INTO unified_import_rows VALUES('S2','CE','NEW_UNFINISHED_MEMBER')").run();
+  const blocked=auditV788Readonly(db);
+  assert.deepEqual(blocked.sevenBusinessSource.blockedDates,['2026-07-01']);
+  assert.equal(blocked.sevenBusinessSource.byDate[0].completedValidUnifiedBatch,false);
+  assert.equal(blocked.sevenBusinessSource.byDate[0].sixBusinessRows,0,
+    'older complete S1 cannot count as the latest source after S2 starts');
+  assert.equal(blocked.sevenBusinessSource.byDate[0].reconciled,false);
+  db.prepare("UPDATE unified_snapshots SET status='COMPLETED' WHERE snapshotId='S2'").run();
+  const completed=auditV788Readonly(db);
+  assert.equal(completed.sevenBusinessSource.byDate[0].sixBusinessRows,1);
+  assert.equal(completed.sevenBusinessSource.byDate[0].completedValidUnifiedBatch,true);
+  assert.equal(completed.sevenBusinessSource.byDate[0].sixBusinessCounts.CE,1);
   assert.equal(audit.whpp.byDate[0].trustedPodTimeCoveragePct,100);
   assert.equal(audit.whpp.byDate[1].trustedPodTimeCoveragePct,0);
 

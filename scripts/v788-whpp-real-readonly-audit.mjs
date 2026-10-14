@@ -79,9 +79,12 @@ function sevenBusinessSourceConservation(db,whppRows=[]){
   if(!['unified_import_batches','unified_snapshots','unified_import_rows'].every(table))
     return {available:false,reason:'UNIFIED_SOURCE_TABLES_MISSING',byDate:[]};
   const latest=new Map();
-  const batches=db.prepare("SELECT b.reportDate,b.snapshotId,b.createdAt,b.batchId FROM unified_import_batches b "+
-    "JOIN unified_snapshots s ON s.snapshotId=b.snapshotId "+
-    "WHERE b.status='VALID' AND s.status='COMPLETED' ORDER BY b.reportDate ASC,b.createdAt DESC,b.batchId DESC").all();
+  // Match production listLatestValidRangeBatches: newest VALID source wins
+  // BEFORE its completion is checked. Never audit an older COMPLETED
+  // snapshot as current when a newer valid import remains unfinished.
+  const batches=db.prepare("SELECT b.reportDate,b.snapshotId,b.createdAt,b.batchId,s.status snapshotStatus "+
+    "FROM unified_import_batches b JOIN unified_snapshots s ON s.snapshotId=b.snapshotId "+
+    "WHERE b.status='VALID' ORDER BY b.reportDate ASC,b.createdAt DESC,b.batchId DESC").all();
   for(const b of batches)if(!latest.has(b.reportDate))latest.set(b.reportDate,b);
   const whppByDate=new Map();
   for(const row of whppRows){
@@ -92,7 +95,10 @@ function sevenBusinessSourceConservation(db,whppRows=[]){
   const dates=[...new Set([...latest.keys(),...whppByDate.keys()])].sort();
   const sourceBySnapshot=db.prepare("SELECT businessType,UPPER(TRIM(shipmentCode)) code FROM unified_import_rows WHERE snapshotId=?");
   const byDate=dates.map(date=>{
-    const batch=latest.get(date);
+    const newest=latest.get(date);
+    const snapshotStatus=String(newest?.snapshotStatus||'').toUpperCase();
+    const batch=snapshotStatus==='COMPLETED'?newest:null;
+    const blockedByUnfinishedValidBatch=Boolean(newest&&!batch);
     const whpp=whppByDate.get(date)||new Set();
     const groups=Object.fromEntries(GROUPS.map(x=>[x,0]));
     const seenByGroup=new Set(),unifiedCodes=new Set();
@@ -115,16 +121,23 @@ function sevenBusinessSourceConservation(db,whppRows=[]){
     const whppOverlap=[...whpp].filter(bill=>unifiedCodes.has(bill)).length;
     const union=new Set([...unifiedCodes,...whpp]).size;
     const sourceSum=uniqueBusinessEntries+whpp.size;
-    return {date,completedValidUnifiedBatch:Boolean(batch),sixBusinessRows:unifiedRows,
+    return {date,latestValidUnifiedBatchPresent:Boolean(newest),
+      completedValidUnifiedBatch:Boolean(batch),
+      latestValidUnifiedSnapshotStatus:snapshotStatus||'NONE',
+      blockedByUnfinishedValidBatch,
+      sixBusinessRows:unifiedRows,
       sixBusinessCounts:groups,sixBusinessUniqueWithinGroups:uniqueBusinessEntries,
       duplicateBusinessRows,crossBusinessDuplicates,outOfScopeRows,
       whppIndependentSourceMembers:whpp.size,whppOverlapWithSix:whppOverlap,
       sevenBusinessSourceSum:sourceSum,sevenBusinessDistinctUnion:union,
-      reconciled:sourceSum===union&&duplicateBusinessRows===0&&outOfScopeRows===0};
+      reconciled:!blockedByUnfinishedValidBatch&&sourceSum===union
+        &&duplicateBusinessRows===0&&outOfScopeRows===0};
   });
-  return {available:true,scope:'LATEST_VALID_COMPLETED_SOURCE_MEMBERSHIP_ONLY',
-    caveat:'Source conservation does not verify actual exported file contents, POD completion or signing timing.',
-    datesChecked:byDate.length,byDate};
+  return {available:true,scope:'LATEST_VALID_SOURCE_WITH_COMPLETION_GATE',
+    caveat:'Latest VALID but unfinished dates are blocked, not replaced by older COMPLETED batches. Source conservation does not verify actual exported file contents, POD completion or signing timing.',
+    datesChecked:byDate.length,
+    blockedDates:byDate.filter(d=>d.blockedByUnfinishedValidBatch).map(d=>d.date),
+    byDate};
 }
 export function auditV788Readonly(db){
   db.exec('PRAGMA query_only=ON');
