@@ -341,7 +341,10 @@ async function runOne(type,date,snapshotId=''){
     :V740_CONFIRM_FIRST_TIMING_REPAIR_REVISION;
   const bills=selectedDatePodBills(type,date,snapshotId);
   patch(type,date,snapshotId,{status:'RUNNING',phase:'TRACK_QUERY',total:bills.length,completed:0,failed:0,queried:0,startedAt:now(),message:`${type} ${date} 签收时效补证：真实POD ${bills.length}票`});
-  if(!bills.length)return patch(type,date,snapshotId,{status:'WAITING_FOR_POD_MEMBERS',phase:'WAITING_FOR_POD_MEMBERS',completedAt:now(),message:`${type} ${date} 当前尚未形成真实POD成员；等待扫描/轨迹处理完成后自动重试。`});
+  // WHPP has a separate exact-day source: returned/returning members need
+  // shipmentStatus verification even if no POD member has formed yet.
+  const hasWhppSource=type==='WHPP'&&selectedDateShipmentStatusBills(type,date,snapshotId).length>0;
+  if(!bills.length&&!hasWhppSource)return patch(type,date,snapshotId,{status:'WAITING_FOR_POD_MEMBERS',phase:'WAITING_FOR_POD_MEMBERS',completedAt:now(),message:`${type} ${date} 当前尚未形成真实POD成员；等待扫描/轨迹处理完成后自动重试。`});
   const client=new CEClient();
 
   let apiFailureBills=0;
