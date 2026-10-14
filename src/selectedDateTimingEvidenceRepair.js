@@ -12,7 +12,7 @@ import { normalizeV485TrackRows, archiveV485TrackQueryResponse } from './v485Str
 import { persistentSelectedDatePodTruth } from './selectedDatePersistentTruth.js';
 import { classifyShipmentStatus, shipmentStatusTime } from './shipmentStatusTruth.js';
 import { explicitWhppTms60PodTime,explicitWhppConfirm85PodTime } from './whppPodTimeEvidence.js';
-import { shouldRunSelectedDateEvidence, whppStatusEvidenceHasGaps, hasDirectTmsShipmentStatus } from './v788WhppStatusCoverage.js';
+import { shouldRunSelectedDateEvidence, whppStatusEvidenceHasGaps, hasDirectTmsShipmentStatus, classifyWhppTmsError } from './v788WhppStatusCoverage.js';
 import { extractV498SavedShopeePodEvidence } from './v498SavedShopeePodEvidence.js';
 
 export const V645_SELECTED_DATE_TIMING_REPAIR_ID='2026-10-05-v645-selected-date-pod-track-repair-v1';
@@ -127,7 +127,14 @@ function stateFor(type,date,snapshotId=''){
 function patch(type,date,snapshotId='',value={}){
   const typeN=typeKey(type),dateN=dateKey(date),snap=snapshotKey(snapshotId),key=keyOf(typeN,dateN,snap);
   const next={...stateFor(typeN,dateN,snap),...value,businessType:typeN,reportDate:dateN,snapshotId:snap,id:V645_SELECTED_DATE_TIMING_REPAIR_ID,updatedAt:now()};
-  states.set(key,next);return next;
+  states.set(key,next);
+  // Save the last known status wave and FAILED state, not just the final
+  // result. If a process stops after a partial API response, the next
+  // readonly audit must still see the counts already observed.
+  if(typeN==='WHPP'&&Number(next.statusSourceMembers||0)>0
+    &&['SHIPMENT_STATUS_QUERY','FAILED','DONE'].includes(String(value.phase||'')))
+    saveWhppTimingDiagnostic(typeN,dateN,next);
+  return next;
 }
 function unique(values=[]){return [...new Set(values.map(v=>String(v||'').trim().toUpperCase()).filter(Boolean))].sort();}
 
@@ -427,6 +434,12 @@ async function runOne(type,date,snapshotId=''){
     ?whppSourceBills
     :bills.filter(code=>!confirmTimedBills.has(code));
   const statusBatches=splitTrackBatches(statusBills),statusTimedBills=new Set();
+  if(type==='WHPP'&&statusBills.length)patch(type,date,snapshotId,{
+    status:'RUNNING',phase:'SHIPMENT_STATUS_QUERY',statusSourceMembers:statusBills.length,
+    statusQueried:0,statusFailed:0,statusApiRows:0,statusMatchedRows:0,
+    statusStatuslessRows:0,statusPersistedRows:0,statusEmptySuccessBatches:0,
+    statusFailureBatches:0,statusFailureTypes:{}
+  });
   let statusQueried=0,statusFailed=0,statusPersistedRows=0,status60=0,status60WithTime=0,status60WithoutTime=0;
   let statusApiRows=0,statusMatchedRows=0,statusStatuslessRows=0,statusEmptySuccessBatches=0,statusFailureBatches=0;
   const statusFailureTypes=new Map();
@@ -467,8 +480,7 @@ async function runOne(type,date,snapshotId=''){
       for(const failure of outcome.failures||[]){
         const n=(failure.batch||[]).length;statusFailed+=n;apiFailureBills+=n;
         statusFailureBatches++;
-        const raw=String(failure.error?.code||failure.error?.name||'UNKNOWN').toUpperCase();
-        const category=/AUTH|LOGIN|TOKEN|UNAUTHORIZED/.test(raw)?'AUTH':/TIMEOUT|ABORT/.test(raw)?'TIMEOUT':/RATE|LIMIT|429/.test(raw)?'RATE_LIMIT':/NETWORK|FETCH|CONNECTION/.test(raw)?'NETWORK':'OTHER';
+        const category=classifyWhppTmsError(failure.error);
         statusFailureTypes.set(category,(statusFailureTypes.get(category)||0)+1);
       }
     }
@@ -530,7 +542,6 @@ async function runOne(type,date,snapshotId=''){
     ?`${type} ${date} 部分接口请求失败 ${apiFailureBills}票；不代表历史轨迹不存在，保留重试。`
     :`${type} ${date} 补证完成：confirm85有时间 ${confirm85WithTime}票，shipmentStatus60有时间 ${status60WithTime}票，轨迹仍缺 ${failed}票。`)
     :`${type} ${date} 签收时效补证完成。`});
-  if(type==='WHPP')saveWhppTimingDiagnostic(type,date,finalState);
   return finalState;
 }
 async function pump(){
