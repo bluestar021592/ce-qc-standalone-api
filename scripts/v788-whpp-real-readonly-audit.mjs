@@ -5,7 +5,7 @@ import { trustedWhppPodTime } from '../src/whppPodTimeEvidence.js';
 // V788 read-only acceptance audit. Never prints shipment identifiers, names,
 // phone numbers, addresses, raw JSON or the database path. No writes, API calls,
 // cache regeneration, VACUUM, or application startup side effects.
-const VERSION='V788_WHPP_REAL_READONLY_AUDIT_V3';
+const VERSION='V788_WHPP_REAL_READONLY_AUDIT_V4';
 
 function safeObject(value){
   try { const v=JSON.parse(String(value||'{}')); return v&&typeof v==='object'?v:{}; }
@@ -45,6 +45,8 @@ function emptyDay(date){
     matchedPODAgainstScanOrFinal:0,matchedReturnAgainstFinal:0,
     conflictingTerminalEvidence:0,explicitPODTimeFromSavedEvidence:0,
     tms60InOtherEvidence:0,tms81InOtherEvidence:0,
+    savedTmsTrackMembers:0,savedTms60:0,savedTms80:0,savedTms81:0,
+    savedTmsUnknown:0,savedTmsCurrentConflict:0,
     hasFullMembershipNotVerifiedOutcome:false,
     savedPodLockMembers:0,trustedPodLockOnPOD:0,rejectedPodLockOnPOD:0,
     trustedPodLockOnNonPOD:0,ledgerOpenWithNormalizedTerminal:0,
@@ -149,6 +151,8 @@ export function auditV788Readonly(db){
   const active72=validateActive72(db);
   const rows=db.prepare("SELECT DISTINCT reportDate, UPPER(TRIM(shipmentCode)) shipmentCode FROM business_daily_parse_rows WHERE businessType='WHPP' AND TRIM(COALESCE(shipmentCode,''))<>'' ORDER BY reportDate,shipmentCode").all();
   const findCurrent=db.prepare("SELECT state,stateJson FROM shipment_current_state WHERE shipmentCode=? AND businessType='WHPP' AND reportDate=?");
+  const hasTrackTable=Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='business_shipment_tracks'").get());
+  const findTms=hasTrackTable?db.prepare("SELECT shipmentStatus,rawJson FROM business_shipment_tracks WHERE businessType='WHPP' AND shipmentCode=? AND reportDate=? ORDER BY rowid DESC LIMIT 1"):null;
   const findLedger=db.prepare("SELECT trackingStatus,terminalReason FROM qc_tracking_ledger WHERE shipmentCode=? AND businessType='WHPP'");
   const findScan=db.prepare("SELECT isPod,orderStatus,rawJson FROM business_scan_results WHERE shipmentCode=? AND businessType='WHPP' AND reportDate=? LIMIT 1");
   const findFinal=db.prepare("SELECT isPod,primaryCategory,rawJson FROM business_final_rows WHERE shipmentCode=? AND businessType='WHPP' AND reportDate=? LIMIT 1");
@@ -162,7 +166,21 @@ export function auditV788Readonly(db){
     const current=findCurrent.get(row.shipmentCode,day);
     const raw=safeObject(current?.stateJson);
     const state=String(current?.state||raw.currentState||'').trim().toUpperCase();
-    const status=String(raw.shipmentStatus||raw?.shipmentTrack?.shipmentStatus||'').trim();
+    const currentStatus=terminalStatusFrom(raw);
+    const tmsRow=findTms?.get(row.shipmentCode,day);
+    const tmsRaw=safeObject(tmsRow?.rawJson);
+    const savedStatus=String(tmsRow?.shipmentStatus||terminalStatusFrom(tmsRaw)||'').trim();
+    if(tmsRow){
+      d.savedTmsTrackMembers++;
+      if(savedStatus==='60')d.savedTms60++;
+      else if(savedStatus==='80')d.savedTms80++;
+      else if(savedStatus==='81')d.savedTms81++;
+      else d.savedTmsUnknown++;
+      if(currentStatus&&savedStatus&&currentStatus!==savedStatus)d.savedTmsCurrentConflict++;
+    }
+    // The independently persisted TMS row has priority over a legacy stateJson label.
+    // A missing TMS record is not itself proof of a terminal event.
+    const status=savedStatus||currentStatus;
     const bucket=truthCategory(state,status);
     d[bucket]++;
     if(current)d.withCurrent++;
@@ -239,6 +257,8 @@ export function auditV788Readonly(db){
       'matchedPODAgainstScanOrFinal','matchedReturnAgainstFinal',
       'conflictingTerminalEvidence','explicitPODTimeFromSavedEvidence',
       'tms60InOtherEvidence','tms81InOtherEvidence',
+      'savedTmsTrackMembers','savedTms60','savedTms80','savedTms81',
+      'savedTmsUnknown','savedTmsCurrentConflict',
       'savedPodLockMembers','trustedPodLockOnPOD','rejectedPodLockOnPOD',
       'trustedPodLockOnNonPOD','ledgerOpenWithNormalizedTerminal',
       'ledgerTerminalWithNonterminal','ledgerTerminalContradictingTms'])totals[key]+=d[key];
@@ -252,7 +272,7 @@ export function auditV788Readonly(db){
   totals.trustedPodTimeCoveragePct=totals.normalizedPOD>0
     ?Math.round(totals.trustedPodLockOnPOD/totals.normalizedPOD*10000)/100:null;
   return {version:VERSION,readOnly:true,source:'local-database-copy',
-    limitations:'Counts show saved labels and locally stored scan/final evidence separately; record presence is not proof that API scans succeeded, and no TMS 60/81 means strict terminal status is unverified. Saved POD-lock coverage counts only member-matched POD records with whitelisted evidence provenance, valid timestamp and a date on or after their daily source date. It does not establish external TMS confirmation or full signature-time accuracy.',
+    limitations:'Reads independently saved business_shipment_tracks status first, falls back to current stateJson only when unavailable. Counts show saved labels and locally stored scan/final evidence separately; record presence is not proof that API scans succeeded, and no TMS 60/81 means strict terminal status is unverified. Saved POD-lock coverage counts only member-matched POD records with whitelisted evidence provenance, valid timestamp and a date on or after their daily source date. It does not establish external TMS confirmation or full signature-time accuracy.',
     active72,whpp:{byDate,totals},
     sevenBusinessSource:sevenBusinessSourceConservation(db,rows)};
 }
