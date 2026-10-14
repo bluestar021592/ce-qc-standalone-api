@@ -36,6 +36,17 @@ function reportAgeDays(date){
   const stamp=Date.parse(d+'T00:00:00+07:00');if(!Number.isFinite(stamp))return 0;
   return Math.floor((Date.now()-stamp)/86400000);
 }
+export function canDurablyStopHistoricalRepair({
+  billsCount=0,timedCount=0,completed=0,failed=0,trackBillsCount=0,
+  persistedEvents=0,ageDays=0,apiFailureBills=0
+}={}){
+  // Auth/transport failures are not proof that historical records have no
+  // tracking evidence. Never write an irreversible old-date stop on API error.
+  return billsCount>0&&timedCount===0&&completed===0
+    &&failed>=trackBillsCount&&persistedEvents===0
+    &&ageDays>HISTORICAL_AUTO_REPAIR_MAX_AGE_DAYS&&apiFailureBills===0;
+}
+
 function readDurableStop(type,date){
   try{
     const row=getDb().prepare('SELECT valueJson,updatedAt FROM app_state WHERE key=?').get(durableStopKey(type,date));
@@ -291,6 +302,7 @@ async function runOne(type,date,snapshotId=''){
   if(!bills.length)return patch(type,date,snapshotId,{status:'WAITING_FOR_POD_MEMBERS',phase:'WAITING_FOR_POD_MEMBERS',completedAt:now(),message:`${type} ${date} 当前尚未形成真实POD成员；等待扫描/轨迹处理完成后自动重试。`});
   const client=new CEClient();
 
+  let apiFailureBills=0;
   const confirmBatches=splitTrackBatches(bills),confirmTimedBills=new Set();
   let confirmQueried=0,confirmFailed=0,confirmPersistedRows=0,confirm85=0,confirm85WithTime=0,confirm85WithoutTime=0;
   for(let offset=0;offset<confirmBatches.length;offset+=4){
@@ -313,7 +325,9 @@ async function runOne(type,date,snapshotId=''){
           else confirm85WithoutTime++;
         }
       }
-      for(const failure of outcome.failures||[])confirmFailed+=(failure.batch||[]).length;
+      for(const failure of outcome.failures||[]){
+        const n=(failure.batch||[]).length;confirmFailed+=n;apiFailureBills+=n;
+      }
     }
     patch(type,date,snapshotId,{
       status:'RUNNING',phase:'CONFIRM_QUERY',confirmQueried,confirmFailed,confirmPersistedRows,confirm85,confirm85WithTime,confirm85WithoutTime,
@@ -352,7 +366,9 @@ async function runOne(type,date,snapshotId=''){
           else status60WithoutTime++;
         }
       }
-      for(const failure of outcome.failures||[])statusFailed+=(failure.batch||[]).length;
+      for(const failure of outcome.failures||[]){
+        const n=(failure.batch||[]).length;statusFailed+=n;apiFailureBills+=n;
+      }
     }
     patch(type,date,snapshotId,{
       status:'RUNNING',phase:'SHIPMENT_STATUS_QUERY',statusQueried,statusFailed,statusPersistedRows,status60,status60WithTime,status60WithoutTime,
@@ -382,11 +398,17 @@ async function runOne(type,date,snapshotId=''){
           if(rows.length){persistedEvents+=persistBillEvents(type,date,code,rows);completed+=1}else failed+=1;
         }
       }
-      for(const failure of outcome.failures||[])failed+=(failure.batch||[]).length;
+      for(const failure of outcome.failures||[]){
+        const n=(failure.batch||[]).length;failed+=n;apiFailureBills+=n;
+      }
     }
     patch(type,date,snapshotId,{status:'RUNNING',phase:'TRACK_QUERY',completed,failed,queried,persistedEvents,confirmQueried,confirmFailed,confirmPersistedRows,confirm85,confirm85WithTime,confirm85WithoutTime,statusQueried,statusFailed,statusPersistedRows,status60,status60WithTime,status60WithoutTime,repairRevision,message:`${type} ${date} 轨迹补证 ${Math.min(offset+4,totalBatches)}/${totalBatches}批：已有POD时间 ${timedBills.size}，轨迹成功 ${Math.max(0,completed-timedBills.size)}，失败 ${failed}`});
   }
-  if(bills.length>0&&timedBills.size===0&&completed===0&&failed>=trackBills.length&&persistedEvents===0&&reportAgeDays(date)>HISTORICAL_AUTO_REPAIR_MAX_AGE_DAYS){
+  if(canDurablyStopHistoricalRepair({
+    billsCount:bills.length,timedCount:timedBills.size,completed,failed,
+    trackBillsCount:trackBills.length,persistedEvents,
+    ageDays:reportAgeDays(date),apiFailureBills
+  })){
     const durable=writeDurableStop(
       type,date,snapshotId,bills.length,
       `${type} ${date} 已完成一次实时轨迹补证，但仍未取得真实60/70→80轨迹；为避免重复无效查询，后续自动补查已停止。`,
@@ -394,7 +416,10 @@ async function runOne(type,date,snapshotId=''){
     );
     return patch(type,date,snapshotId,durable);
   }
-  return patch(type,date,snapshotId,{status:failed?'COMPLETED_WITH_GAPS':'COMPLETED',phase:'DONE',completed,failed,queried,persistedEvents,confirmQueried,confirmFailed,confirmPersistedRows,confirm85,confirm85WithTime,confirm85WithoutTime,statusQueried,statusFailed,statusPersistedRows,status60,status60WithTime,status60WithoutTime,repairRevision,completedAt:now(),message:failed?`${type} ${date} 补证完成：confirm85有时间 ${confirm85WithTime}票，shipmentStatus60有时间 ${status60WithTime}票，轨迹仍缺 ${failed}票。`:`${type} ${date} 签收时效补证完成。`});
+  return patch(type,date,snapshotId,{status:failed?'COMPLETED_WITH_GAPS':'COMPLETED',phase:'DONE',completed,failed,queried,persistedEvents,apiFailureBills,confirmQueried,confirmFailed,confirmPersistedRows,confirm85,confirm85WithTime,confirm85WithoutTime,statusQueried,statusFailed,statusPersistedRows,status60,status60WithTime,status60WithoutTime,repairRevision,completedAt:now(),message:failed?(apiFailureBills>0
+    ?`${type} ${date} 部分接口请求失败 ${apiFailureBills}票；不代表历史轨迹不存在，保留重试。`
+    :`${type} ${date} 补证完成：confirm85有时间 ${confirm85WithTime}票，shipmentStatus60有时间 ${status60WithTime}票，轨迹仍缺 ${failed}票。`)
+    :`${type} ${date} 签收时效补证完成。`});
 }
 async function pump(){
   if(runningKey||!queue.size)return;
