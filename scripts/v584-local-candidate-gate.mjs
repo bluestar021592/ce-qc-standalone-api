@@ -140,6 +140,7 @@ const TASKS=[
   ['node',['scripts/v788-real-acceptance-verdict-smoke.mjs']],
   ['node',['scripts/v788-isolated-runner-smoke.mjs']],
   ['node',['scripts/v788-whpp-saved-tms-bridge-smoke.mjs']],
+  ['node',['scripts/v788-whpp-status60-explicit-time-smoke.mjs']],
   ['node',['scripts/v788-ledger-tms-precedence-smoke.mjs']],
   ['node',['scripts/v788-actual-excel-date-ownership-smoke.mjs']],
   ['node',['scripts/v776-qc-closed-waybill-lookup-smoke.mjs']],
