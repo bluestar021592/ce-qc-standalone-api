@@ -7,7 +7,7 @@ const home=fs.readFileSync('src/homeQualitySummary.js','utf8');
 
 assert.match(repair,/V740_CONFIRM_FIRST_TIMING_REPAIR_REVISION/,'V740 repair revision missing');
 assert.match(repair,/client\.confirmQuery\(codes\)/,'historical POD timing must query confirm endpoint without re-uploading the daily report');
-assert.match(repair,/persistConfirmRows\(type,date,rows\)/,'live confirm rows must persist into selected-date scan evidence');
+assert.match(repair,/persistConfirmRows\(type,date,rows,null,success\.batch\|\|\[\]\)/,'live confirm rows must persist only for members in their exact requested batch');
 assert.match(repair,/confirm85WithTime/,'orderStatus=85 with real timestamp counter missing');
 assert.match(repair,/confirm85WithoutTime/,'orderStatus=85 without timestamp counter missing');
 assert.match(repair,/selectedDateShipmentStatusBills\(type,date,snapshotId\)/,'WHPP must verify all independent source 60\/80\/81 members even when confirm previously provided POD time');
