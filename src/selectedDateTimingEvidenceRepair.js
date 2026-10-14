@@ -49,6 +49,37 @@ export function canDurablyStopHistoricalRepair({
     &&ageDays>HISTORICAL_AUTO_REPAIR_MAX_AGE_DAYS&&apiFailureBills===0;
 }
 
+const lastTimingDiagnosticKey=(type,date)=>'selected_date_timing_diag:'+typeKey(type)+':'+dateKey(date);
+// Persist only aggregate counters. Never store waybills, raw API payloads,
+// credentials or raw error messages in diagnostic checkpoints.
+function saveWhppTimingDiagnostic(type,date,result={}){
+  if(typeKey(type)!=='WHPP')return false;
+  const n=key=>Math.max(0,Math.floor(Number(result[key])||0));
+  const failures={};
+  for(const key of ['AUTH','TIMEOUT','RATE_LIMIT','NETWORK','OTHER']){
+    if(Object.hasOwn(result.statusFailureTypes||{},key))
+      failures[key]=Math.max(0,Math.floor(Number(result.statusFailureTypes[key])||0));
+  }
+  const value={
+    version:'V788_WHPP_TIMING_DIAGNOSTICS_V1',
+    reportDate:dateKey(date),
+    status:String(result.status||'').slice(0,50),
+    statusSourceMembers:n('statusSourceMembers'),statusQueried:n('statusQueried'),
+    statusFailed:n('statusFailed'),statusApiRows:n('statusApiRows'),
+    statusMatchedRows:n('statusMatchedRows'),statusStatuslessRows:n('statusStatuslessRows'),
+    statusPersistedRows:n('statusPersistedRows'),
+    statusEmptySuccessBatches:n('statusEmptySuccessBatches'),
+    statusFailureBatches:n('statusFailureBatches'),
+    statusFailureTypes:failures,updatedAt:now()
+  };
+  try{
+    getDb().prepare(`INSERT INTO app_state(key,valueJson,updatedAt) VALUES(?,?,?)
+      ON CONFLICT(key) DO UPDATE SET valueJson=excluded.valueJson,updatedAt=excluded.updatedAt`)
+      .run(lastTimingDiagnosticKey(type,date),JSON.stringify(value),value.updatedAt);
+    return true;
+  }catch{return false}
+}
+
 function readDurableStop(type,date){
   try{
     const row=getDb().prepare('SELECT valueJson,updatedAt FROM app_state WHERE key=?').get(durableStopKey(type,date));
@@ -493,12 +524,14 @@ async function runOne(type,date,snapshotId=''){
     );
     return patch(type,date,snapshotId,durable);
   }
-  return patch(type,date,snapshotId,{status:(failed||statusEvidenceHasGaps)?'COMPLETED_WITH_GAPS':'COMPLETED',phase:'DONE',statusEvidenceHasGaps,statusMissingMembers,completed,failed,queried,persistedEvents,apiFailureBills,confirmQueried,confirmFailed,confirmPersistedRows,confirm85,confirm85WithTime,confirm85WithoutTime,statusQueried,statusFailed,statusPersistedRows,status60,status60WithTime,status60WithoutTime,statusSourceMembers:statusBills.length,statusApiRows,statusMatchedRows,statusStatuslessRows,statusEmptySuccessBatches,statusFailureBatches,statusFailureTypes:Object.fromEntries(statusFailureTypes),repairRevision,completedAt:now(),message:(failed||statusEvidenceHasGaps)?(statusEvidenceHasGaps
+  const finalState=patch(type,date,snapshotId,{status:(failed||statusEvidenceHasGaps)?'COMPLETED_WITH_GAPS':'COMPLETED',phase:'DONE',statusEvidenceHasGaps,statusMissingMembers,completed,failed,queried,persistedEvents,apiFailureBills,confirmQueried,confirmFailed,confirmPersistedRows,confirm85,confirm85WithTime,confirm85WithoutTime,statusQueried,statusFailed,statusPersistedRows,status60,status60WithTime,status60WithoutTime,statusSourceMembers:statusBills.length,statusApiRows,statusMatchedRows,statusStatuslessRows,statusEmptySuccessBatches,statusFailureBatches,statusFailureTypes:Object.fromEntries(statusFailureTypes),repairRevision,completedAt:now(),message:(failed||statusEvidenceHasGaps)?(statusEvidenceHasGaps
     ?`${type} ${date} TMS原始状态证据未覆盖全部来源票：来源 ${statusBills.length}，保存 ${statusPersistedRows}，缺失至少 ${statusMissingMembers}，接口失败 ${statusFailed}。补证仍有缺口，不能视为业务闭环。`
     :apiFailureBills>0
     ?`${type} ${date} 部分接口请求失败 ${apiFailureBills}票；不代表历史轨迹不存在，保留重试。`
     :`${type} ${date} 补证完成：confirm85有时间 ${confirm85WithTime}票，shipmentStatus60有时间 ${status60WithTime}票，轨迹仍缺 ${failed}票。`)
     :`${type} ${date} 签收时效补证完成。`});
+  if(type==='WHPP')saveWhppTimingDiagnostic(type,date,finalState);
+  return finalState;
 }
 async function pump(){
   if(runningKey||!queue.size)return;
