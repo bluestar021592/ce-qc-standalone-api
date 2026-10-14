@@ -827,7 +827,7 @@ function filterActiveCarryMembers(bills=[],businessType='',reportDate='',db=getD
 function overlaySavedTerminalExportTruth(rows=[],db=getDb()){
   const bills=[...new Set(rows.map(billOf).filter(Boolean))];
   if(!bills.length)return rows;
-  const closed=new Map();
+  const closed=new Map(),sameDayCurrentStates=new Map();
   for(let i=0;i<bills.length;i+=300){
     const chunk=bills.slice(i,i+300),marks=chunk.map(()=>'?').join(',');
     try{
@@ -843,10 +843,12 @@ function overlaySavedTerminalExportTruth(rows=[],db=getDb()){
       }
     }catch{}
     try{
-      const states=db.prepare(`SELECT shipmentCode,businessType,state,stateJson,lastEventTime
+      const states=db.prepare(`SELECT shipmentCode,businessType,reportDate,state,stateJson,lastEventTime
         FROM shipment_current_state WHERE shipmentCode IN (${marks})`).all(...chunk);
       for(const row of states){
         const bill=String(row.shipmentCode||'').toUpperCase();
+        sameDayCurrentStates.set(String(row.reportDate||'').slice(0,10)+'|'+bill,
+          String(row.state||'').trim().toUpperCase());
         // Exact saved 60/80/81 statuses supersede stale ledger terminals.
         // Without a numeric TMS status, retain any verified ledger terminal.
         // 80 can never close POD or return, even if the old normalized label
@@ -881,8 +883,51 @@ function overlaySavedTerminalExportTruth(rows=[],db=getDb()){
       }
     }catch{}
   }
+  // The timing-repair worker persists /api/tms-shipment/track responses in
+  // business_shipment_tracks without rewriting the imported source state.
+  // Join ONLY exact WHPP business, date and member. Missing table/evidence
+  // is normal: it must never create a fake terminal.
+  const persistedWhppStatus=new Map();
+  const whppByDate=new Map();
+  for(const row of rows){
+    if(String(row.businessType||'').toUpperCase()!=='WHPP')continue;
+    const date=String(row.reportDate||'').slice(0,10),bill=billOf(row);
+    if(!date||!bill)continue;
+    if(!whppByDate.has(date))whppByDate.set(date,new Set());
+    whppByDate.get(date).add(bill);
+  }
+  for(const [date,set] of whppByDate){
+    const members=[...set];
+    for(let i=0;i<members.length;i+=300){
+      const group=members.slice(i,i+300),marks=group.map(()=>'?').join(',');
+      try{
+        const evidence=db.prepare(`SELECT shipmentCode,shipmentStatus
+          FROM business_shipment_tracks
+          WHERE businessType='WHPP' AND reportDate=? AND shipmentCode IN (${marks})
+          ORDER BY updatedAt ASC`).all(date,...group);
+        for(const hit of evidence){
+          const code=String(hit.shipmentStatus||'').trim(),bill=String(hit.shipmentCode||'').toUpperCase();
+          if(['60','80','81'].includes(code))persistedWhppStatus.set(date+'|'+bill,code);
+        }
+      }catch{} // Legacy databases may not have this optional evidence table.
+    }
+  }
   return rows.map(row=>{
-    const fact=closed.get(billOf(row));
+    const bill=billOf(row);
+    const date=String(row.reportDate||'').slice(0,10);
+    let fact=closed.get(bill);
+    const saved=String(row.businessType||'').toUpperCase()==='WHPP'
+      ?persistedWhppStatus.get(date+'|'+bill):null;
+    if(saved){
+      const oldState=sameDayCurrentStates.get(date+'|'+bill)||'';
+      const contradiction=(saved==='60'&&['RETURNED','RETURN_COMPLETED','RETURN_IN_PROGRESS','RETURNING'].includes(oldState))
+        ||(saved==='81'&&['POD','RETURN_IN_PROGRESS','RETURNING'].includes(oldState))
+        ||(saved==='80'&&['POD','RETURNED','RETURN_COMPLETED'].includes(oldState));
+      fact={outcome:contradiction?'CONFLICT':saved==='60'?'POD':saved==='81'?'RETURNED':'RETURNING',
+        businessType:'WHPP',podTime:'',eventTime:'',
+        strictTms:!contradiction&&saved!=='80',terminalCode:saved,
+        contradiction,source:'SAVED_WHPP_EXACT_DAY_TMS_TRACK'};
+    }
     if(!fact||fact.businessType&&fact.businessType!==String(row.businessType||'').toUpperCase())return row;
     if(fact.outcome==='CONFLICT')return {...row,isPod:0,是否POD:'否',POD状态:'',是否退回:'否',
       currentState:'PENDING_VERIFICATION',primaryCategory:'终态矛盾待核验',
@@ -916,7 +961,8 @@ function overlaySavedTerminalExportTruth(rows=[],db=getDb()){
         }:{}),
         lastEventTime:fact.eventTime||row.lastEventTime||'',
         terminalEvidenceStatus:fact.strictTms?'STRICT_TMS':'NORMALIZED_LABEL_ONLY',
-        terminalEvidenceSource:fact.strictTms?'SAVED_STRICT_POD':'SAVED_NORMALIZED_POD_LABEL'};
+        terminalEvidenceSource:fact.source||(
+          fact.strictTms?'SAVED_STRICT_POD':'SAVED_NORMALIZED_POD_LABEL')};
     }
     if(fact.outcome==='RETURNED')return {...row,isPod:0,是否POD:'否',POD状态:'',是否退回:'是',退回状态:'已退回',
       currentState:'RETURNED',primaryCategory:'已退回',statusDesc:'已退回',状态说明:'已退回',
@@ -925,7 +971,8 @@ function overlaySavedTerminalExportTruth(rows=[],db=getDb()){
       truthEvidence:{...(row.truthEvidence||{}),pod:false,returned:true,
         currentTerminalStrict:fact.strictTms===true},
       terminalEvidenceStatus:fact.strictTms?'STRICT_TMS':'NORMALIZED_LABEL_ONLY',
-      terminalEvidenceSource:fact.strictTms?'SAVED_STRICT_RETURNED':'SAVED_NORMALIZED_RETURNED_LABEL'};
+      terminalEvidenceSource:fact.source||(
+        fact.strictTms?'SAVED_STRICT_RETURNED':'SAVED_NORMALIZED_RETURNED_LABEL')};
     if(fact.outcome==='RETURNING')return {...row,isPod:0,是否POD:'否',POD状态:'',是否退回:'否',
       退回状态:'退回中',订单取消:'否',currentState:'RETURNING',primaryCategory:'退回中',
       shipmentStatus:'80',statusDesc:'退回中',状态说明:'退回中',
