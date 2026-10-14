@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import {shouldRunSelectedDateEvidence,whppStatusEvidenceHasGaps} from '../src/v788WhppStatusCoverage.js';
+import {shouldRunSelectedDateEvidence,whppStatusEvidenceHasGaps,hasDirectTmsShipmentStatus} from '../src/v788WhppStatusCoverage.js';
+import {persistShipmentStatusRows} from '../src/selectedDateTimingEvidenceRepair.js';
 
 // Zero-POD WHPP must still query the whole exact-date source (incl. 80/81).
 assert.equal(shouldRunSelectedDateEvidence(0,56),true);
@@ -13,6 +14,15 @@ assert.equal(whppStatusEvidenceHasGaps('WHPP',{podMembers:0,sourceMembers:56,per
 assert.equal(whppStatusEvidenceHasGaps('WHPP',{podMembers:0,sourceMembers:56,persistedRows:56,failedMembers:0}),false);
 assert.equal(whppStatusEvidenceHasGaps('WHPP',{podMembers:290,sourceMembers:0,persistedRows:0,failedMembers:0}),true);
 assert.equal(whppStatusEvidenceHasGaps('SHOPEECN',{podMembers:0,sourceMembers:56,persistedRows:0,failedMembers:0}),false);
+assert.equal(hasDirectTmsShipmentStatus({shipmentStatus:'60'}),true);
+assert.equal(hasDirectTmsShipmentStatus({shipmentStatus:'80'}),true);
+assert.equal(hasDirectTmsShipmentStatus({shipmentStatus:81}),true);
+assert.equal(hasDirectTmsShipmentStatus({shipmentStatus:'10'}),true);
+assert.equal(hasDirectTmsShipmentStatus({shipmentStatus:''}),false);
+assert.equal(hasDirectTmsShipmentStatus({eventCode:'60'}),false);
+assert.equal(hasDirectTmsShipmentStatus({orderStatus:'85',statusText:'POD'}),false);
+assert.equal(hasDirectTmsShipmentStatus({shipmentStatus:'POD'}),false);
+
 const repairSource=fs.readFileSync('src/selectedDateTimingEvidenceRepair.js','utf8');
 assert.match(repairSource,/const whppSourceBills=type==='WHPP'\?selectedDateShipmentStatusBills/);
 assert.match(repairSource,/shouldRunSelectedDateEvidence\(bills\.length,whppSourceBills\.length\)/);
@@ -21,6 +31,31 @@ assert.match(repairSource,/if\(!statusEvidenceHasGaps&&canDurablyStopHistoricalR
 assert.match(repairSource,/status:\(failed\|\|statusEvidenceHasGaps\)\?'COMPLETED_WITH_GAPS':'COMPLETED'/);
 
 import { DatabaseSync } from 'node:sqlite';
+
+const savedDb=new DatabaseSync(':memory:');
+try{
+  savedDb.exec(`CREATE TABLE business_shipment_tracks(
+    businessType TEXT,shipmentCode TEXT,reportDate TEXT,shipmentStatus TEXT,
+    statusText TEXT,apiStatus TEXT,rawJson TEXT,createdAt TEXT,updatedAt TEXT)`);
+  savedDb.exec(`CREATE TABLE business_pod_locks(
+    businessType TEXT,shipmentCode TEXT,podTime TEXT,source TEXT,
+    createdAt TEXT,updatedAt TEXT,PRIMARY KEY(businessType,shipmentCode))`);
+  const day='2026-07-01',bill='A1';
+  assert.equal(persistShipmentStatusRows('WHPP',day,[{shipmentCode:bill,shipmentStatus:'60'}],savedDb,[bill]),1);
+  const saved=()=>savedDb.prepare('SELECT shipmentStatus FROM business_shipment_tracks WHERE businessType=? AND reportDate=? AND shipmentCode=?').get('WHPP',day,bill)?.shipmentStatus;
+  assert.equal(saved(),'60');
+  // An API row without direct TMS status can never erase older proof.
+  assert.equal(persistShipmentStatusRows('WHPP',day,[{shipmentCode:bill,eventCode:'81',statusText:'returned'}],savedDb,[bill]),0);
+  assert.equal(saved(),'60');
+  assert.equal(persistShipmentStatusRows('WHPP',day,[{shipmentCode:bill,shipmentStatus:''}],savedDb,[bill]),0);
+  assert.equal(saved(),'60');
+  assert.equal(persistShipmentStatusRows('WHPP',day,[{shipmentCode:'OTHER',shipmentStatus:'81'}],savedDb,[bill]),0);
+  assert.equal(savedDb.prepare('SELECT COUNT(*) AS n FROM business_shipment_tracks').get().n,1);
+  // An actual direct status can replace prior status for the exact member.
+  assert.equal(persistShipmentStatusRows('WHPP',day,[{shipmentCode:bill,shipmentStatus:'81'}],savedDb,[bill]),1);
+  assert.equal(saved(),'81');
+}finally{savedDb.close();}
+
 import { auditV788Readonly,truthCategory } from './v788-whpp-real-readonly-audit.mjs';
 assert.equal(truthCategory('PENDING_SCAN','60'),'latePODPendingState');
 assert.equal(truthCategory('OPEN','81'),'lateReturnedPendingState');
