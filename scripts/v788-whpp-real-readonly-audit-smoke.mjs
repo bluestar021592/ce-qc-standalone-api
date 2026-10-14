@@ -2,8 +2,16 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {shouldRunSelectedDateEvidence,whppStatusEvidenceHasGaps,hasDirectTmsShipmentStatus,classifyWhppTmsError} from '../src/v788WhppStatusCoverage.js';
 import {persistShipmentStatusRows} from '../src/selectedDateTimingEvidenceRepair.js';
-import {summarizeWhppTmsProbe,runV788LiveTmsProbe} from './v788-live-tms-readonly-probe.mjs';
+import {summarizeWhppTmsProbe,runV788LiveTmsProbe,selectWhppProbeSample} from './v788-live-tms-readonly-probe.mjs';
 
+// Sample one saved POD candidate and one returned candidate, without
+// trusting their old labels as a terminal TMS result.
+const sampleStates=new Map([['A1','POD'],['A2','POD'],['R1','RETURNED'],['R2','RETURNED'],['N1','OPEN']]);
+const sampled=selectWhppProbeSample(['A1','A2','R1','R2','N1'],sampleStates,3);
+assert.equal(sampled.length,3);
+assert.equal(sampled.some(code=>sampleStates.get(code)==='POD'),true);
+assert.equal(sampled.some(code=>sampleStates.get(code)==='RETURNED'),true);
+assert.equal(selectWhppProbeSample(['A1','R1'],sampleStates,99).length,2);
 const dryProbe=await runV788LiveTmsProbe();
 assert.equal(dryProbe.status,'DRY_RUN','a probe without --execute must not touch database, credentials, or remote API');
 const probeSummary=summarizeWhppTmsProbe(['A1','A2','A3'],[
