@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import {shouldRunSelectedDateEvidence,whppStatusEvidenceHasGaps,hasDirectTmsShipmentStatus} from '../src/v788WhppStatusCoverage.js';
+import {shouldRunSelectedDateEvidence,whppStatusEvidenceHasGaps,hasDirectTmsShipmentStatus,classifyWhppTmsError} from '../src/v788WhppStatusCoverage.js';
 import {persistShipmentStatusRows} from '../src/selectedDateTimingEvidenceRepair.js';
 
 // Zero-POD WHPP must still query the whole exact-date source (incl. 80/81).
@@ -23,7 +23,20 @@ assert.equal(hasDirectTmsShipmentStatus({eventCode:'60'}),false);
 assert.equal(hasDirectTmsShipmentStatus({orderStatus:'85',statusText:'POD'}),false);
 assert.equal(hasDirectTmsShipmentStatus({shipmentStatus:'POD'}),false);
 
+// Errors must be classified without retaining raw API texts or credential strings.
+assert.equal(classifyWhppTmsError({ceStatus:401,message:'expired'}),'AUTH');
+assert.equal(classifyWhppTmsError({response:{status:403}}),'AUTH');
+assert.equal(classifyWhppTmsError({code:'BATCH_TIME_BUDGET_EXCEEDED'}),'TIMEOUT');
+assert.equal(classifyWhppTmsError({code:'ECONNRESET'}),'NETWORK');
+assert.equal(classifyWhppTmsError({status:429}),'RATE_LIMIT');
+assert.equal(classifyWhppTmsError(new Error('unknown TMS')),'OTHER');
 const repairSource=fs.readFileSync('src/selectedDateTimingEvidenceRepair.js','utf8');
+assert.match(repairSource,/saveWhppTimingDiagnostic\(typeN,dateN,next\)/,
+  'each WHPP status-query wave must persist diagnostic counts');
+assert.match(repairSource,/\['SHIPMENT_STATUS_QUERY','FAILED','DONE'\]/,
+  'even failed or interrupted runs must retain the last status-wave diagnostics');
+assert.match(repairSource,/classifyWhppTmsError\(failure\.error\)/,
+  'status errors must normalize auth, timeout and network failures');
 assert.match(repairSource,/const whppSourceBills=type==='WHPP'\?selectedDateShipmentStatusBills/);
 assert.match(repairSource,/shouldRunSelectedDateEvidence\(bills\.length,whppSourceBills\.length\)/);
 assert.match(repairSource,/statusBills=type==='WHPP'\s*\?whppSourceBills/);
