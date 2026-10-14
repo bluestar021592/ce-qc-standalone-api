@@ -15,3 +15,13 @@ export function whppStatusEvidenceHasGaps(type='',{
   if(!source)return count(podMembers)>0;
   return count(failedMembers)>0||count(persistedRows)<source;
 }
+
+/**
+ * Only the direct shipmentStatus field from the TMS shipment endpoint is
+ * eligible for WHPP status evidence. An eventCode/orderStatus/statusText or
+ * an empty response must not replace previously saved shipment proof.
+ */
+export function hasDirectTmsShipmentStatus(row={}){
+  const status=String(row?.shipmentStatus??'').trim();
+  return /^\d+$/.test(status);
+}
