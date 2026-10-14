@@ -12,7 +12,7 @@ import { normalizeV485TrackRows, archiveV485TrackQueryResponse } from './v485Str
 import { persistentSelectedDatePodTruth } from './selectedDatePersistentTruth.js';
 import { classifyShipmentStatus, shipmentStatusTime } from './shipmentStatusTruth.js';
 import { explicitWhppTms60PodTime,explicitWhppConfirm85PodTime } from './whppPodTimeEvidence.js';
-import { shouldRunSelectedDateEvidence, whppStatusEvidenceHasGaps } from './v788WhppStatusCoverage.js';
+import { shouldRunSelectedDateEvidence, whppStatusEvidenceHasGaps, hasDirectTmsShipmentStatus } from './v788WhppStatusCoverage.js';
 import { extractV498SavedShopeePodEvidence } from './v498SavedShopeePodEvidence.js';
 
 export const V645_SELECTED_DATE_TIMING_REPAIR_ID='2026-10-05-v645-selected-date-pod-track-repair-v1';
@@ -71,7 +71,7 @@ function writeDurableStop(type,date,snapshotId,total,message,stats={}){
     statusQueried:Number(stats.statusQueried||0),statusFailed:Number(stats.statusFailed||0),statusPersistedRows:Number(stats.statusPersistedRows||0),
     status60:Number(stats.status60||0),status60WithTime:Number(stats.status60WithTime||0),status60WithoutTime:Number(stats.status60WithoutTime||0),
     statusSourceMembers:Number(stats.statusSourceMembers||0),statusApiRows:Number(stats.statusApiRows||0),
-    statusMatchedRows:Number(stats.statusMatchedRows||0),statusEmptySuccessBatches:Number(stats.statusEmptySuccessBatches||0),
+    statusMatchedRows:Number(stats.statusMatchedRows||0),statusStatuslessRows:Number(stats.statusStatuslessRows||0),statusEmptySuccessBatches:Number(stats.statusEmptySuccessBatches||0),
     statusFailureBatches:Number(stats.statusFailureBatches||0),statusFailureTypes:stats.statusFailureTypes||{},
     repairRevision:String(stats.repairRevision||''),exhaustionSource:String(stats.exhaustionSource||'POST_QUERY_EXHAUSTED'),
     message:message||'历史轨迹证据缺失，自动补查已停止。',completedAt:now(),updatedAt:now()
@@ -265,6 +265,9 @@ export function persistShipmentStatusRows(type,date,rows=[],dbOverride=null,requ
     // Drop TMS overfetch, unexpected business members and orphan payloads.
     // Never create locks for bills absent from this exact request batch.
     if(!code||(requested.size>0&&!requested.has(code)))continue;
+    // Missing shipmentStatus is not TMS evidence; never replace a previous
+    // valid saved status with a statusless or event-only response.
+    if(owner==='WHPP'&&!hasDirectTmsShipmentStatus(raw))continue;
     latest.set(code,{...raw,shipmentCode:code,reportDate:date});
   }
   if(!latest.size)return 0;
@@ -394,7 +397,7 @@ async function runOne(type,date,snapshotId=''){
     :bills.filter(code=>!confirmTimedBills.has(code));
   const statusBatches=splitTrackBatches(statusBills),statusTimedBills=new Set();
   let statusQueried=0,statusFailed=0,statusPersistedRows=0,status60=0,status60WithTime=0,status60WithoutTime=0;
-  let statusApiRows=0,statusMatchedRows=0,statusEmptySuccessBatches=0,statusFailureBatches=0;
+  let statusApiRows=0,statusMatchedRows=0,statusStatuslessRows=0,statusEmptySuccessBatches=0,statusFailureBatches=0;
   const statusFailureTypes=new Map();
   for(let offset=0;offset<statusBatches.length;offset+=4){
     const wave=statusBatches.slice(offset,offset+4);
@@ -409,7 +412,9 @@ async function runOne(type,date,snapshotId=''){
         statusApiRows+=rows.length;
         if(!rows.length)statusEmptySuccessBatches++;
         const expected=new Set(successBatch.map(code=>String(code||'').trim().toUpperCase()));
-        statusMatchedRows+=new Set(rows.map(billOf).filter(code=>expected.has(code))).size;
+        const matched=rows.filter(row=>expected.has(billOf(row)));
+        statusMatchedRows+=new Set(matched.map(billOf)).size;
+        if(type==='WHPP')statusStatuslessRows+=matched.filter(row=>!hasDirectTmsShipmentStatus(row)).length;
         statusPersistedRows+=persistShipmentStatusRows(type,date,rows,null,successBatch);
         const grouped=rawRowsByBill(rows);
         for(const codeRaw of successBatch){
@@ -438,7 +443,7 @@ async function runOne(type,date,snapshotId=''){
     }
     patch(type,date,snapshotId,{
       status:'RUNNING',phase:'SHIPMENT_STATUS_QUERY',statusQueried,statusFailed,statusPersistedRows,status60,status60WithTime,status60WithoutTime,
-      statusSourceMembers:statusBills.length,statusApiRows,statusMatchedRows,statusEmptySuccessBatches,statusFailureBatches,statusFailureTypes:Object.fromEntries(statusFailureTypes),
+      statusSourceMembers:statusBills.length,statusApiRows,statusMatchedRows,statusStatuslessRows,statusEmptySuccessBatches,statusFailureBatches,statusFailureTypes:Object.fromEntries(statusFailureTypes),
       confirmQueried,confirmFailed,confirmPersistedRows,confirm85,confirm85WithTime,confirm85WithoutTime,repairRevision,
       message:`${type} ${date} shipmentStatus补证 ${Math.min(offset+4,statusBatches.length)}/${statusBatches.length}批：60/POD有时间 ${status60WithTime}票，无时间 ${status60WithoutTime}票`
     });
@@ -484,11 +489,11 @@ async function runOne(type,date,snapshotId=''){
     const durable=writeDurableStop(
       type,date,snapshotId,bills.length,
       `${type} ${date} 已完成一次实时轨迹补证，但仍未取得真实60/70→80轨迹；为避免重复无效查询，后续自动补查已停止。`,
-      {completed,failed,queried,persistedEvents,confirmQueried,confirmFailed,confirmPersistedRows,confirm85,confirm85WithTime,confirm85WithoutTime,statusQueried,statusFailed,statusPersistedRows,status60,status60WithTime,status60WithoutTime,statusSourceMembers:statusBills.length,statusApiRows,statusMatchedRows,statusEmptySuccessBatches,statusFailureBatches,statusFailureTypes:Object.fromEntries(statusFailureTypes),repairRevision,exhaustionSource:'POST_CONFIRM_STATUS_AND_TRACK_QUERY_EXHAUSTED'}
+      {completed,failed,queried,persistedEvents,confirmQueried,confirmFailed,confirmPersistedRows,confirm85,confirm85WithTime,confirm85WithoutTime,statusQueried,statusFailed,statusPersistedRows,status60,status60WithTime,status60WithoutTime,statusSourceMembers:statusBills.length,statusApiRows,statusMatchedRows,statusStatuslessRows,statusEmptySuccessBatches,statusFailureBatches,statusFailureTypes:Object.fromEntries(statusFailureTypes),repairRevision,exhaustionSource:'POST_CONFIRM_STATUS_AND_TRACK_QUERY_EXHAUSTED'}
     );
     return patch(type,date,snapshotId,durable);
   }
-  return patch(type,date,snapshotId,{status:(failed||statusEvidenceHasGaps)?'COMPLETED_WITH_GAPS':'COMPLETED',phase:'DONE',statusEvidenceHasGaps,statusMissingMembers,completed,failed,queried,persistedEvents,apiFailureBills,confirmQueried,confirmFailed,confirmPersistedRows,confirm85,confirm85WithTime,confirm85WithoutTime,statusQueried,statusFailed,statusPersistedRows,status60,status60WithTime,status60WithoutTime,statusSourceMembers:statusBills.length,statusApiRows,statusMatchedRows,statusEmptySuccessBatches,statusFailureBatches,statusFailureTypes:Object.fromEntries(statusFailureTypes),repairRevision,completedAt:now(),message:(failed||statusEvidenceHasGaps)?(statusEvidenceHasGaps
+  return patch(type,date,snapshotId,{status:(failed||statusEvidenceHasGaps)?'COMPLETED_WITH_GAPS':'COMPLETED',phase:'DONE',statusEvidenceHasGaps,statusMissingMembers,completed,failed,queried,persistedEvents,apiFailureBills,confirmQueried,confirmFailed,confirmPersistedRows,confirm85,confirm85WithTime,confirm85WithoutTime,statusQueried,statusFailed,statusPersistedRows,status60,status60WithTime,status60WithoutTime,statusSourceMembers:statusBills.length,statusApiRows,statusMatchedRows,statusStatuslessRows,statusEmptySuccessBatches,statusFailureBatches,statusFailureTypes:Object.fromEntries(statusFailureTypes),repairRevision,completedAt:now(),message:(failed||statusEvidenceHasGaps)?(statusEvidenceHasGaps
     ?`${type} ${date} TMS原始状态证据未覆盖全部来源票：来源 ${statusBills.length}，保存 ${statusPersistedRows}，缺失至少 ${statusMissingMembers}，接口失败 ${statusFailed}。补证仍有缺口，不能视为业务闭环。`
     :apiFailureBills>0
     ?`${type} ${date} 部分接口请求失败 ${apiFailureBills}票；不代表历史轨迹不存在，保留重试。`
