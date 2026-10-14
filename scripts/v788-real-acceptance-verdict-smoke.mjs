@@ -26,6 +26,8 @@ const blocked=buildV788AcceptanceVerdict(open);
 assert.equal(blocked.releaseDecision,'BLOCKED');
 assert.deepEqual(blocked.gates.find(x=>x.id==='WHPP_LEDGER_VS_CURRENT').detail,
  {openLedgerWithPODOrReturned:346,terminalLedgerWithUnfinished:0});
+let unsynced=clone();unsynced.whpp.totals.latePODPendingState=2;
+assert.equal(buildV788AcceptanceVerdict(unsynced).gates.find(x=>x.id==='WHPP_LATE_TMS_NEEDS_STATE_SYNC').status,'REVIEW');
 let old=clone();old.whpp.totals.trustedPodLockOnPOD=0;old.whpp.totals.trustedPodTimeCoveragePct=0;
 assert.equal(buildV788AcceptanceVerdict(old).gates.find(x=>x.id==='WHPP_POD_SIGNING_TIME').status,'REVIEW');
 let cp=clone();cp.active72.status='INVALID';cp.active72.count=71;

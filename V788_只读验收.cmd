@@ -16,5 +16,5 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
-echo Read-only acceptance report created beside this launcher.
+echo Read-only acceptance report created beside the D-drive isolated database copy.
 pause

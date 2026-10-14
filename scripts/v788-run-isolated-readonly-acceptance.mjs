@@ -54,8 +54,7 @@ export function runIsolatedAcceptance(dbPath=DEFAULT_COPY,outBase=''){
   if(before.size!==after.size||before.mtimeMs!==after.mtimeMs)
     throw new Error('验收副本在核验期间发生改变，结果无效；请重新检查验收副本');
   const verdict=buildV788AcceptanceVerdict(audit);
-  const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
-  const dest=outBase?path.resolve(outBase):path.join(root,'V788_只读验收结果');
+  const dest=outBase?path.resolve(outBase):path.join(path.dirname(safe),'V788_只读验收结果');
   if(dest.toLowerCase()===safe.toLowerCase())
     throw new Error('报告输出位置不得指向SQLite源文件');
   const payload={generatedAt:new Date().toISOString(),

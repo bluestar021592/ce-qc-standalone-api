@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
-import { auditV788Readonly } from './v788-whpp-real-readonly-audit.mjs';
+import { auditV788Readonly,truthCategory } from './v788-whpp-real-readonly-audit.mjs';
+assert.equal(truthCategory('PENDING_SCAN','60'),'latePODPendingState');
+assert.equal(truthCategory('OPEN','81'),'lateReturnedPendingState');
+assert.equal(truthCategory('RETURNED','60'),'contradiction');
+assert.equal(truthCategory('POD','81'),'contradiction');
+assert.equal(truthCategory('POD','60'),'strictPOD');
+assert.equal(truthCategory('RETURNED','81'),'strictReturned');
 
 const db=new DatabaseSync(':memory:');
 try{

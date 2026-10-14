@@ -22,15 +22,20 @@ function validateActive72(db){
       &&String(m?.name||'').trim().length>0);
   return {status:valid?'ACTIVE_72':'INVALID',count:members.length,uniqueCount:new Set(codes).size};
 }
-function truthCategory(state,status){
-  if(status==='60')return state==='POD'?'strictPOD':'contradiction';
-  if(status==='81')return ['RETURNED','RETURN_COMPLETED'].includes(state)?'strictReturned':'contradiction';
+export function truthCategory(state,status){
+  if(status==='60')return state==='POD'?'strictPOD'
+    :['RETURNED','RETURN_COMPLETED','RETURN_IN_PROGRESS','RETURNING'].includes(state)
+      ?'contradiction':'latePODPendingState';
+  if(status==='81')return ['RETURNED','RETURN_COMPLETED'].includes(state)?'strictReturned'
+    :['POD','RETURN_IN_PROGRESS','RETURNING'].includes(state)
+      ?'contradiction':'lateReturnedPendingState';
   if(status==='80')return ['POD','RETURNED','RETURN_COMPLETED'].includes(state)?'contradiction':'returning80';
   if(['POD','RETURNED','RETURN_COMPLETED'].includes(state))return 'labelOnlyTerminal';
   return 'otherUnverified';
 }
 function emptyDay(date){
   return {date,sourceMembers:0,withCurrent:0,strictPOD:0,strictReturned:0,returning80:0,
+    latePODPendingState:0,lateReturnedPendingState:0,
     contradiction:0,labelOnlyTerminal:0,otherUnverified:0,
     scannedMembers:0,finalizedMembers:0,withExplicitPodTime:0,
     ledgerOpenWithStrictTerminal:0,scanAndFinalComplete:false,
@@ -227,6 +232,7 @@ export function auditV788Readonly(db){
   const totals=emptyDay('ALL');
   for(const d of byDate){
     for(const key of ['sourceMembers','withCurrent','strictPOD','strictReturned','returning80',
+      'latePODPendingState','lateReturnedPendingState',
       'contradiction','labelOnlyTerminal','otherUnverified','scannedMembers','finalizedMembers',
       'withExplicitPodTime','ledgerOpenWithStrictTerminal','normalizedPOD','normalizedReturned',
       'normalizedNonterminal','scanPOD','finalPOD','finalReturnCompleted',

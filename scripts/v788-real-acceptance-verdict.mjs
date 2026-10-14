@@ -28,6 +28,12 @@ export function buildV788AcceptanceVerdict(audit){
       ?'PASS':'BLOCK',
     {stateContradictions:Number(totals.contradiction||0),
      terminalLedgerContradictions:Number(totals.ledgerTerminalContradictingTms||0)}));
+  results.push(check('WHPP_LATE_TMS_NEEDS_STATE_SYNC',
+    Number(totals.latePODPendingState||0)===0&&Number(totals.lateReturnedPendingState||0)===0
+      ?'PASS':'REVIEW',
+    {lateStatus60StillUnfinished:Number(totals.latePODPendingState||0),
+      lateStatus81StillUnfinished:Number(totals.lateReturnedPendingState||0),
+      note:'最新60/81允许闭环，尚未同步的旧OPEN状态应更新，但不是相反终态矛盾'}));
   results.push(check('WHPP_LEDGER_VS_CURRENT',
     Number(totals.ledgerOpenWithNormalizedTerminal||0)===0
       &&Number(totals.ledgerTerminalWithNonterminal||0)===0?'PASS':'BLOCK',
