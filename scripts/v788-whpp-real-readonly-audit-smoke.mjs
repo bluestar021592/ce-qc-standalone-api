@@ -1,5 +1,15 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+const authUi=fs.readFileSync('public/app.js','utf8');
+// Main QC login is not CE API login. An expired TMS credential must never
+// render as connected even if authStore retains loggedIn=true.
+assert.match(authUi,/function isCeApiSessionUsable\(auth = \{\}\)/);
+assert.match(authUi,/auth\?\.expired === true/);
+assert.match(authUi,/Number\(auth\.expiresInSeconds\) > 120/);
+assert.match(authUi,/CE接口凭证已过期或即将过期，请重新登录CE系统/);
+assert.match(authUi,/statusLine\('CE API连接', isCeApiSessionUsable\(ceAuth\)/);
+assert.match(authUi,/const html = isCeApiSessionUsable\(ceAuth\)/);
+
 import {shouldRunSelectedDateEvidence,whppStatusEvidenceHasGaps,hasDirectTmsShipmentStatus,classifyWhppTmsError} from '../src/v788WhppStatusCoverage.js';
 import {persistShipmentStatusRows} from '../src/selectedDateTimingEvidenceRepair.js';
 import {summarizeWhppTmsProbe,runV788LiveTmsProbe,selectWhppProbeSample} from './v788-live-tms-readonly-probe.mjs';
