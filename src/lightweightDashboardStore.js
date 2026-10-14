@@ -843,8 +843,17 @@ function overlaySavedTerminalExportTruth(rows=[],db=getDb()){
       }
     }catch{}
     try{
-      const states=db.prepare(`SELECT shipmentCode,businessType,reportDate,state,stateJson,lastEventTime
-        FROM shipment_current_state WHERE shipmentCode IN (${marks})`).all(...chunk);
+      // Some older sealed SQLite fixtures lacked reportDate in this table.
+      // Fall back to the previous query shape; do not silently discard
+      // valid TMS 60/80/81 evidence just because a legacy column is absent.
+      let states;
+      try{
+        states=db.prepare(`SELECT shipmentCode,businessType,reportDate,state,stateJson,lastEventTime
+          FROM shipment_current_state WHERE shipmentCode IN (${marks})`).all(...chunk);
+      }catch{
+        states=db.prepare(`SELECT shipmentCode,businessType,state,stateJson,lastEventTime
+          FROM shipment_current_state WHERE shipmentCode IN (${marks})`).all(...chunk);
+      }
       for(const row of states){
         const bill=String(row.shipmentCode||'').toUpperCase();
         sameDayCurrentStates.set(String(row.reportDate||'').slice(0,10)+'|'+bill,
