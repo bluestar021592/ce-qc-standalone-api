@@ -7,7 +7,8 @@ assert.match(authUi,/function isCeApiSessionUsable\(auth = \{\}\)/);
 assert.match(authUi,/auth\?\.expired === true/);
 assert.match(authUi,/Number\(auth\.expiresInSeconds\) > 120/);
 assert.match(authUi,/CE接口凭证已过期或即将过期，请重新登录CE系统/);
-assert.match(authUi,/statusLine\('CE API连接', isCeApiSessionUsable\(ceAuth\)/);
+assert.match(authUi,/statusLine\('CE接口凭证', isCeApiSessionUsable\(ceAuth\)/);
+assert.match(authUi,/本地未过期/);
 assert.match(authUi,/const html = isCeApiSessionUsable\(ceAuth\)/);
 
 import {shouldRunSelectedDateEvidence,whppStatusEvidenceHasGaps,hasDirectTmsShipmentStatus,classifyWhppTmsError} from '../src/v788WhppStatusCoverage.js';
