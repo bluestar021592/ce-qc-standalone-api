@@ -3,8 +3,16 @@ import fs from 'node:fs';
 import {DatabaseSync} from 'node:sqlite';
 import {loadWhppCanonicalTruth} from '../src/whppCanonicalTruth.js';
 import {persistentSelectedDatePodTruth} from '../src/selectedDatePersistentTruth.js';
-import {selectedDateShipmentStatusBills} from '../src/selectedDateTimingEvidenceRepair.js';
+import {selectedDateShipmentStatusBills,canDurablyStopHistoricalRepair} from '../src/selectedDateTimingEvidenceRepair.js';
 
+// Saved 60/81 missing after an API outage is not an evidence-absent result:
+const exhausted={billsCount:290,timedCount:0,completed:0,failed:290,
+  trackBillsCount:290,persistedEvents:0,ageDays:100,apiFailureBills:0};
+assert.equal(canDurablyStopHistoricalRepair(exhausted),true);
+assert.equal(canDurablyStopHistoricalRepair({...exhausted,apiFailureBills:1}),false,
+  'a failed auth/transport batch must never permanently stop WHPP historic evidence recovery');
+assert.equal(canDurablyStopHistoricalRepair({...exhausted,timedCount:1}),false);
+assert.equal(canDurablyStopHistoricalRepair({...exhausted,ageDays:20}),false);
 const src=fs.readFileSync(new URL('../src/lightweightDashboardStore.js',import.meta.url),'utf8');
 const first=src.indexOf('function overlaySavedTerminalExportTruth(');
 const end=src.indexOf('\n}\n',first)+3;
