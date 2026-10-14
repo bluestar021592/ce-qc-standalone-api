@@ -1,4 +1,25 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import {shouldRunSelectedDateEvidence,whppStatusEvidenceHasGaps} from '../src/v788WhppStatusCoverage.js';
+
+// Zero-POD WHPP must still query the whole exact-date source (incl. 80/81).
+assert.equal(shouldRunSelectedDateEvidence(0,56),true);
+assert.equal(shouldRunSelectedDateEvidence(0,0),false);
+assert.equal(shouldRunSelectedDateEvidence(290,346),true);
+// A returned empty or partial TMS response is never a completed proof.
+assert.equal(whppStatusEvidenceHasGaps('WHPP',{podMembers:0,sourceMembers:56,persistedRows:0,failedMembers:0}),true);
+assert.equal(whppStatusEvidenceHasGaps('WHPP',{podMembers:0,sourceMembers:56,persistedRows:55,failedMembers:0}),true);
+assert.equal(whppStatusEvidenceHasGaps('WHPP',{podMembers:0,sourceMembers:56,persistedRows:56,failedMembers:1}),true);
+assert.equal(whppStatusEvidenceHasGaps('WHPP',{podMembers:0,sourceMembers:56,persistedRows:56,failedMembers:0}),false);
+assert.equal(whppStatusEvidenceHasGaps('WHPP',{podMembers:290,sourceMembers:0,persistedRows:0,failedMembers:0}),true);
+assert.equal(whppStatusEvidenceHasGaps('SHOPEECN',{podMembers:0,sourceMembers:56,persistedRows:0,failedMembers:0}),false);
+const repairSource=fs.readFileSync('src/selectedDateTimingEvidenceRepair.js','utf8');
+assert.match(repairSource,/const whppSourceBills=type==='WHPP'\?selectedDateShipmentStatusBills/);
+assert.match(repairSource,/shouldRunSelectedDateEvidence\(bills\.length,whppSourceBills\.length\)/);
+assert.match(repairSource,/statusBills=type==='WHPP'\s*\?whppSourceBills/);
+assert.match(repairSource,/if\(!statusEvidenceHasGaps&&canDurablyStopHistoricalRepair/);
+assert.match(repairSource,/status:\(failed\|\|statusEvidenceHasGaps\)\?'COMPLETED_WITH_GAPS':'COMPLETED'/);
+
 import { DatabaseSync } from 'node:sqlite';
 import { auditV788Readonly,truthCategory } from './v788-whpp-real-readonly-audit.mjs';
 assert.equal(truthCategory('PENDING_SCAN','60'),'latePODPendingState');
