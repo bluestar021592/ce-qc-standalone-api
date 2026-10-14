@@ -146,6 +146,29 @@ function sevenBusinessSourceConservation(db,whppRows=[]){
     blockedDates:byDate.filter(d=>d.blockedByUnfinishedValidBatch).map(d=>d.date),
     byDate};
 }
+function savedTimingStopSummary(db){
+  const exists=Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='app_state'").get());
+  if(!exists)return {available:false,reason:'APP_STATE_TABLE_MISSING',byDate:[]};
+  const cols=new Set(db.prepare("PRAGMA table_info(app_state)").all().map(x=>String(x.name||'')));
+  if(!cols.has('key')||!cols.has('valueJson'))return {available:false,reason:'APP_STATE_COLUMNS_MISSING',byDate:[]};
+  const byDate=[];
+  for(const date of ['2026-07-01','2026-07-02']){
+    const key='selected_date_timing_stop:WHPP:'+date;
+    const record=db.prepare("SELECT valueJson FROM app_state WHERE key=? LIMIT 1").get(key);
+    if(!record){byDate.push({date,savedDurableStop:false});continue}
+    const payload=safeObject(record.valueJson);
+    const number=k=>Math.max(0,Number(payload[k]||0)||0);
+    byDate.push({date,savedDurableStop:true,stopStatus:String(payload.status||'').slice(0,64),
+      statusQueried:number('statusQueried'),statusFailed:number('statusFailed'),
+      statusSourceMembers:number('statusSourceMembers'),statusApiRows:number('statusApiRows'),
+      statusMatchedRows:number('statusMatchedRows'),statusPersistedRows:number('statusPersistedRows'),
+      statusFailureBatches:number('statusFailureBatches'),
+      statusFailureTypes:Object.fromEntries(Object.entries(payload.statusFailureTypes||{}).filter(([k,v])=>/^(AUTH|TIMEOUT|RATE_LIMIT|NETWORK|OTHER)$/.test(k)).map(([k,v])=>[k,Math.max(0,Number(v)||0)]))
+    });
+  }
+  return {available:true,scope:'ONLY_DURABLE_STOP_RECORDS_NOT_ALL_QUERY_HISTORY',
+    caveat:'A missing durable stop record does not show that the TMS API was never called.',byDate};
+}
 export function auditV788Readonly(db){
   db.exec('PRAGMA query_only=ON');
   const active72=validateActive72(db);
@@ -273,7 +296,7 @@ export function auditV788Readonly(db){
     ?Math.round(totals.trustedPodLockOnPOD/totals.normalizedPOD*10000)/100:null;
   return {version:VERSION,readOnly:true,source:'local-database-copy',
     limitations:'Reads independently saved business_shipment_tracks status first, falls back to current stateJson only when unavailable. Counts show saved labels and locally stored scan/final evidence separately; record presence is not proof that API scans succeeded, and no TMS 60/81 means strict terminal status is unverified. Saved POD-lock coverage counts only member-matched POD records with whitelisted evidence provenance, valid timestamp and a date on or after their daily source date. It does not establish external TMS confirmation or full signature-time accuracy.',
-    active72,whpp:{byDate,totals},
+    active72,whpp:{byDate,totals},savedTimingStopSummary:savedTimingStopSummary(db),
     sevenBusinessSource:sevenBusinessSourceConservation(db,rows)};
 }
 export function auditDatabaseFile(dbFile){
