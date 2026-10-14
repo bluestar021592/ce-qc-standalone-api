@@ -1,6 +1,6 @@
 export function trustedWhppPodTime(lock,date){
   const source=String(lock?.source||'').trim().toLowerCase();
-  if(!['whpp_strict_track_event','whpp_saved_scan_pod_time','whpp_saved_final_pod_time','whpp_shipment_status_60_explicit_pod_time'].includes(source))
+  if(!['whpp_strict_track_event','whpp_saved_scan_pod_time','whpp_saved_final_pod_time','whpp_shipment_status_60_explicit_pod_time','whpp_confirm_85_explicit_pod_time'].includes(source))
     return '';
   const text=String(lock?.podTime||'').trim();
   const m=/^(\d{4})-(\d{2})-(\d{2})(?:[ T](?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d{1,6})?)?(?:Z|[+-](?:[01]\d|2[0-3]):?[0-5]\d)?)?$/.exec(text);
@@ -25,19 +25,24 @@ export function loadWhppTrustedPodTime(db,shipmentCode,reportDate){
  * Generic API row update, scan, record creation or status refresh timestamps
  * are intentionally excluded. No inference from eventCode or orderStatus 85.
  */
-export function explicitWhppTms60PodTime(row={},reportDate=''){
-  if(String(row?.shipmentStatus??'').trim()!=='60')return '';
-  const fields=[
-    'podTime','POD时间','签收时间','podDateTime','podDate','deliveryTime',
-    'deliveryCompletedAt','deliveredAt','deliveredTime',
-    'signedTime','signedAt','signTime','signDateTime','actualDeliveryTime'
-  ];
-  for(const key of fields){
+const EXPLICIT_WHPP_SIGNING_FIELDS=[
+  'podTime','POD时间','签收时间','podDateTime','podDate','deliveryTime',
+  'deliveryCompletedAt','deliveredAt','deliveredTime',
+  'signedTime','signedAt','signTime','signDateTime','actualDeliveryTime'
+];
+function explicitWhppSigningTime(row={},reportDate='',source=''){
+  for(const key of EXPLICIT_WHPP_SIGNING_FIELDS){
     const candidate=String(row?.[key]??'').trim();
-    const valid=trustedWhppPodTime({
-      podTime:candidate,source:'whpp_shipment_status_60_explicit_pod_time'
-    },reportDate);
+    const valid=trustedWhppPodTime({podTime:candidate,source},reportDate);
     if(valid)return valid;
   }
   return '';
+}
+export function explicitWhppTms60PodTime(row={},reportDate=''){
+  if(String(row?.shipmentStatus??'').trim()!=='60')return '';
+  return explicitWhppSigningTime(row,reportDate,'whpp_shipment_status_60_explicit_pod_time');
+}
+export function explicitWhppConfirm85PodTime(row={},reportDate=''){
+  if(String(row?.orderStatus??'').trim()!=='85')return '';
+  return explicitWhppSigningTime(row,reportDate,'whpp_confirm_85_explicit_pod_time');
 }

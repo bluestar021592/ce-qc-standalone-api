@@ -11,7 +11,7 @@ import { recipientGroupOf } from './recipientGroup.js';
 import { normalizeV485TrackRows, archiveV485TrackQueryResponse } from './v485StrictTrackEvidence.js';
 import { persistentSelectedDatePodTruth } from './selectedDatePersistentTruth.js';
 import { classifyShipmentStatus, shipmentStatusTime } from './shipmentStatusTruth.js';
-import { explicitWhppTms60PodTime } from './whppPodTimeEvidence.js';
+import { explicitWhppTms60PodTime,explicitWhppConfirm85PodTime } from './whppPodTimeEvidence.js';
 import { extractV498SavedShopeePodEvidence } from './v498SavedShopeePodEvidence.js';
 
 export const V645_SELECTED_DATE_TIMING_REPAIR_ID='2026-10-05-v645-selected-date-pod-track-repair-v1';
@@ -192,10 +192,34 @@ function eventFingerprint(row={}){
   const raw=JSON.stringify(normalized);
   return time+'|'+code+'|'+raw;
 }
-function persistConfirmRows(type,date,rows=[]){
-  const owner=storageType(type),db=getDb(),stamp=now(),latest=new Map();
+// Shared provenance-preserving upsert: never replace a previously
+// attested POD timestamp with unrelated API refresh information.
+function prepareVerifiedWhppPodLock(db){
+  return db.prepare(`INSERT INTO business_pod_locks
+    (businessType,shipmentCode,podTime,source,createdAt,updatedAt)
+    VALUES('WHPP',?,?,?,?,?)
+    ON CONFLICT(businessType,shipmentCode) DO UPDATE SET
+      podTime=CASE WHEN LOWER(TRIM(COALESCE(business_pod_locks.source,''))) IN
+        ('whpp_strict_track_event','whpp_saved_scan_pod_time',
+         'whpp_saved_final_pod_time','whpp_shipment_status_60_explicit_pod_time',
+         'whpp_confirm_85_explicit_pod_time')
+        AND TRIM(COALESCE(business_pod_locks.podTime,''))<>'' THEN business_pod_locks.podTime
+        ELSE excluded.podTime END,
+      source=CASE WHEN LOWER(TRIM(COALESCE(business_pod_locks.source,''))) IN
+        ('whpp_strict_track_event','whpp_saved_scan_pod_time',
+         'whpp_saved_final_pod_time','whpp_shipment_status_60_explicit_pod_time',
+         'whpp_confirm_85_explicit_pod_time')
+        AND TRIM(COALESCE(business_pod_locks.podTime,''))<>'' THEN business_pod_locks.source
+        ELSE excluded.source END,
+      updatedAt=excluded.updatedAt`);
+}
+
+export function persistConfirmRows(type,date,rows=[],dbOverride=null,requestedBills=[]){
+  const owner=storageType(type),db=dbOverride||getDb(),stamp=now(),latest=new Map();
+  const requested=new Set(unique(requestedBills));
   for(const raw of rows||[]){
-    const code=billOf(raw);if(!code)continue;
+    const code=billOf(raw);
+    if(!code||(requested.size>0&&!requested.has(code)))continue;
     latest.set(code,{...raw,shipmentCode:code,reportDate:date});
   }
   if(!latest.size)return 0;
@@ -206,6 +230,7 @@ function persistConfirmRows(type,date,rows=[]){
     isPod=CASE WHEN excluded.isPod=1 THEN 1 ELSE business_scan_results.isPod END,
     orderStatus=CASE WHEN excluded.orderStatus<>'' THEN excluded.orderStatus ELSE business_scan_results.orderStatus END,
     rawJson=excluded.rawJson,updatedAt=excluded.updatedAt`);
+  const lockPod=owner==='WHPP'?prepareVerifiedWhppPodLock(db):null;
   let saved=0;
   db.exec('BEGIN IMMEDIATE');
   try{
@@ -213,6 +238,10 @@ function persistConfirmRows(type,date,rows=[]){
       const orderStatus=String(row.orderStatus??'').trim();
       const isPod=orderStatus==='85'?1:0;
       ins.run(owner,code,date,isPod,orderStatus,JSON.stringify(row),stamp,stamp);
+      if(lockPod){
+        const podTime=explicitWhppConfirm85PodTime(row,date);
+        if(podTime)lockPod.run(code,podTime,'whpp_confirm_85_explicit_pod_time',stamp,stamp);
+      }
       saved++;
     }
     db.exec('COMMIT');
@@ -237,24 +266,7 @@ export function persistShipmentStatusRows(type,date,rows=[],dbOverride=null,requ
   if(!latest.size)return 0;
   const del=db.prepare('DELETE FROM business_shipment_tracks WHERE businessType=? AND reportDate=? AND shipmentCode=?');
   const ins=db.prepare('INSERT INTO business_shipment_tracks(businessType,shipmentCode,reportDate,shipmentStatus,statusText,apiStatus,rawJson,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?)');
-  // Preserve previously verified locks. A new strict TMS 60 timestamp may
-  // replace only missing/untrusted prior values, never overwrite older
-  // independently attested signing timestamps or non-POD member histories.
-  const lockPod=owner==='WHPP'?db.prepare(`INSERT INTO business_pod_locks
-    (businessType,shipmentCode,podTime,source,createdAt,updatedAt)
-    VALUES('WHPP',?,?,'whpp_shipment_status_60_explicit_pod_time',?,?)
-    ON CONFLICT(businessType,shipmentCode) DO UPDATE SET
-      podTime=CASE WHEN LOWER(TRIM(COALESCE(business_pod_locks.source,''))) IN
-        ('whpp_strict_track_event','whpp_saved_scan_pod_time',
-         'whpp_saved_final_pod_time','whpp_shipment_status_60_explicit_pod_time')
-        AND TRIM(COALESCE(business_pod_locks.podTime,''))<>'' THEN business_pod_locks.podTime
-        ELSE excluded.podTime END,
-      source=CASE WHEN LOWER(TRIM(COALESCE(business_pod_locks.source,''))) IN
-        ('whpp_strict_track_event','whpp_saved_scan_pod_time',
-         'whpp_saved_final_pod_time','whpp_shipment_status_60_explicit_pod_time')
-        AND TRIM(COALESCE(business_pod_locks.podTime,''))<>'' THEN business_pod_locks.source
-        ELSE excluded.source END,
-      updatedAt=excluded.updatedAt`):null;
+  const lockPod=owner==='WHPP'?prepareVerifiedWhppPodLock(db):null;
   let saved=0;
   db.exec('BEGIN IMMEDIATE');
   try{
@@ -263,7 +275,7 @@ export function persistShipmentStatusRows(type,date,rows=[],dbOverride=null,requ
       ins.run(owner,code,date,String(row.shipmentStatus??''),String(row.statusText||row.shipmentStatusDesc||''),String(row.apiStatus||'success'),JSON.stringify(row),stamp,stamp);
       if(lockPod){
         const podTime=explicitWhppTms60PodTime(row,date);
-        if(podTime)lockPod.run(code,podTime,stamp,stamp);
+        if(podTime)lockPod.run(code,podTime,'whpp_shipment_status_60_explicit_pod_time',stamp,stamp);
       }
       saved++;
     }
@@ -342,13 +354,15 @@ async function runOne(type,date,snapshotId=''){
     for(const outcome of results){
       for(const success of outcome.successes||[]){
         const rows=success.events||[];
-        confirmPersistedRows+=persistConfirmRows(type,date,rows);
+        confirmPersistedRows+=persistConfirmRows(type,date,rows,null,success.batch||[]);
         for(const row of rows){
           const code=billOf(row);if(!code)continue;
           if(String(row.orderStatus??'').trim()!=='85')continue;
           confirm85++;
-          const evidence=confirmTimingEvidence(row);
-          if(evidence?.podDate){confirm85WithTime++;confirmTimedBills.add(code);}
+          const podTime=type==='WHPP'
+            ?explicitWhppConfirm85PodTime(row,date)
+            :confirmTimingEvidence(row)?.podDate;
+          if(podTime){confirm85WithTime++;confirmTimedBills.add(code);}
           else confirm85WithoutTime++;
         }
       }
