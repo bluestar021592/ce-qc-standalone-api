@@ -1,4 +1,25 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+// V788 is exposed only as a deliberate ADMIN action inside the QC APP.
+// No startup auto-query and no status endpoint that leaks shipment identifiers.
+const server=fs.readFileSync('server.js','utf8');
+const ui=fs.readFileSync('public/app.js','utf8');
+const html=fs.readFileSync('public/index.html','utf8');
+assert.match(server,/app\.get\('\/api\/v788\/whpp-evidence\/status',requireRole\('ADMIN'\)/);
+assert.match(server,/app\.post\('\/api\/v788\/whpp-evidence\/start',requireRole\('ADMIN'\)/);
+assert.match(server,/acknowledgeIsolatedQuery!==true/);
+assert.match(server,/v788StageActive=true/);
+assert.match(server,/runV788Stage\(\{execute:true\}\)/);
+assert.match(server,/productionDatabaseModified:false/);
+assert.match(server,/businessStateUpdated:false/);
+assert.match(html,/id="v788WhppEvidencePanel"/);
+assert.match(html,/id="v788WhppEvidenceStart"/);
+assert.match(html,/开始隔离核验（346票）/);
+assert.match(ui,/function startV788WhppEvidence\(\)/);
+assert.match(ui,/function loadV788WhppEvidenceStatus\(\)/);
+assert.match(ui,/acknowledgeIsolatedQuery:true/);
+assert.match(ui,/!isCeApiSessionUsable\(ceAuth\)/);
+
 import {DatabaseSync} from 'node:sqlite';
 import {strictWhppTmsBatch,initV788Sidecar,stageV788Batch,inspectV788Sidecar,v788SourceSignature}
   from './v788-whpp-tms-evidence-sidecar.mjs';
