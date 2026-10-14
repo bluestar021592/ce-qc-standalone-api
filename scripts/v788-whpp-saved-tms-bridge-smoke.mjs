@@ -27,7 +27,7 @@ try{
     "CREATE TABLE business_scan_results(businessType TEXT,reportDate TEXT,shipmentCode TEXT,isPod INTEGER,orderStatus TEXT,rawJson TEXT);"+
     "CREATE TABLE business_final_rows(businessType TEXT,reportDate TEXT,shipmentCode TEXT,isPod INTEGER,primaryCategory TEXT,apiStatus TEXT,carryStatus TEXT,latestEventTime TEXT,latestEventDesc TEXT,latestNode TEXT,rawJson TEXT);"+
     "CREATE TABLE shipment_current_state(shipmentCode TEXT,businessType TEXT,reportDate TEXT,state TEXT,apiStatus TEXT,lastEventTime TEXT,stateJson TEXT);"+
-    "CREATE TABLE business_shipment_tracks(businessType TEXT,reportDate TEXT,shipmentCode TEXT,shipmentStatus TEXT,updatedAt TEXT);"+
+    "CREATE TABLE business_shipment_tracks(businessType TEXT,reportDate TEXT,shipmentCode TEXT,shipmentStatus TEXT,rawJson TEXT,updatedAt TEXT);"+
     "CREATE TABLE qc_tracking_ledger(shipmentCode TEXT,businessType TEXT,trackingStatus TEXT,terminalReason TEXT,podDate TEXT,lastEventTime TEXT)");
   const date='2026-07-02';
   const cases=[
@@ -41,7 +41,7 @@ try{
   const iCurrent=db.prepare("INSERT INTO shipment_current_state VALUES(?,'WHPP',? ,?,'success','',?)");
   const iScan=db.prepare("INSERT INTO business_scan_results VALUES('WHPP',?,?,0,'','{}')");
   const iFinal=db.prepare("INSERT INTO business_final_rows VALUES('WHPP',?,?,0,'待派送','success','','','','','{}')");
-  const iTrack=db.prepare("INSERT INTO business_shipment_tracks VALUES('WHPP',?,?,?,'2026-10-14T01:00:00Z')");
+  const iTrack=db.prepare("INSERT INTO business_shipment_tracks VALUES('WHPP',?,?,?,'{}','2026-10-14T01:00:00Z')");
   for(const [bill,state,status] of cases){
     iMember.run(date,bill);
     iCurrent.run(bill,date,state,JSON.stringify({currentState:state}));
