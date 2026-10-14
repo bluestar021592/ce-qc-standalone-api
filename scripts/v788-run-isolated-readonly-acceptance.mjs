@@ -42,14 +42,17 @@ export function acceptanceText(audit,verdict){
     '独立TMS与当前状态冲突：'+Number(totals.savedTmsCurrentConflict||0),
     '历史TMS补证记录（只读诊断）：',
     ...(audit.savedTimingStopSummary?.byDate||[]).map(item=>
-      item.date+'：'+(item.savedDurableStop
-        ?'已保存停止记录；请求='+Number(item.statusQueried||0)
+      item.date+'：'+(item.savedTimingRecord||item.savedDurableStop
+        ?(item.recordType==='LATEST_COMPLETED_REPAIR'?'已保存最近一次补证诊断；':'已保存历史停止记录；')
+          +'状态='+String(item.stopStatus||'')
+          +'，请求='+Number(item.statusQueried||0)
           +'，返回='+Number(item.statusApiRows||0)
           +'，匹配='+Number(item.statusMatchedRows||0)
+          +'，缺少直接状态字段='+Number(item.statusStatuslessRows||0)
           +'，写入='+Number(item.statusPersistedRows||0)
           +'，失败='+Number(item.statusFailed||0)
           +'，失败类别='+JSON.stringify(item.statusFailureTypes||{})
-        :'未发现停止记录（不代表未调用TMS接口）')),
+        :'未发现已保存补证诊断（不代表未调用TMS接口）')),
     '七业务来源日期：'+Number(audit.sevenBusinessSource?.datesChecked||0),
     '最新日报未处理完成日期：'+Number(audit.sevenBusinessSource?.blockedDates?.length||0),
     '---------------------------------------------',
