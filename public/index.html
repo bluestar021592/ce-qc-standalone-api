@@ -166,6 +166,16 @@
           <div class="page-heading"><div><h2>系统设置</h2><p>登录、门店配置、备份与日志</p></div></div>
           <div class="settings-grid">
             <section class="panel operation-panel auth-panel"><div class="panel-title"><h3>CE系统登录</h3></div><div id="ceAuthPanel"></div><div id="shopeeAuthPanel" hidden></div></section>
+            <section id="v788WhppEvidencePanel" class="panel operation-panel" aria-label="V788隔离验收" hidden>
+              <div class="panel-title"><h3>WHPP历史346票核验（隔离模式）</h3></div>
+              <p class="operation-status">核对7月1日190票、7月2日156票。只在D盘验收副本目录保存逐票TMS证据，不修改正式日报、POD状态或账本。</p>
+              <p class="operation-status" id="v788WhppEvidenceText" aria-live="polite">正在读取核验状态…</p>
+              <div class="button-stack">
+                <button id="v788WhppEvidenceStart" class="btn primary full" type="button" onclick="startV788WhppEvidence()" disabled>开始隔离核验（346票）</button>
+                <button class="btn ghost full" type="button" onclick="loadV788WhppEvidenceStatus()">刷新核验结果</button>
+              </div>
+              <p class="operation-status">即使显示“证据已留存”，也不代表签收时间、业务账本或正式发布已经验收。</p>
+            </section>
             <section id="shopSettingsPanel" class="panel operation-panel"><div class="panel-title"><h3>门店CP码配置</h3></div><button class="btn ghost full" onclick="chooseAuxiliaryFile('shopCodeFile','.xlsx,.xls')">选择门店CP码</button><div id="shopCodeFileName" class="operation-status">未选择文件</div><button class="btn ghost full" onclick="importShopCodes()">更新门店CP码</button><div id="shopCodeSettingStatus" class="operation-status"></div></section>
             <section class="panel operation-panel"><div class="panel-title"><h3>导出与长期备份</h3></div><div class="button-stack"><button class="btn primary" onclick="navigatePage('reports')">报表预览</button><button class="btn ghost" onclick="downloadFile('/api/export-backup')">导出长期JSON</button><button class="btn ghost" onclick="openBackupImport()">恢复长期JSON</button></div></section>
             <section id="logPanel" class="panel operation-panel log-panel-wide"><div class="panel-title"><h3>操作日志</h3><button class="text-button" onclick="clearLogs()">清空</button></div><pre id="logs" class="log-window"></pre><pre id="shopeeLogs" class="log-window"></pre></section>
