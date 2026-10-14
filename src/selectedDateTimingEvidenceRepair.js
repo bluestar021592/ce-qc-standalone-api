@@ -385,6 +385,8 @@ async function runOne(type,date,snapshotId=''){
     :bills.filter(code=>!confirmTimedBills.has(code));
   const statusBatches=splitTrackBatches(statusBills),statusTimedBills=new Set();
   let statusQueried=0,statusFailed=0,statusPersistedRows=0,status60=0,status60WithTime=0,status60WithoutTime=0;
+  let statusApiRows=0,statusMatchedRows=0,statusEmptySuccessBatches=0,statusFailureBatches=0;
+  const statusFailureTypes=new Map();
   for(let offset=0;offset<statusBatches.length;offset+=4){
     const wave=statusBatches.slice(offset,offset+4);
     const results=await Promise.all(wave.map(async batch=>{
@@ -395,6 +397,10 @@ async function runOne(type,date,snapshotId=''){
     for(const outcome of results){
       for(const success of outcome.successes||[]){
         const successBatch=success.batch||[],rows=success.events||[];
+        statusApiRows+=rows.length;
+        if(!rows.length)statusEmptySuccessBatches++;
+        const expected=new Set(successBatch.map(code=>String(code||'').trim().toUpperCase()));
+        statusMatchedRows+=new Set(rows.map(billOf).filter(code=>expected.has(code))).size;
         statusPersistedRows+=persistShipmentStatusRows(type,date,rows,null,successBatch);
         const grouped=rawRowsByBill(rows);
         for(const codeRaw of successBatch){
@@ -415,10 +421,15 @@ async function runOne(type,date,snapshotId=''){
       }
       for(const failure of outcome.failures||[]){
         const n=(failure.batch||[]).length;statusFailed+=n;apiFailureBills+=n;
+        statusFailureBatches++;
+        const raw=String(failure.error?.code||failure.error?.name||'UNKNOWN').toUpperCase();
+        const category=/AUTH|LOGIN|TOKEN|UNAUTHORIZED/.test(raw)?'AUTH':/TIMEOUT|ABORT/.test(raw)?'TIMEOUT':/RATE|LIMIT|429/.test(raw)?'RATE_LIMIT':/NETWORK|FETCH|CONNECTION/.test(raw)?'NETWORK':'OTHER';
+        statusFailureTypes.set(category,(statusFailureTypes.get(category)||0)+1);
       }
     }
     patch(type,date,snapshotId,{
       status:'RUNNING',phase:'SHIPMENT_STATUS_QUERY',statusQueried,statusFailed,statusPersistedRows,status60,status60WithTime,status60WithoutTime,
+      statusSourceMembers:statusBills.length,statusApiRows,statusMatchedRows,statusEmptySuccessBatches,statusFailureBatches,statusFailureTypes:Object.fromEntries(statusFailureTypes),
       confirmQueried,confirmFailed,confirmPersistedRows,confirm85,confirm85WithTime,confirm85WithoutTime,repairRevision,
       message:`${type} ${date} shipmentStatus补证 ${Math.min(offset+4,statusBatches.length)}/${statusBatches.length}批：60/POD有时间 ${status60WithTime}票，无时间 ${status60WithoutTime}票`
     });
@@ -459,11 +470,11 @@ async function runOne(type,date,snapshotId=''){
     const durable=writeDurableStop(
       type,date,snapshotId,bills.length,
       `${type} ${date} 已完成一次实时轨迹补证，但仍未取得真实60/70→80轨迹；为避免重复无效查询，后续自动补查已停止。`,
-      {completed,failed,queried,persistedEvents,confirmQueried,confirmFailed,confirmPersistedRows,confirm85,confirm85WithTime,confirm85WithoutTime,statusQueried,statusFailed,statusPersistedRows,status60,status60WithTime,status60WithoutTime,repairRevision,exhaustionSource:'POST_CONFIRM_STATUS_AND_TRACK_QUERY_EXHAUSTED'}
+      {completed,failed,queried,persistedEvents,confirmQueried,confirmFailed,confirmPersistedRows,confirm85,confirm85WithTime,confirm85WithoutTime,statusQueried,statusFailed,statusPersistedRows,status60,status60WithTime,status60WithoutTime,statusSourceMembers:statusBills.length,statusApiRows,statusMatchedRows,statusEmptySuccessBatches,statusFailureBatches,statusFailureTypes:Object.fromEntries(statusFailureTypes),repairRevision,exhaustionSource:'POST_CONFIRM_STATUS_AND_TRACK_QUERY_EXHAUSTED'}
     );
     return patch(type,date,snapshotId,durable);
   }
-  return patch(type,date,snapshotId,{status:failed?'COMPLETED_WITH_GAPS':'COMPLETED',phase:'DONE',completed,failed,queried,persistedEvents,apiFailureBills,confirmQueried,confirmFailed,confirmPersistedRows,confirm85,confirm85WithTime,confirm85WithoutTime,statusQueried,statusFailed,statusPersistedRows,status60,status60WithTime,status60WithoutTime,repairRevision,completedAt:now(),message:failed?(apiFailureBills>0
+  return patch(type,date,snapshotId,{status:failed?'COMPLETED_WITH_GAPS':'COMPLETED',phase:'DONE',completed,failed,queried,persistedEvents,apiFailureBills,confirmQueried,confirmFailed,confirmPersistedRows,confirm85,confirm85WithTime,confirm85WithoutTime,statusQueried,statusFailed,statusPersistedRows,status60,status60WithTime,status60WithoutTime,statusSourceMembers:statusBills.length,statusApiRows,statusMatchedRows,statusEmptySuccessBatches,statusFailureBatches,statusFailureTypes:Object.fromEntries(statusFailureTypes),repairRevision,completedAt:now(),message:failed?(apiFailureBills>0
     ?`${type} ${date} 部分接口请求失败 ${apiFailureBills}票；不代表历史轨迹不存在，保留重试。`
     :`${type} ${date} 补证完成：confirm85有时间 ${confirm85WithTime}票，shipmentStatus60有时间 ${status60WithTime}票，轨迹仍缺 ${failed}票。`)
     :`${type} ${date} 签收时效补证完成。`});
