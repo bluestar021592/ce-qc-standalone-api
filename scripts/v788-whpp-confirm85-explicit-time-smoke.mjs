@@ -21,7 +21,7 @@ const rows=[
 ];
 assert.equal(persistConfirmRows('WHPP',date,rows,db,rows.slice(0,3).map(x=>x.shipmentCode)),3);
 assert.equal(db.prepare("SELECT COUNT(*) AS n FROM business_scan_results").get().n,3);
-assert.deepEqual(db.prepare("SELECT podTime,source FROM business_pod_locks WHERE shipmentCode='V788CONFIRM85'").get(),
+assert.deepEqual({...db.prepare("SELECT podTime,source FROM business_pod_locks WHERE shipmentCode='V788CONFIRM85'").get()},
 {podTime:'2026-07-03 14:15:00',source:'whpp_confirm_85_explicit_pod_time'});
 assert.equal(db.prepare("SELECT COUNT(*) AS n FROM business_pod_locks").get().n,1);
 assert.equal(trustedWhppPodTime(db.prepare("SELECT podTime,source FROM business_pod_locks WHERE shipmentCode='V788CONFIRM85'").get(),date),'2026-07-03 14:15:00');

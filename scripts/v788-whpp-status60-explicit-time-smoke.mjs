@@ -34,12 +34,12 @@ const requested=rows.slice(0,5).map(x=>x.shipmentCode);
 assert.equal(persistShipmentStatusRows('WHPP',date,rows,db,requested),5);
 assert.equal(db.prepare('SELECT COUNT(*) AS n FROM business_shipment_tracks').get().n,5);
 assert.equal(db.prepare('SELECT COUNT(*) AS n FROM business_pod_locks').get().n,1);
-assert.deepEqual(db.prepare("SELECT podTime,source FROM business_pod_locks WHERE shipmentCode='V788TIME01'").get(),
+assert.deepEqual({...db.prepare("SELECT podTime,source FROM business_pod_locks WHERE shipmentCode='V788TIME01'").get()},
 {podTime:'2026-07-03 09:12:00',source:'whpp_shipment_status_60_explicit_pod_time'});
 assert.equal(db.prepare("SELECT shipmentCode FROM business_pod_locks WHERE shipmentCode='WRONGOVERFETCH'").get(),undefined);
 db.prepare("INSERT INTO business_pod_locks VALUES('WHPP','V788TIME02','2026-07-10 12:00:00','USER_EDIT','','')").run();
 persistShipmentStatusRows('WHPP',date,[{shipmentCode:'V788TIME02',shipmentStatus:'60',deliveryCompletedAt:'2026-07-04 08:40:00'}],db,['V788TIME02']);
-assert.deepEqual(db.prepare("SELECT podTime,source FROM business_pod_locks WHERE shipmentCode='V788TIME02'").get(),
+assert.deepEqual({...db.prepare("SELECT podTime,source FROM business_pod_locks WHERE shipmentCode='V788TIME02'").get()},
 {podTime:'2026-07-04 08:40:00',source:'whpp_shipment_status_60_explicit_pod_time'});
 db.prepare("INSERT INTO business_pod_locks VALUES('WHPP','V788PRESERVE','2026-07-03 02:00:00','whpp_strict_track_event','','')").run();
 persistShipmentStatusRows('WHPP',date,[{shipmentCode:'V788PRESERVE',shipmentStatus:'60',podTime:'2026-07-04 09:00:00'}],db,['V788PRESERVE']);
