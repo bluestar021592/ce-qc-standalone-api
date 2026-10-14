@@ -24,10 +24,11 @@ export function buildV788AcceptanceVerdict(audit){
       unbalancedDates:(source.byDate||[]).filter(day=>day.reconciled!==true).length,
       sourceMembershipOnly:true}));
   results.push(check('WHPP_TERMINAL_CONFLICTS',
-    Number(totals.contradiction||0)===0&&Number(totals.ledgerTerminalContradictingTms||0)===0
+    Number(totals.contradiction||0)===0&&Number(totals.ledgerTerminalContradictingTms||0)===0&&Number(totals.savedTmsCurrentConflict||0)===0
       ?'PASS':'BLOCK',
     {stateContradictions:Number(totals.contradiction||0),
-     terminalLedgerContradictions:Number(totals.ledgerTerminalContradictingTms||0)}));
+     terminalLedgerContradictions:Number(totals.ledgerTerminalContradictingTms||0),
+     persistedTmsVsCurrentStatusConflicts:Number(totals.savedTmsCurrentConflict||0)}));
   results.push(check('WHPP_LATE_TMS_NEEDS_STATE_SYNC',
     Number(totals.latePODPendingState||0)===0&&Number(totals.lateReturnedPendingState||0)===0
       ?'PASS':'REVIEW',
