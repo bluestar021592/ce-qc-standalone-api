@@ -153,21 +153,25 @@ function savedTimingStopSummary(db){
   if(!cols.has('key')||!cols.has('valueJson'))return {available:false,reason:'APP_STATE_COLUMNS_MISSING',byDate:[]};
   const byDate=[];
   for(const date of ['2026-07-01','2026-07-02']){
-    const key='selected_date_timing_stop:WHPP:'+date;
-    const record=db.prepare("SELECT valueJson FROM app_state WHERE key=? LIMIT 1").get(key);
-    if(!record){byDate.push({date,savedDurableStop:false});continue}
+    const saved=db.prepare("SELECT valueJson FROM app_state WHERE key=? LIMIT 1");
+    const latest=saved.get('selected_date_timing_diag:WHPP:'+date);
+    const stopped=saved.get('selected_date_timing_stop:WHPP:'+date);
+    const record=latest||stopped;
+    if(!record){byDate.push({date,savedTimingRecord:false,savedDurableStop:false});continue}
     const payload=safeObject(record.valueJson);
     const number=k=>Math.max(0,Number(payload[k]||0)||0);
-    byDate.push({date,savedDurableStop:true,stopStatus:String(payload.status||'').slice(0,64),
+    byDate.push({date,savedTimingRecord:true,recordType:latest?'LATEST_COMPLETED_REPAIR':'DURABLE_STOP',
+      savedDurableStop:Boolean(stopped),stopStatus:String(payload.status||'').slice(0,64),
       statusQueried:number('statusQueried'),statusFailed:number('statusFailed'),
       statusSourceMembers:number('statusSourceMembers'),statusApiRows:number('statusApiRows'),
-      statusMatchedRows:number('statusMatchedRows'),statusPersistedRows:number('statusPersistedRows'),
+      statusMatchedRows:number('statusMatchedRows'),statusStatuslessRows:number('statusStatuslessRows'),
+      statusPersistedRows:number('statusPersistedRows'),
       statusFailureBatches:number('statusFailureBatches'),
       statusFailureTypes:Object.fromEntries(Object.entries(payload.statusFailureTypes||{}).filter(([k,v])=>/^(AUTH|TIMEOUT|RATE_LIMIT|NETWORK|OTHER)$/.test(k)).map(([k,v])=>[k,Math.max(0,Number(v)||0)]))
     });
   }
-  return {available:true,scope:'ONLY_DURABLE_STOP_RECORDS_NOT_ALL_QUERY_HISTORY',
-    caveat:'A missing durable stop record does not show that the TMS API was never called.',byDate};
+  return {available:true,scope:'LATEST_COMPLETED_REPAIR_OR_DURABLE_STOP',
+    caveat:'A missing diagnostic record does not show that the TMS API was never called.',byDate};
 }
 export function auditV788Readonly(db){
   db.exec('PRAGMA query_only=ON');
