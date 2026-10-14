@@ -113,7 +113,24 @@ try{
   // Independently saved TMS evidence overrides missing legacy stateJson status.
   db.prepare("UPDATE shipment_current_state SET stateJson=? WHERE shipmentCode='A1'").run(JSON.stringify({podTime:'2026-07-03 09:00:00'}));
   db.prepare("INSERT INTO business_shipment_tracks VALUES('WHPP','A1','2026-07-01','60','{}')").run();
+  // Recent repair diagnostics survive process restarts in app_state and
+  // take precedence over an older durable stop; expose only aggregate counts.
+  db.exec("CREATE TABLE app_state(key TEXT PRIMARY KEY,valueJson TEXT,updatedAt TEXT)");
+  const diag=db.prepare("INSERT INTO app_state(key,valueJson,updatedAt) VALUES(?,?,?)");
+  diag.run('selected_date_timing_stop:WHPP:2026-07-01',
+    JSON.stringify({status:'HISTORICAL_EVIDENCE_UNAVAILABLE',statusQueried:12}), '2026-10-13');
+  diag.run('selected_date_timing_diag:WHPP:2026-07-01',
+    JSON.stringify({status:'COMPLETED_WITH_GAPS',statusSourceMembers:190,
+      statusQueried:190,statusApiRows:150,statusMatchedRows:120,
+      statusStatuslessRows:30,statusPersistedRows:90,statusFailed:5,
+      statusFailureTypes:{TIMEOUT:1}}), '2026-10-14');
   const audit=auditV788Readonly(db);
+  assert.equal(audit.savedTimingStopSummary.byDate[0].recordType,'LATEST_COMPLETED_REPAIR');
+  assert.equal(audit.savedTimingStopSummary.byDate[0].statusQueried,190);
+  assert.equal(audit.savedTimingStopSummary.byDate[0].statusPersistedRows,90);
+  assert.equal(audit.savedTimingStopSummary.byDate[0].statusStatuslessRows,30);
+  assert.equal(audit.savedTimingStopSummary.byDate[0].savedDurableStop,true);
+  assert.equal(audit.savedTimingStopSummary.byDate[1].savedTimingRecord,false);
   assert.equal(audit.whpp.totals.savedTmsTrackMembers,1);
   assert.equal(audit.whpp.totals.savedTms60,1);
   assert.equal(audit.whpp.totals.savedTmsCurrentConflict,0);
