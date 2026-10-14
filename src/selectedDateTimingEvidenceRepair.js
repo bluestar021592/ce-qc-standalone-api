@@ -224,10 +224,14 @@ function confirmTimingEvidence(row={}){
   return extractV498SavedShopeePodEvidence({shipmentCode:code,orderStatus:String(row.orderStatus??''),rawJson:JSON.stringify(row)},'business_scan_results');
 }
 
-export function persistShipmentStatusRows(type,date,rows=[],dbOverride=null){
+export function persistShipmentStatusRows(type,date,rows=[],dbOverride=null,requestedBills=[]){
   const owner=storageType(type),db=dbOverride||getDb(),stamp=now(),latest=new Map();
+  const requested=new Set(unique(requestedBills));
   for(const raw of rows||[]){
-    const code=billOf(raw);if(!code)continue;
+    const code=billOf(raw);
+    // Drop TMS overfetch, unexpected business members and orphan payloads.
+    // Never create locks for bills absent from this exact request batch.
+    if(!code||(requested.size>0&&!requested.has(code)))continue;
     latest.set(code,{...raw,shipmentCode:code,reportDate:date});
   }
   if(!latest.size)return 0;
@@ -377,7 +381,7 @@ async function runOne(type,date,snapshotId=''){
     for(const outcome of results){
       for(const success of outcome.successes||[]){
         const successBatch=success.batch||[],rows=success.events||[];
-        statusPersistedRows+=persistShipmentStatusRows(type,date,rows);
+        statusPersistedRows+=persistShipmentStatusRows(type,date,rows,null,successBatch);
         const grouped=rawRowsByBill(rows);
         for(const codeRaw of successBatch){
           const code=String(codeRaw||'').trim().toUpperCase(),row=(grouped.get(code)||[]).at(-1)||null;
