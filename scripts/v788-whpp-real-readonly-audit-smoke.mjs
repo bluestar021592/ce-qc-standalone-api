@@ -35,6 +35,10 @@ assert.match(repairSource,/saveWhppTimingDiagnostic\(typeN,dateN,next\)/,
   'each WHPP status-query wave must persist diagnostic counts');
 assert.match(repairSource,/\['SHIPMENT_STATUS_QUERY','FAILED','DONE'\]/,
   'even failed or interrupted runs must retain the last status-wave diagnostics');
+assert.match(repairSource,/type==='WHPP'&&Number\(statusFailureTypes\.get\('AUTH'\)\|\|0\)>0/,
+  'expired WHPP TMS auth must stop follow-on queries');
+assert.match(repairSource,/TMS身份认证失败，已停止本日剩余查询/,
+  'explicit auth failure must not be reported as completed');
 assert.match(repairSource,/classifyWhppTmsError\(failure\.error\)/,
   'status errors must normalize auth, timeout and network failures');
 assert.match(repairSource,/const whppSourceBills=type==='WHPP'\?selectedDateShipmentStatusBills/);
