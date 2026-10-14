@@ -145,6 +145,20 @@ export function selectedDatePodBills(type,date,snapshotId=''){
   if(t==='TBKH')return tbkhPodBills(d,snapshotId);
   return shopeePodBills(t,d);
 }
+// WHPP terminal-status verification is not restricted to already-POD
+// members. The independent source also contains RETURNED and unresolved
+// labels; query shipmentStatus for the entire exact-day source membership,
+// while restricting the more expensive signing-time trajectory search to POD.
+export function selectedDateShipmentStatusBills(type,date,snapshotId='',dbOverride=null){
+  const t=typeKey(type),d=dateKey(date);
+  if(!TYPES.has(t)||!d)return[];
+  if(t!=='WHPP')return selectedDatePodBills(t,d,snapshotId);
+  const db=dbOverride||getDb();
+  const truth=loadWhppCanonicalTruth(d,'',db);
+  if(!truth?.total||!Array.isArray(truth.rows)||truth.rows.length!==truth.total)return[];
+  return unique(truth.rows.map(row=>billOf(row)));
+}
+
 function groupRows(rows=[],fallbackBills=[]){
   const map=new Map();
   const normalizedRows=normalizeV485TrackRows(rows,{fallbackBills});
@@ -304,7 +318,12 @@ async function runOne(type,date,snapshotId=''){
     });
   }
 
-  const statusBills=bills.filter(code=>!confirmTimedBills.has(code));
+  // A WHPP POD time from confirm-query does not prove its TMS 60/81
+  // shipment status. Always verify all exact-day WHPP members (including
+  // formerly RETURNED labels), once per requested evidence run.
+  const statusBills=type==='WHPP'
+    ?selectedDateShipmentStatusBills(type,date,snapshotId)
+    :bills.filter(code=>!confirmTimedBills.has(code));
   const statusBatches=splitTrackBatches(statusBills),statusTimedBills=new Set();
   let statusQueried=0,statusFailed=0,statusPersistedRows=0,status60=0,status60WithTime=0,status60WithoutTime=0;
   for(let offset=0;offset<statusBatches.length;offset+=4){
