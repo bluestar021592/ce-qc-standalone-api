@@ -69,6 +69,9 @@ function writeDurableStop(type,date,snapshotId,total,message,stats={}){
     confirm85:Number(stats.confirm85||0),confirm85WithTime:Number(stats.confirm85WithTime||0),confirm85WithoutTime:Number(stats.confirm85WithoutTime||0),
     statusQueried:Number(stats.statusQueried||0),statusFailed:Number(stats.statusFailed||0),statusPersistedRows:Number(stats.statusPersistedRows||0),
     status60:Number(stats.status60||0),status60WithTime:Number(stats.status60WithTime||0),status60WithoutTime:Number(stats.status60WithoutTime||0),
+    statusSourceMembers:Number(stats.statusSourceMembers||0),statusApiRows:Number(stats.statusApiRows||0),
+    statusMatchedRows:Number(stats.statusMatchedRows||0),statusEmptySuccessBatches:Number(stats.statusEmptySuccessBatches||0),
+    statusFailureBatches:Number(stats.statusFailureBatches||0),statusFailureTypes:stats.statusFailureTypes||{},
     repairRevision:String(stats.repairRevision||''),exhaustionSource:String(stats.exhaustionSource||'POST_QUERY_EXHAUSTED'),
     message:message||'历史轨迹证据缺失，自动补查已停止。',completedAt:now(),updatedAt:now()
   };
