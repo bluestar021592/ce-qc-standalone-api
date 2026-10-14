@@ -122,7 +122,7 @@ export function loadWhppCanonicalTruth(reportDate='', snapshotId='', dbOverride=
       (savedStatus==='60'&&pod&&!returned&&
         (latestTmsCode==='60'||(currentMap.has(code)&&savedState==='POD')))||
       (savedStatus==='81'&&returned&&!pod&&
-        (latestTmsCode==='81'||(currentMap.has(code)&&['RETURNED','RETURN_COMPLETED'].includes(savedState)))
+        (latestTmsCode==='81'||(currentMap.has(code)&&['RETURNED','RETURN_COMPLETED'].includes(savedState))))
     );
     const savedLock=pod?podLockMap.get(code):null;
     const savedPodDate=pod?trustedWhppPodTime(savedLock,date):'';
