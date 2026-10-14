@@ -16,6 +16,7 @@ import { extractV498SavedShopeePodEvidence } from './v498SavedShopeePodEvidence.
 export const V645_SELECTED_DATE_TIMING_REPAIR_ID='2026-10-05-v645-selected-date-pod-track-repair-v1';
 export const V737_STATUS_FIRST_TIMING_REPAIR_REVISION='2026-10-07-v737-status-first-timing-repair-v1';
 export const V740_CONFIRM_FIRST_TIMING_REPAIR_REVISION='2026-10-07-v740-confirm-first-timing-repair-v1';
+export const V788_WHPP_FULL_SOURCE_STATUS_REVISION='2026-10-14-v788-whpp-all-source-tms-status-v1';
 const TYPES=new Set(['TBKH','WHPP','SHOPEECN','SHOPEEVN']);
 const states=new Map();
 const queue=new Map();
@@ -282,6 +283,9 @@ async function queryTimingEvidenceRows(client,codes=[]){
 }
 
 async function runOne(type,date,snapshotId=''){
+  const repairRevision=type==='WHPP'
+    ?V788_WHPP_FULL_SOURCE_STATUS_REVISION
+    :V740_CONFIRM_FIRST_TIMING_REPAIR_REVISION;
   const bills=selectedDatePodBills(type,date,snapshotId);
   patch(type,date,snapshotId,{status:'RUNNING',phase:'TRACK_QUERY',total:bills.length,completed:0,failed:0,queried:0,startedAt:now(),message:`${type} ${date} 签收时效补证：真实POD ${bills.length}票`});
   if(!bills.length)return patch(type,date,snapshotId,{status:'WAITING_FOR_POD_MEMBERS',phase:'WAITING_FOR_POD_MEMBERS',completedAt:now(),message:`${type} ${date} 当前尚未形成真实POD成员；等待扫描/轨迹处理完成后自动重试。`});
@@ -313,7 +317,7 @@ async function runOne(type,date,snapshotId=''){
     }
     patch(type,date,snapshotId,{
       status:'RUNNING',phase:'CONFIRM_QUERY',confirmQueried,confirmFailed,confirmPersistedRows,confirm85,confirm85WithTime,confirm85WithoutTime,
-      repairRevision:V740_CONFIRM_FIRST_TIMING_REPAIR_REVISION,
+      repairRevision,
       message:`${type} ${date} confirm补证 ${Math.min(offset+4,confirmBatches.length)}/${confirmBatches.length}批：85/POD有时间 ${confirm85WithTime}票，无时间 ${confirm85WithoutTime}票`
     });
   }
@@ -352,7 +356,7 @@ async function runOne(type,date,snapshotId=''){
     }
     patch(type,date,snapshotId,{
       status:'RUNNING',phase:'SHIPMENT_STATUS_QUERY',statusQueried,statusFailed,statusPersistedRows,status60,status60WithTime,status60WithoutTime,
-      confirmQueried,confirmFailed,confirmPersistedRows,confirm85,confirm85WithTime,confirm85WithoutTime,repairRevision:V740_CONFIRM_FIRST_TIMING_REPAIR_REVISION,
+      confirmQueried,confirmFailed,confirmPersistedRows,confirm85,confirm85WithTime,confirm85WithoutTime,repairRevision,
       message:`${type} ${date} shipmentStatus补证 ${Math.min(offset+4,statusBatches.length)}/${statusBatches.length}批：60/POD有时间 ${status60WithTime}票，无时间 ${status60WithoutTime}票`
     });
   }
@@ -380,17 +384,17 @@ async function runOne(type,date,snapshotId=''){
       }
       for(const failure of outcome.failures||[])failed+=(failure.batch||[]).length;
     }
-    patch(type,date,snapshotId,{status:'RUNNING',phase:'TRACK_QUERY',completed,failed,queried,persistedEvents,confirmQueried,confirmFailed,confirmPersistedRows,confirm85,confirm85WithTime,confirm85WithoutTime,statusQueried,statusFailed,statusPersistedRows,status60,status60WithTime,status60WithoutTime,repairRevision:V740_CONFIRM_FIRST_TIMING_REPAIR_REVISION,message:`${type} ${date} 轨迹补证 ${Math.min(offset+4,totalBatches)}/${totalBatches}批：已有POD时间 ${timedBills.size}，轨迹成功 ${Math.max(0,completed-timedBills.size)}，失败 ${failed}`});
+    patch(type,date,snapshotId,{status:'RUNNING',phase:'TRACK_QUERY',completed,failed,queried,persistedEvents,confirmQueried,confirmFailed,confirmPersistedRows,confirm85,confirm85WithTime,confirm85WithoutTime,statusQueried,statusFailed,statusPersistedRows,status60,status60WithTime,status60WithoutTime,repairRevision,message:`${type} ${date} 轨迹补证 ${Math.min(offset+4,totalBatches)}/${totalBatches}批：已有POD时间 ${timedBills.size}，轨迹成功 ${Math.max(0,completed-timedBills.size)}，失败 ${failed}`});
   }
   if(bills.length>0&&timedBills.size===0&&completed===0&&failed>=trackBills.length&&persistedEvents===0&&reportAgeDays(date)>HISTORICAL_AUTO_REPAIR_MAX_AGE_DAYS){
     const durable=writeDurableStop(
       type,date,snapshotId,bills.length,
       `${type} ${date} 已完成一次实时轨迹补证，但仍未取得真实60/70→80轨迹；为避免重复无效查询，后续自动补查已停止。`,
-      {completed,failed,queried,persistedEvents,confirmQueried,confirmFailed,confirmPersistedRows,confirm85,confirm85WithTime,confirm85WithoutTime,statusQueried,statusFailed,statusPersistedRows,status60,status60WithTime,status60WithoutTime,repairRevision:V740_CONFIRM_FIRST_TIMING_REPAIR_REVISION,exhaustionSource:'POST_CONFIRM_STATUS_AND_TRACK_QUERY_EXHAUSTED'}
+      {completed,failed,queried,persistedEvents,confirmQueried,confirmFailed,confirmPersistedRows,confirm85,confirm85WithTime,confirm85WithoutTime,statusQueried,statusFailed,statusPersistedRows,status60,status60WithTime,status60WithoutTime,repairRevision,exhaustionSource:'POST_CONFIRM_STATUS_AND_TRACK_QUERY_EXHAUSTED'}
     );
     return patch(type,date,snapshotId,durable);
   }
-  return patch(type,date,snapshotId,{status:failed?'COMPLETED_WITH_GAPS':'COMPLETED',phase:'DONE',completed,failed,queried,persistedEvents,confirmQueried,confirmFailed,confirmPersistedRows,confirm85,confirm85WithTime,confirm85WithoutTime,statusQueried,statusFailed,statusPersistedRows,status60,status60WithTime,status60WithoutTime,repairRevision:V740_CONFIRM_FIRST_TIMING_REPAIR_REVISION,completedAt:now(),message:failed?`${type} ${date} 补证完成：confirm85有时间 ${confirm85WithTime}票，shipmentStatus60有时间 ${status60WithTime}票，轨迹仍缺 ${failed}票。`:`${type} ${date} 签收时效补证完成。`});
+  return patch(type,date,snapshotId,{status:failed?'COMPLETED_WITH_GAPS':'COMPLETED',phase:'DONE',completed,failed,queried,persistedEvents,confirmQueried,confirmFailed,confirmPersistedRows,confirm85,confirm85WithTime,confirm85WithoutTime,statusQueried,statusFailed,statusPersistedRows,status60,status60WithTime,status60WithoutTime,repairRevision,completedAt:now(),message:failed?`${type} ${date} 补证完成：confirm85有时间 ${confirm85WithTime}票，shipmentStatus60有时间 ${status60WithTime}票，轨迹仍缺 ${failed}票。`:`${type} ${date} 签收时效补证完成。`});
 }
 async function pump(){
   if(runningKey||!queue.size)return;
@@ -403,10 +407,14 @@ export function requestSelectedDateTimingRepair(businessType='',reportDate='',sn
   if(!TYPES.has(type)||!date)return stateFor(type,date,snap);
   let current=stateFor(type,date,snap),status=String(current.status||'').toUpperCase();
   if(status==='HISTORICAL_EVIDENCE_UNAVAILABLE'){
-    // V740 adds live confirm-query before shipmentStatus/event fallback. Older
-    // durable stops are reopened exactly once because confirm-query is the same
-    // source that originally established many historical POD memberships.
-    if(String(current.repairRevision||'')===V740_CONFIRM_FIRST_TIMING_REPAIR_REVISION&&Number(current.confirmQueried||0)>0)return current;
+    // WHPP V788 adds an exact-source 60/80/81 query for every saved member,
+    // including the 56 historically returned-label candidates. Reopen a V740
+    // durable stop only ONCE under this new revision. A V788 exhausted stop
+    // never loops; other businesses preserve their original V740 policy.
+    const revision=String(current.repairRevision||'');
+    if(type==='WHPP'&&revision===V788_WHPP_FULL_SOURCE_STATUS_REVISION)return current;
+    if(type!=='WHPP'&&revision===V740_CONFIRM_FIRST_TIMING_REPAIR_REVISION
+      &&Number(current.confirmQueried||0)>0)return current;
     clearDurableStop(type,date);
     states.delete(keyOf(type,date,snap));
     current=baseState(type,date,snap);
