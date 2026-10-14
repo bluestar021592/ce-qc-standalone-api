@@ -11,6 +11,8 @@ assert.match(server,/acknowledgeIsolatedQuery!==true/);
 assert.match(server,/v788StageActive=true/);
 assert.match(server,/runV788Stage\(\{execute:true\}\)/);
 assert.match(server,/productionDatabaseModified:false/);
+assert.match(server,/import fsSync from 'node:fs'/);
+assert.match(server,/fsSync\.readFileSync\(v788StageReport,'utf8'\)/);
 assert.match(server,/businessStateUpdated:false/);
 assert.match(html,/id="v788WhppEvidencePanel"/);
 assert.match(html,/id="v788WhppEvidenceStart"/);
