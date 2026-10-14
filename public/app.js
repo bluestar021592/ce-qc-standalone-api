@@ -358,6 +358,7 @@ function renderAll() {
   renderAuthPanels();
   renderNetworkSettings();
   if (currentPage === 'settings') void runPageLoad('settings-users', loadUserManagement, 30000);
+  if (currentPage === 'settings') void runPageLoad('settings-v788-evidence', loadV788WhppEvidenceStatus, 8000);
   if (currentPage === 'home') renderHome();
   else if (['ce', 'ceaf', 'tbkh', 'ali1688'].includes(currentPage)) renderCcslPage();
   else if (['shopeecn', 'shopeevn'].includes(currentPage)) renderShopeePage();
@@ -1944,6 +1945,59 @@ function isCeApiSessionUsable(auth = {}) {
   if (!auth?.loggedIn || !auth?.hasAccessToken || auth?.expired === true) return false;
   if (auth?.expiresAt && !(Number(auth.expiresInSeconds) > 120)) return false;
   return true;
+}
+
+// V788 in-app evidence check: no ZIP, CMD or separate upload required.
+// It does NOT run until an administrator explicitly clicks confirmation.
+let v788EvidenceInFlight=false;
+let v788EvidencePoll=null;
+async function loadV788WhppEvidenceStatus() {
+  const panel=document.getElementById('v788WhppEvidencePanel');
+  const info=document.getElementById('v788WhppEvidenceText');
+  const start=document.getElementById('v788WhppEvidenceStart');
+  if(!panel||!info||!start||currentPage!=='settings')return;
+  panel.hidden=false;
+  try{
+    const data=await api('/api/v788/whpp-evidence/status');
+    const waiting=Boolean(data.active||data.status==='RUNNING');
+    const covered=Number(data.savedMembers||0),batches=Number(data.completedBatches||0);
+    const isFull=covered===346&&batches===8&&data.savedStatus==='346_TMS_ROWS_STAGED_NOT_BUSINESS_ACCEPTED'&&data.isolatedCopyUnchanged===true;
+    const lines=[];
+    if(isFull)lines.push('逐票证据已保存：346/346票，8/8批；POD '+Number(data.pod||0)+'票，已退回 '+Number(data.returned||0)+'票。');
+    else if(waiting)lines.push('正在核验，已保存 '+covered+'/346票；完成 '+batches+'/8批。页面可以保持打开。');
+    else if(data.status==='FAILED'||data.status==='STOPPED_RETRYABLE')lines.push('核验暂停：'+String(data.message||'请检查CE系统登录状态'));
+    else if(covered>0)lines.push('已有证据 '+covered+'/346票；完成 '+batches+'/8批，可继续补齐。');
+    else lines.push('尚未保存逐票证据；已完成的346票只读对账无需再上传。');
+    lines.push('仅隔离核验，不修改正式数据库；签收时间和历史账本仍需独立验收。');
+    info.textContent=lines.join(' ');
+    start.disabled=waiting||v788EvidenceInFlight||isFull||!isCeApiSessionUsable(ceAuth)||data.platformReady!==true;
+    start.textContent=waiting?'隔离核验进行中…':isFull?'346票已留存':'开始隔离核验（346票）';
+    if(!isCeApiSessionUsable(ceAuth)&&!isFull)
+      info.textContent+=' CE系统接口凭证未就绪，请先在上方重新登录CE系统。';
+    if(v788EvidencePoll){clearTimeout(v788EvidencePoll);v788EvidencePoll=null;}
+    if(waiting&&currentPage==='settings')
+      v788EvidencePoll=setTimeout(()=>{void loadV788WhppEvidenceStatus()},4000);
+  }catch(error){
+    info.textContent='核验状态暂时无法读取：'+String(error?.message||'请稍后刷新')+'。没有启动TMS查询。';
+    start.disabled=true;
+  }
+}
+async function startV788WhppEvidence(){
+  const button=document.getElementById('v788WhppEvidenceStart');
+  if(v788EvidenceInFlight||button?.disabled)return;
+  if(!window.confirm('确认只对D盘V788隔离副本的346票查询TMS并保存独立证据？正式数据库、POD时间和历史账本不会修改。'))return;
+  v788EvidenceInFlight=true;
+  if(button)button.disabled=true;
+  try{
+    await api('/api/v788/whpp-evidence/start',{
+      method:'POST',headers:{'content-type':'application/json'},
+      body:JSON.stringify({acknowledgeIsolatedQuery:true})
+    });
+    await loadV788WhppEvidenceStatus();
+  }catch(error){
+    const target=document.getElementById('v788WhppEvidenceText');
+    if(target)target.textContent='核验没有启动：'+String(error?.message||'请检查登录状态');
+  }finally{v788EvidenceInFlight=false}
 }
 
 function renderAuthPanels() {
