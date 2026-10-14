@@ -3,6 +3,7 @@ import express from 'express';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs/promises';
+import fsSync from 'node:fs';
 import { fileURLToPath } from 'url';
 import { networkInterfaces } from 'os';
 import { spawn } from 'node:child_process';
@@ -2225,7 +2226,7 @@ function v788StagePublicStatus(){
   let saved={};
   if(process.platform==='win32'){
     try{
-      const data=JSON.parse(fs.readFileSync(v788StageReport,'utf8'));
+      const data=JSON.parse(fsSync.readFileSync(v788StageReport,'utf8'));
       saved={
         savedStatus:String(data?.status||'').slice(0,90),
         completedBatches:Number(data?.coverage?.completedBatches||0),
