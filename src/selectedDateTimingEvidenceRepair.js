@@ -12,6 +12,7 @@ import { normalizeV485TrackRows, archiveV485TrackQueryResponse } from './v485Str
 import { persistentSelectedDatePodTruth } from './selectedDatePersistentTruth.js';
 import { classifyShipmentStatus, shipmentStatusTime } from './shipmentStatusTruth.js';
 import { explicitWhppTms60PodTime,explicitWhppConfirm85PodTime } from './whppPodTimeEvidence.js';
+import { shouldRunSelectedDateEvidence, whppStatusEvidenceHasGaps } from './v788WhppStatusCoverage.js';
 import { extractV498SavedShopeePodEvidence } from './v498SavedShopeePodEvidence.js';
 
 export const V645_SELECTED_DATE_TIMING_REPAIR_ID='2026-10-05-v645-selected-date-pod-track-repair-v1';
@@ -340,11 +341,13 @@ async function runOne(type,date,snapshotId=''){
     ?V788_WHPP_FULL_SOURCE_STATUS_REVISION
     :V740_CONFIRM_FIRST_TIMING_REPAIR_REVISION;
   const bills=selectedDatePodBills(type,date,snapshotId);
+  // Read WHPP's immutable exact-day source once; it includes RETURNED and OPEN,
+  // even on dates with zero POD. Later status queries reuse the same membership.
+  const whppSourceBills=type==='WHPP'?selectedDateShipmentStatusBills(type,date,snapshotId):[];
   patch(type,date,snapshotId,{status:'RUNNING',phase:'TRACK_QUERY',total:bills.length,completed:0,failed:0,queried:0,startedAt:now(),message:`${type} ${date} 签收时效补证：真实POD ${bills.length}票`});
   // WHPP has a separate exact-day source: returned/returning members need
   // shipmentStatus verification even if no POD member has formed yet.
-  const hasWhppSource=type==='WHPP'&&selectedDateShipmentStatusBills(type,date,snapshotId).length>0;
-  if(!bills.length&&!hasWhppSource)return patch(type,date,snapshotId,{status:'WAITING_FOR_POD_MEMBERS',phase:'WAITING_FOR_POD_MEMBERS',completedAt:now(),message:`${type} ${date} 当前尚未形成真实POD成员；等待扫描/轨迹处理完成后自动重试。`});
+  if(!shouldRunSelectedDateEvidence(bills.length,whppSourceBills.length))return patch(type,date,snapshotId,{status:'WAITING_FOR_POD_MEMBERS',phase:'WAITING_FOR_POD_MEMBERS',completedAt:now(),message:`${type} ${date} 当前尚未形成真实POD成员；等待扫描/轨迹处理完成后自动重试。`});
   const client=new CEClient();
 
   let apiFailureBills=0;
@@ -387,7 +390,7 @@ async function runOne(type,date,snapshotId=''){
   // shipment status. Always verify all exact-day WHPP members (including
   // formerly RETURNED labels), once per requested evidence run.
   const statusBills=type==='WHPP'
-    ?selectedDateShipmentStatusBills(type,date,snapshotId)
+    ?whppSourceBills
     :bills.filter(code=>!confirmTimedBills.has(code));
   const statusBatches=splitTrackBatches(statusBills),statusTimedBills=new Set();
   let statusQueried=0,statusFailed=0,statusPersistedRows=0,status60=0,status60WithTime=0,status60WithoutTime=0;
@@ -468,7 +471,12 @@ async function runOne(type,date,snapshotId=''){
     }
     patch(type,date,snapshotId,{status:'RUNNING',phase:'TRACK_QUERY',completed,failed,queried,persistedEvents,confirmQueried,confirmFailed,confirmPersistedRows,confirm85,confirm85WithTime,confirm85WithoutTime,statusQueried,statusFailed,statusPersistedRows,status60,status60WithTime,status60WithoutTime,repairRevision,message:`${type} ${date} 轨迹补证 ${Math.min(offset+4,totalBatches)}/${totalBatches}批：已有POD时间 ${timedBills.size}，轨迹成功 ${Math.max(0,completed-timedBills.size)}，失败 ${failed}`});
   }
-  if(canDurablyStopHistoricalRepair({
+  const statusEvidenceHasGaps=whppStatusEvidenceHasGaps(type,{
+    podMembers:bills.length,sourceMembers:statusBills.length,
+    persistedRows:statusPersistedRows,failedMembers:statusFailed
+  });
+  const statusMissingMembers=type==='WHPP'?Math.max(0,statusBills.length-statusPersistedRows):0;
+  if(!statusEvidenceHasGaps&&canDurablyStopHistoricalRepair({
     billsCount:bills.length,timedCount:timedBills.size,completed,failed,
     trackBillsCount:trackBills.length,persistedEvents,
     ageDays:reportAgeDays(date),apiFailureBills
@@ -480,7 +488,9 @@ async function runOne(type,date,snapshotId=''){
     );
     return patch(type,date,snapshotId,durable);
   }
-  return patch(type,date,snapshotId,{status:failed?'COMPLETED_WITH_GAPS':'COMPLETED',phase:'DONE',completed,failed,queried,persistedEvents,apiFailureBills,confirmQueried,confirmFailed,confirmPersistedRows,confirm85,confirm85WithTime,confirm85WithoutTime,statusQueried,statusFailed,statusPersistedRows,status60,status60WithTime,status60WithoutTime,statusSourceMembers:statusBills.length,statusApiRows,statusMatchedRows,statusEmptySuccessBatches,statusFailureBatches,statusFailureTypes:Object.fromEntries(statusFailureTypes),repairRevision,completedAt:now(),message:failed?(apiFailureBills>0
+  return patch(type,date,snapshotId,{status:(failed||statusEvidenceHasGaps)?'COMPLETED_WITH_GAPS':'COMPLETED',phase:'DONE',statusEvidenceHasGaps,statusMissingMembers,completed,failed,queried,persistedEvents,apiFailureBills,confirmQueried,confirmFailed,confirmPersistedRows,confirm85,confirm85WithTime,confirm85WithoutTime,statusQueried,statusFailed,statusPersistedRows,status60,status60WithTime,status60WithoutTime,statusSourceMembers:statusBills.length,statusApiRows,statusMatchedRows,statusEmptySuccessBatches,statusFailureBatches,statusFailureTypes:Object.fromEntries(statusFailureTypes),repairRevision,completedAt:now(),message:(failed||statusEvidenceHasGaps)?(statusEvidenceHasGaps
+    ?`${type} ${date} TMS原始状态证据未覆盖全部来源票：来源 ${statusBills.length}，保存 ${statusPersistedRows}，缺失至少 ${statusMissingMembers}，接口失败 ${statusFailed}。补证仍有缺口，不能视为业务闭环。`
+    :apiFailureBills>0
     ?`${type} ${date} 部分接口请求失败 ${apiFailureBills}票；不代表历史轨迹不存在，保留重试。`
     :`${type} ${date} 补证完成：confirm85有时间 ${confirm85WithTime}票，shipmentStatus60有时间 ${status60WithTime}票，轨迹仍缺 ${failed}票。`)
     :`${type} ${date} 签收时效补证完成。`});
