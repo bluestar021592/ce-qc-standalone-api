@@ -2220,7 +2220,7 @@ app.get('/api/family-recovery-proof', async (req,res)=>{
 // ADMIN access only. Never auto-runs during startup, import or dashboard reads.
 let v788StageActive=false;
 let v788StageResult={status:'NOT_STARTED',updatedAt:'',message:'尚未启动'};
-const v788StageReport=String.raw`D:\\CE_QC_V788_验收副本\\V788_WHPP_TMS_逐票证据验收.json`;
+const v788StageReport=String.raw`D:\CE_QC_V788_验收副本\V788_WHPP_TMS_逐票证据验收.json`;
 function v788StagePublicStatus(){
   let saved={};
   if(process.platform==='win32'){
