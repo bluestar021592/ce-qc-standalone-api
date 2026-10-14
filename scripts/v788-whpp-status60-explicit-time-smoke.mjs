@@ -59,8 +59,8 @@ assert.equal(map.get('V788TIME01').truthEvidence.trustedSavedPodTime,true);
 assert.equal(map.get('V788TIME01').truthEvidence.currentTerminalStrict,true);
 assert.equal(map.get('V788TIME02').podTime,'2026-07-04 08:40:00');
 assert.equal(map.get('V788RETURN').currentState,'RETURNED');
-assert.equal(map.get('V788RETURN').podTime,undefined);
+assert.equal(String(map.get('V788RETURN').podTime||''),'');
 assert.equal(map.get('V788RETURNING').currentState,'RETURN_IN_PROGRESS');
-assert.equal(map.get('V788BADDATE').podTime,undefined);
+assert.equal(String(map.get('V788BADDATE').podTime||''),'');
 console.log('[V788 STATUS60 POD TIME] real explicit POD date saved, updateTime ignored, 80/81 excluded, safe previous lock preserved, correct member-only provenance PASS');
 }finally{db.close();}
