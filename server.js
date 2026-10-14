@@ -55,6 +55,7 @@ import { diagnoseV736Timing } from './src/v736TimingDiagnostics.js';
 import { readSelectedDateBusinessSourceTruth } from './src/v783SevenBusinessSourceTruth.js';
 import { diagnoseWhppDailyTimingSources } from './src/v745WhppTimingSourceDiagnostics.js';
 import { requestSelectedDateTimingRepair, inspectSelectedDateTimingRepair } from './src/selectedDateTimingEvidenceRepair.js';
+import { runV788Stage } from './scripts/v788-whpp-stage-tms-evidence.mjs';
 import { persistentSelectedDatePodTruth, persistentWhppCompletionTruth } from './src/selectedDatePersistentTruth.js';
 import { buildCanonicalBusinessAccounting } from './src/businessAccounting.js';
 import { buildDataIntegrityReport } from './src/dataIntegrity.js';
@@ -2213,6 +2214,65 @@ app.get('/api/family-recovery-proof', async (req,res)=>{
   res.setHeader('Cache-Control','no-store');
   return res.json({ok:true,reportDate:date,snapshotId,businesses:result});
 });
+// V788: a single in-app, opt-in action replaces repeated ZIP/CMD transfers.
+// Executes ONLY against the exact D-drive ISOLATED COPY, writing a SEPARATE
+// sidecar SQLite. Never edits the production QC DB or legacy acceptance copy.
+// ADMIN access only. Never auto-runs during startup, import or dashboard reads.
+let v788StageActive=false;
+let v788StageResult={status:'NOT_STARTED',updatedAt:'',message:'尚未启动'};
+const v788StageReport=String.raw`D:\\CE_QC_V788_验收副本\\V788_WHPP_TMS_逐票证据验收.json`;
+function v788StagePublicStatus(){
+  let saved={};
+  if(process.platform==='win32'){
+    try{
+      const data=JSON.parse(fs.readFileSync(v788StageReport,'utf8'));
+      saved={
+        savedStatus:String(data?.status||'').slice(0,90),
+        completedBatches:Number(data?.coverage?.completedBatches||0),
+        savedMembers:Number(data?.coverage?.persistedMembers||0),
+        missingMembers:Number(data?.coverage?.missingMembers||0),
+        sourceMembers:Number(data?.coverage?.expectedMembers||346),
+        pod:Number(data?.coverage?.statuses?.s60||0),
+        returned:Number(data?.coverage?.statuses?.s81||0),
+        podWithExplicitTime:Number(data?.coverage?.podWithExplicitTime||0),
+        isolatedCopyUnchanged:data?.isolatedCopyUnchanged===true
+      };
+    }catch{}
+  }
+  return {ok:true,platformReady:process.platform==='win32',
+    active:v788StageActive,...v788StageResult,...saved,
+    source:'ISOLATED_COPY_ONLY',productionDatabaseModified:false,
+    businessStateUpdated:false,readyToPublish:false};
+}
+app.get('/api/v788/whpp-evidence/status',requireRole('ADMIN'),(req,res)=>{
+  res.setHeader('Cache-Control','no-store');
+  res.json(v788StagePublicStatus());
+});
+app.post('/api/v788/whpp-evidence/start',requireRole('ADMIN'),(req,res)=>{
+  if(process.platform!=='win32')return res.status(409).json({ok:false,error:'仅允许Windows隔离验收环境运行'});
+  if(v788StageActive)return res.status(409).json({ok:false,error:'已有验收任务运行中，请勿重复启动'});
+  if(req.body?.acknowledgeIsolatedQuery!==true)
+    return res.status(400).json({ok:false,error:'需要确认：仅查询D盘隔离副本、独立留存证据，不修改正式业务数据'});
+  v788StageActive=true;
+  v788StageResult={status:'RUNNING',updatedAt:new Date().toISOString(),
+    message:'正在核对346票并保存独立证据，最多8批，每批50票'};
+  setImmediate(async()=>{
+    try{
+      const result=await runV788Stage({execute:true});
+      v788StageResult={status:String(result?.status||'FAILED'),updatedAt:new Date().toISOString(),
+        message:result?.status==='346_TMS_ROWS_STAGED_NOT_BUSINESS_ACCEPTED'
+          ?'346票逐票TMS证据已保存在隔离副本目录；业务POD时间和账本仍未验收'
+          :'隔离证据检查未完成，请查看下方诊断状态'};
+    }catch(error){
+      const message=String(error?.message||'');
+      const safeCode=message.startsWith('V788_')?message.slice(0,80):'ISOLATED_STAGE_FAILED';
+      v788StageResult={status:'FAILED',updatedAt:new Date().toISOString(),
+        message:'隔离核验失败：'+safeCode+'。未修改正式数据库'};
+    }finally{v788StageActive=false}
+  });
+  res.status(202).json({ok:true,status:'RUNNING',message:'隔离证据查询已开始，请在本页面查看进度'});
+});
+
 app.post('/api/timing-repair/start', (req,res)=>{
   const reportDate=String(req.body?.reportDate||'').slice(0,10);
   if(!/^\d{4}-\d{2}-\d{2}$/.test(reportDate))return res.status(400).json({ok:false,error:'缺少有效日报日期。'});
