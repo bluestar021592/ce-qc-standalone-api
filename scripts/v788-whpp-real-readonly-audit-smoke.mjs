@@ -55,7 +55,7 @@ try{
   insertLock.run('B2','2026-07-03 08:30:00','NOT_VERIFIED_SOURCE');
   insertLock.run('B3','2026-07-01 08:30:00','whpp_saved_scan_pod_time');
   // Independently saved TMS evidence overrides missing legacy stateJson status.
-  db.prepare("UPDATE shipment_current_state SET stateJson='{}' WHERE shipmentCode='A1'").run();
+  db.prepare("UPDATE shipment_current_state SET stateJson='{"podTime":"2026-07-03 09:00:00"}' WHERE shipmentCode='A1'").run();
   db.prepare("INSERT INTO business_shipment_tracks VALUES('WHPP','A1','2026-07-01','60','{}')").run();
   const audit=auditV788Readonly(db);
   assert.equal(audit.whpp.totals.savedTmsTrackMembers,1);
