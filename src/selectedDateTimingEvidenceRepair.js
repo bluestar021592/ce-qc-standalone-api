@@ -490,6 +490,18 @@ async function runOne(type,date,snapshotId=''){
       confirmQueried,confirmFailed,confirmPersistedRows,confirm85,confirm85WithTime,confirm85WithoutTime,repairRevision,
       message:`${type} ${date} shipmentStatus补证 ${Math.min(offset+4,statusBatches.length)}/${statusBatches.length}批：60/POD有时间 ${status60WithTime}票，无时间 ${status60WithoutTime}票`
     });
+    // A failed refresh/401 must not fan out into remaining WHPP TMS
+    // requests. Save a failed checkpoint and let a fresh login retry later.
+    if(type==='WHPP'&&Number(statusFailureTypes.get('AUTH')||0)>0){
+      return patch(type,date,snapshotId,{
+        status:'FAILED',phase:'FAILED',repairRevision,completedAt:now(),
+        statusSourceMembers:statusBills.length,
+        statusQueried,statusFailed,statusApiRows,statusMatchedRows,
+        statusStatuslessRows,statusPersistedRows,statusEmptySuccessBatches,
+        statusFailureBatches,statusFailureTypes:Object.fromEntries(statusFailureTypes),
+        message:`${type} ${date} TMS身份认证失败，已停止本日剩余查询；历史数据未完成补证，请重新登录后重试。`
+      });
+    }
   }
 
   const timedBills=new Set([...confirmTimedBills,...statusTimedBills]);
