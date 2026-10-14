@@ -790,7 +790,7 @@ function renderSystemStatus() {
   const carry = Number(appState.carry || 0) + Number(shopeeState.carry || 0);
   document.getElementById('sideSystemStatus').innerHTML = `
     <strong>系统状态</strong>
-    ${statusLine('CE API连接', isCeApiSessionUsable(ceAuth) ? '正常' : (ceAuth.loggedIn ? '凭证已过期或即将过期' : '未登录'), isCeApiSessionUsable(ceAuth))}
+    ${statusLine('CE接口凭证', isCeApiSessionUsable(ceAuth) ? '本地未过期' : (ceAuth.loggedIn ? '已过期或即将过期' : '未登录'), isCeApiSessionUsable(ceAuth))}
     ${statusLine('数据库状态', db.ok ? '正常' : '异常', db.ok)}
     ${statusLine('存储状态', db.usingFallbackDataDir ? '备用目录' : '正常', !db.usingFallbackDataDir)}
     ${statusLine('POD锁状态', `${formatInt(podLocks)}条`, true)}
