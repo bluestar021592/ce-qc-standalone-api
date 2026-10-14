@@ -2,6 +2,23 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {shouldRunSelectedDateEvidence,whppStatusEvidenceHasGaps,hasDirectTmsShipmentStatus,classifyWhppTmsError} from '../src/v788WhppStatusCoverage.js';
 import {persistShipmentStatusRows} from '../src/selectedDateTimingEvidenceRepair.js';
+import {summarizeWhppTmsProbe,runV788LiveTmsProbe} from './v788-live-tms-readonly-probe.mjs';
+
+const dryProbe=await runV788LiveTmsProbe();
+assert.equal(dryProbe.status,'DRY_RUN','a probe without --execute must not touch database, credentials, or remote API');
+const probeSummary=summarizeWhppTmsProbe(['A1','A2','A3'],[
+  {shipmentCode:'A1',shipmentStatus:'60'},
+  {shipmentCode:'A2',shipmentStatus:'81'},
+  {shipmentCode:'A3',statusText:'POD'},
+  {shipmentCode:'OTHER',shipmentStatus:'80'}
+]);
+assert.equal(probeSummary.requested,3);
+assert.equal(probeSummary.matchedWithDirectStatus,2);
+assert.equal(probeSummary.missingDirectStatus,1);
+assert.equal(probeSummary.unmatchedRows,1);
+assert.equal(probeSummary.statuslessRows,1);
+assert.deepEqual(probeSummary.statuses,{s60:1,s80:0,s81:1,other:0});
+
 
 // Zero-POD WHPP must still query the whole exact-date source (incl. 80/81).
 assert.equal(shouldRunSelectedDateEvidence(0,56),true);
