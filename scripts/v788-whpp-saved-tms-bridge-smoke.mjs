@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import {DatabaseSync} from 'node:sqlite';
 import {loadWhppCanonicalTruth} from '../src/whppCanonicalTruth.js';
 import {persistentSelectedDatePodTruth} from '../src/selectedDatePersistentTruth.js';
+import {selectedDateShipmentStatusBills} from '../src/selectedDateTimingEvidenceRepair.js';
 
 const src=fs.readFileSync(new URL('../src/lightweightDashboardStore.js',import.meta.url),'utf8');
 const first=src.indexOf('function overlaySavedTerminalExportTruth(');
@@ -59,6 +60,11 @@ try{
   assert.ok(!byBill.get('TESTPOD').podTime,'TMS code 60 alone must never invent a signing timestamp');
   // WHPP can supply real independent POD members with NO unified batch.
   const selected=persistentSelectedDatePodTruth(db,'WHPP',date);
+  assert.deepEqual(selectedDateShipmentStatusBills('WHPP',date,'',db),
+    cases.map(row=>row[0]).sort(),
+    'TMS status request must cover every exact-day WHPP source member, not merely prior POD labels');
+  assert.deepEqual(selectedDateShipmentStatusBills('WHPP','2026-07-04','',db),[],
+    'no arbitrary TMS request without matched independent day members');
   assert.equal(selected.authoritative,true);
   assert.deepEqual(selected.bills,['TESTPOD']);
   const projected=overlay(result.rows,db);
