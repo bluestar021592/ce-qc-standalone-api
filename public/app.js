@@ -790,7 +790,7 @@ function renderSystemStatus() {
   const carry = Number(appState.carry || 0) + Number(shopeeState.carry || 0);
   document.getElementById('sideSystemStatus').innerHTML = `
     <strong>系统状态</strong>
-    ${statusLine('CE API连接', ceAuth.loggedIn ? '正常' : '未登录', ceAuth.loggedIn)}
+    ${statusLine('CE API连接', isCeApiSessionUsable(ceAuth) ? '正常' : (ceAuth.loggedIn ? '凭证已过期或即将过期' : '未登录'), isCeApiSessionUsable(ceAuth))}
     ${statusLine('数据库状态', db.ok ? '正常' : '异常', db.ok)}
     ${statusLine('存储状态', db.usingFallbackDataDir ? '备用目录' : '正常', !db.usingFallbackDataDir)}
     ${statusLine('POD锁状态', `${formatInt(podLocks)}条`, true)}
@@ -1938,10 +1938,19 @@ function runStatusMarkup(state) {
   return `${statusPill(runStatusText(state), state.runStatus === 'finished')}<p>当前阶段：${escapeHtml(processing.phase || '待处理')}</p><p>${label}：${formatInt(done)} / ${formatInt(total)} · 单批最大${batchSize}</p>`;
 }
 
+function isCeApiSessionUsable(auth = {}) {
+  // Local QC login is separate from the CE API token. A stored token can be
+  // expired while summarizeToken() still reports loggedIn=true.
+  if (!auth?.loggedIn || !auth?.hasAccessToken || auth?.expired === true) return false;
+  if (auth?.expiresAt && !(Number(auth.expiresInSeconds) > 120)) return false;
+  return true;
+}
+
 function renderAuthPanels() {
-  const html = ceAuth.loggedIn
+  const loginForm = `<label class="field-label">tenantId<input class="auth-tenant" value="000000" autocomplete="off"></label><label class="field-label">username<input class="auth-user" autocomplete="username"></label><label class="field-label">password<input class="auth-password" type="password" autocomplete="current-password"></label><button class="btn primary full" onclick="loginCe(this)">登录CE系统</button><div class="auth-message"></div>`;
+  const html = isCeApiSessionUsable(ceAuth)
     ? `${statusPill('CE系统已登录', true)}<p>登录用户：${escapeHtml(ceAuth.account || ceAuth.userId || '—')}</p><div class="button-row"><button class="btn ghost" onclick="showLoginForms()">重新登录</button><button class="btn ghost" onclick="logoutCe()">退出</button></div>`
-    : `<label class="field-label">tenantId<input class="auth-tenant" value="000000" autocomplete="off"></label><label class="field-label">username<input class="auth-user" autocomplete="username"></label><label class="field-label">password<input class="auth-password" type="password" autocomplete="current-password"></label><button class="btn primary full" onclick="loginCe(this)">登录CE系统</button><div class="auth-message"></div>`;
+    : `${ceAuth.loggedIn ? statusPill('CE接口凭证已过期或即将过期，请重新登录CE系统', false) : ''}${loginForm}`;
   document.getElementById('ceAuthPanel').innerHTML = html;
   document.getElementById('shopeeAuthPanel').innerHTML = html;
 }
