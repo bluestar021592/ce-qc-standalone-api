@@ -86,6 +86,9 @@ try{
   assert.equal(audit.sevenBusinessSource.byDate[1].whppIndependentSourceMembers,3);
   assert.equal(audit.sevenBusinessSource.byDate[1].completedValidUnifiedBatch,false);
   assert.equal(audit.sevenBusinessSource.byDate[1].sevenBusinessDistinctUnion,3);
+  // The audit enables query_only. For the *in-memory test fixture only*,
+  // explicitly disable it before seeding a simulated later upload.
+  db.exec('PRAGMA query_only=OFF');
   // Newer VALID but PROCESSING must not fall back to previous complete S1.
   db.prepare("INSERT INTO unified_import_batches VALUES('S2','2026-07-01','2026-07-01 11:00:00','B2','VALID')").run();
   db.prepare("INSERT INTO unified_snapshots VALUES('S2','PROCESSING')").run();
@@ -96,6 +99,7 @@ try{
   assert.equal(blocked.sevenBusinessSource.byDate[0].sixBusinessRows,0,
     'older complete S1 cannot count as the latest source after S2 starts');
   assert.equal(blocked.sevenBusinessSource.byDate[0].reconciled,false);
+  db.exec('PRAGMA query_only=OFF');
   db.prepare("UPDATE unified_snapshots SET status='COMPLETED' WHERE snapshotId='S2'").run();
   const completed=auditV788Readonly(db);
   assert.equal(completed.sevenBusinessSource.byDate[0].sixBusinessRows,1);
