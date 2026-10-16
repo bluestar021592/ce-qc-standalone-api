@@ -1,0 +1,31 @@
+name: V788 Real Edge Pilot
+# Real Windows Edge UI validation for the *candidate* only, using a disposable
+# temporary database and mock local administrator. No real CE login or D: reads.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'server.js'
+      - 'public/**'
+      - 'scripts/v581-production-shell-browser-smoke.mjs'
+      - 'scripts/v788-*.mjs'
+      - '.github/workflows/v788-real-edge-pilot.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-edge-real-pilot:
+    runs-on: windows-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - name: Real Edge home-click plus V788 admin status panel
+        shell: pwsh
+        run: node scripts/v581-production-shell-browser-smoke.mjs
