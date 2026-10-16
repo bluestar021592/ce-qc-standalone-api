@@ -2542,9 +2542,13 @@ async function loadV788WhppEvidenceV625(){
     const covered=Number(data.savedMembers||0),batches=Number(data.completedBatches||0);
     const running=data.active===true||data.status==='RUNNING';
     const allSaved=covered===346&&batches===8;
-    const full=allSaved&&data.savedStatus==='346_TMS_ROWS_STAGED_NOT_BUSINESS_ACCEPTED'
-      &&data.sidecarVerified===true&&data.isolatedCopyUnchanged===true
-      &&data.distributionMatchesV3===true&&Number(data.evidenceConflicts||0)===0;
+    // Verified proof from the independent SQLite, not last-run JSON progress,
+    // owns completion. A stale/interrupted report must not hide saved evidence
+    // or encourage a second 346-waybill TMS query.
+    const full=allSaved&&data.independentlyVerifiedCounts===true
+      &&data.sidecarVerified===true&&data.isolatedSourceReady===true
+      &&data.distributionMatchesV3===true
+      &&data.statusOnlyPreview?.source==='INDEPENDENT_ISOLATED_SQLITE';
     const finalizeOffline=allSaved&&data.status==='INTERRUPTED_RETRYABLE';
     const needsReview=allSaved&&!full&&!finalizeOffline;
     const lines=[];
