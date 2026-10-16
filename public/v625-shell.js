@@ -1417,10 +1417,11 @@ function buildWhppCanonicalAccounting(state={},fallback={}){
     ...all.filter(row=>rowTmsStatus(row)==='60'&&allowedTerminal(row,'60')),
     ...excludeReturning(tabs?.pod?.rows).filter(row=>allowedTerminal(row,'60'))
   ]);
+  const podBills=new Set(pod.map(detailCode));
   const returned=uniqueDetailRows([
     ...all.filter(row=>rowTmsStatus(row)==='81'&&allowedTerminal(row,'81')),
     ...excludeReturning(tabs?.returned?.rows).filter(row=>allowedTerminal(row,'81'))
-  ]).filter(row=>!new Set(pod.map(detailCode)).has(detailCode(row)));
+  ]).filter(row=>!podBills.has(detailCode(row)));
   const terminalBills=new Set([...returning,...pod,...returned,...conflicted].map(detailCode));
   const excludeTerminal=rows=>uniqueDetailRows(rows||[]).filter(row=>!terminalBills.has(detailCode(row)));
   const cancelled=excludeTerminal(tabs?.cancelled?.rows);
