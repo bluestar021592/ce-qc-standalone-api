@@ -131,6 +131,14 @@ export function verifyV788PersistedSidecar(db,expectedSourceSignature=''){
     return {verified:false,reason:'SOURCE_SIGNATURE_MISMATCH'};
   }
   const rows=db.prepare("SELECT reportDate,shipmentStatus,COUNT(*) n FROM v788_tms_evidence GROUP BY reportDate,shipmentStatus").all();
+  // Exact-member fingerprint derived from saved waybill IDs must equal the
+  // original read-only source signature. Matching only 346/290/56 totals is
+  // insufficient: substituted or missing waybills would otherwise look green.
+  const savedMembers=db.prepare('SELECT reportDate,shipmentCode FROM v788_tms_evidence ORDER BY reportDate,shipmentCode').all();
+  const savedSources=Object.keys(DATE_COUNTS).map(date=>({
+    date,codes:savedMembers.filter(item=>item.reportDate===date).map(item=>String(item.shipmentCode||'').trim().toUpperCase())
+  }));
+  const exactMemberSetMatches=v788SourceSignature(savedSources)===expectedSourceSignature;
   const byDate=Object.fromEntries(Object.keys(DATE_COUNTS).map(date=>[date,{s60:0,s80:0,s81:0,other:0}]));
   let total=0,invalidDates=0;
   for(const row of rows){
@@ -153,8 +161,9 @@ export function verifyV788PersistedSidecar(db,expectedSourceSignature=''){
   const terminalMatches=Object.entries(EXPECTED_TERMINAL).every(([date,counts])=>
     byDate[date].s60===counts.s60&&byDate[date].s81===counts.s81
       &&byDate[date].s80===0&&byDate[date].other===0);
-  const verified=total===346&&invalidDates===0&&exactBatches&&terminalMatches;
+  const verified=total===346&&invalidDates===0&&exactBatches&&terminalMatches
+    &&exactMemberSetMatches;
   return {verified,reason:verified?'SAVED_PROOF_MATCHES_V3':'SAVED_PROOF_INCOMPLETE_OR_DRIFTED',
-    storedMembers:total,batches:commits.length,byDate,
+    storedMembers:total,batches:commits.length,byDate,exactMemberSetMatches,
     distributionMatchesV3:terminalMatches};
 }
