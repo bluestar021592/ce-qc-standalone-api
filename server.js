@@ -58,6 +58,7 @@ import { readSelectedDateBusinessSourceTruth } from './src/v783SevenBusinessSour
 import { diagnoseWhppDailyTimingSources } from './src/v745WhppTimingSourceDiagnostics.js';
 import { requestSelectedDateTimingRepair, inspectSelectedDateTimingRepair } from './src/selectedDateTimingEvidenceRepair.js';
 import { runV788Stage } from './scripts/v788-whpp-stage-tms-evidence.mjs';
+import { verifiedV788EvidenceCoverage } from './src/v788WhppStatusCoverage.js';
 import {verifyV788PersistedSidecar,v788ReadSourceMembershipSignature,previewV788WhppLedgerReconciliation} from './scripts/v788-whpp-tms-evidence-sidecar.mjs';
 import { persistentSelectedDatePodTruth, persistentWhppCompletionTruth } from './src/selectedDatePersistentTruth.js';
 import { buildCanonicalBusinessAccounting } from './src/businessAccounting.js';
@@ -2236,6 +2237,7 @@ function v788IsRegularExactFile(file){
 }
 function v788StagePublicStatus(){
   let saved={sidecarVerified:false,sidecarCheck:'NOT_CHECKED'};
+  let independentlyVerifiedCoverage=null;
   if(process.platform==='win32'){
     try{
       const data=JSON.parse(fsSync.readFileSync(v788StageReport,'utf8'));
@@ -2265,6 +2267,9 @@ function v788StagePublicStatus(){
             // original D: source and the proof ledger are independently read.
             // Do not leak shipment codes or claim POD-time/ledger readiness.
             if(checked.verified===true){
+              independentlyVerifiedCoverage=verifiedV788EvidenceCoverage(checked);
+              if(!independentlyVerifiedCoverage)
+                throw Error('V788_VERIFIED_PROJECTION_INVALID');
               // Independent proof-file read: these are explicit TMS time
               // candidates only. They are NOT the formal POD time-lock,
               // signed-days KPI or export acceptance.
@@ -2284,14 +2289,7 @@ function v788StagePublicStatus(){
                 saved.ledgerReconciliation={ready:false,reason:'ISOLATED_LEDGER_PREVIEW_UNAVAILABLE',
                   productionModified:false};
               }
-              saved.statusOnlyPreview={
-              source:'INDEPENDENT_ISOLATED_SQLITE',
-              dates:Object.entries(checked.byDate||{}).map(([date,v])=>({
-                date,total:Number(v.s60||0)+Number(v.s81||0),
-                pod:Number(v.s60||0),returned:Number(v.s81||0)
-              })),
-              signingTimeAccepted:false,ledgerAccepted:false,exportAccepted:false
-            };
+              saved.statusOnlyPreview=independentlyVerifiedCoverage.statusOnlyPreview;
             }
           }finally{checkDb.close()}
         }
@@ -2311,7 +2309,10 @@ function v788StagePublicStatus(){
         podWithExplicitTime:Number(data?.coverage?.podWithExplicitTime||0),
         distributionMatchesV3:data?.coverage?.distributionMatchesV3===true,
         evidenceConflicts:Number(data?.coverage?.conflictingExistingStates||0),
-        isolatedCopyUnchanged:data?.isolatedCopyUnchanged===true
+        isolatedCopyUnchanged:data?.isolatedCopyUnchanged===true,
+        // Progress JSON is advisory. After independent SQLite verification,
+        // source membership, batch count and POD/return totals always win.
+        ...(independentlyVerifiedCoverage||{})
       };
     }catch{}
   }
