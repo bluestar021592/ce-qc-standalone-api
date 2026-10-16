@@ -131,8 +131,15 @@ try{
     Write-Host ''
     Write-Host 'V788 isolated trial is ready in a separate local window (port 5278).' -ForegroundColor Green
     Write-Host 'All application writes go to the disposable trial database; formal V787 remains running.' -ForegroundColor Green
-    Start-Process "http://127.0.0.1:$Port/settings?auth=v625"
-    [void](Read-Host 'Use the trial browser. When finished, return here and press Enter to stop and remove the sandbox')
+    $CiSelfTest=($env:GITHUB_ACTIONS -eq 'true' -and $env:CI -eq 'true' -and $env:CE_QC_V788_PILOT_CI_NO_BROWSER -eq '1')
+    if($CiSelfTest){
+      Write-Host '[V788_PILOT_E2E] READY local V788 backend on 5278, separate auth on 5280; disposable isolated database only.' -ForegroundColor Green
+      # No browser or interactive prompt in the GitHub runner.
+      # The Finally blocks must stop every V788 child and clean the trial sandbox.
+    }else{
+      Start-Process "http://127.0.0.1:$Port/settings?auth=v625"
+      [void](Read-Host 'Use the trial browser. When finished, return here and press Enter to stop and remove the sandbox')
+    }
   }finally{
     StopPilot
     RestoreEnvironment
