@@ -220,6 +220,7 @@ function metricState(state={}){
   const oc=num(first(state,['dashboard.metrics.ocCurrent','dashboard.metrics.oc1','dashboard.categories.ocTotal','oc']))??0;
   const unresolved=num(first(state,['dashboard.metrics.unresolved','dashboard.abnormalCount','unresolved']))??Math.max(0,total-pod);
   const returned=num(first(state,['dashboard.metrics.returned','returned']))??0;
+  const returning=num(first(state,['dashboard.metrics.returnInProgress','dashboard.metrics.returning','returnInProgress','returning']))??0;
   const cancelled=num(first(state,['dashboard.metrics.cancelled','cancelled']))??0;
   const explicitDelivery=num(first(state,['dashboard.metrics.delivery','dashboard.metrics.deliveryStay','dashboard.categories.deliveryTotal']));
   const delivery=explicitDelivery??Math.max(0,total-pod-returned-cancelled);
@@ -227,7 +228,7 @@ function metricState(state={}){
   const shopTotal=num(first(state,['dashboard.metrics.shopTotal']))??0;
   const otherNormal=Math.max(0,cancelled+normalDiversion+shopTotal);
   const avgDays=num(first(state,['dashboard.metrics.avgPodDays','avgPodDays','dashboard.avgPodDays']));
-  return{total,pod,podRate:total?pod/total*100:0,pending,oc,unresolved,returned,cancelled,delivery,normalDiversion,shopTotal,otherNormal,avgDays};
+  return{total,pod,podRate:total?pod/total*100:0,pending,oc,unresolved,returned,returning,cancelled,delivery,normalDiversion,shopTotal,otherNormal,avgDays};
 }
 
 function renderTrend(rootId,points=[]){
@@ -273,7 +274,10 @@ function renderDonut(m){
   const parts=[
     ['派送中',count(m.delivery),'#1677f2'],
     ['已签收',count(m.pod),'#20b979'],
-    ...(returnCapable?[['已退回',count(m.returned),'#e98945']]:[]),
+    ...(returnCapable?[
+      ['已退回',count(m.returned),'#e98945'],
+      ['退回中',count(m.returning),'#d97706']
+    ]:[]),
     ['Pending',count(m.pending),'#f5a623'],
     ['异常',count(m.abnormal),'#ef4b50'],
     ['其他正常状态',count(m.otherNormal),'#8c9bab']
@@ -1310,6 +1314,16 @@ function uniqueDetailRows(rows=[]){const map=new Map();for(const row of rows){co
 function rowText(row={}){return [row.primaryCategory,row.主分类,row.异常分类,row.currentState,row.scanNormalizedState,row.退回状态,row.specialState,row.shopState,row.最后节点,row.latestEventDesc,row.QC判断].map(v=>String(v||'')).join(' ').toUpperCase()}
 function rowIsPod(row={}){const text=rowText(row);return row.是否POD==='是'||String(row.orderStatus||'')==='85'||/(^|\s)(POD|已签收|签收成功|已妥投|DELIVERED|SIGNED)(\s|$)/i.test(text)&&!/未签收|未妥投|签收失败/.test(text)}
 function rowIsReturned(row={}){const text=rowText(row);return !/未退回|非退回|待退回|退回处理中|NOT_RETURNED|PENDING_RETURN/i.test(text)&&/(已退回|退回完成|RETURN_COMPLETED|RETURNED)/i.test(text)}
+// TMS shipmentStatus 80 is RETURNING, never signed or completed return.
+// Do not read tracking eventCode 80 here: that code means POD in a different API.
+function rowIsReturning(row={}){
+  const code=String(row?.shipmentStatus??row?.shipmentTrack?.shipmentStatus??'').trim();
+  if(code==='80')return true;
+  if(code==='60'||code==='81')return false;
+  const state=String(row?.currentState||'').trim().toUpperCase();
+  return state==='RETURN_IN_PROGRESS'||state==='RETURNING'
+    ||/^(退回中|退回处理中|正在退回|返仓途中)$/.test(String(row?.退回状态||'').trim());
+}
 function rowIsPending(row={}){return Number(row.Pending次数||row.Pending天数||row.pendingDistinctDayCount||0)>0||/(^|\s)PENDING(\s|$)|Pending/i.test(rowText(row))}
 function rowIsAbnormal(row={}){
   const text=rowText(row);
@@ -1326,19 +1340,29 @@ function buildWhppCanonicalAccounting(state={},fallback={}){
   const tabs=state?.detailTabs||state?.dashboard?.detailTabs||{};
   const metrics=state?.dashboard?.metrics||{};
   const all=uniqueDetailRows(tabs?.all?.rows||[]);
-  const pod=uniqueDetailRows(tabs?.pod?.rows||[]);
-  const returned=uniqueDetailRows(tabs?.returned?.rows||[]);
-  const cancelled=uniqueDetailRows(tabs?.cancelled?.rows||[]);
-  const normalDiversion=uniqueDetailRows(tabs?.normalDiversion?.rows||[]);
-  const shops=uniqueDetailRows([
+  const unresolved=uniqueDetailRows(tabs?.unresolved?.rows||[]);
+  const returning=uniqueDetailRows([
+    ...all.filter(rowIsReturning),
+    ...unresolved.filter(rowIsReturning),
+    ...(tabs?.returnInProgress?.rows||[]).filter(rowIsReturning),
+    ...(tabs?.returning?.rows||[]).filter(rowIsReturning)
+  ]);
+  const returningBills=new Set(returning.map(detailCode));
+  // Never count a newer status 80 again in stale POD/returned detail tabs.
+  const excludeReturning=rows=>uniqueDetailRows(rows||[]).filter(row=>!returningBills.has(detailCode(row)));
+  const pod=excludeReturning(tabs?.pod?.rows);
+  const returned=excludeReturning(tabs?.returned?.rows);
+  const cancelled=excludeReturning(tabs?.cancelled?.rows);
+  const normalDiversion=excludeReturning(tabs?.normalDiversion?.rows);
+  const shops=excludeReturning([
     ...(tabs?.phnomPenhShop?.rows||[]),
     ...(tabs?.provinceShop?.rows||[]),
     ...(tabs?.unknownShop?.rows||[])
   ]);
-  const unresolved=uniqueDetailRows(tabs?.unresolved?.rows||[]);
-  const assigned=new Set([...pod,...returned,...cancelled,...normalDiversion,...shops].map(detailCode));
+  const assigned=new Set([...returning,...pod,...returned,...cancelled,...normalDiversion,...shops].map(detailCode));
   const pending=[],abnormal=[],delivery=[],unprocessed=[];
   for(const row of unresolved){
+    if(assigned.has(detailCode(row)))continue;
     if(rowIsPending(row))pending.push(row);
     else if(rowIsAbnormal(row))abnormal.push(row);
     else if(Number(row.派送中停留天数||row.派送中天数||0)>0||/派送中/.test(rowText(row)))delivery.push(row);
@@ -1350,9 +1374,9 @@ function buildWhppCanonicalAccounting(state={},fallback={}){
     if(code&&!assigned.has(code)){unprocessed.push(row);assigned.add(code)}
   }
   const otherNormal=uniqueDetailRows([...cancelled,...normalDiversion,...shops]);
-  const rowsByKind={total:all,pod,returned,pending,abnormal,otherNormal,delivery,unprocessed};
+  const rowsByKind={total:all,pod,returned,returning,pending,abnormal,otherNormal,delivery,unprocessed};
   const total=Number(metrics.total||fallback.total||all.length||0);
-  const accounted=['pod','returned','pending','abnormal','otherNormal','delivery','unprocessed'].reduce((n,key)=>n+rowsByKind[key].length,0);
+  const accounted=['pod','returned','returning','pending','abnormal','otherNormal','delivery','unprocessed'].reduce((n,key)=>n+rowsByKind[key].length,0);
   return{total,accounted,difference:total-accounted,rowsByKind,canonical:true};
 }
 function buildBusinessAccounting(state={},fallback={}){
@@ -1364,10 +1388,12 @@ function buildBusinessAccounting(state={},fallback={}){
     [];
   const source=uniqueDetailRows(authoritativeRows||[]);
   const total=Number(fallback.total||source.length||0);
-  if(!source.length)return{total,accounted:0,difference:total,rowsByKind:{total:[],pod:[],returned:[],pending:[],abnormal:[],otherNormal:[],delivery:[]}};
-  const rowsByKind={total:source,pod:[],returned:[],pending:[],abnormal:[],otherNormal:[],delivery:[],unprocessed:[]};
+  if(!source.length)return{total,accounted:0,difference:total,rowsByKind:{total:[],pod:[],returned:[],returning:[],pending:[],abnormal:[],otherNormal:[],delivery:[],unprocessed:[]}};
+  const rowsByKind={total:source,pod:[],returned:[],returning:[],pending:[],abnormal:[],otherNormal:[],delivery:[],unprocessed:[]};
+  const returnCapable=['WHPP','SHOPEECN','SHOPEEVN'].includes(business);
   for(const row of source){
-    if(row.finalRowAvailable===false)rowsByKind.unprocessed.push(row);
+    if(returnCapable&&rowIsReturning(row))rowsByKind.returning.push(row);
+    else if(row.finalRowAvailable===false)rowsByKind.unprocessed.push(row);
     else if(rowIsPod(row))rowsByKind.pod.push(row);
     else if(rowIsReturned(row))rowsByKind.returned.push(row);
     else if(rowIsPending(row))rowsByKind.pending.push(row);
@@ -1375,7 +1401,7 @@ function buildBusinessAccounting(state={},fallback={}){
     else if(rowIsOtherNormal(row))rowsByKind.otherNormal.push(row);
     else rowsByKind.delivery.push(row);
   }
-  const accounted=['pod','returned','pending','abnormal','otherNormal','delivery','unprocessed'].reduce((n,key)=>n+rowsByKind[key].length,0);
+  const accounted=['pod','returned','returning','pending','abnormal','otherNormal','delivery','unprocessed'].reduce((n,key)=>n+rowsByKind[key].length,0);
   return{total:total||source.length,accounted,difference:(total||source.length)-accounted,rowsByKind};
 }
 function v628MetricRows(kind){
@@ -1390,7 +1416,7 @@ function v628MetricRows(kind){
 }
 function renderKpiDetail(kind){
   const panel=byId('v628KpiDetailPanel'),tbody=byId('v628KpiDetailRows');if(!panel||!tbody)return;
-  const labels={total:'总票数',delivery:'派送中',pod:'已签收(POD)',pending:'Pending',abnormal:'异常',returned:'退回件',otherNormal:'其他正常状态',unprocessed:'待处理',shopArrived:'到达门店',pendingGap:'Pending不连续',oc2Plus:'OC 2天+'};
+  const labels={total:'总票数',delivery:'派送中',pod:'已签收(POD)',pending:'Pending',abnormal:'异常',returned:'已退回',returning:'退回中',otherNormal:'其他正常状态',unprocessed:'待处理',shopArrived:'到达门店',pendingGap:'Pending不连续',oc2Plus:'OC 2天+'};
   const rows=v628MetricRows(kind);
   qa('[data-kpi-detail]').forEach(el=>el.classList.toggle('active',el.dataset.kpiDetail===kind));
   setText('v628KpiDetailTitle',(labels[kind]||'指标')+'明细');
@@ -1639,7 +1665,7 @@ async function loadBusiness(options={}){
     if(byId('kpiUnprocessedCard')){byId('kpiUnprocessedCard').hidden=true;setText('kpiUnprocessed',fmt(0))}
     // Prefer disjoint exact-member accounting. OC and Pending KPIs can be
     // overlapping risk flags, so they must not be summed into a status donut.
-    const disjointKinds=['delivery','pod','returned','pending','abnormal','otherNormal','unprocessed'];
+    const disjointKinds=['delivery','pod','returned','returning','pending','abnormal','otherNormal','unprocessed'];
     const exactRows=a.rowsByKind||{};
     const hasExactRows=disjointKinds.some(key=>Array.isArray(exactRows[key])&&exactRows[key].length>0);
     const exactCounts=Object.fromEntries(disjointKinds.map(key=>[key,Array.isArray(exactRows[key])?exactRows[key].length:0]));
@@ -1647,10 +1673,10 @@ async function loadBusiness(options={}){
     const verifiedAccounting=hasExactRows&&exactSum===Number(m.total||0);
     // Preserve V636 compact first paint while detail/accounting hydrates.
     // Risk indicators are deliberately not included in provisional slices.
-    renderDonut({total:m.total,delivery:m.delivery||0,pod:m.pod||0,returned:m.returned||0,pending:0,abnormal:0,otherNormal:0});
+    renderDonut({total:m.total,delivery:m.delivery||0,pod:m.pod||0,returned:m.returned||0,returning:m.returning||0,pending:0,abnormal:0,otherNormal:0});
     if(verifiedAccounting)renderDonut({
       total:m.total,delivery:exactCounts.delivery,pod:exactCounts.pod,
-      returned:exactCounts.returned,pending:exactCounts.pending,
+      returned:exactCounts.returned,returning:exactCounts.returning,pending:exactCounts.pending,
       abnormal:exactCounts.abnormal,
       otherNormal:exactCounts.otherNormal+exactCounts.unprocessed
     });
