@@ -1626,7 +1626,7 @@ async function loadBusiness(options={}){
     const counts=accountingObserved>0?accountingCounts:fastCounts;
 
     setText('kpiTotal',fmt(m.total||a.total));setText('kpiDelivery',fmt(counts.delivery??m.delivery));setText('kpiPod',fmt(counts.pod??m.pod));
-    setText('kpiPodRate',pct(m.total?Number(m.pod||0)*100/Number(m.total):0));
+    setText('kpiPodRate',Number(m.total)>0?pct(Number(m.pod||0)*100/Number(m.total)):'—');
     setText('kpiPending',fmt(counts.pending??m.pending));setText('kpiOpen',fmt(m.unresolved));setText('kpiOc',fmt(m.oc));
     setText('v631AccountingMeta',state.snapshotStatus==='COMPLETED'
       ?('当前日报 '+fmt(m.total)+' 票 · 快速看板已就绪')
@@ -1634,7 +1634,7 @@ async function loadBusiness(options={}){
     setText('kpiAvgDays',m.avgDays==null||(m.pod>0&&Number(m.avgDays)<=0)?'—':Number(m.avgDays).toFixed(2).replace(/\.00$/,''));
     const returnCapable=['WHPP','SHOPEECN','SHOPEEVN'].includes(business);
     if(byId('kpiReturnedCard'))byId('kpiReturnedCard').hidden=!returnCapable;if(byId('kpiReturnRateCard'))byId('kpiReturnRateCard').hidden=!returnCapable;
-    if(returnCapable){setText('kpiReturned',fmt(m.returned||0));setText('kpiReturnRate',pct(m.total?Number(m.returned||0)*100/Number(m.total):0))}
+    if(returnCapable){setText('kpiReturned',fmt(m.returned||0));setText('kpiReturnRate',Number(m.total)>0?pct(Number(m.returned||0)*100/Number(m.total)):'—')}
     if(byId('kpiOtherCard')){byId('kpiOtherCard').hidden=false;setText('kpiOtherNormal',fmt(m.otherNormal||0))}
     if(byId('kpiUnprocessedCard')){byId('kpiUnprocessedCard').hidden=true;setText('kpiUnprocessed',fmt(0))}
     // Prefer disjoint exact-member accounting. OC and Pending KPIs can be
