@@ -1961,17 +1961,22 @@ async function loadV788WhppEvidenceStatus() {
     const data=await api('/api/v788/whpp-evidence/status');
     const waiting=Boolean(data.active||data.status==='RUNNING');
     const covered=Number(data.savedMembers||0),batches=Number(data.completedBatches||0);
-    const isFull=covered===346&&batches===8&&data.savedStatus==='346_TMS_ROWS_STAGED_NOT_BUSINESS_ACCEPTED'&&data.isolatedCopyUnchanged===true;
+    const allBatchesPresent=covered===346&&batches===8;
+    const isFull=allBatchesPresent&&data.savedStatus==='346_TMS_ROWS_STAGED_NOT_BUSINESS_ACCEPTED'
+      &&data.isolatedCopyUnchanged===true&&data.distributionMatchesV3===true
+      &&Number(data.evidenceConflicts||0)===0;
+    const needsReview=allBatchesPresent&&!isFull;
     const lines=[];
     if(isFull)lines.push('逐票证据已保存：346/346票，8/8批；POD '+Number(data.pod||0)+'票，已退回 '+Number(data.returned||0)+'票。');
     else if(waiting)lines.push('正在核验，已保存 '+covered+'/346票；完成 '+batches+'/8批。页面可以保持打开。');
     else if(data.status==='FAILED'||data.status==='STOPPED_RETRYABLE')lines.push('核验暂停：'+String(data.message||'请检查CE系统登录状态'));
+    else if(needsReview)lines.push('346票已保存但尚未通过一致性验收：请复核日期分布、状态冲突或数据库副本是否发生变化。不会自动修改或重查。');
     else if(covered>0)lines.push('已有证据 '+covered+'/346票；完成 '+batches+'/8批，可继续补齐。');
     else lines.push('尚未保存逐票证据；已完成的346票只读对账无需再上传。');
     lines.push('仅隔离核验，不修改正式数据库；签收时间和历史账本仍需独立验收。');
     info.textContent=lines.join(' ');
-    start.disabled=waiting||v788EvidenceInFlight||isFull||!isCeApiSessionUsable(ceAuth)||data.platformReady!==true;
-    start.textContent=waiting?'隔离核验进行中…':isFull?'346票已留存':'开始隔离核验（346票）';
+    start.disabled=waiting||v788EvidenceInFlight||isFull||needsReview||!isCeApiSessionUsable(ceAuth)||data.platformReady!==true;
+    start.textContent=waiting?'隔离核验进行中…':isFull?'346票已留存':needsReview?'需复核，禁止重复查询':'开始隔离核验（346票）';
     if(!isCeApiSessionUsable(ceAuth)&&!isFull)
       info.textContent+=' CE系统接口凭证未就绪，请先在上方重新登录CE系统。';
     if(v788EvidencePoll){clearTimeout(v788EvidencePoll);v788EvidencePoll=null;}
