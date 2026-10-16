@@ -1,5 +1,11 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import fsPromises from 'node:fs/promises';
+import ExcelJS from 'exceljs';
+import {createShopeeTemplateWorkbook} from '../src/shopeeTemplateExporter.js';
+import {readV788ExistingWhppXlsx} from './v788-existing-whpp-xlsx-readback.mjs';
 // V788 is exposed only as a deliberate ADMIN action inside the QC APP.
 // No startup auto-query and no status endpoint that leaks shipment identifiers.
 const server=fs.readFileSync('server.js','utf8');
@@ -273,6 +279,88 @@ try{
     assert.equal(contradiction.currentOppositeTerminal,1);
     assert.equal(contradiction.reason,'RECONCILIATION_REQUIRES_MANUAL_REVIEW');
   }finally{compareDb.close()}
+
+  // Generate a REAL XLSX using the production exporter, reopen and compare
+  // its actual cells with an independently opened 346-member source and
+  // sidecar strict status truth. Nothing touches the formal Windows DB.
+  const xlsxTemp=await fsPromises.mkdtemp(path.join(os.tmpdir(),'v788-existing-whpp-'));
+  const xlsxSource=new DatabaseSync(':memory:');
+  try{
+    xlsxSource.exec('CREATE TABLE business_daily_parse_rows(businessType TEXT,reportDate TEXT,shipmentCode TEXT)');
+    const addSource=xlsxSource.prepare("INSERT INTO business_daily_parse_rows VALUES('WHPP',?,?)");
+    const snapshotRows=all.map(day=>{
+      const rows=day.codes.map(code=>{
+        addSource.run(day.date,code);
+        const isPod=day.states.get(code)==='POD';
+        return {
+          shipmentCode:code,reportDate:day.date,businessType:'WHPP',
+          currentState:isPod?'POD':'RETURNED',
+          terminalEvidenceStatus:'STRICT_TMS',
+          shipmentStatus:isPod?'60':'81',
+          isPod:isPod?1:0,是否POD:isPod?'是':'否',
+          是否退回:isPod?'否':'是',退回状态:isPod?'':'已退回',
+          regionCode:'PP',signingDays:null
+        };
+      });
+      return {snapshotId:'V788-'+day.date,reportDate:day.date,payload:{finalRows:rows}};
+    });
+    const made=await createShopeeTemplateWorkbook({
+      type:'WHPP',periodType:'custom',
+      range:{from:'2026-07-01',to:'2026-07-02'},
+      snapshots:snapshotRows,outputDir:xlsxTemp
+    });
+    xlsxSource.exec('PRAGMA query_only=ON');
+    const beforeRead=xlsxSource.prepare('SELECT total_changes() n').get().n;
+    const actual=await readV788ExistingWhppXlsx({
+      sourceDb:xlsxSource,proofDb:db,workbookPath:made.file
+    });
+    assert.equal(actual.status,'XLSX_CONTENT_VERIFIED');
+    assert.equal(actual.sourceMembers,346);
+    assert.equal(actual.readbackRows,346);
+    assert.equal(actual.readbackPodRows,290);
+    assert.equal(actual.readbackReturnedRows,56);
+    assert.equal(actual.xlsxUnchangedDuringReadback,true);
+    assert.equal(actual.allSevenBusinessExportAccepted,false);
+    assert.equal(xlsxSource.prepare('SELECT total_changes() n').get().n,beforeRead);
+    assert.ok(!JSON.stringify(actual).includes('J0000'),'aggregate readback may not leak waybills');
+    // Same row count but another bill: block wrong-member substitutions.
+    const changed=new ExcelJS.Workbook();
+    await changed.xlsx.readFile(made.file);
+    changed.getWorksheet('全部明细').getRow(2).getCell(2).value='V788_NOT_A_SOURCE_BILL';
+    const corrupt=path.join(xlsxTemp,'changed-whpp.xlsx');
+    await changed.xlsx.writeFile(corrupt);
+    const wrongBill=await readV788ExistingWhppXlsx({
+      sourceDb:xlsxSource,proofDb:db,workbookPath:corrupt
+    });
+    assert.equal(wrongBill.status,'BLOCKED');
+    assert.equal(wrongBill.issues.missingMembers,1);
+    assert.equal(wrongBill.issues.extraMembers,1);
+    // Restored member but false signed status: do not accept a workbook
+    // that presents a true return as POD or vice versa.
+    changed.getWorksheet('全部明细').getRow(2).getCell(2).value=all[0].codes[0];
+    changed.getWorksheet('全部明细').getRow(2).getCell(4).value='R';
+    const badMark=path.join(xlsxTemp,'wrong-marker.xlsx');
+    await changed.xlsx.writeFile(badMark);
+    const markerError=await readV788ExistingWhppXlsx({
+      sourceDb:xlsxSource,proofDb:db,workbookPath:badMark
+    });
+    assert.equal(markerError.status,'BLOCKED');
+    assert.ok(markerError.issues.terminalMarkerMismatch>=1);
+    // Proof disappears: still check exact membership, but never certify
+    // terminal status based solely on an untrusted workbook label.
+    const missingProofDb=new DatabaseSync(':memory:');
+    try{
+      initV788Sidecar(missingProofDb,sig);
+      const without=await readV788ExistingWhppXlsx({
+        sourceDb:xlsxSource,proofDb:missingProofDb,workbookPath:made.file
+      });
+      assert.equal(without.status,'MEMBERSHIP_ONLY_NEEDS_TMS');
+      assert.equal(without.independentlyVerifiedTms,false);
+    }finally{missingProofDb.close()}
+  }finally{
+    xlsxSource.close();
+    await fsPromises.rm(xlsxTemp,{recursive:true,force:true});
+  }
 
   // Replacing a saved waybill with an unrelated ID preserves all eight
   // batch counters and 290/56 terminal totals, but MUST fail exact proof.
