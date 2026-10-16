@@ -117,3 +117,44 @@ export function inspectV788Sidecar(db,sources=[]){
     complete:batches===8&&seen.size===expected.size&&unexpected===0
       &&conflicts===0&&distributionMatches};
 }
+
+/**
+ * Read-only cross-check used by the in-app progress panel. The JSON report
+ * alone is never authoritative: verify the independent SQLite file itself.
+ * This only attests to saved terminal counts/source digest, not POD time,
+ * ledger closure, or actual seven-business export acceptance.
+ */
+export function verifyV788PersistedSidecar(db,expectedSourceSignature=''){
+  const signature=db.prepare("SELECT value FROM v788_meta WHERE key='source_signature' LIMIT 1").get()?.value||'';
+  if(!/^[a-f0-9]{64}$/.test(String(expectedSourceSignature||''))
+      ||signature!==expectedSourceSignature){
+    return {verified:false,reason:'SOURCE_SIGNATURE_MISMATCH'};
+  }
+  const rows=db.prepare("SELECT reportDate,shipmentStatus,COUNT(*) n FROM v788_tms_evidence GROUP BY reportDate,shipmentStatus").all();
+  const byDate=Object.fromEntries(Object.keys(DATE_COUNTS).map(date=>[date,{s60:0,s80:0,s81:0,other:0}]));
+  let total=0,invalidDates=0;
+  for(const row of rows){
+    if(!Object.hasOwn(byDate,row.reportDate)){invalidDates+=Number(row.n||0);continue}
+    const kind=row.shipmentStatus==='60'?'s60':row.shipmentStatus==='80'?'s80':row.shipmentStatus==='81'?'s81':'other';
+    byDate[row.reportDate][kind]+=Number(row.n||0);
+    total+=Number(row.n||0);
+  }
+  const commits=db.prepare('SELECT reportDate,batchIndex,requested FROM v788_batch_commits ORDER BY reportDate,batchIndex').all();
+  let exactBatches=commits.length===8;
+  for(const date of Object.keys(DATE_COUNTS)){
+    const expectedBatches=Math.ceil(DATE_COUNTS[date]/50);
+    const own=commits.filter(x=>x.reportDate===date);
+    if(own.length!==expectedBatches)exactBatches=false;
+    for(let i=0;i<expectedBatches;i++){
+      const expected=i===expectedBatches-1?DATE_COUNTS[date]-50*i:50;
+      if(!own.some(x=>x.batchIndex===i&&Number(x.requested)===expected))exactBatches=false;
+    }
+  }
+  const terminalMatches=Object.entries(EXPECTED_TERMINAL).every(([date,counts])=>
+    byDate[date].s60===counts.s60&&byDate[date].s81===counts.s81
+      &&byDate[date].s80===0&&byDate[date].other===0);
+  const verified=total===346&&invalidDates===0&&exactBatches&&terminalMatches;
+  return {verified,reason:verified?'SAVED_PROOF_MATCHES_V3':'SAVED_PROOF_INCOMPLETE_OR_DRIFTED',
+    storedMembers:total,batches:commits.length,byDate,
+    distributionMatchesV3:terminalMatches};
+}
