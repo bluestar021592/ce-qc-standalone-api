@@ -58,7 +58,7 @@ import { readSelectedDateBusinessSourceTruth } from './src/v783SevenBusinessSour
 import { diagnoseWhppDailyTimingSources } from './src/v745WhppTimingSourceDiagnostics.js';
 import { requestSelectedDateTimingRepair, inspectSelectedDateTimingRepair } from './src/selectedDateTimingEvidenceRepair.js';
 import { runV788Stage } from './scripts/v788-whpp-stage-tms-evidence.mjs';
-import {verifyV788PersistedSidecar,v788ReadSourceMembershipSignature} from './scripts/v788-whpp-tms-evidence-sidecar.mjs';
+import {verifyV788PersistedSidecar,v788ReadSourceMembershipSignature,previewV788WhppLedgerReconciliation} from './scripts/v788-whpp-tms-evidence-sidecar.mjs';
 import { persistentSelectedDatePodTruth, persistentWhppCompletionTruth } from './src/selectedDatePersistentTruth.js';
 import { buildCanonicalBusinessAccounting } from './src/businessAccounting.js';
 import { buildDataIntegrityReport } from './src/dataIntegrity.js';
@@ -2271,6 +2271,19 @@ function v788StagePublicStatus(){
               saved.independentPodTimeEvidenceChecked=true;
               saved.independentTrustedPodTimeCount=Number(checked.trustedExplicitPodTimes||0);
               saved.independentMissingPodTimeCount=Number(checked.missingTrustedExplicitPodTimes||0);
+              // Reconcile ONLY from the exact independently verified D:
+              // source and proof files. No production DB, no ledger writes.
+              try{
+                const previewSource=new V788ReadOnlyDatabaseSync(v788SourceCopy,{readOnly:true});
+                try{
+                  previewSource.exec('PRAGMA query_only=ON');
+                  saved.ledgerReconciliation=previewV788WhppLedgerReconciliation(
+                    previewSource,checkDb,actualSourceSignature);
+                }finally{previewSource.close()}
+              }catch{
+                saved.ledgerReconciliation={ready:false,reason:'ISOLATED_LEDGER_PREVIEW_UNAVAILABLE',
+                  productionModified:false};
+              }
               saved.statusOnlyPreview={
               source:'INDEPENDENT_ISOLATED_SQLITE',
               dates:Object.entries(checked.byDate||{}).map(([date,v])=>({
