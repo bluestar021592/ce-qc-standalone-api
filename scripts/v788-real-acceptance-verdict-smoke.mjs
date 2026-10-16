@@ -10,7 +10,8 @@ const base={
     contradiction:0,ledgerTerminalContradictingTms:0,
     ledgerOpenWithNormalizedTerminal:0,ledgerTerminalWithNonterminal:0}},
  sevenBusinessSource:{available:true,datesChecked:2,blockedDates:[],
-   byDate:[{date:'2026-07-01',reconciled:true},{date:'2026-07-02',reconciled:true}]}
+   byDate:[{date:'2026-07-01',reconciled:true,latestValidUnifiedBatchPresent:true,completedValidUnifiedBatch:true},
+     {date:'2026-07-02',reconciled:true,latestValidUnifiedBatchPresent:true,completedValidUnifiedBatch:true}]}
 };
 const clone=()=>JSON.parse(JSON.stringify(base));
 const ready=buildV788AcceptanceVerdict(clone());
@@ -21,6 +22,14 @@ assert.equal(ready.readyToPublish,false);
 let stale=clone();stale.sevenBusinessSource.byDate[0].reconciled=false;
 stale.sevenBusinessSource.blockedDates=['2026-07-01'];
 assert.equal(buildV788AcceptanceVerdict(stale).releaseDecision,'BLOCKED');
+let missingUnified=clone();missingUnified.sevenBusinessSource.byDate[0].latestValidUnifiedBatchPresent=false;
+missingUnified.sevenBusinessSource.byDate[0].completedValidUnifiedBatch=false;
+assert.equal(buildV788AcceptanceVerdict(missingUnified).releaseDecision,'BLOCKED',
+  'WHPP-only date is not proof that all seven business sources exist');
+assert.equal(buildV788AcceptanceVerdict(missingUnified).gates.find(x=>x.id==='SEVEN_BUSINESS_LATEST_SOURCES').detail.missingUnifiedSourceDates,1);
+let incompleteUnified=clone();incompleteUnified.sevenBusinessSource.byDate[1].completedValidUnifiedBatch=false;
+assert.equal(buildV788AcceptanceVerdict(incompleteUnified).releaseDecision,'BLOCKED',
+  'reconciled members must not mask incomplete newest unified import');
 let open=clone();open.whpp.totals.ledgerOpenWithNormalizedTerminal=346;
 const blocked=buildV788AcceptanceVerdict(open);
 assert.equal(blocked.releaseDecision,'BLOCKED');
