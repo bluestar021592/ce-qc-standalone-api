@@ -9,6 +9,7 @@ on:
       - 'public/**'
       - 'scripts/v788-real-admin-edge-pilot.mjs'
       - 'scripts/v788-*.mjs'
+      - 'tools/CE_QC_V788_隔离试用.ps1'
       - '.github/workflows/v788-real-edge-pilot.yml'
   workflow_dispatch:
 
@@ -26,6 +27,18 @@ jobs:
           node-version: '24'
           cache: npm
       - run: npm ci
+      - name: Isolated candidate pilot launcher syntax and fail-closed invariant
+        shell: pwsh
+        run: |
+          $path = Resolve-Path 'tools/CE_QC_V788_隔离试用.ps1'
+          $tokens = $null
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile($path.Path, [ref]$tokens, [ref]$errors)
+          if ($errors.Count -ne 0) { $errors | ForEach-Object { Write-Error $_.Message }; exit 1 }
+          node --check scripts/v788-create-isolated-pilot-snapshot.mjs
+          node --check scripts/v788-edge-synthetic-evidence-fixture.mjs
+          node --check scripts/v788-real-admin-edge-pilot.mjs
+          node scripts/v788-isolated-pilot-safety-smoke.mjs
       - name: Real Edge V788 admin status panel, no CE TMS
         shell: pwsh
         run: node scripts/v788-real-admin-edge-pilot.mjs
