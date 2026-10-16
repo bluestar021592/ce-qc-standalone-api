@@ -2240,7 +2240,16 @@ function v788StagePublicStatus(){
   let independentlyVerifiedCoverage=null;
   if(process.platform==='win32'){
     try{
-      const data=JSON.parse(fsSync.readFileSync(v788StageReport,'utf8'));
+      // Progress JSON can be missing, incomplete or stale after a crash.
+      // It is never a prerequisite for independently proving exact member
+      // identity from the existing read-only source + persisted TMS sidecar.
+      let data={};
+      if(v788IsRegularExactFile(v788StageReport)){
+        try{data=JSON.parse(fsSync.readFileSync(v788StageReport,'utf8'))}
+        catch{saved.reportCheck='REPORT_UNREADABLE_USING_SQLITE_PROOF'}
+      }else{
+        saved.reportCheck='REPORT_MISSING_OR_UNSAFE_USING_SQLITE_PROOF';
+      }
       // Only inspect the exact expected regular sidecar. Refuse symlinks or
       // redirected copies, and never open or mutate the source QC SQLite.
       try{
@@ -2253,10 +2262,11 @@ function v788StagePublicStatus(){
           actualSourceSignature=v788ReadSourceMembershipSignature(srcDb);
         }finally{srcDb.close()}
         const reportSignature=String(data?.sourceSignature||'');
-        if(!actualSourceSignature||actualSourceSignature!==reportSignature){
-          saved.sidecarVerified=false;
-          saved.sidecarCheck='SOURCE_MEMBERSHIP_CHANGED';
-        }else{
+        if(reportSignature&&actualSourceSignature!==reportSignature)
+          saved.reportCheck='STALE_REPORT_SIGNATURE_USING_SQLITE_PROOF';
+        if(!actualSourceSignature)
+          throw Error('V788_ISOLATED_SOURCE_SIGNATURE_MISSING');
+        {
           const checkDb=new V788ReadOnlyDatabaseSync(v788SidecarFile,{readOnly:true});
           try{
             checkDb.exec('PRAGMA query_only=ON');

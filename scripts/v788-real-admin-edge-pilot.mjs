@@ -181,6 +181,29 @@ try{
   assert.equal(evidence.body.returned,56);
   assert.equal(evidence.body.statusOnlyPreview.dates[0].pod,166);
   assert.equal(evidence.body.statusOnlyPreview.dates[1].returned,32);
+  // The real Edge backend must be able to recover persisted SQLite evidence
+  // even if the last-run JSON progress file disappeared or was corrupted.
+  // Never query TMS or alter source/sidecar to recover a view-only report.
+  const fixtureReport=String.raw`D:\\CE_QC_V788_验收副本\\V788_WHPP_TMS_逐票证据验收.json`;
+  const originalReport=fs.readFileSync(fixtureReport,'utf8');
+  fs.unlinkSync(fixtureReport);
+  const noReport=await httpStatus(base+'/api/v788/whpp-evidence/status',admin);
+  assert.equal(noReport.body.sidecarVerified,true,'valid saved SQLite proof must survive missing JSON report');
+  assert.equal(noReport.body.independentlyVerifiedCounts,true);
+  assert.equal(noReport.body.savedMembers,346);
+  assert.equal(noReport.body.pod,290);
+  assert.equal(noReport.body.reportCheck,'REPORT_MISSING_OR_UNSAFE_USING_SQLITE_PROOF');
+  fs.writeFileSync(fixtureReport,'{malformed-progress-json');
+  const malformedReport=await httpStatus(base+'/api/v788/whpp-evidence/status',admin);
+  assert.equal(malformedReport.body.sidecarVerified,true,'malformed JSON cannot conceal verified SQLite evidence');
+  assert.equal(malformedReport.body.reportCheck,'REPORT_UNREADABLE_USING_SQLITE_PROOF');
+  const staleReport=JSON.parse(originalReport);
+  staleReport.sourceSignature='f'.repeat(64);
+  fs.writeFileSync(fixtureReport,JSON.stringify(staleReport));
+  const stale=await httpStatus(base+'/api/v788/whpp-evidence/status',admin);
+  assert.equal(stale.body.sidecarVerified,true,'stale progress signature cannot override exact source + persisted sidecar signature');
+  assert.equal(stale.body.reportCheck,'STALE_REPORT_SIGNATURE_USING_SQLITE_PROOF');
+  fs.writeFileSync(fixtureReport,originalReport);
   const refreshed=await cdp.eval("(async()=>{const b=document.getElementById('v788WhppEvidenceRefresh');if(!b)return false;b.click();return true})()");
   assert.equal(refreshed,true,'REAL V625 page must have a visible refresh button');
   const verified=await waitFor(async()=>{

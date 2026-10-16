@@ -67,6 +67,14 @@ assert.match(server,/new V788ReadOnlyDatabaseSync\(v788SidecarFile,\{readOnly:tr
 assert.match(server,/new V788ReadOnlyDatabaseSync\(v788SourceCopy,\{readOnly:true\}\)/);
 assert.match(server,/v788ReadSourceMembershipSignature\(srcDb\)/);
 assert.match(server,/actualSourceSignature!==reportSignature/);
+assert.match(server,/if\(v788IsRegularExactFile\(v788StageReport\)\)/,
+  'JSON report must be read only from an exact safe regular file');
+assert.match(server,/REPORT_MISSING_OR_UNSAFE_USING_SQLITE_PROOF/,
+  'missing report cannot prevent independent source + sidecar verification');
+assert.match(server,/REPORT_UNREADABLE_USING_SQLITE_PROOF/,
+  'malformed progress JSON cannot conceal valid saved status evidence');
+assert.match(server,/STALE_REPORT_SIGNATURE_USING_SQLITE_PROOF/,
+  'a stale JSON signature must not outweigh a fresh independent SQLite comparison');
 
 assert.match(server,/if\(checked\.verified===true\)\{/,
   'only independently verified SQLite status evidence may produce a completed preview');
