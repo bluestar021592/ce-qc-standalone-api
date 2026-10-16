@@ -22,7 +22,9 @@ $EnvSaved=$false
 $EnvNames=@('DATA_DIR','DB_FILE','LOCALAPPDATA','EXPORTS_DIR','BACKUPS_DIR','IMPORTS_DIR',
   'PORT','HOST','PUBLIC_HOSTNAME','NODE_ENV','ACCESS_MODE',
   'CE_QC_BACKGROUND_MAINTENANCE_ENABLED','CE_QC_SKIP_STARTUP_POD_REPAIR',
-  'CE_QC_ENABLE_EXPORT_SIDECAR_AT_STARTUP','CE_QC_DISABLE_V246_TRACKING')
+  'CE_QC_ENABLE_EXPORT_SIDECAR_AT_STARTUP','CE_QC_DISABLE_V246_TRACKING',
+  'CE_QC_AUTH_SIDECAR_PORT','CE_QC_AUTH_SIDECAR_HOST',
+  'CE_QC_EXPORT_SIDECAR_PORT','CE_QC_V788_PILOT_ISOLATED')
 function Require([bool]$Condition,[string]$Message){
   if(-not $Condition){throw $Message}
 }
@@ -58,6 +60,15 @@ foreach($name in @('git','node','npm')){
   Require ([bool](Get-Command $name -ErrorAction SilentlyContinue)) "Missing $name; no APP changes were made."
 }
 AssertPortFree
+# Reserve separate sidecar ports; never take over V787 auth (usually 5179).
+foreach($sidecarPort in @(5280,5281)){
+  $probe=$null
+  try{
+    $probe=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Parse('127.0.0.1'),$sidecarPort)
+    $probe.Start()
+  }catch{throw "V788 trial sidecar port $sidecarPort is already occupied. Existing APP remains untouched."}
+  finally{if($probe){$probe.Stop()}}
+}
 Push-Location -LiteralPath $Root
 try{
   $CurrentHead=GitText @('rev-parse','HEAD')
@@ -98,6 +109,10 @@ try{
     $env:CE_QC_SKIP_STARTUP_POD_REPAIR='1'
     $env:CE_QC_ENABLE_EXPORT_SIDECAR_AT_STARTUP='0'
     $env:CE_QC_DISABLE_V246_TRACKING='1'
+    $env:CE_QC_AUTH_SIDECAR_PORT='5280'
+    $env:CE_QC_AUTH_SIDECAR_HOST='127.0.0.1'
+    $env:CE_QC_EXPORT_SIDECAR_PORT='5281'
+    $env:CE_QC_V788_PILOT_ISOLATED='1'
     $logs=Join-Path $Sandbox 'logs'
     $Server=Start-Process -FilePath 'node.exe' -ArgumentList 'bootstrap.js' -WorkingDirectory $App -PassThru -WindowStyle Hidden -RedirectStandardOutput (Join-Path $logs 'server.log') -RedirectStandardError (Join-Path $logs 'server-errors.log')
     $ready=$false
