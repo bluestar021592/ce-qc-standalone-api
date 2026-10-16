@@ -2572,7 +2572,25 @@ async function loadV788WhppEvidenceV625(){
           Number(rec.currentNeedsReturnedSync||0)+'票。');
         lines.push('该结果仅为独立副本只读对账；尚未修改历史账本或正式数据库。');
       }else if(rec){
-        lines.push('账本对账证据不完整或存在冲突，禁止自动更改历史状态。');
+        // A blocked reconciliation must explain the *aggregate* reason.
+        // Never surface waybill IDs, raw ledger entries or unsafe file paths.
+        const n=key=>Math.max(0,Number.isFinite(Number(rec[key]))?Math.floor(Number(rec[key])):0);
+        const missing=n('currentMissingOrDuplicate')+n('ledgerMissingOrDuplicate');
+        const opposite=n('currentOppositeTerminal')+n('ledgerOppositeTerminal');
+        const needsPod=n('currentNeedsPODSync')+n('ledgerNeedsPODSync');
+        const needsReturn=n('currentNeedsReturnedSync')+n('ledgerNeedsReturnedSync');
+        if(rec.reason==='ISOLATED_LEDGER_PREVIEW_UNAVAILABLE')
+          lines.push('历史账本：隔离副本账本只读检查暂不可用，不能据此判断账本已闭环。');
+        else if(['SOURCE_SIGNATURE_MISMATCH','CROSS_DATE_LEDGER_AMBIGUOUS','NONTERMINAL_TMS_MEMBER'].includes(rec.reason))
+          lines.push('历史账本：证据存在来源差异、跨日期歧义或非终态记录，必须人工核验，禁止自动同步。');
+        else{
+          lines.push('历史账本待核验：状态表缺失或重复 '+n('currentMissingOrDuplicate')+
+            ' 票，账本缺失或重复 '+n('ledgerMissingOrDuplicate')+
+            ' 票，相反终态 '+opposite+' 处；');
+          lines.push('旧记录待同步线索：POD '+needsPod+' 处、已退回 '+needsReturn+
+            ' 处。统计为状态表与账本差异次数，并非去重运单票数。');
+        }
+        lines.push('对账未通过，仅展示隔离副本汇总；尚未修改历史账本或正式数据库。');
       }
     }else if(running)lines.push('正在核验：已保存 '+covered+'/346票，'+batches+'/8批。');
     else if(needsReview)lines.push('346票证据已存在，但来源、状态或签名校验未通过；请复核，不允许重复查询。');
