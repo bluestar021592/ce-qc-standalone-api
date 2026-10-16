@@ -167,6 +167,43 @@ try{
   assert.equal(audit.complete,true);
   assert.equal(verifyV788PersistedSidecar(db,sig).verified,true,
     'actual SQLite evidence proves all 346 terminal statuses and 8 batches');
+  // Status proof is independent from signing-time proof. Do not infer a
+  // successful signing timestamp just because TMS returned code 60.
+  const initialProof=verifyV788PersistedSidecar(db,sig);
+  assert.equal(initialProof.trustedExplicitPodTimes,0);
+  assert.equal(initialProof.missingTrustedExplicitPodTimes,290);
+  assert.equal(initialProof.invalidStoredEvidence,0);
+  const podOne=all[0].codes[0],returnOne=all[0].codes.at(-1);
+  const setPodTime=db.prepare('UPDATE v788_tms_evidence SET explicitPodTime=? WHERE reportDate=? AND shipmentCode=?');
+  setPodTime.run('2026-07-04 10:00:00','2026-07-01',podOne);
+  const oneTime=verifyV788PersistedSidecar(db,sig);
+  assert.equal(oneTime.verified,true);
+  assert.equal(oneTime.trustedExplicitPodTimes,1);
+  assert.equal(oneTime.missingTrustedExplicitPodTimes,289);
+  setPodTime.run('2026-06-30 11:00:00','2026-07-01',podOne);
+  const beforeSourceDay=verifyV788PersistedSidecar(db,sig);
+  assert.equal(beforeSourceDay.verified,false);
+  assert.equal(beforeSourceDay.invalidStoredEvidence,1);
+  assert.equal(beforeSourceDay.reason,'SAVED_PROOF_TIME_OR_DIGEST_INVALID');
+  setPodTime.run('','2026-07-01',podOne);
+  setPodTime.run('2026-07-05 12:00:00','2026-07-01',returnOne);
+  assert.equal(verifyV788PersistedSidecar(db,sig).verified,false,
+    'status 81 must never claim a POD time');
+  setPodTime.run('','2026-07-01',returnOne);
+  const oldDigest=db.prepare('SELECT apiDigest FROM v788_tms_evidence WHERE reportDate=? AND shipmentCode=?').get('2026-07-01',podOne).apiDigest;
+  db.prepare('UPDATE v788_tms_evidence SET apiDigest=? WHERE reportDate=? AND shipmentCode=?').run('INVALID','2026-07-01',podOne);
+  assert.equal(verifyV788PersistedSidecar(db,sig).verified,false,
+    'malformed signed API evidence digest cannot be accepted');
+  db.prepare('UPDATE v788_tms_evidence SET apiDigest=? WHERE reportDate=? AND shipmentCode=?').run(oldDigest,'2026-07-01',podOne);
+  assert.equal(verifyV788PersistedSidecar(db,sig).verified,true);
+  assert.throws(()=>stageV788Batch(db,{date:'2026-07-01',index:0,
+    codes:all[0].codes.slice(0,50),
+    rows:all[0].codes.slice(0,50).map((code,index)=>({
+      shipmentCode:code,shipmentStatus:'60',
+      ...(index===0?{signedAt:'2026-07-04 10:00:00'}:{})
+    }))}),/V788_BATCH_REPLAY_EXPLICIT_POD_TIME_CHANGED/,
+    'same terminal status with a newly different signedAt must not be silently discarded');
+
   // Replacing a saved waybill with an unrelated ID preserves all eight
   // batch counters and 290/56 terminal totals, but MUST fail exact proof.
   db.prepare('UPDATE v788_tms_evidence SET shipmentCode=? WHERE reportDate=? AND shipmentCode=?')
