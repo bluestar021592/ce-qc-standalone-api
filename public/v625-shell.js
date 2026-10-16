@@ -2532,6 +2532,16 @@ async function loadV788WhppEvidenceV625(){
           '/'+Number(data.pod||0)+'票；仍缺'+Number(data.independentMissingPodTimeCount||0)+
           '票。该证据尚未写入正式签收时间账本。');
       }
+      const rec=data.ledgerReconciliation;
+      if(rec?.ready===true){
+        lines.push('旧账本待同步：POD '+Number(rec.ledgerNeedsPODSync||0)+
+          '票、已退回 '+Number(rec.ledgerNeedsReturnedSync||0)+'票；当前状态待同步：POD '+
+          Number(rec.currentNeedsPODSync||0)+'票、已退回 '+
+          Number(rec.currentNeedsReturnedSync||0)+'票。');
+        lines.push('该结果仅为独立副本只读对账；尚未修改历史账本或正式数据库。');
+      }else if(rec){
+        lines.push('账本对账证据不完整或存在冲突，禁止自动更改历史状态。');
+      }
     }else if(running)lines.push('正在核验：已保存 '+covered+'/346票，'+batches+'/8批。');
     else if(needsReview)lines.push('346票证据已存在，但来源、状态或签名校验未通过；请复核，不允许重复查询。');
     else if(data.status==='FAILED')lines.push('核验失败：'+String(data.message||'请查看登录及隔离副本状态'));
