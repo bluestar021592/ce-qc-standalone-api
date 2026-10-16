@@ -8,6 +8,8 @@ import path from 'node:path';
 import net from 'node:net';
 import {spawn,spawnSync} from 'node:child_process';
 import {createV788SyntheticEvidence,deleteV788SyntheticEvidence} from './v788-edge-synthetic-evidence-fixture.mjs';
+import {makeV788PilotSnapshot,PILOT_ROOT} from './v788-create-isolated-pilot-snapshot.mjs';
+import {DatabaseSync} from 'node:sqlite';
 
 function freePort(){
   return new Promise((resolve,reject)=>{
@@ -97,7 +99,7 @@ const dataDir=path.join(root,'data'),browserDir=path.join(root,'browser'),appLoc
 for(const dir of [dataDir,browserDir,appLocal])fs.mkdirSync(dir,{recursive:true});
 const [port,debugPort,authPort,exportPort]=await Promise.all([freePort(),freePort(),freePort(),freePort()]);
 const base='http://127.0.0.1:'+port,secret='V788_EDGE_TEST_SECRET_0123456789_ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-let backend,edge,cdp,log='',lastUi=null,syntheticCreated=false;
+let backend,edge,cdp,log='',lastUi=null,syntheticCreated=false,trialRootCreated=false;
 try{
   backend=spawn(process.execPath,['bootstrap.js'],{
     cwd:process.cwd(),stdio:['ignore','pipe','pipe'],windowsHide:true,
@@ -191,6 +193,23 @@ try{
   assert.equal(buttonNow,true,'completed proof must never allow another real TMS request');
   assert.equal(cdp.urls.filter(x=>x.includes('/api/v788/whpp-evidence/start')).length,0);
   console.log('[V788_REAL_EDGE] PASS synthetic 346 exact source: 190/156, POD 166+124, returned 24+32; real V625 DOM; zero TMS calls');
+  // A disposable candidate trial must be able to clone the pre-existing
+  // isolated acceptance source *without* opening the formal business DB.
+  assert.equal(fs.existsSync(PILOT_ROOT),false,'GitHub CI must not overwrite any trial root');
+  fs.mkdirSync(PILOT_ROOT);
+  trialRootCreated=true;
+  const trialDir=path.win32.join(PILOT_ROOT,'data');
+  fs.mkdirSync(trialDir);
+  const trialDb=path.win32.join(trialDir,'pilot_copy.db');
+  const cloned=await makeV788PilotSnapshot(trialDb);
+  assert.equal(cloned.sourceMembers,346);
+  assert.equal(cloned.formalDatabaseOpened,false);
+  assert.equal(cloned.sourceReadOnly,true);
+  const proofCopy=new DatabaseSync(trialDb,{readOnly:true});
+  try{
+    assert.equal(proofCopy.prepare("SELECT COUNT(DISTINCT shipmentCode) n FROM business_daily_parse_rows WHERE businessType='WHPP'").get().n,346);
+  }finally{proofCopy.close()}
+  console.log('[V788_REAL_EDGE] PASS candidate trial snapshot: copied exact isolated 346-member SQLite to disposable D pilot sandbox; formal DB untouched');
 }catch(error){
   console.error('[V788_REAL_EDGE] FAIL '+String(error?.stack||error));
   console.error('[V788_REAL_EDGE] last settings state='+JSON.stringify(lastUi));
@@ -203,6 +222,16 @@ try{
   process.exitCode=1;
 }finally{
   cdp?.close();kill(edge);kill(backend);
+  if(trialRootCreated)try{
+    const testCopy=path.win32.join(PILOT_ROOT,'data','pilot_copy.db');
+    for(const f of [testCopy,testCopy+'-wal',testCopy+'-shm'])
+      if(fs.existsSync(f))fs.unlinkSync(f);
+    fs.rmdirSync(path.win32.join(PILOT_ROOT,'data'));
+    fs.rmdirSync(PILOT_ROOT);
+  }catch(error){
+    console.error('[V788_REAL_EDGE] trial sandbox cleanup failed '+String(error?.message||error));
+    process.exitCode=1;
+  }
   if(syntheticCreated)try{deleteV788SyntheticEvidence()}catch(error){
     console.error('[V788_REAL_EDGE] CI synthetic cleanup failed '+String(error?.message||error));
     process.exitCode=1;
