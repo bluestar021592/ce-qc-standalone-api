@@ -2435,12 +2435,14 @@ async function loadV788WhppEvidenceV625(){
     else if(data.resumeAvailable||finalizeOffline)lines.push('上次核验中断，已保存 '+covered+'/346票、'+batches+'/8批，允许安全续查。');
     else lines.push('尚未保存完整346票逐票证据。已经完成的只读TMS汇总不需要重新上传。');
     lines.push('本阶段只核验历史状态；签收时间、账本、正式导出尚未放行。');
+    if(data.isolatedSourceReady!==true)
+      lines.push('没有找到安全的D盘V788验收副本。此页面不会读取正式数据库，也不会启动TMS查询。');
     const loginRequired=!v788CeSessionReady&&!finalizeOffline;
     if(loginRequired&&!full&&!running)
       lines.push('CE系统接口凭证未就绪，请先在上方登录CE系统。');
     info.textContent=lines.join(' ');
     button.disabled=running||v788EvidencePosting||full||needsReview||loginRequired
-      ||data.platformReady!==true;
+      ||data.platformReady!==true||data.isolatedSourceReady!==true;
     button.textContent=running?'正在核验…':full?'346票状态已核实'
       :needsReview?'需复核，禁止重复查询'
       :(data.resumeAvailable||finalizeOffline)?'继续安全核验（保留已有批次）':'开始隔离核验（346票）';
