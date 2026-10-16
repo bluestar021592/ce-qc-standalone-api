@@ -26,7 +26,7 @@ assert.match(whpp.v625BusinessLegend.innerHTML,/已签收 124（79.49%）/);
 assert.doesNotMatch(whpp.v625BusinessLegend.innerHTML,/待核验/);
 const unresolved=run('WHPP',{total:10,pod:5,returned:2,returning:1,delivery:1,pending:0,abnormal:0,otherNormal:0,unprocessed:1});
 assert.match(unresolved.v625BusinessLegend.innerHTML,/待核验 1（10.00%）/);
-assert.match(unresolved.v625BusinessLegend.innerHTML,/其他正常状态 0（0.00%）/);
+assert.doesNotMatch(unresolved.v625BusinessLegend.innerHTML,/其他正常状态/,'zero normal states should not clutter the status chart');
 const missing=run('WHPP',{total:156,pod:100,returned:32,delivery:0,pending:0,abnormal:0,otherNormal:0});
 assert.match(missing.v625BusinessLegend.innerHTML,/待核验 24/);
 const overlap=run('WHPP',{total:156,pod:124,returned:32,delivery:20,pending:0,abnormal:0,otherNormal:0});
