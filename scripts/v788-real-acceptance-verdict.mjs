@@ -18,9 +18,12 @@ export function buildV788AcceptanceVerdict(audit){
   }
   results.push(check('SEVEN_BUSINESS_LATEST_SOURCES',
     source.available&&Array.isArray(source.byDate)&&source.byDate.length>0
-      &&source.byDate.every(day=>day.reconciled===true)?'PASS':'BLOCK',
+      &&source.byDate.every(day=>day.latestValidUnifiedBatchPresent===true
+        &&day.completedValidUnifiedBatch===true&&day.reconciled===true)?'PASS':'BLOCK',
     {datesChecked:Number(source.datesChecked||0),
       unfinishedLatestValidDates:(source.blockedDates||[]).length,
+      missingUnifiedSourceDates:(source.byDate||[]).filter(day=>day.latestValidUnifiedBatchPresent!==true).length,
+      incompleteUnifiedSourceDates:(source.byDate||[]).filter(day=>day.latestValidUnifiedBatchPresent===true&&day.completedValidUnifiedBatch!==true).length,
       unbalancedDates:(source.byDate||[]).filter(day=>day.reconciled!==true).length,
       sourceMembershipOnly:true}));
   results.push(check('WHPP_TERMINAL_CONFLICTS',
