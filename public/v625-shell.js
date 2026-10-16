@@ -286,6 +286,11 @@ function renderDonut(m){
     if(legend)legend.textContent='状态分类存在重叠：已分类 '+fmt(accounted)+' / 总票 '+fmt(total)+'，等待核验';
     return;
   }
+  if(total===0){
+    if(donut)donut.style.background='var(--v625-border,#dce5ef)';
+    if(legend)legend.textContent='暂无数据（所选日期和业务无有效日报成员）';
+    return;
+  }
   if(accounted<total)parts.push(['待核验',total-accounted,'#c5cfdb']);
   const denominator=Math.max(1,total);
   let at=0;const stops=[];
