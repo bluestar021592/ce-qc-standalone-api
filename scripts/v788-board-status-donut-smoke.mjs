@@ -76,6 +76,21 @@ const detailed=vm.runInNewContext(source.slice(accountingStart,accountingEnd)+`\
     unresolved:{rows:[t80,tBad]}
   }},t80,t60,t81,tBad
 },{timeout:1000});
+// A terminal 81 must close an older RETURNING member for both Shopee
+// categories, while status 80 is still return-in-progress and not returned.
+for(const type of ['SHOPEECN','SHOPEEVN']){
+  const latestReturn={shipmentCode:'CLOSED_RETURN',shipmentStatus:'81',currentState:'RETURN_IN_PROGRESS'};
+  const continuingReturn={shipmentCode:'STILL_RETURNING',shipmentStatus:'80',currentState:'RETURNING'};
+  const actual=vm.runInNewContext(source.slice(accountingStart,accountingEnd)+
+    '\\nbuildBusinessAccounting({finalRows:[latestReturn,continuingReturn]},{total:2});'.replace('\\n','\n'),{
+      business:type,latestReturn,continuingReturn
+    },{timeout:1000});
+  assert.equal(actual.rowsByKind.returned.length,1,type+' new 81 must close old returning');
+  assert.equal(actual.rowsByKind.returning.length,1,type+' status 80 must remain unfinished return');
+  assert.equal(actual.rowsByKind.unprocessed.length,0,type+' normal return progression is not a conflict');
+  assert.equal(actual.accounted,2,type+' must account each member exactly once');
+  assert.equal(actual.difference,0);
+}
 for(const kind of ['whpp','shopee']){
   const state=detailed[kind];
   assert.equal(state.rowsByKind.returning.length,1,kind+' must isolate the TMS 80 parcel');
