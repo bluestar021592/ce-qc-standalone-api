@@ -123,6 +123,18 @@ try{
   assert.equal(audit.complete,true);
   assert.equal(verifyV788PersistedSidecar(db,sig).verified,true,
     'actual SQLite evidence proves all 346 terminal statuses and 8 batches');
+  // Replacing a saved waybill with an unrelated ID preserves all eight
+  // batch counters and 290/56 terminal totals, but MUST fail exact proof.
+  db.prepare('UPDATE v788_tms_evidence SET shipmentCode=? WHERE reportDate=? AND shipmentCode=?')
+    .run('NOT_A_SOURCE_MEMBER','2026-07-01',all[0].codes[0]);
+  const wrongMember=verifyV788PersistedSidecar(db,sig);
+  assert.equal(wrongMember.distributionMatchesV3,true);
+  assert.equal(wrongMember.exactMemberSetMatches,false);
+  assert.equal(wrongMember.verified,false);
+  db.prepare('UPDATE v788_tms_evidence SET shipmentCode=? WHERE reportDate=? AND shipmentCode=?')
+    .run(all[0].codes[0],'2026-07-01','NOT_A_SOURCE_MEMBER');
+  assert.equal(verifyV788PersistedSidecar(db,sig).verified,true);
+
   assert.equal(verifyV788PersistedSidecar(db,'f'.repeat(64)).verified,false,
     'a stale JSON report signature must not certify a different sidecar');
 
