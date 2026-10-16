@@ -280,7 +280,8 @@ function renderDonut(m){
     ]:[]),
     ['Pending',count(m.pending),'#f5a623'],
     ['异常',count(m.abnormal),'#ef4b50'],
-    ['其他正常状态',count(m.otherNormal),'#8c9bab']
+    ['其他正常状态',count(m.otherNormal),'#8c9bab'],
+    ['待核验',count(m.unprocessed),'#c5cfdb']
   ];
   const accounted=parts.reduce((sum,item)=>sum+item[1],0);
   const donut=byId('v625BusinessDonut');
@@ -295,7 +296,7 @@ function renderDonut(m){
     if(legend)legend.textContent='暂无数据（所选日期和业务无有效日报成员）';
     return;
   }
-  if(accounted<total)parts.push(['待核验',total-accounted,'#c5cfdb']);
+  if(accounted<total)parts.find(part=>part[0]==='待核验')[1]+=total-accounted;
   const denominator=Math.max(1,total);
   let at=0;const stops=[];
   for(const[,value,color]of parts){
@@ -1312,12 +1313,38 @@ function tabRows(...keys){
 function detailCode(row={}){return String(row.shipmentCode||row.运单号||row.waybill||'').trim().toUpperCase()}
 function uniqueDetailRows(rows=[]){const map=new Map();for(const row of rows){const code=detailCode(row);if(code&&!map.has(code))map.set(code,row)}return[...map.values()]}
 function rowText(row={}){return [row.primaryCategory,row.主分类,row.异常分类,row.currentState,row.scanNormalizedState,row.退回状态,row.specialState,row.shopState,row.最后节点,row.latestEventDesc,row.QC判断].map(v=>String(v||'')).join(' ').toUpperCase()}
-function rowIsPod(row={}){const text=rowText(row);return row.是否POD==='是'||String(row.orderStatus||'')==='85'||/(^|\s)(POD|已签收|签收成功|已妥投|DELIVERED|SIGNED)(\s|$)/i.test(text)&&!/未签收|未妥投|签收失败/.test(text)}
-function rowIsReturned(row={}){const text=rowText(row);return !/未退回|非退回|待退回|退回处理中|NOT_RETURNED|PENDING_RETURN/i.test(text)&&/(已退回|退回完成|RETURN_COMPLETED|RETURNED)/i.test(text)}
+function rowTmsStatus(row={}){return String(row?.shipmentStatus??row?.shipmentTrack?.shipmentStatus??'').trim()}
+function rowHasTmsConflict(row={}){
+  const code=rowTmsStatus(row),state=String(row?.currentState||'').trim().toUpperCase();
+  return row?.shipmentStatusConflict===true||row?.truthEvidence?.tmsContradiction===true
+    ||state==='PENDING_VERIFICATION'
+    ||(code==='60'&&['RETURNED','RETURN_COMPLETED','RETURN_IN_PROGRESS','RETURNING'].includes(state))
+    ||(code==='81'&&['POD','RETURN_IN_PROGRESS','RETURNING'].includes(state))
+    ||(code==='80'&&['POD','RETURNED','RETURN_COMPLETED'].includes(state));
+}
+function rowIsPod(row={}){
+  if(rowHasTmsConflict(row))return false;
+  const code=rowTmsStatus(row);
+  if(code==='60')return true;
+  if(code==='80'||code==='81')return false;
+  const text=rowText(row);
+  return row.是否POD==='是'||String(row.orderStatus||'')==='85'
+    ||/(^|\s)(POD|已签收|签收成功|已妥投|DELIVERED|SIGNED)(\s|$)/i.test(text)&&!/未签收|未妥投|签收失败/.test(text);
+}
+function rowIsReturned(row={}){
+  if(rowHasTmsConflict(row))return false;
+  const code=rowTmsStatus(row);
+  if(code==='81')return true;
+  if(code==='60'||code==='80')return false;
+  const text=rowText(row);
+  return !/未退回|非退回|待退回|退回处理中|NOT_RETURNED|PENDING_RETURN/i.test(text)
+    &&/(已退回|退回完成|RETURN_COMPLETED|RETURNED)/i.test(text);
+}
 // TMS shipmentStatus 80 is RETURNING, never signed or completed return.
 // Do not read tracking eventCode 80 here: that code means POD in a different API.
 function rowIsReturning(row={}){
-  const code=String(row?.shipmentStatus??row?.shipmentTrack?.shipmentStatus??'').trim();
+  if(rowHasTmsConflict(row))return false;
+  const code=rowTmsStatus(row);
   if(code==='80')return true;
   if(code==='60'||code==='81')return false;
   const state=String(row?.currentState||'').trim().toUpperCase();
@@ -1341,6 +1368,8 @@ function buildWhppCanonicalAccounting(state={},fallback={}){
   const metrics=state?.dashboard?.metrics||{};
   const all=uniqueDetailRows(tabs?.all?.rows||[]);
   const unresolved=uniqueDetailRows(tabs?.unresolved?.rows||[]);
+  const conflicted=uniqueDetailRows([...all,...unresolved].filter(rowHasTmsConflict));
+  const conflictBills=new Set(conflicted.map(detailCode));
   const returning=uniqueDetailRows([
     ...all.filter(rowIsReturning),
     ...unresolved.filter(rowIsReturning),
@@ -1348,6 +1377,7 @@ function buildWhppCanonicalAccounting(state={},fallback={}){
     ...(tabs?.returning?.rows||[]).filter(rowIsReturning)
   ]);
   const returningBills=new Set(returning.map(detailCode));
+  for(const code of conflictBills)returningBills.add(code);
   // Never count a newer status 80 again in stale POD/returned detail tabs.
   const excludeReturning=rows=>uniqueDetailRows(rows||[]).filter(row=>!returningBills.has(detailCode(row)));
   const pod=excludeReturning(tabs?.pod?.rows);
@@ -1363,6 +1393,7 @@ function buildWhppCanonicalAccounting(state={},fallback={}){
   const pending=[],abnormal=[],delivery=[],unprocessed=[];
   for(const row of unresolved){
     if(assigned.has(detailCode(row)))continue;
+    if(rowHasTmsConflict(row)){unprocessed.push(row);assigned.add(detailCode(row));continue;}
     if(rowIsPending(row))pending.push(row);
     else if(rowIsAbnormal(row))abnormal.push(row);
     else if(Number(row.派送中停留天数||row.派送中天数||0)>0||/派送中/.test(rowText(row)))delivery.push(row);
@@ -1392,7 +1423,8 @@ function buildBusinessAccounting(state={},fallback={}){
   const rowsByKind={total:source,pod:[],returned:[],returning:[],pending:[],abnormal:[],otherNormal:[],delivery:[],unprocessed:[]};
   const returnCapable=['WHPP','SHOPEECN','SHOPEEVN'].includes(business);
   for(const row of source){
-    if(returnCapable&&rowIsReturning(row))rowsByKind.returning.push(row);
+    if(rowHasTmsConflict(row))rowsByKind.unprocessed.push(row);
+    else if(returnCapable&&rowIsReturning(row))rowsByKind.returning.push(row);
     else if(row.finalRowAvailable===false)rowsByKind.unprocessed.push(row);
     else if(rowIsPod(row))rowsByKind.pod.push(row);
     else if(rowIsReturned(row))rowsByKind.returned.push(row);
@@ -1673,12 +1705,12 @@ async function loadBusiness(options={}){
     const verifiedAccounting=hasExactRows&&exactSum===Number(m.total||0);
     // Preserve V636 compact first paint while detail/accounting hydrates.
     // Risk indicators are deliberately not included in provisional slices.
-    renderDonut({total:m.total,delivery:m.delivery||0,pod:m.pod||0,returned:m.returned||0,returning:m.returning||0,pending:0,abnormal:0,otherNormal:0});
+    renderDonut({total:m.total,delivery:m.delivery||0,pod:m.pod||0,returned:m.returned||0,returning:m.returning||0,pending:0,abnormal:0,otherNormal:0,unprocessed:0});
     if(verifiedAccounting)renderDonut({
       total:m.total,delivery:exactCounts.delivery,pod:exactCounts.pod,
       returned:exactCounts.returned,returning:exactCounts.returning,pending:exactCounts.pending,
       abnormal:exactCounts.abnormal,
-      otherNormal:exactCounts.otherNormal+exactCounts.unprocessed
+      otherNormal:exactCounts.otherNormal,unprocessed:exactCounts.unprocessed
     });
 
     // Fast summary/timing updates are useful, but never gate the board's first paint.
