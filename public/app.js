@@ -1964,7 +1964,7 @@ async function loadV788WhppEvidenceStatus() {
     const allBatchesPresent=covered===346&&batches===8;
     const isFull=allBatchesPresent&&data.savedStatus==='346_TMS_ROWS_STAGED_NOT_BUSINESS_ACCEPTED'
       &&data.isolatedCopyUnchanged===true&&data.distributionMatchesV3===true
-      &&Number(data.evidenceConflicts||0)===0;
+      &&Number(data.evidenceConflicts||0)===0&&data.sidecarVerified===true;
     // A process restart may leave all eight batches committed while the
     // previous report still says RUNNING. That needs safe resumption, not
     // a blocked terminal "conflicting evidence" verdict.
@@ -1977,7 +1977,7 @@ async function loadV788WhppEvidenceStatus() {
     else if(data.status==='INTERRUPTED_RETRYABLE'||data.status==='STOPPED_RETRYABLE')
       lines.push('隔离核验中断：已保存 '+covered+'/346票、'+batches+'/8批。可从已有批次继续，不会重新扫描日报。');
     else if(data.status==='FAILED')lines.push('核验失败：'+String(data.message||'请检查CE登录状态及隔离副本'));
-    else if(needsReview)lines.push('346票已保存但尚未通过一致性验收：请复核日期分布、状态冲突或数据库副本是否发生变化。不会自动修改或重查。');
+    else if(needsReview)lines.push('汇总报告显示346票，但逐票证据文件或状态一致性尚未通过复核。请检查隔离副本，不会自动修改数据或重复查询。');
     else if(covered>0)lines.push('已有证据 '+covered+'/346票；完成 '+batches+'/8批，可继续补齐。');
     else lines.push('尚未保存逐票证据；已完成的346票只读对账无需再上传。');
     lines.push('仅隔离核验，不修改正式数据库；签收时间和历史账本仍需独立验收。');
