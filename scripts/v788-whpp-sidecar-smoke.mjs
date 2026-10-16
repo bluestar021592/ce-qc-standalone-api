@@ -5,6 +5,21 @@ import fs from 'node:fs';
 const server=fs.readFileSync('server.js','utf8');
 const ui=fs.readFileSync('public/app.js','utf8');
 const html=fs.readFileSync('public/index.html','utf8');
+const activeShell=fs.readFileSync('public/v625-shell.html','utf8');
+const activeJs=fs.readFileSync('public/v625-shell.js','utf8');
+assert.match(activeShell,/id="v788WhppEvidencePanel"/,
+  'real V625 settings MUST render the feature; legacy index.html does not render on /settings');
+assert.match(activeShell,/id="v788WhppEvidenceStart"/);
+assert.match(activeShell,/data-settings-panel="interface"/);
+assert.match(activeJs,/loadV788WhppEvidenceV625/);
+assert.match(activeJs,/startV788WhppEvidenceV625/);
+assert.match(activeJs,/if\(name==='interface'\)void loadSettings\(\)\.then\(\(\)=>loadV788WhppEvidenceV625\(\)\)/);
+assert.match(activeJs,/acknowledgeIsolatedQuery:true/);
+assert.match(activeJs,/sidecarVerified===true/);
+assert.match(activeJs,/CE系统接口凭证未就绪/);
+assert.match(activeJs,/needsReview\|\|loginRequired/);
+assert.match(activeJs,/byId\('v788WhppEvidenceStart'\)\?\.addEventListener\('click',startV788WhppEvidenceV625\)/);
+
 assert.match(server,/app\.get\('\/api\/v788\/whpp-evidence\/status',requireRole\('ADMIN'\)/);
 assert.match(server,/app\.post\('\/api\/v788\/whpp-evidence\/start',requireRole\('ADMIN'\)/);
 assert.match(server,/acknowledgeIsolatedQuery!==true/);
