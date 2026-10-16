@@ -24,7 +24,7 @@ $EnvNames=@('DATA_DIR','DB_FILE','LOCALAPPDATA','EXPORTS_DIR','BACKUPS_DIR','IMP
   'CE_QC_BACKGROUND_MAINTENANCE_ENABLED','CE_QC_SKIP_STARTUP_POD_REPAIR',
   'CE_QC_ENABLE_EXPORT_SIDECAR_AT_STARTUP','CE_QC_DISABLE_V246_TRACKING',
   'CE_QC_AUTH_SIDECAR_PORT','CE_QC_AUTH_SIDECAR_HOST',
-  'CE_QC_EXPORT_SIDECAR_PORT','CE_QC_V788_PILOT_ISOLATED')
+  'CE_QC_EXPORT_SIDECAR_PORT','CE_QC_V788_PILOT_ISOLATED','CE_QC_LOCAL_SESSION_SECRET')
 function Require([bool]$Condition,[string]$Message){
   if(-not $Condition){throw $Message}
 }
@@ -113,6 +113,12 @@ try{
     $env:CE_QC_AUTH_SIDECAR_HOST='127.0.0.1'
     $env:CE_QC_EXPORT_SIDECAR_PORT='5281'
     $env:CE_QC_V788_PILOT_ISOLATED='1'
+    # The V788 app and its isolated auth sidecar must sign with exactly the
+    # same per-pilot key; never reuse, read, or modify the V787 session key.
+    $PilotSecretBytes=New-Object byte[] 48
+    $PilotRng=[System.Security.Cryptography.RandomNumberGenerator]::Create()
+    try{$PilotRng.GetBytes($PilotSecretBytes)}finally{$PilotRng.Dispose()}
+    $env:CE_QC_LOCAL_SESSION_SECRET=[Convert]::ToBase64String($PilotSecretBytes)
     $logs=Join-Path $Sandbox 'logs'
     $Server=Start-Process -FilePath 'node.exe' -ArgumentList 'bootstrap.js' -WorkingDirectory $App -PassThru -WindowStyle Hidden -RedirectStandardOutput (Join-Path $logs 'server.log') -RedirectStandardError (Join-Path $logs 'server-errors.log')
     $ready=$false
