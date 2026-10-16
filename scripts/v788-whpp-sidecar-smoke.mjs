@@ -70,9 +70,9 @@ assert.match(server,/actualSourceSignature!==reportSignature/);
 
 assert.match(server,/if\(checked\.verified===true\)\{/,
   'only independently verified SQLite status evidence may produce a completed preview');
-assert.match(server,/saved\\.statusOnlyPreview=independentlyVerifiedCoverage\\.statusOnlyPreview/,
+assert.ok(server.includes('saved.statusOnlyPreview=independentlyVerifiedCoverage.statusOnlyPreview'),
   'verified proof must supply the historical status preview');
-assert.match(server,/signingTimeAccepted:false,ledgerAccepted:false,exportAccepted:false/);
+assert.ok(fs.readFileSync('src/v788WhppStatusCoverage.js','utf8').includes('signingTimeAccepted:false,ledgerAccepted:false,exportAccepted:false'));
 assert.match(ui,/WHPP历史状态只读预览可用/);
 assert.match(ui,/试用范围只限上述历史状态只读预览/);
 
@@ -99,13 +99,13 @@ assert.match(activeJs,/该证据尚未写入正式签收时间账本/,
 assert.match(ui,/data.sidecarVerified===true/);
 
 assert.match(server,/distributionMatchesV3:data\?\.coverage\?\.distributionMatchesV3===true/);
-assert.match(server,/independentlyVerifiedCoverage=verifiedV788EvidenceCoverage\\(checked\\)/,
+assert.ok(server.includes('independentlyVerifiedCoverage=verifiedV788EvidenceCoverage(checked)'),
   'SQLite proof must be projected independently of progress JSON');
-assert.match(server,/\\.\\.\\.\\(independentlyVerifiedCoverage\\|\\|\\{\\}\\)/,
+assert.ok(server.includes('...(independentlyVerifiedCoverage||{})'),
   'verified coverage must override any stale JSON progress totals');
-assert.match(activeJs,/data\\.independentlyVerifiedCounts===true/,
+assert.ok(activeJs.includes('data.independentlyVerifiedCounts===true'),
   'completed status-only preview must require independently verified counts');
-assert.doesNotMatch(activeJs,/data\\.savedStatus==='346_TMS_ROWS_STAGED_NOT_BUSINESS_ACCEPTED'/,
+assert.ok(!activeJs.includes("data.savedStatus==='346_TMS_ROWS_STAGED_NOT_BUSINESS_ACCEPTED'"),
   'a stale final JSON report must not force another 346-waybill query');
 
 assert.match(server,/evidenceConflicts:Number\(data\?\.coverage\?\.conflictingExistingStates\|\|0\)/);
