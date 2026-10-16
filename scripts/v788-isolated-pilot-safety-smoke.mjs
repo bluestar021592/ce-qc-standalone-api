@@ -1,0 +1,32 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+const launcher=fs.readFileSync('tools/CE_QC_V788_隔离试用.ps1','utf8');
+const source=fs.readFileSync('scripts/v788-create-isolated-pilot-snapshot.mjs','utf8');
+// This is not a browser demo and not a production installation.
+// Source can only be the exact separate acceptance copy.
+assert.match(launcher,/\[Parameter\(Mandatory=\$true\)\]\[string\]\$ExpectedSha/);
+assert.match(launcher,/\$ExpectedSha -match '\^\[a-fA-F0-9\]\{40\}\$'/);
+assert.match(launcher,/rev-parse','FETCH_HEAD/);
+assert.match(launcher,/Candidate SHA changed/);
+assert.match(launcher,/git worktree add --detach/);
+assert.match(launcher,/git worktree remove --force/);
+assert.match(launcher,/Port=5278/);
+assert.match(launcher,/TcpListener.*127\.0\.0\.1/);
+assert.match(launcher,/\$env:HOST='127\.0\.0\.1'/);
+assert.match(launcher,/\$env:DB_FILE=\$PilotDb/);
+assert.match(launcher,/\$env:DATA_DIR=\$PilotData/);
+assert.match(launcher,/\$env:LOCALAPPDATA=\(Join-Path \$Sandbox 'localapp'\)/);
+assert.match(launcher,/CE_QC_BACKGROUND_MAINTENANCE_ENABLED='0'/);
+assert.match(launcher,/CE_QC_SKIP_STARTUP_POD_REPAIR='1'/);
+assert.match(launcher,/node scripts\/v788-create-isolated-pilot-snapshot\.mjs/);
+assert.match(launcher,/if\(\$Sandbox -eq 'D:\\CE_QC_V788_试用沙盒'\)/);
+assert.doesNotMatch(launcher,/\bgit\s+(checkout|reset|pull|switch)\b/i);
+assert.doesNotMatch(launcher,/\\CE CCSL金边数据库\\ce_qc_monitor\.db/i);
+assert.match(source,/new DatabaseSync\(source,\{readOnly:true\}\)/);
+assert.match(source,/src\.exec\('PRAGMA query_only=ON'\)/);
+assert.match(source,/await backup\(src,full\+'\.partial'\)/);
+assert.match(source,/V788_PILOT_OUTPUT_MUST_BE_IN_SANDBOX/);
+assert.match(source,/V788_PILOT_ISOLATED_PATH_REQUIRED/);
+assert.match(source,/V788_PILOT_SOURCE_CHANGED_DURING_COPY/);
+assert.doesNotMatch(source,/new DatabaseSync\(SOURCE\)/);
+console.log('[V788_PILOT_STATIC_GATE] PASS isolated exact-SHA worktree, temporary D sandbox, readOnly DB backup and localhost-only backend');
