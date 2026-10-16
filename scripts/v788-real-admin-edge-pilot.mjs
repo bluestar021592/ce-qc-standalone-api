@@ -184,7 +184,7 @@ try{
   // The real Edge backend must be able to recover persisted SQLite evidence
   // even if the last-run JSON progress file disappeared or was corrupted.
   // Never query TMS or alter source/sidecar to recover a view-only report.
-  const fixtureReport=String.raw`D:\\CE_QC_V788_验收副本\\V788_WHPP_TMS_逐票证据验收.json`;
+  const fixtureReport=String.raw`D:\CE_QC_V788_验收副本\V788_WHPP_TMS_逐票证据验收.json`;
   const originalReport=fs.readFileSync(fixtureReport,'utf8');
   fs.unlinkSync(fixtureReport);
   const noReport=await httpStatus(base+'/api/v788/whpp-evidence/status',admin);
