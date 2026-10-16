@@ -18,6 +18,16 @@ assert.match(launcher,/\$env:DATA_DIR=\$PilotData/);
 assert.match(launcher,/\$env:LOCALAPPDATA=\(Join-Path \$Sandbox 'localapp'\)/);
 assert.match(launcher,/CE_QC_BACKGROUND_MAINTENANCE_ENABLED='0'/);
 assert.match(launcher,/CE_QC_SKIP_STARTUP_POD_REPAIR='1'/);
+assert.match(launcher,/CE_QC_AUTH_SIDECAR_PORT='5280'/);
+assert.match(launcher,/CE_QC_AUTH_SIDECAR_HOST='127.0.0.1'/);
+assert.match(launcher,/CE_QC_EXPORT_SIDECAR_PORT='5281'/);
+assert.match(launcher,/CE_QC_V788_PILOT_ISOLATED='1'/);
+assert.match(launcher,/CE_QC_V788_PILOT_CI_NO_BROWSER/);
+const authController=fs.readFileSync('src/accessControl.js','utf8');
+const authChild=fs.readFileSync('src/localAuthSidecar.js','utf8');
+assert.match(authController,/CE_QC_V788_PILOT_ISOLATED==='1' \? 'ce_qc_local_auth_v788_pilot' : 'ce_qc_local_auth_v431'/);
+assert.match(authChild,/CE_QC_V788_PILOT_ISOLATED==='1' \? 'ce_qc_local_auth_v788_pilot' : 'ce_qc_local_auth_v431'/);
+
 assert.match(launcher,/node scripts\/v788-create-isolated-pilot-snapshot\.mjs/);
 assert.match(launcher,/if\(\$Sandbox -eq 'D:\\CE_QC_V788_试用沙盒'\)/);
 assert.doesNotMatch(launcher,/\bgit\s+(checkout|reset|pull|switch)\b/i);
