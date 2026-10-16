@@ -2242,8 +2242,27 @@ function v788StagePublicStatus(){
       };
     }catch{}
   }
+  // The API process may restart after a committed batch and before the
+  // final report write. Recover its persisted result without launching TMS.
+  // A stale RUNNING report means interrupted, NOT a live/background task.
+  const lastStatus=String(saved.savedStatus||'');
+  const recovered=!v788StageActive&&v788StageResult.status==='NOT_STARTED';
+  const restoredStatus=recovered
+    ?lastStatus==='RUNNING'?'INTERRUPTED_RETRYABLE'
+      :lastStatus==='STOPPED_RETRYABLE'?'STOPPED_RETRYABLE'
+      :lastStatus==='346_TMS_ROWS_STAGED_NOT_BUSINESS_ACCEPTED'?'STAGED'
+      :lastStatus==='EVIDENCE_INCOMPLETE'?'EVIDENCE_INCOMPLETE'
+      :v788StageResult.status
+    :v788StageResult.status;
+  const resumeAvailable=restoredStatus==='INTERRUPTED_RETRYABLE'
+    ||restoredStatus==='STOPPED_RETRYABLE';
+  const restoredMessage=restoredStatus==='INTERRUPTED_RETRYABLE'
+    ?'APP重新启动后已发现未完成的隔离验收，已有批次将先核实再续查。'
+    :restoredStatus==='STOPPED_RETRYABLE'?'上次隔离查询已暂停，可以从已有批次继续。'
+    :v788StageResult.message;
   return {ok:true,platformReady:process.platform==='win32',
-    active:v788StageActive,...v788StageResult,...saved,
+    ...v788StageResult,...saved,status:restoredStatus,message:restoredMessage,
+    active:v788StageActive,resumeAvailable,
     source:'ISOLATED_COPY_ONLY',productionDatabaseModified:false,
     businessStateUpdated:false,readyToPublish:false};
 }
