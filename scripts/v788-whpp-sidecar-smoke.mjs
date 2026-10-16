@@ -19,6 +19,12 @@ assert.match(server,/new V788ReadOnlyDatabaseSync\(v788SourceCopy,\{readOnly:tru
 assert.match(server,/v788ReadSourceMembershipSignature\(srcDb\)/);
 assert.match(server,/actualSourceSignature!==reportSignature/);
 
+assert.match(server,/if\(checked\.verified===true\)saved\.statusOnlyPreview=/);
+assert.match(server,/signingTimeAccepted:false,ledgerAccepted:false,exportAccepted:false/);
+assert.match(ui,/WHPP历史状态只读预览可用/);
+assert.match(ui,/试用范围只限上述历史状态只读预览/);
+
+
 assert.match(server,/verifyV788PersistedSidecar\(checkDb,String\(data\?\.sourceSignature\|\|''\)\)/);
 assert.match(server,/saved\.sidecarVerified=checked\.verified===true/);
 assert.match(ui,/data.sidecarVerified===true/);
