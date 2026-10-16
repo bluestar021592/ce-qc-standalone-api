@@ -39,6 +39,8 @@ jobs:
           node --check scripts/v788-edge-synthetic-evidence-fixture.mjs
           node --check scripts/v788-real-admin-edge-pilot.mjs
           node scripts/v788-isolated-pilot-safety-smoke.mjs
+          node scripts/v788-real-acceptance-verdict-smoke.mjs
+          node scripts/v788-board-status-donut-smoke.mjs
       - name: Real Edge V788 admin status panel, no CE TMS
         shell: pwsh
         run: node scripts/v788-real-admin-edge-pilot.mjs
