@@ -14,6 +14,18 @@ assert.match(server,/productionDatabaseModified:false/);
 assert.match(server,/import fsSync from 'node:fs'/);
 assert.match(server,/fsSync\.readFileSync\(v788StageReport,'utf8'\)/);
 assert.match(server,/businessStateUpdated:false/);
+const stageSource=fs.readFileSync('scripts/v788-whpp-stage-tms-evidence.mjs','utf8');
+// The in-APP CE system login writes a configurable tokenFile. Reject V788
+// implementations that silently read an obsolete hardcoded D:\\ token path.
+assert.match(stageSource,/getTokenFile\(\)/);
+assert.match(stageSource,/new CEClient\(\)/);
+assert.match(stageSource,/client\.http\.post\('\/api\/tms-shipment\/track'/);
+assert.match(stageSource,/maxRedirects:0/);
+assert.doesNotMatch(stageSource,/refreshTokenIfNeeded\(/);
+assert.doesNotMatch(stageSource,/client\.shipmentTrack\(/);
+assert.doesNotMatch(stageSource,/['"]x-refresh-token['"]\s*\]/);
+assert.match(stageSource,/V788_TMS_TOKEN_SOURCE_MISMATCH/);
+
 assert.match(html,/id="v788WhppEvidencePanel"/);
 assert.match(html,/id="v788WhppEvidenceStart"/);
 assert.match(html,/开始隔离核验（346票）/);
