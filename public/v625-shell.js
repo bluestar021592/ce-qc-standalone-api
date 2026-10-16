@@ -2706,8 +2706,8 @@ async function settingsBackupNow(){
     await loadSettingsBackups();
   }catch(e){note('v625SettingsBackupMessage','备份失败：'+e.message,'error')}
 }
-async function ceLogin(){try{const r=await post('/api/ce-login',{tenantId:byId('v625CeTenant').value||'000000',username:byId('v625CeUser').value.trim(),password:byId('v625CePassword').value},30000);byId('v625CePassword').value='';setText('v625CeStatus','已连接');note('v625CeMessage','CE登录成功：'+(r.authStatus?.account||''),'success')}catch(e){note('v625CeMessage','登录失败：'+e.message,'error')}}
-async function ceLogout(){try{await post('/api/ce-logout',{},15000);setText('v625CeStatus','未连接');note('v625CeMessage','已退出CE系统。','success')}catch(e){note('v625CeMessage','退出失败：'+e.message,'error')}}
+async function ceLogin(){try{const r=await post('/api/ce-login',{tenantId:byId('v625CeTenant').value||'000000',username:byId('v625CeUser').value.trim(),password:byId('v625CePassword').value},30000);byId('v625CePassword').value='';setText('v625CeStatus','已连接');note('v625CeMessage','CE登录成功：'+(r.authStatus?.account||''),'success');await loadSettings();void loadV788WhppEvidenceV625()}catch(e){note('v625CeMessage','登录失败：'+e.message,'error')}}
+async function ceLogout(){try{await post('/api/ce-logout',{},15000);v788CeSessionReady=false;setText('v625CeStatus','未连接');note('v625CeMessage','已退出CE系统。','success');void loadV788WhppEvidenceV625()}catch(e){note('v625CeMessage','退出失败：'+e.message,'error')}}
 let v780CandidateShopSource = '';
 let v780CandidateShopHash = '';
 async function loadCompleteShopStatus(){
