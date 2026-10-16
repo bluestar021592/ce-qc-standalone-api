@@ -2264,7 +2264,14 @@ function v788StagePublicStatus(){
             // Only disclose aggregate day-by-day statuses after both the
             // original D: source and the proof ledger are independently read.
             // Do not leak shipment codes or claim POD-time/ledger readiness.
-            if(checked.verified===true)saved.statusOnlyPreview={
+            if(checked.verified===true){
+              // Independent proof-file read: these are explicit TMS time
+              // candidates only. They are NOT the formal POD time-lock,
+              // signed-days KPI or export acceptance.
+              saved.independentPodTimeEvidenceChecked=true;
+              saved.independentTrustedPodTimeCount=Number(checked.trustedExplicitPodTimes||0);
+              saved.independentMissingPodTimeCount=Number(checked.missingTrustedExplicitPodTimes||0);
+              saved.statusOnlyPreview={
               source:'INDEPENDENT_ISOLATED_SQLITE',
               dates:Object.entries(checked.byDate||{}).map(([date,v])=>({
                 date,total:Number(v.s60||0)+Number(v.s81||0),
@@ -2272,6 +2279,7 @@ function v788StagePublicStatus(){
               })),
               signingTimeAccepted:false,ledgerAccepted:false,exportAccepted:false
             };
+            }
           }finally{checkDb.close()}
         }
       }catch{
