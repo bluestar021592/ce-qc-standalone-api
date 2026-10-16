@@ -216,6 +216,10 @@ try{
     'real Edge cannot claim a signing-time KPI when synthetic TMS status lacks explicit POD timestamps');
   assert.match(verified,/尚未写入正式签收时间账本/,
     'status-only acceptance must not imply production timing has been repaired');
+  assert.match(verified,/历史账本：隔离副本账本只读检查暂不可用/,
+    'missing isolated ledger tables must render an explicit no-verdict diagnostic');
+  assert.doesNotMatch(verified,/历史账本待同步：POD 0票、已退回 0票/,
+    'unreadable ledger must never be advertised as a clean zero-difference reconciliation');
   const buttonNow=await cdp.eval("document.getElementById('v788WhppEvidenceStart')?.disabled");
   assert.equal(buttonNow,true,'completed proof must never allow another real TMS request');
   assert.equal(cdp.urls.filter(x=>x.includes('/api/v788/whpp-evidence/start')).length,0);
