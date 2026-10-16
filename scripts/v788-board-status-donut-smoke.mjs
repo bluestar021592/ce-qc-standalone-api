@@ -7,6 +7,8 @@ assert.ok(source.includes('otherNormal:exactCounts.otherNormal+exactCounts.unpro
 assert.ok(source.includes('exactSum===Number(m.total||0)'),'only complete disjoint accounting can drive risk category slices');
 assert.ok(source.includes('pending:0,abnormal:0,otherNormal:0'),'compact first paint must not invent overlapping Pending or abnormal status');
 assert.ok(source.includes('if(verifiedAccounting)renderDonut('),'verified exact-member data must supersede provisional state');
+assert.ok(source.includes("setText('kpiPodRate',Number(m.total)>0?"),'zero denominator must not show fabricated POD 0%');
+assert.ok(source.includes("setText('kpiReturnRate',Number(m.total)>0?"),'zero denominator must not show fabricated return 0%');
 const start=source.indexOf('function renderDonut(m){');
 const end=source.indexOf('\nasync function loadSession()',start);
 assert.ok(start>=0&&end>start,'business donut source must exist');
