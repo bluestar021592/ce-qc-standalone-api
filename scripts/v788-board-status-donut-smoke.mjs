@@ -43,6 +43,31 @@ assert.equal(classify({shipmentStatus:'81',currentState:'RETURN_IN_PROGRESS'}),f
 assert.equal(classify({shipmentStatus:'60',退回状态:'退回中'}),false,'TMS 60 is POD');
 assert.equal(classify({eventCode:'80'}),false,'tracking eventCode80 must not mean return in progress');
 assert.equal(classify({currentState:'RETURN_IN_PROGRESS'}),true);
+// Verify the actual two business-accounting paths, including stale POD and
+// returned tabs containing a newer TMS 80: each waybill must be counted once.
+const accountingEnd=source.indexOf('\nfunction v628MetricRows(',classifierStart);
+assert.ok(accountingEnd>classifierEnd);
+const t80={shipmentCode:'TEST80',shipmentStatus:'80',currentState:'RETURN_IN_PROGRESS'};
+const t60={shipmentCode:'TEST60',shipmentStatus:'60',currentState:'POD',是否POD:'是'};
+const t81={shipmentCode:'TEST81',shipmentStatus:'81',currentState:'RETURNED',退回状态:'已退回'};
+const detailed=vm.runInNewContext(source.slice(classifierStart,accountingEnd)+`\n({
+  whpp:buildWhppCanonicalAccounting(whppState,{total:3}),
+  shopee:buildBusinessAccounting({finalRows:[t80,t60,t81]},{total:3})
+});`,{
+  business:'SHOPEECN',
+  whppState:{dashboard:{metrics:{total:3}},detailTabs:{
+    all:{rows:[t80,t60,t81]},pod:{rows:[t80,t60]},returned:{rows:[t80,t81]},
+    unresolved:{rows:[t80]}
+  }},t80,t60,t81
+},{timeout:1000});
+for(const kind of ['whpp','shopee']){
+  const state=detailed[kind];
+  assert.equal(state.rowsByKind.returning.length,1,kind+' must isolate the TMS 80 parcel');
+  assert.equal(state.rowsByKind.pod.length,1,kind+' must not count old POD for TMS 80');
+  assert.equal(state.rowsByKind.returned.length,1,kind+' must not count old 81 for TMS 80');
+  assert.equal(state.accounted,3,kind+' status categories must conserve 3 waybills');
+  assert.equal(state.difference,0);
+}
 const ce=run('CE',{total:10,pod:8,returned:0,delivery:2,pending:0,abnormal:0,otherNormal:0});
 assert.doesNotMatch(ce.v625BusinessLegend.innerHTML,/已退回/);
 // Cover every business board, not just WHPP, with mutually exclusive sample states.
