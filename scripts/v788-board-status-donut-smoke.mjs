@@ -96,9 +96,9 @@ const whppLag=vm.runInNewContext(source.slice(accountingStart,accountingEnd)+
       unresolved:{rows:[]}
     }}
   },{timeout:1000});
-assert.deepEqual(whppLag.rowsByKind.pod.map(detailCode=>detailCode.shipmentCode).sort(),['X','Z']);
-assert.deepEqual(whppLag.rowsByKind.returned.map(detailCode=>detailCode.shipmentCode),['W']);
-assert.deepEqual(whppLag.rowsByKind.returning.map(detailCode=>detailCode.shipmentCode),['Y']);
+assert.equal(whppLag.rowsByKind.pod.map(row=>row.shipmentCode).sort().join(','),'X,Z');
+assert.equal(whppLag.rowsByKind.returned.map(row=>row.shipmentCode).join(','),'W');
+assert.equal(whppLag.rowsByKind.returning.map(row=>row.shipmentCode).join(','),'Y');
 assert.equal(whppLag.rowsByKind.otherNormal.length,0);
 assert.equal(whppLag.accounted,4,'latest TMS statuses must conserve four members');
 assert.equal(whppLag.difference,0);
