@@ -16,7 +16,7 @@ assert.match(server,/fsSync\.readFileSync\(v788StageReport,'utf8'\)/);
 assert.match(server,/businessStateUpdated:false/);
 assert.match(server,/new V788ReadOnlyDatabaseSync\(v788SidecarFile,\{readOnly:true\}\)/);
 assert.match(server,/verifyV788PersistedSidecar\(checkDb,String\(data\?\.sourceSignature\|\|''\)\)/);
-assert.match(server,/sidecarVerified:checked.verified===true/);
+assert.match(server,/saved\.sidecarVerified=checked\.verified===true/);
 assert.match(ui,/data.sidecarVerified===true/);
 
 assert.match(server,/distributionMatchesV3:data\?\.coverage\?\.distributionMatchesV3===true/);
