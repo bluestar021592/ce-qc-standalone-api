@@ -45,6 +45,16 @@ assert.match(ui,/试用范围只限上述历史状态只读预览/);
 
 assert.match(server,/verifyV788PersistedSidecar\(checkDb,actualSourceSignature\)/);
 assert.match(server,/saved\.sidecarVerified=checked\.verified===true/);
+assert.match(server,/saved\.independentPodTimeEvidenceChecked=true/,
+  'read-only status panel may display independent POD time count only after signed SQLite proof verification');
+assert.match(server,/checked\.trustedExplicitPodTimes/,
+  'POD time count must come from the independently opened sidecar, never a JSON progress count');
+assert.match(server,/checked\.missingTrustedExplicitPodTimes/);
+assert.match(activeJs,/data\.independentPodTimeEvidenceChecked===true/,
+  'real V625 interface must label independent signing-time coverage explicitly');
+assert.match(activeJs,/该证据尚未写入正式签收时间账本/,
+  'time evidence from isolated proof is not yet formal signing-day acceptance');
+
 assert.match(ui,/data.sidecarVerified===true/);
 
 assert.match(server,/distributionMatchesV3:data\?\.coverage\?\.distributionMatchesV3===true/);
