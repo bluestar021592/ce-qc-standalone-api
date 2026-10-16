@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {spawnSync} from 'node:child_process';
 import {
   isV506SameOriginRequest,
   rebindV506AuthCookie,
@@ -78,6 +79,34 @@ test('V506 actually verifies and re-signs V431 cookie when rebinding LOCAL to LA
   }finally{
     if(previous==null) delete process.env.CE_QC_LOCAL_SESSION_SECRET; else process.env.CE_QC_LOCAL_SESSION_SECRET=previous;
   }
+});
+
+
+test('V788 pilot rebinds signed isolated session at 5278 without accepting V787 cookie',()=>{
+  const secret='v788-pilot-auth-rebind-test-0123456789-abcdefghijklmnopqrstuvwxyz';
+  const script=[
+    "import assert from 'node:assert/strict';",
+    "import crypto from 'node:crypto';",
+    "import {rebindV506AuthCookie,rewriteV506LoginHtml} from './src/v506LocalAuthBridgePatch.js';",
+    "const payload={v:431,iat:Date.now(),exp:Date.now()+60000,channel:'LOCAL',user:{username:'test-only',role:'ADMIN',devMode:true}};",
+    "const body=Buffer.from(JSON.stringify(payload)).toString('base64url');",
+    "const secret=process.env.CE_QC_LOCAL_SESSION_SECRET;",
+    "const signature=crypto.createHmac('sha256',secret).update(body).digest('base64url');",
+    "const cookie='ce_qc_local_auth_v788_pilot='+body+'.'+signature+'; Path=/; HttpOnly; SameSite=Strict; Max-Age=60';",
+    "const rebound=rebindV506AuthCookie(cookie,'LOCAL');",
+    "assert.ok(rebound.startsWith('ce_qc_local_auth_v788_pilot='));",
+    "assert.equal(rebindV506AuthCookie('ce_qc_local_auth_v431='+body+'.'+signature+'; Path=/','LOCAL'),'');",
+    "const label=rewriteV506LoginHtml('<form action=\"http://127.0.0.1:5280/api/local-auth/login\">独立登录通道 5179，不占用质控主数据库写入锁。</form>');",
+    "assert.match(label,/当前5278页面安全转发/);",
+    "assert.match(label,/\\/api\\/local-auth-proxy\\/login/);",
+    "console.log('[V788_AUTH_PILOT] signed cookie rebind successful');"
+  ].join('\n');
+  const child=spawnSync(process.execPath,['--input-type=module','-e',script],{
+    cwd:root,encoding:'utf8',timeout:15000,
+    env:{...process.env,CE_QC_V788_PILOT_ISOLATED:'1',CE_QC_LOCAL_SESSION_SECRET:secret,PORT:'5278',CE_QC_AUTH_SIDECAR_PORT:'5280'}
+  });
+  assert.equal(child.status,0,String(child.stderr||'')+'\n'+String(child.stdout||''));
+  assert.match(child.stdout,/V788_AUTH_PILOT/);
 });
 
 test('V506 bridge is installed before accessIdentity and never authenticates against SQLite itself',()=>{
