@@ -42,3 +42,21 @@ jobs:
       - name: Real Edge V788 admin status panel, no CE TMS
         shell: pwsh
         run: node scripts/v788-real-admin-edge-pilot.mjs
+      - name: Start and stop actual V788 pilot in disposable Windows CI
+        shell: pwsh
+        env:
+          CE_QC_V788_PILOT_CI_NO_BROWSER: '1'
+        run: |
+          $ErrorActionPreference='Stop'
+          $env:NODE_ENV='test'
+          node --input-type=module -e "import {createV788SyntheticEvidence} from './scripts/v788-edge-synthetic-evidence-fixture.mjs';createV788SyntheticEvidence()"
+          if ($LASTEXITCODE -ne 0) { throw 'Synthetic isolated fixture setup failed' }
+          try {
+            & pwsh -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'tools/CE_QC_V788_隔离试用.ps1' -ExpectedSha $env:GITHUB_SHA -CandidateRef 'v788-board-calibration'
+            if ($LASTEXITCODE -ne 0) { throw 'Real isolated V788 pilot launcher did not start/stop correctly' }
+          } finally {
+            node --input-type=module -e "import {deleteV788SyntheticEvidence} from './scripts/v788-edge-synthetic-evidence-fixture.mjs';deleteV788SyntheticEvidence()"
+            if ($LASTEXITCODE -ne 0) { throw 'Synthetic isolated fixture cleanup failed' }
+          }
+          if (Test-Path 'D:\CE_QC_V788_试用沙盒') { throw 'V788 pilot sandbox was not removed after shutdown' }
+          Write-Host '[V788_PILOT_E2E] PASS candidate startup, isolated DB, trial web endpoint, and clean shutdown'
