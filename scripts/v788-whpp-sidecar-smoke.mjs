@@ -54,7 +54,9 @@ assert.match(ui,/function loadV788WhppEvidenceStatus\(\)/);
 assert.match(ui,/acknowledgeIsolatedQuery:true/);
 assert.match(ui,/!isCeApiSessionUsable\(ceAuth\)/);
 assert.match(ui,/const needsReview=allBatchesPresent&&!isFull/);
-assert.match(ui,/needsReview\|\|!isCeApiSessionUsable\(ceAuth\)/);
+assert.match(ui,/const offlineFinalize=restartFinalize&&covered===346&&batches===8/);
+assert.match(ui,/\(loginMissing&&!offlineFinalize\)/);
+assert.match(ui,/loginMissing&&!isFull&&!offlineFinalize/);
 assert.match(ui,/需复核，禁止重复查询/);
 assert.match(server,/lastStatus==='RUNNING'\?'INTERRUPTED_RETRYABLE'/,
   'a stale last-batch RUNNING report must be resumable after a process restart');
