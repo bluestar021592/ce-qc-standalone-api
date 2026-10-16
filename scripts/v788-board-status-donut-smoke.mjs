@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 const source=fs.readFileSync(new URL('../public/v625-shell.js',import.meta.url),'utf8');
 assert.ok(source.includes('returned:m.returned||0'),'business view must pass return members to chart');
-assert.ok(source.includes('otherNormal:exactCounts.otherNormal+exactCounts.unprocessed'),'disjoint accounting must preserve other states and unprocessed members');
+assert.ok(source.includes('otherNormal:exactCounts.otherNormal,unprocessed:exactCounts.unprocessed'),'unverified members must not be described as other normal states');
 assert.ok(source.includes('exactSum===Number(m.total||0)'),'only complete disjoint accounting can drive risk category slices');
 assert.ok(source.includes('pending:0,abnormal:0,otherNormal:0'),'compact first paint must not invent overlapping Pending or abnormal status');
 assert.ok(source.includes('if(verifiedAccounting)renderDonut('),'verified exact-member data must supersede provisional state');
@@ -24,6 +24,9 @@ const whpp=run('WHPP',{total:156,pod:124,returned:32,delivery:0,pending:0,abnorm
 assert.match(whpp.v625BusinessLegend.innerHTML,/已退回 32（20.51%）/);
 assert.match(whpp.v625BusinessLegend.innerHTML,/已签收 124（79.49%）/);
 assert.doesNotMatch(whpp.v625BusinessLegend.innerHTML,/待核验/);
+const unresolved=run('WHPP',{total:10,pod:5,returned:2,returning:1,delivery:1,pending:0,abnormal:0,otherNormal:0,unprocessed:1});
+assert.match(unresolved.v625BusinessLegend.innerHTML,/待核验 1（10.00%）/);
+assert.match(unresolved.v625BusinessLegend.innerHTML,/其他正常状态 0（0.00%）/);
 const missing=run('WHPP',{total:156,pod:100,returned:32,delivery:0,pending:0,abnormal:0,otherNormal:0});
 assert.match(missing.v625BusinessLegend.innerHTML,/待核验 24/);
 const overlap=run('WHPP',{total:156,pod:124,returned:32,delivery:20,pending:0,abnormal:0,otherNormal:0});
@@ -38,7 +41,11 @@ const classifierStart=source.indexOf('function rowText(');
 const classifierEnd=source.indexOf('\nfunction rowIsPending(',classifierStart);
 assert.ok(classifierStart>=0&&classifierEnd>classifierStart);
 const classify=(input)=>vm.runInNewContext(source.slice(classifierStart,classifierEnd)+'\nrowIsReturning(input);',{input},{timeout:1000});
-assert.equal(classify({shipmentStatus:'80',currentState:'POD'}),true,'TMS 80 outranks legacy POD');
+assert.equal(classify({shipmentStatus:'80',currentState:'POD'}),false,'80 conflicting with old POD must await verification');
+const conflicting=(input)=>vm.runInNewContext(source.slice(classifierStart,classifierEnd)+'\nrowHasTmsConflict(input);',{input},{timeout:1000});
+assert.equal(conflicting({shipmentStatus:'80',currentState:'POD'}),true);
+assert.equal(conflicting({shipmentStatus:'81',currentState:'POD'}),true);
+assert.equal(conflicting({shipmentStatus:'60',currentState:'RETURNED'}),true);
 assert.equal(classify({shipmentStatus:'81',currentState:'RETURN_IN_PROGRESS'}),false,'TMS 81 is completed returned');
 assert.equal(classify({shipmentStatus:'60',退回状态:'退回中'}),false,'TMS 60 is POD');
 assert.equal(classify({eventCode:'80'}),false,'tracking eventCode80 must not mean return in progress');
@@ -50,24 +57,26 @@ assert.ok(accountingEnd>classifierEnd);
 const t80={shipmentCode:'TEST80',shipmentStatus:'80',currentState:'RETURN_IN_PROGRESS'};
 const t60={shipmentCode:'TEST60',shipmentStatus:'60',currentState:'POD',是否POD:'是'};
 const t81={shipmentCode:'TEST81',shipmentStatus:'81',currentState:'RETURNED',退回状态:'已退回'};
+const tBad={shipmentCode:'TESTBAD',shipmentStatus:'81',currentState:'PENDING_VERIFICATION',truthEvidence:{tmsContradiction:true},是否POD:'是'};
 const accountingStart=source.indexOf('function detailCode(');
 assert.ok(accountingStart>=0&&accountingStart<classifierStart);
 const detailed=vm.runInNewContext(source.slice(accountingStart,accountingEnd)+`\n({
-  whpp:buildWhppCanonicalAccounting(whppState,{total:3}),
-  shopee:buildBusinessAccounting({finalRows:[t80,t60,t81]},{total:3})
+  whpp:buildWhppCanonicalAccounting(whppState,{total:4}),
+  shopee:buildBusinessAccounting({finalRows:[t80,t60,t81,tBad]},{total:4})
 });`,{
   business:'SHOPEECN',
-  whppState:{dashboard:{metrics:{total:3}},detailTabs:{
-    all:{rows:[t80,t60,t81]},pod:{rows:[t80,t60]},returned:{rows:[t80,t81]},
-    unresolved:{rows:[t80]}
-  }},t80,t60,t81
+  whppState:{dashboard:{metrics:{total:4}},detailTabs:{
+    all:{rows:[t80,t60,t81,tBad]},pod:{rows:[t80,t60,tBad]},returned:{rows:[t80,t81]},
+    unresolved:{rows:[t80,tBad]}
+  }},t80,t60,t81,tBad
 },{timeout:1000});
 for(const kind of ['whpp','shopee']){
   const state=detailed[kind];
   assert.equal(state.rowsByKind.returning.length,1,kind+' must isolate the TMS 80 parcel');
   assert.equal(state.rowsByKind.pod.length,1,kind+' must not count old POD for TMS 80');
   assert.equal(state.rowsByKind.returned.length,1,kind+' must not count old 81 for TMS 80');
-  assert.equal(state.accounted,3,kind+' status categories must conserve 3 waybills');
+  assert.equal(state.rowsByKind.unprocessed.length,1,kind+' contradiction must be unresolved, not normal');
+  assert.equal(state.accounted,4,kind+' status categories must conserve 4 waybills');
   assert.equal(state.difference,0);
 }
 const ce=run('CE',{total:10,pod:8,returned:0,delivery:2,pending:0,abnormal:0,otherNormal:0});
