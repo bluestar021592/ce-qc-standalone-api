@@ -1294,6 +1294,24 @@ function renderTimingMissing(type){
 let v628BusinessWorkspaceRows=[];
 let v630BusinessDetailTabs={};
 let v631BusinessAccounting={rowsByKind:{},total:0,accounted:0,difference:0};
+function applyVerifiedBusinessKpis(kinds={},total=0,targetBusiness=''){
+  const denominator=Number(total);
+  const parts=['delivery','pod','returned','returning','pending','abnormal','otherNormal','unprocessed'];
+  if(!Number.isSafeInteger(denominator)||denominator<=0)return false;
+  if(parts.some(key=>!Number.isSafeInteger(Number(kinds[key]??0))||Number(kinds[key]??0)<0))return false;
+  const assigned=parts.reduce((sum,key)=>sum+Number(kinds[key]||0),0);
+  if(assigned!==denominator)return false;
+  setText('kpiDelivery',fmt(kinds.delivery||0));
+  setText('kpiPod',fmt(kinds.pod||0));
+  setText('kpiPodRate',pct(Number(kinds.pod||0)*100/denominator));
+  setText('kpiPending',fmt(kinds.pending||0));
+  setText('kpiOtherNormal',fmt(kinds.otherNormal||0));
+  if(['WHPP','SHOPEECN','SHOPEEVN'].includes(targetBusiness)){
+    setText('kpiReturned',fmt(kinds.returned||0));
+    setText('kpiReturnRate',pct(Number(kinds.returned||0)*100/denominator));
+  }
+  return true;
+}
 let v628BusinessMetricState={};
 let v628BusinessReportDate='';
 let v748QualityRows={shopArrived:[],pendingGap:[],oc2Plus:[]};
@@ -1606,6 +1624,17 @@ async function v765LoadBusinessDetailLane({reportDate,snapshotId,m,options,gener
     if(v628BusinessWorkspaceRows.length&&!workspaceTruncated){
       const detailed=buildBusinessAccounting({finalRows:v628BusinessWorkspaceRows},m);
       v631BusinessAccounting=detailed;
+      // Only complete, untruncated selected-date member sets can overwrite
+      // compact board metrics. Partial workspace previews never change KPIs.
+      if(Number(wr.allRowCount||0)===Number(m.total)
+         &&detailed.rowsByKind.total.length===Number(m.total)
+         &&detailed.accounted===Number(m.total)){
+        const complete=Object.fromEntries(['delivery','pod','returned','returning','pending','abnormal','otherNormal','unprocessed']
+          .map(key=>[key,detailed.rowsByKind[key]?.length||0]));
+        if(applyVerifiedBusinessKpis(complete,m.total,targetBusiness)){
+          renderDonut({total:m.total,...complete});
+        }
+      }
       if(!bi)setText('v631AccountingMeta','已归类 '+fmt(detailed.accounted)+' / '+fmt(m.total)+' · 差异 '+fmt(Math.max(0,m.total-detailed.accounted)));
     }
     if(!options.skipQualityRefresh){
@@ -1706,12 +1735,16 @@ async function loadBusiness(options={}){
     // Preserve V636 compact first paint while detail/accounting hydrates.
     // Risk indicators are deliberately not included in provisional slices.
     renderDonut({total:m.total,delivery:m.delivery||0,pod:m.pod||0,returned:m.returned||0,returning:m.returning||0,pending:0,abnormal:0,otherNormal:0,unprocessed:0});
-    if(verifiedAccounting)renderDonut({
-      total:m.total,delivery:exactCounts.delivery,pod:exactCounts.pod,
-      returned:exactCounts.returned,returning:exactCounts.returning,pending:exactCounts.pending,
-      abnormal:exactCounts.abnormal,
-      otherNormal:exactCounts.otherNormal,unprocessed:exactCounts.unprocessed
-    });
+    if(verifiedAccounting){
+      renderDonut({
+        total:m.total,delivery:exactCounts.delivery,pod:exactCounts.pod,
+        returned:exactCounts.returned,returning:exactCounts.returning,pending:exactCounts.pending,
+        abnormal:exactCounts.abnormal,
+        otherNormal:exactCounts.otherNormal,unprocessed:exactCounts.unprocessed
+      });
+      // Keep displayed POD/returned ratios in lockstep with exact member status.
+      applyVerifiedBusinessKpis(exactCounts,m.total,business);
+    }
 
     // Fast summary/timing updates are useful, but never gate the board's first paint.
     void summaryPromise.then(summary=>{
