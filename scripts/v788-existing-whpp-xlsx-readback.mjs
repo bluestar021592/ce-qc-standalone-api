@@ -92,6 +92,12 @@ export async function readV788ExistingWhppXlsx({sourceDb,proofDb,workbookPath}={
       if((podSet.has(key)&&value!=='Y')||(returnSet.has(key)&&value!=='R'))
         issues.terminalMarkerMismatch++;
     }
+    for(const [key,value] of pod.statuses){
+      if(podSet.has(key)&&value!=='Y')issues.terminalMarkerMismatch++;
+    }
+    for(const [key,value] of returned.statuses){
+      if(returnSet.has(key)&&value!=='R')issues.terminalMarkerMismatch++;
+    }
     for(const key of pod.keys)if(!srcSet.has(key))issues.invalidTerminalSheetMembers++;
     for(const key of returned.keys)if(!srcSet.has(key))issues.invalidTerminalSheetMembers++;
   }
