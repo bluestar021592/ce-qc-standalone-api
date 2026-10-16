@@ -84,7 +84,7 @@ for(const kind of ['whpp','shopee']){
 // and must not be counted as ordinary delivery or hidden by the donut.
 for(const type of ['CE','CEAF','TBKH','ALI1688']){
   const scoped=vm.runInNewContext(source.slice(accountingStart,accountingEnd)+
-    String.raw`\nbuildBusinessAccounting({finalRows:[t80,t81]},{total:2});`,{
+    '\nbuildBusinessAccounting({finalRows:[t80,t81]},{total:2});',{
       business:type,t80,t81
     },{timeout:1000});
   assert.equal(scoped.rowsByKind.returned.length,0,type+' unsupported return must not become a hidden category');
