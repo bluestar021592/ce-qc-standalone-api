@@ -225,6 +225,19 @@ try{
   assert.equal(audit.byDate['2026-07-02'].s81,32);
   assert.equal(audit.distributionMatchesV3,true);
   assert.equal(audit.complete,true);
+  // A saved old RETURNING label is a normal predecessor of latest TMS 81;
+  // opposite POD vs RETURNING remains a real contradiction.
+  const returningMember=all[0].codes.at(-1);
+  all[0].states.set(returningMember,'RETURNING');
+  const completedFromReturning=inspectV788Sidecar(db,all);
+  assert.equal(completedFromReturning.complete,true);
+  assert.equal(completedFromReturning.conflictingExistingStates,0);
+  all[0].states.set(returningMember,'RETURNED');
+  all[0].states.set(all[0].codes[0],'RETURN_IN_PROGRESS');
+  const podFromReturning=inspectV788Sidecar(db,all);
+  assert.equal(podFromReturning.complete,false);
+  assert.equal(podFromReturning.conflictingExistingStates,1);
+  all[0].states.set(all[0].codes[0],'POD');
   assert.equal(verifyV788PersistedSidecar(db,sig).verified,true,
     'actual SQLite evidence proves all 346 terminal statuses and 8 batches');
   // Status proof is independent from signing-time proof. Do not infer a
@@ -312,8 +325,8 @@ try{
     assert.equal(contradiction.ready,false,'reverse terminal conflict must never be auto-closed');
     assert.equal(contradiction.currentOppositeTerminal,1);
     assert.equal(contradiction.reason,'RECONCILIATION_REQUIRES_MANUAL_REVIEW');
-    // A stale RETURNING state is the opposite of a confirmed POD/returned
-    // terminal event, not a harmless OPEN record eligible for auto-sync.
+    // A stale RETURNING state is incompatible with new POD, but the normal
+    // precursor to a completed return. Only the first must block sync.
     compareDb.exec('PRAGMA query_only=OFF');
     compareDb.prepare("UPDATE shipment_current_state SET state='RETURN_IN_PROGRESS' WHERE shipmentCode='J0000'").run();
     compareDb.exec('PRAGMA query_only=ON');
@@ -326,9 +339,11 @@ try{
     compareDb.prepare("UPDATE shipment_current_state SET state='OPEN' WHERE shipmentCode='J0000'").run();
     compareDb.exec('PRAGMA query_only=ON');
     const returningVsReturned=previewV788WhppLedgerReconciliation(compareDb,db,sig);
-    assert.equal(returningVsReturned.ready,false);
-    assert.equal(returningVsReturned.currentOppositeTerminal,1,
-      'TMS 81 vs RETURNING must block closure');
+    assert.equal(returningVsReturned.ready,true);
+    assert.equal(returningVsReturned.currentOppositeTerminal,0);
+    assert.equal(returningVsReturned.currentNeedsReturnedSync,1,
+      'TMS 81 must be eligible to complete an older RETURNING member');
+    assert.equal(returningVsReturned.reason,'READONLY_RECONCILIATION_PREVIEW_ONLY');
 
   }finally{compareDb.close()}
 

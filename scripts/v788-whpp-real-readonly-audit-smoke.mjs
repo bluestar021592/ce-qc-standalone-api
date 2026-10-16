@@ -112,6 +112,9 @@ try{
 import { auditV788Readonly,truthCategory } from './v788-whpp-real-readonly-audit.mjs';
 assert.equal(truthCategory('PENDING_SCAN','60'),'latePODPendingState');
 assert.equal(truthCategory('OPEN','81'),'lateReturnedPendingState');
+assert.equal(truthCategory('RETURNING','81'),'lateReturnedPendingState');
+assert.equal(truthCategory('RETURN_IN_PROGRESS','81'),'lateReturnedPendingState');
+assert.equal(truthCategory('RETURNING','60'),'contradiction');
 assert.equal(truthCategory('RETURNED','60'),'contradiction');
 assert.equal(truthCategory('POD','81'),'contradiction');
 assert.equal(truthCategory('POD','60'),'strictPOD');

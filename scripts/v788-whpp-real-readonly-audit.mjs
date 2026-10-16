@@ -27,7 +27,7 @@ export function truthCategory(state,status){
     :['RETURNED','RETURN_COMPLETED','RETURN_IN_PROGRESS','RETURNING'].includes(state)
       ?'contradiction':'latePODPendingState';
   if(status==='81')return ['RETURNED','RETURN_COMPLETED'].includes(state)?'strictReturned'
-    :['POD','RETURN_IN_PROGRESS','RETURNING'].includes(state)
+    :state==='POD'
       ?'contradiction':'lateReturnedPendingState';
   if(status==='80')return ['POD','RETURNED','RETURN_COMPLETED'].includes(state)?'contradiction':'returning80';
   if(['POD','RETURNED','RETURN_COMPLETED'].includes(state))return 'labelOnlyTerminal';

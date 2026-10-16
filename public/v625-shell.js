@@ -1337,7 +1337,7 @@ function rowHasTmsConflict(row={}){
   return row?.shipmentStatusConflict===true||row?.truthEvidence?.tmsContradiction===true
     ||state==='PENDING_VERIFICATION'
     ||(code==='60'&&['RETURNED','RETURN_COMPLETED','RETURN_IN_PROGRESS','RETURNING'].includes(state))
-    ||(code==='81'&&['POD','RETURN_IN_PROGRESS','RETURNING'].includes(state))
+    ||(code==='81'&&state==='POD')
     ||(code==='80'&&['POD','RETURNED','RETURN_COMPLETED'].includes(state));
 }
 function rowIsPod(row={}){

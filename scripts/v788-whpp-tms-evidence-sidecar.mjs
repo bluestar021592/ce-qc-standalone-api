@@ -117,7 +117,7 @@ export function inspectV788Sidecar(db,sources=[]){
     byDate[r.reportDate][category]++;
     if(status==='60'&&r.explicitPodTime)podWithTime++;
     if((status==='60'&&['RETURNED','RETURN_COMPLETED','RETURNING','RETURN_IN_PROGRESS'].includes(state))
-      ||(status==='81'&&['POD','RETURNING','RETURN_IN_PROGRESS'].includes(state))
+      ||(status==='81'&&state==='POD')
       ||(status==='80'&&['POD','RETURNED','RETURN_COMPLETED'].includes(state)))conflicts++;
   }
   const batches=db.prepare('SELECT COUNT(*) AS n FROM v788_batch_commits').get().n;
@@ -183,7 +183,7 @@ export function previewV788WhppLedgerReconciliation(sourceDb,proofDb,expectedSou
         if(['RETURNED','RETURN_COMPLETED','RETURN_IN_PROGRESS','RETURNING'].includes(state))result.currentOppositeTerminal++;
         else if(state!=='POD')result.currentNeedsPODSync++;
       }else{
-        if(['POD','RETURN_IN_PROGRESS','RETURNING'].includes(state))result.currentOppositeTerminal++;
+        if(state==='POD')result.currentOppositeTerminal++;
         else if(!['RETURNED','RETURN_COMPLETED'].includes(state))result.currentNeedsReturnedSync++;
       }
     }

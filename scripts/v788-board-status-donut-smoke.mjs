@@ -45,6 +45,12 @@ assert.equal(classify({shipmentStatus:'80',currentState:'POD'}),false,'80 confli
 const conflicting=(input)=>vm.runInNewContext(source.slice(classifierStart,classifierEnd)+'\nrowHasTmsConflict(input);',{input},{timeout:1000});
 assert.equal(conflicting({shipmentStatus:'80',currentState:'POD'}),true);
 assert.equal(conflicting({shipmentStatus:'81',currentState:'POD'}),true);
+assert.equal(conflicting({shipmentStatus:'81',currentState:'RETURNING'}),false,
+  'latest TMS 81 is a legitimate completion of old returning state');
+assert.equal(conflicting({shipmentStatus:'81',currentState:'RETURN_IN_PROGRESS'}),false);
+assert.equal(conflicting({shipmentStatus:'60',currentState:'RETURNING'}),true);
+const completedReturn=(input)=>vm.runInNewContext(source.slice(classifierStart,classifierEnd)+'\nrowIsReturned(input);',{input},{timeout:1000});
+assert.equal(completedReturn({shipmentStatus:'81',currentState:'RETURNING'}),true);
 assert.equal(conflicting({shipmentStatus:'60',currentState:'RETURNED'}),true);
 assert.equal(classify({shipmentStatus:'81',currentState:'RETURN_IN_PROGRESS'}),false,'TMS 81 is completed returned');
 assert.equal(classify({shipmentStatus:'60',退回状态:'退回中'}),false,'TMS 60 is POD');
@@ -81,7 +87,7 @@ for(const kind of ['whpp','shopee']){
 }
 // A newer TMS terminal status in WHPP all-detail must override older
 // POD/return/normal-diversion tabs; no waybill may appear twice or disappear.
-const changedReturn={shipmentCode:'W',shipmentStatus:'81',currentState:'RETURNED'};
+const changedReturn={shipmentCode:'W',shipmentStatus:'81',currentState:'RETURNING'};
 const changedPod={shipmentCode:'X',shipmentStatus:'60',currentState:'POD'};
 const changedReturning={shipmentCode:'Y',shipmentStatus:'80',currentState:'RETURN_IN_PROGRESS'};
 const changedPodFromNormal={shipmentCode:'Z',shipmentStatus:'60',currentState:'POD'};
