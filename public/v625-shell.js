@@ -305,7 +305,7 @@ function renderDonut(m){
     at=next;
   }
   if(donut)donut.style.background=stops.length?'conic-gradient('+stops.join(',')+')':'var(--v625-border,#dce5ef)';
-  if(legend)legend.innerHTML=parts.map(([name,value,color])=>'<div><i style="background:'+color+'"></i><span>'+esc(name)+' '+fmt(value)+'（'+pct(value/denominator*100)+'）</span></div>').join('');
+  if(legend)legend.innerHTML=parts.filter(([,value])=>value>0).map(([name,value,color])=>'<div><i style="background:'+color+'"></i><span>'+esc(name)+' '+fmt(value)+'（'+pct(value/denominator*100)+'）</span></div>').join('');
 }
 async function loadSession(){
   try{
