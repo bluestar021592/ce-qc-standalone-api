@@ -1442,10 +1442,14 @@ function buildBusinessAccounting(state={},fallback={}){
   const returnCapable=['WHPP','SHOPEECN','SHOPEEVN'].includes(business);
   for(const row of source){
     if(rowHasTmsConflict(row))rowsByKind.unprocessed.push(row);
+    // Return states are only defined for WHPP/Shopee. On other businesses,
+    // preserve the parcel as a visible verification exception instead of
+    // hiding it in an undisplayed return slice or mislabelling it as delivery.
+    else if(!returnCapable&&(rowIsReturning(row)||rowIsReturned(row)))rowsByKind.unprocessed.push(row);
     else if(returnCapable&&rowIsReturning(row))rowsByKind.returning.push(row);
     else if(row.finalRowAvailable===false)rowsByKind.unprocessed.push(row);
     else if(rowIsPod(row))rowsByKind.pod.push(row);
-    else if(rowIsReturned(row))rowsByKind.returned.push(row);
+    else if(returnCapable&&rowIsReturned(row))rowsByKind.returned.push(row);
     else if(rowIsPending(row))rowsByKind.pending.push(row);
     else if(rowIsAbnormal(row))rowsByKind.abnormal.push(row);
     else if(rowIsOtherNormal(row))rowsByKind.otherNormal.push(row);
