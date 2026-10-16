@@ -70,7 +70,7 @@ try{
       states:new Map()}
   ];
   for(const day of all){
-    for(let i=0;i<day.codes.length;i++)day.states.set(day.codes[i],i%5===0?'RETURNED':'POD');
+    for(let i=0;i<day.codes.length;i++)day.states.set(day.codes[i],i<(day.date==='2026-07-01'?166:124)?'POD':'RETURNED');
   }
   const sig=v788SourceSignature(all);
   initV788Sidecar(db,sig);
@@ -93,7 +93,20 @@ try{
   assert.equal(audit.conflictingExistingStates,0);
   assert.equal(audit.podWithExplicitTime,0);
   assert.equal(audit.completedBatches,8);
+  assert.equal(audit.statuses.s60,290);
+  assert.equal(audit.statuses.s81,56);
+  assert.equal(audit.byDate['2026-07-01'].s60,166);
+  assert.equal(audit.byDate['2026-07-02'].s81,32);
+  assert.equal(audit.distributionMatchesV3,true);
   assert.equal(audit.complete,true);
+  // The reported terminal totals are an independent hard gate, not merely
+  // 346 rows with any status or a green batch counter.
+  db.prepare('UPDATE v788_tms_evidence SET shipmentStatus=? WHERE reportDate=? AND shipmentCode=?').run('81','2026-07-01',all[0].codes[0]);
+  const drift=inspectV788Sidecar(db,all);
+  assert.equal(drift.distributionMatchesV3,false);
+  assert.equal(drift.complete,false);
+  db.prepare('UPDATE v788_tms_evidence SET shipmentStatus=? WHERE reportDate=? AND shipmentCode=?').run('60','2026-07-01',all[0].codes[0]);
+  assert.equal(inspectV788Sidecar(db,all).complete,true);
   assert.throws(()=>stageV788Batch(db,{date:'2026-07-01',index:0,
     codes:all[0].codes.slice(0,50),
     rows:all[0].codes.slice(0,50).map(code=>({shipmentCode:code,shipmentStatus:'80'}))}),/REPLAY_STATUS_CHANGED/);
