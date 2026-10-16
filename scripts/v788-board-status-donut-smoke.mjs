@@ -79,6 +79,30 @@ for(const kind of ['whpp','shopee']){
   assert.equal(state.accounted,4,kind+' status categories must conserve 4 waybills');
   assert.equal(state.difference,0);
 }
+// A newer TMS terminal status in WHPP all-detail must override older
+// POD/return/normal-diversion tabs; no waybill may appear twice or disappear.
+const changedReturn={shipmentCode:'W',shipmentStatus:'81',currentState:'RETURNED'};
+const changedPod={shipmentCode:'X',shipmentStatus:'60',currentState:'POD'};
+const changedReturning={shipmentCode:'Y',shipmentStatus:'80',currentState:'RETURN_IN_PROGRESS'};
+const changedPodFromNormal={shipmentCode:'Z',shipmentStatus:'60',currentState:'POD'};
+const whppLag=vm.runInNewContext(source.slice(accountingStart,accountingEnd)+
+  '\\nbuildWhppCanonicalAccounting(whppState,{total:4});',{
+    business:'WHPP',whppState:{dashboard:{metrics:{total:4}},detailTabs:{
+      all:{rows:[changedReturn,changedPod,changedReturning,changedPodFromNormal]},
+      pod:{rows:[{shipmentCode:'W',shipmentStatus:'60',currentState:'POD'},
+        {shipmentCode:'Y',shipmentStatus:'60',currentState:'POD'}]},
+      returned:{rows:[{shipmentCode:'X',shipmentStatus:'81',currentState:'RETURNED'}]},
+      normalDiversion:{rows:[{shipmentCode:'Z',currentState:'SHOP'}]},
+      unresolved:{rows:[]}
+    }}
+  },{timeout:1000});
+assert.deepEqual(whppLag.rowsByKind.pod.map(detailCode=>detailCode.shipmentCode).sort(),['X','Z']);
+assert.deepEqual(whppLag.rowsByKind.returned.map(detailCode=>detailCode.shipmentCode),['W']);
+assert.deepEqual(whppLag.rowsByKind.returning.map(detailCode=>detailCode.shipmentCode),['Y']);
+assert.equal(whppLag.rowsByKind.otherNormal.length,0);
+assert.equal(whppLag.accounted,4,'latest TMS statuses must conserve four members');
+assert.equal(whppLag.difference,0);
+
 // CE/CEAF/TBKH/ALI1688 do not have return-rate buckets. If a returned
 // shipment status unexpectedly appears, it must remain visible as an exception
 // and must not be counted as ordinary delivery or hidden by the donut.
