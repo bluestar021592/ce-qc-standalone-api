@@ -18,6 +18,7 @@ $SandboxCreated=$false
 $WorktreeCreated=$false
 $CurrentHead=''
 $EnvOriginal=@{}
+$EnvSaved=$false
 $EnvNames=@('DATA_DIR','DB_FILE','LOCALAPPDATA','EXPORTS_DIR','BACKUPS_DIR','IMPORTS_DIR',
   'PORT','HOST','PUBLIC_HOSTNAME','NODE_ENV','ACCESS_MODE',
   'CE_QC_BACKGROUND_MAINTENANCE_ENABLED','CE_QC_SKIP_STARTUP_POD_REPAIR',
@@ -31,6 +32,7 @@ function GitText([string[]]$Arguments){
   return $result
 }
 function RestoreEnvironment {
+  if(-not $EnvSaved){return}
   foreach($name in $EnvNames){
     [Environment]::SetEnvironmentVariable($name,$EnvOriginal[$name],'Process')
   }
@@ -80,6 +82,7 @@ try{
     foreach($name in $EnvNames){
       $EnvOriginal[$name]=[Environment]::GetEnvironmentVariable($name,'Process')
     }
+    $EnvSaved=$true
     $env:DATA_DIR=$PilotData
     $env:DB_FILE=$PilotDb
     $env:LOCALAPPDATA=(Join-Path $Sandbox 'localapp')
@@ -94,16 +97,19 @@ try{
     $env:CE_QC_BACKGROUND_MAINTENANCE_ENABLED='0'
     $env:CE_QC_SKIP_STARTUP_POD_REPAIR='1'
     $env:CE_QC_ENABLE_EXPORT_SIDECAR_AT_STARTUP='0'
-    $env:CE_QC_DISABLE_V246_TRACKING='0'
+    $env:CE_QC_DISABLE_V246_TRACKING='1'
     $logs=Join-Path $Sandbox 'logs'
     $Server=Start-Process -FilePath 'node.exe' -ArgumentList 'bootstrap.js' -WorkingDirectory $App -PassThru -WindowStyle Hidden -RedirectStandardOutput (Join-Path $logs 'server.log') -RedirectStandardError (Join-Path $logs 'server-errors.log')
     $ready=$false
     for($i=0;$i -lt 90;$i++){
       if($Server.HasExited){throw 'Candidate backend exited before opening the browser.'}
+      $probe=$null
       try{
-        $res=Invoke-WebRequest -Uri "http://127.0.0.1:$Port/api/health" -TimeoutSec 2 -UseBasicParsing
-        if($res.StatusCode -eq 200){$ready=$true;break}
+        $probe=[Net.Sockets.TcpClient]::new()
+        $probe.Connect('127.0.0.1',$Port)
+        if($probe.Connected){$ready=$true;break}
       }catch{}
+      finally{if($probe){$probe.Close();$probe.Dispose()}}
       Start-Sleep -Milliseconds 700
     }
     Require $ready 'Candidate backend did not start. Nothing was installed.'
