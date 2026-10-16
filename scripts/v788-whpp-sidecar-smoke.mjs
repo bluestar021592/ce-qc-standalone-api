@@ -48,6 +48,13 @@ assert.match(ui,/试用范围只限上述历史状态只读预览/);
 
 assert.match(server,/verifyV788PersistedSidecar\(checkDb,actualSourceSignature\)/);
 assert.match(server,/saved\.sidecarVerified=checked\.verified===true/);
+assert.match(server,/previewV788WhppLedgerReconciliation\(/,
+  'status route must reconcile ledger only from independently opened SQLite proof');
+assert.match(activeJs,/data\.ledgerReconciliation/,
+  'V625 must display aggregate ledger differences instead of requiring manual commands');
+assert.match(activeJs,/尚未修改历史账本或正式数据库/,
+  'preview must never claim the ledger has been repaired');
+
 assert.match(server,/saved\.independentPodTimeEvidenceChecked=true/,
   'read-only status panel may display independent POD time count only after signed SQLite proof verification');
 assert.match(server,/checked\.trustedExplicitPodTimes/,
@@ -103,7 +110,7 @@ assert.match(ui,/继续安全核验（保留已有批次）/);
 
 
 import {DatabaseSync} from 'node:sqlite';
-import {strictWhppTmsBatch,initV788Sidecar,stageV788Batch,inspectV788Sidecar,v788SourceSignature,verifyV788PersistedSidecar,v788ReadSourceMembershipSignature}
+import {strictWhppTmsBatch,initV788Sidecar,stageV788Batch,inspectV788Sidecar,v788SourceSignature,verifyV788PersistedSidecar,v788ReadSourceMembershipSignature,previewV788WhppLedgerReconciliation}
   from './v788-whpp-tms-evidence-sidecar.mjs';
 import {runV788Stage} from './v788-whpp-stage-tms-evidence.mjs';
 
@@ -216,6 +223,56 @@ try{
       ...(index===0?{signedAt:'2026-07-04 10:00:00'}:{})
     }))}),/V788_BATCH_REPLAY_EXPLICIT_POD_TIME_CHANGED/,
     'same terminal status with a newly different signedAt must not be silently discarded');
+
+  // Two independently opened read-only inputs: historical source/current/
+  // ledger versus the exact 346-member TMS proof. Nothing is updated.
+  const compareDb=new DatabaseSync(':memory:');
+  try{
+    compareDb.exec("CREATE TABLE business_daily_parse_rows(businessType TEXT,reportDate TEXT,shipmentCode TEXT);"+
+      "CREATE TABLE shipment_current_state(businessType TEXT,reportDate TEXT,shipmentCode TEXT,state TEXT,stateJson TEXT);"+
+      "CREATE TABLE qc_tracking_ledger(businessType TEXT,shipmentCode TEXT,trackingStatus TEXT,terminalReason TEXT)");
+    const src=compareDb.prepare("INSERT INTO business_daily_parse_rows VALUES('WHPP',?,?)");
+    const current=compareDb.prepare("INSERT INTO shipment_current_state VALUES('WHPP',?,?,?,?)");
+    const led=compareDb.prepare("INSERT INTO qc_tracking_ledger VALUES('WHPP',?,?,?)");
+    for(const day of all){
+      for(const code of day.codes){
+        const pod=day.states.get(code)==='POD';
+        const stale=day.date==='2026-07-01'&&(code==='J0000'||code==='J0189');
+        src.run(day.date,code);
+        current.run(day.date,code,stale?'OPEN':pod?'POD':'RETURNED','{}');
+        led.run(code,stale?'OPEN':'TERMINAL',stale?'':pod?'POD':'RETURNED');
+      }
+    }
+    compareDb.exec('PRAGMA query_only=ON');
+    const beforeSource=compareDb.prepare('SELECT total_changes() AS n').get().n;
+    const beforeSidecar=db.prepare('SELECT total_changes() AS n').get().n;
+    const recon=previewV788WhppLedgerReconciliation(compareDb,db,sig);
+    assert.equal(recon.ready,true,'fully verified sidecar permits a READ-ONLY delta preview');
+    assert.equal(recon.sourceMembers,346);
+    assert.equal(recon.strictPOD,290);
+    assert.equal(recon.strictReturned,56);
+    assert.equal(recon.currentNeedsPODSync,1);
+    assert.equal(recon.currentNeedsReturnedSync,1);
+    assert.equal(recon.ledgerNeedsPODSync,1);
+    assert.equal(recon.ledgerNeedsReturnedSync,1);
+    assert.equal(recon.currentOppositeTerminal,0);
+    assert.equal(recon.ledgerOppositeTerminal,0);
+    assert.equal(recon.productionModified,false);
+    assert.equal(recon.exportAccepted,false);
+    assert.equal(compareDb.prepare('SELECT total_changes() AS n').get().n,beforeSource);
+    assert.equal(db.prepare('SELECT total_changes() AS n').get().n,beforeSidecar);
+    assert.ok(!JSON.stringify(recon).includes('J0000'),'no shipment identifier may leak into preview');
+    const bad=previewV788WhppLedgerReconciliation(compareDb,db,'a'.repeat(64));
+    assert.equal(bad.ready,false,'wrong source signature cannot produce reconciliation');
+    assert.equal(bad.productionModified,false);
+    compareDb.exec('PRAGMA query_only=OFF');
+    compareDb.prepare("UPDATE shipment_current_state SET state='RETURNED' WHERE shipmentCode='J0000'").run();
+    compareDb.exec('PRAGMA query_only=ON');
+    const contradiction=previewV788WhppLedgerReconciliation(compareDb,db,sig);
+    assert.equal(contradiction.ready,false,'reverse terminal conflict must never be auto-closed');
+    assert.equal(contradiction.currentOppositeTerminal,1);
+    assert.equal(contradiction.reason,'RECONCILIATION_REQUIRES_MANUAL_REVIEW');
+  }finally{compareDb.close()}
 
   // Replacing a saved waybill with an unrelated ID preserves all eight
   // batch counters and 290/56 terminal totals, but MUST fail exact proof.
