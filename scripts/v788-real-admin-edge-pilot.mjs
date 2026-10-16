@@ -188,7 +188,11 @@ try{
     return String(line).includes('290')&&String(line).includes('56')
       &&String(line).includes('190')&&String(line).includes('156')?line:false;
   },'SYNTHETIC_346_REAL_EDGE_DISPLAY',14000);
-  assert.ok(verified.includes('2026-07-01')&&verified.includes('2026-07-02'));
+  assert.ok(verified.includes('2026-07-01')&&verified.includes('2026-07-02')); 
+  assert.match(verified,/独立TMS明确签收时间：0\/290票；仍缺290票/,
+    'real Edge cannot claim a signing-time KPI when synthetic TMS status lacks explicit POD timestamps');
+  assert.match(verified,/尚未写入正式签收时间账本/,
+    'status-only acceptance must not imply production timing has been repaired');
   const buttonNow=await cdp.eval("document.getElementById('v788WhppEvidenceStart')?.disabled");
   assert.equal(buttonNow,true,'completed proof must never allow another real TMS request');
   assert.equal(cdp.urls.filter(x=>x.includes('/api/v788/whpp-evidence/start')).length,0);
