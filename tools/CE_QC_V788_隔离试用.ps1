@@ -140,6 +140,10 @@ try{
     $CiSelfTest=($env:GITHUB_ACTIONS -eq 'true' -and $env:CI -eq 'true' -and $env:CE_QC_V788_PILOT_CI_NO_BROWSER -eq '1')
     if($CiSelfTest){
       Write-Host '[V788_PILOT_E2E] READY local V788 backend on 5278, separate auth on 5280; disposable isolated database only.' -ForegroundColor Green
+      # Real credential validation and signed cookie exchange against the
+      # disposable trial DB, not the official account or DB.
+      & node scripts/v788-pilot-login-session-smoke.mjs
+      if($LASTEXITCODE -ne 0){throw 'V788 pilot login/session handshake failed; no formal APP update.'}
       # No browser or interactive prompt in the GitHub runner.
       # The Finally blocks must stop every V788 child and clean the trial sandbox.
     }else{
