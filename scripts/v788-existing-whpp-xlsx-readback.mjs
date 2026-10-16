@@ -68,8 +68,16 @@ export async function readV788ExistingWhppXlsx({sourceDb,proofDb,workbookPath}={
   const all=actual['全部明细'],pod=actual['POD明细'],returned=actual['退回明细'];
   const srcSet=new Set(src.keys());
   const membership=diff(srcSet,all.keys);
+  // Structural contradictions are not conditional on TMS proof: a parcel
+  // appearing in both mutually exclusive detail tabs, or appearing in a
+  // detail tab without belonging to the all-members source, is invalid.
+  const overlap=[...pod.keys].filter(key=>returned.keys.has(key)).length;
+  const orphanPod=[...pod.keys].filter(key=>!all.keys.has(key)).length;
+  const orphanReturned=[...returned.keys].filter(key=>!all.keys.has(key)).length;
   const issues={
     missingMembers:membership.missing,extraMembers:membership.extra,
+    duplicatedPodAndReturnedMembers:overlap,
+    podOutsideAllDetail:orphanPod,returnedOutsideAllDetail:orphanReturned,
     duplicateRows:SHEETS.reduce((n,name)=>n+actual[name].duplicate,0),
     incompleteRows:SHEETS.reduce((n,name)=>n+actual[name].incomplete,0),
     unexpectedDateRows:SHEETS.reduce((n,name)=>n+actual[name].unexpectedDates,0),
