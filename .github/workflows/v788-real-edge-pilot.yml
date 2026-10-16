@@ -7,7 +7,7 @@ on:
     paths:
       - 'server.js'
       - 'public/**'
-      - 'scripts/v581-production-shell-browser-smoke.mjs'
+      - 'scripts/v788-real-admin-edge-pilot.mjs'
       - 'scripts/v788-*.mjs'
       - '.github/workflows/v788-real-edge-pilot.yml'
   workflow_dispatch:
@@ -26,6 +26,6 @@ jobs:
           node-version: '24'
           cache: npm
       - run: npm ci
-      - name: Real Edge home-click plus V788 admin status panel
+      - name: Real Edge V788 admin status panel, no CE TMS
         shell: pwsh
-        run: node scripts/v581-production-shell-browser-smoke.mjs
+        run: node scripts/v788-real-admin-edge-pilot.mjs
