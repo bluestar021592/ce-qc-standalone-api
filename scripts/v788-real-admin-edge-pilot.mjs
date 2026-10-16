@@ -7,6 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
 import {spawn,spawnSync} from 'node:child_process';
+import {createV788SyntheticEvidence,deleteV788SyntheticEvidence} from './v788-edge-synthetic-evidence-fixture.mjs';
 
 function freePort(){
   return new Promise((resolve,reject)=>{
@@ -96,7 +97,7 @@ const dataDir=path.join(root,'data'),browserDir=path.join(root,'browser'),appLoc
 for(const dir of [dataDir,browserDir,appLocal])fs.mkdirSync(dir,{recursive:true});
 const [port,debugPort,authPort,exportPort]=await Promise.all([freePort(),freePort(),freePort(),freePort()]);
 const base='http://127.0.0.1:'+port,secret='V788_EDGE_TEST_SECRET_0123456789_ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-let backend,edge,cdp,log='',lastUi=null;
+let backend,edge,cdp,log='',lastUi=null,syntheticCreated=false;
 try{
   backend=spawn(process.execPath,['bootstrap.js'],{
     cwd:process.cwd(),stdio:['ignore','pipe','pipe'],windowsHide:true,
@@ -162,7 +163,34 @@ try{
   assert.match(String(info.title||''),/核验/);
   assert.equal(cdp.urls.filter(x=>x.includes('/api/v788/whpp-evidence/start')).length,0,
     'Loading settings must not auto-start CE TMS');
-  console.log('[V788_REAL_EDGE] PASS real Windows Edge ADMIN /settings; visible panel; disabled TMS; zero POST');
+  console.log('[V788_REAL_EDGE] PASS real Windows Edge ADMIN /settings; disabled without source; 0 TMS POST');
+  // Now simulate EXACT 346 fake members and saved proof on disposable CI D:.
+  // The browser MUST render 190/156 + 290 POD + 56 returned from the
+  // independent original SQLite + SQLite sidecar, never from JSON alone.
+  process.env.NODE_ENV='test';
+  createV788SyntheticEvidence();
+  syntheticCreated=true;
+  const evidence=await httpStatus(base+'/api/v788/whpp-evidence/status',admin);
+  assert.equal(evidence.status,200);
+  assert.equal(evidence.body.sidecarVerified,true,'real source and sidecar must both validate');
+  assert.equal(evidence.body.isolatedSourceReady,true);
+  assert.equal(evidence.body.savedMembers,346);
+  assert.equal(evidence.body.pod,290);
+  assert.equal(evidence.body.returned,56);
+  assert.equal(evidence.body.statusOnlyPreview.dates[0].pod,166);
+  assert.equal(evidence.body.statusOnlyPreview.dates[1].returned,32);
+  const refreshed=await cdp.eval("(async()=>{const b=document.getElementById('v788WhppEvidenceRefresh');if(!b)return false;b.click();return true})()");
+  assert.equal(refreshed,true,'REAL V625 page must have a visible refresh button');
+  const verified=await waitFor(async()=>{
+    const line=await cdp.eval("document.getElementById('v788WhppEvidenceText')?.textContent||''");
+    return String(line).includes('290')&&String(line).includes('56')
+      &&String(line).includes('190')&&String(line).includes('156')?line:false;
+  },'SYNTHETIC_346_REAL_EDGE_DISPLAY',14000);
+  assert.ok(verified.includes('2026-07-01')&&verified.includes('2026-07-02'));
+  const buttonNow=await cdp.eval("document.getElementById('v788WhppEvidenceStart')?.disabled");
+  assert.equal(buttonNow,true,'completed proof must never allow another real TMS request');
+  assert.equal(cdp.urls.filter(x=>x.includes('/api/v788/whpp-evidence/start')).length,0);
+  console.log('[V788_REAL_EDGE] PASS synthetic 346 exact source: 190/156, POD 166+124, returned 24+32; real V625 DOM; zero TMS calls');
 }catch(error){
   console.error('[V788_REAL_EDGE] FAIL '+String(error?.stack||error));
   console.error('[V788_REAL_EDGE] last settings state='+JSON.stringify(lastUi));
@@ -175,5 +203,9 @@ try{
   process.exitCode=1;
 }finally{
   cdp?.close();kill(edge);kill(backend);
+  if(syntheticCreated)try{deleteV788SyntheticEvidence()}catch(error){
+    console.error('[V788_REAL_EDGE] CI synthetic cleanup failed '+String(error?.message||error));
+    process.exitCode=1;
+  }
   try{fs.rmSync(root,{recursive:true,force:true,maxRetries:10,retryDelay:100})}catch{}
 }
