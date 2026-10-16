@@ -49,6 +49,11 @@ export async function readV788ExistingWhppXlsx({sourceDb,proofDb,workbookPath}={
   const before=fs.lstatSync(workbookPath);
   if(!before.isFile()||before.isSymbolicLink()||before.size<=0||before.size>75*1024*1024)
     throw Error('V788_XLSX_NOT_SAFE_REGULAR_FILE');
+  // Resolve the source once, then verify it still refers to the very same
+  // ordinary file after parsing. The readback never follows a renamed or
+  // substituted worksheet source into a "PASS" result.
+  const physicalBefore=fs.realpathSync.native(workbookPath);
+  const fileIdentity=stat=>[stat.dev,stat.ino,stat.size,stat.mtimeMs,stat.ctimeMs].join('|');
   if(!String(workbookPath).toLowerCase().endsWith('.xlsx'))
     throw Error('V788_XLSX_FILE_EXTENSION_REQUIRED');
   const expectedSignature=v788ReadSourceMembershipSignature(sourceDb);
@@ -109,8 +114,13 @@ export async function readV788ExistingWhppXlsx({sourceDb,proofDb,workbookPath}={
     for(const key of pod.keys)if(!srcSet.has(key))issues.invalidTerminalSheetMembers++;
     for(const key of returned.keys)if(!srcSet.has(key))issues.invalidTerminalSheetMembers++;
   }
-  const after=fs.statSync(workbookPath);
-  const fileStable=before.size===after.size&&before.mtimeMs===after.mtimeMs;
+  let fileStable=false;
+  try{
+    const after=fs.lstatSync(workbookPath);
+    fileStable=after.isFile()&&!after.isSymbolicLink()
+      &&fs.realpathSync.native(workbookPath)===physicalBefore
+      &&fileIdentity(before)===fileIdentity(after);
+  }catch{fileStable=false}
   const foundProblems=Object.values(issues).some(x=>x!==null&&x!==0);
   const status=!fileStable?'FILE_CHANGED_DURING_READBACK':
     foundProblems?'BLOCKED':
