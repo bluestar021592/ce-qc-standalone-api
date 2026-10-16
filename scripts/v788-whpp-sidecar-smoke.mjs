@@ -17,6 +17,9 @@ assert.match(activeJs,/if\(name==='interface'\)void loadSettings\(\)\.then\(\(\)
 assert.match(activeJs,/acknowledgeIsolatedQuery:true/);
 assert.match(activeJs,/sidecarVerified===true/);
 assert.match(activeJs,/CE系统接口凭证未就绪/);
+assert.match(activeJs,/data.isolatedSourceReady!==true/);
+assert.match(server,/isolatedSourceReady=process.platform==='win32'&&v788IsRegularExactFile\(v788SourceCopy\)/);
+assert.match(server,/code:'V788_ISOLATED_SOURCE_MISSING'/);
 assert.match(activeJs,/needsReview\|\|loginRequired/);
 assert.match(activeJs,/byId\('v788WhppEvidenceStart'\)\?\.addEventListener\('click',startV788WhppEvidenceV625\)/);
 
