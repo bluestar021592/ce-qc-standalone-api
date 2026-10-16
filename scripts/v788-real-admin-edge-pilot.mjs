@@ -120,7 +120,9 @@ try{
   assert.equal(accepted.body.ok,true);
   assert.equal(accepted.body.readyToPublish,false);
   assert.equal(accepted.body.businessStateUpdated,false);
-  console.log('[V788_REAL_EDGE] ADMIN GET 200; VIEWER GET 403; isolated candidate server');
+  assert.equal(accepted.body.isolatedSourceReady,false,
+    'temporary Windows runner without D: acceptance copy must prohibit real TMS start');
+  console.log('[V788_REAL_EDGE] ADMIN GET 200; VIEWER GET 403; isolated source absent and safely blocked');
 
   edge=spawn(browser,[
     '--headless=new','--disable-gpu','--disable-extensions','--no-first-run',
