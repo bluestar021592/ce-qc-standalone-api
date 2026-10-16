@@ -1971,7 +1971,13 @@ async function loadV788WhppEvidenceStatus() {
     const restartFinalize=allBatchesPresent&&data.status==='INTERRUPTED_RETRYABLE';
     const needsReview=allBatchesPresent&&!isFull&&!restartFinalize;
     const lines=[];
-    if(isFull)lines.push('逐票证据已保存：346/346票，8/8批；POD '+Number(data.pod||0)+'票，已退回 '+Number(data.returned||0)+'票。');
+    if(isFull){
+      lines.push('WHPP历史状态只读预览可用：346/346票，POD '+Number(data.pod||0)+'票，已退回 '+Number(data.returned||0)+'票。');
+      for(const day of data.statusOnlyPreview?.dates||[]){
+        if(!['2026-07-01','2026-07-02'].includes(day.date))continue;
+        lines.push(day.date+'：'+Number(day.total||0)+'票，POD '+Number(day.pod||0)+'票、已退回 '+Number(day.returned||0)+'票。');
+      }
+    }
     else if(waiting)lines.push('正在核验，已保存 '+covered+'/346票；完成 '+batches+'/8批。页面可以保持打开。');
     else if(restartFinalize)lines.push('已找到8批346票历史证据，但上次运行在写入最终报告前中断。可点击“继续安全核验”完成本地复核；无需清空或重传日报。');
     else if(data.status==='INTERRUPTED_RETRYABLE'||data.status==='STOPPED_RETRYABLE')
@@ -1980,7 +1986,7 @@ async function loadV788WhppEvidenceStatus() {
     else if(needsReview)lines.push('汇总报告显示346票，但逐票证据文件或状态一致性尚未通过复核。请检查隔离副本，不会自动修改数据或重复查询。');
     else if(covered>0)lines.push('已有证据 '+covered+'/346票；完成 '+batches+'/8批，可继续补齐。');
     else lines.push('尚未保存逐票证据；已完成的346票只读对账无需再上传。');
-    lines.push('仅隔离核验，不修改正式数据库；签收时间和历史账本仍需独立验收。');
+    lines.push('试用范围只限上述历史状态只读预览；未核验签收时间、历史账本闭环和正式导出均不可宣称通过。不会修改正式数据库。');
     info.textContent=lines.join(' ');
     start.disabled=waiting||v788EvidenceInFlight||isFull||needsReview||!isCeApiSessionUsable(ceAuth)||data.platformReady!==true;
     start.textContent=waiting?'隔离核验进行中…':isFull?'346票已留存'
