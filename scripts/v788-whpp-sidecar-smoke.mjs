@@ -320,6 +320,16 @@ try{
     assert.equal(actual.readbackPodRows,290);
     assert.equal(actual.readbackReturnedRows,56);
     assert.equal(actual.xlsxUnchangedDuringReadback,true);
+    if(process.platform!=='win32'){
+      // A symlink can point at a perfectly correct XLSX; the readback still
+      // must reject it instead of following a mutable alias to a new file.
+      const alias=path.join(xlsxTemp,'linked-source.xlsx');
+      await fsPromises.symlink(made.file,alias,'file');
+      await assert.rejects(
+        readV788ExistingWhppXlsx({sourceDb:xlsxSource,proofDb:db,workbookPath:alias}),
+        /V788_XLSX_NOT_SAFE_REGULAR_FILE/
+      );
+    }
     assert.equal(actual.allSevenBusinessExportAccepted,false);
     assert.equal(xlsxSource.prepare('SELECT total_changes() n').get().n,beforeRead);
     assert.ok(!JSON.stringify(actual).includes('J0000'),'aggregate readback may not leak waybills');
@@ -425,6 +435,10 @@ try{
   }finally{db2.close()}
 }finally{db.close()}
 const xlsxReadbackSource=fs.readFileSync('scripts/v788-existing-whpp-xlsx-readback.mjs','utf8');
+assert.match(xlsxReadbackSource,/fs\.realpathSync\.native\(workbookPath\)/,
+  'real source must be checked for path replacement on both sides of readback');
+assert.match(xlsxReadbackSource,/stat\.dev,stat\.ino,stat\.size,stat\.mtimeMs,stat\.ctimeMs/,
+  'source metadata must detect same-size replacements and inode changes');
 assert.match(xlsxReadbackSource,/duplicatedPodAndReturnedMembers:overlap/,
   'same dated waybill must not belong to both XLSX POD and returned detail sheets');
 assert.match(xlsxReadbackSource,/podOutsideAllDetail:orphanPod/,
