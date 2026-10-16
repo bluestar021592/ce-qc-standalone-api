@@ -96,7 +96,7 @@ const dataDir=path.join(root,'data'),browserDir=path.join(root,'browser'),appLoc
 for(const dir of [dataDir,browserDir,appLocal])fs.mkdirSync(dir,{recursive:true});
 const [port,debugPort,authPort,exportPort]=await Promise.all([freePort(),freePort(),freePort(),freePort()]);
 const base='http://127.0.0.1:'+port,secret='V788_EDGE_TEST_SECRET_0123456789_ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-let backend,edge,cdp,log='';
+let backend,edge,cdp,log='',lastUi=null;
 try{
   backend=spawn(process.execPath,['bootstrap.js'],{
     cwd:process.cwd(),stdio:['ignore','pipe','pipe'],windowsHide:true,
@@ -146,6 +146,7 @@ try{
   await cdp.send('Page.navigate',{url:base+'/settings?auth=v788-real-edge'});
   const info=await waitFor(async()=>{
     const data=await cdp.eval("(()=>({path:location.pathname,panel:document.getElementById('v788WhppEvidencePanel')?.hidden,button:document.getElementById('v788WhppEvidenceStart')?.disabled,title:document.getElementById('v788WhppEvidenceStart')?.textContent,info:document.getElementById('v788WhppEvidenceText')?.textContent||''}))()");
+    lastUi=data;
     return data?.path==='/settings'&&data.panel===false
       &&String(data.info).includes('CE系统接口凭证')?data:false;
   },'ADMIN_SETTINGS_UI',30000);
@@ -156,6 +157,12 @@ try{
   console.log('[V788_REAL_EDGE] PASS real Windows Edge ADMIN /settings; visible panel; disabled TMS; zero POST');
 }catch(error){
   console.error('[V788_REAL_EDGE] FAIL '+String(error?.stack||error));
+  console.error('[V788_REAL_EDGE] last settings state='+JSON.stringify(lastUi));
+  console.error('[V788_REAL_EDGE] last browser URLs='+JSON.stringify(cdp?.urls.slice(-22)||[]));
+  if(cdp)try{
+    const state=await cdp.eval("(()=>({href:location.href,title:document.title,ready:document.readyState,body:document.body?.innerText?.slice(0,600),scriptLoaded:typeof loadV788WhppEvidenceStatus,appLoaded:typeof renderAll,loginText:document.body?.innerText?.includes('登录')}))()");
+    console.error('[V788_REAL_EDGE] browser diagnosis='+JSON.stringify(state));
+  }catch(ex){console.error('[V788_REAL_EDGE] browser diagnosis unavailable '+String(ex?.message||ex))}
   console.error('[V788_REAL_EDGE] backend tail:\n'+log.slice(-4800));
   process.exitCode=1;
 }finally{
