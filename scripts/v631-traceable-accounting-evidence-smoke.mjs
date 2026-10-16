@@ -22,7 +22,26 @@ assert.match(server,/if\(!auth\.hasAccessToken\)[\s\S]*localEvents\.length/,'loc
 assert.match(server,/requestedBusinessType/,'track query must preserve exact seven-business context');
 
 assert.match(js,/function buildBusinessAccounting\(state=\{\},fallback=\{\}\)/,'exclusive business accounting missing');
-assert.match(js,/if\(rowIsPod\(row\)\)[\s\S]*else if\(rowIsReturned\(row\)\)[\s\S]*else if\(rowIsPending\(row\)\)[\s\S]*else if\(rowIsAbnormal\(row\)\)[\s\S]*else if\(rowIsOtherNormal\(row\)\)[\s\S]*else rowsByKind\.delivery/,'business buckets must be mutually exclusive');
+// V788: returns are valid only for WHPP/Shopee and a TMS 80 is a
+// separate unfinished-return bucket; the old chain may not force every
+// business to own a hidden returned bucket.
+const start=js.indexOf('function buildBusinessAccounting(');
+const end=js.indexOf('\\nfunction v628MetricRows(',start);
+assert.ok(start>=0&&end>start,'business accounting must precede KPI drilldown');
+const classify=js.slice(start,end);
+for(const fragment of [
+  "if(rowHasTmsConflict(row))rowsByKind.unprocessed.push(row)",
+  "else if(!returnCapable&&(rowIsReturning(row)||rowIsReturned(row)))rowsByKind.unprocessed.push(row)",
+  "else if(returnCapable&&rowIsReturning(row))rowsByKind.returning.push(row)",
+  "else if(rowIsPod(row))rowsByKind.pod.push(row)",
+  "else if(returnCapable&&rowIsReturned(row))rowsByKind.returned.push(row)",
+  "else if(rowIsPending(row))rowsByKind.pending.push(row)",
+  "else if(rowIsAbnormal(row))rowsByKind.abnormal.push(row)",
+  "else if(rowIsOtherNormal(row))rowsByKind.otherNormal.push(row)",
+  "else rowsByKind.delivery.push(row)"
+])assert.ok(classify.includes(fragment),'exclusive business accounting step missing: '+fragment);
+assert.match(classify,/const accounted=\\['pod','returned','returning','pending','abnormal','otherNormal','delivery','unprocessed'\\]\\.reduce/,
+  'business accounting must conserve disjoint status buckets');
 assert.match(js,/v631AccountingMeta/,'visible conservation audit missing');
 assert.match(js,/businessType='\+encodeURIComponent\(business\)/,'drilldown links must carry exact business type');
 assert.match(js,/function renderTimingMissing\(type\)/,'missing-timing drilldown renderer missing');
