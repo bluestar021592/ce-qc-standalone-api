@@ -44,3 +44,40 @@ export function classifyWhppTmsError(error){
     ||/NETWORK|CONNECTION|SOCKET|TLS|DNS/.test(message))return 'NETWORK';
   return 'OTHER';
 }
+
+
+/**
+ * Exact, read-only projection from the independently reopened sidecar SQLite.
+ * The JSON progress report is never authoritative after proof verification.
+ * Only status evidence is certified here; signature time, historical ledger
+ * closure and formal seven-business XLSX are separate release gates.
+ */
+export function verifiedV788EvidenceCoverage(checked={}){
+  if(checked?.verified!==true||checked?.distributionMatchesV3!==true
+      ||Number(checked?.storedMembers)!==346||Number(checked?.batches)!==8)return null;
+  const expect=[
+    {date:'2026-07-01',total:190,pod:166,returned:24},
+    {date:'2026-07-02',total:156,pod:124,returned:32}
+  ];
+  const dates=[];
+  for(const day of expect){
+    const entry=checked?.byDate?.[day.date];
+    if(!entry)return null;
+    const pod=Number(entry.s60),returned=Number(entry.s81);
+    if(pod!==day.pod||returned!==day.returned
+        ||Number(entry.s80)!==0||Number(entry.other)!==0)return null;
+    dates.push({date:day.date,total:pod+returned,pod,returned});
+  }
+  const pod=dates.reduce((n,d)=>n+d.pod,0);
+  const returned=dates.reduce((n,d)=>n+d.returned,0);
+  if(pod+returned!==346)return null;
+  return {
+    independentlyVerifiedCounts:true,
+    sourceMembers:346,savedMembers:346,missingMembers:0,completedBatches:8,
+    pod,returned,distributionMatchesV3:true,
+    statusOnlyPreview:{
+      source:'INDEPENDENT_ISOLATED_SQLITE',dates,
+      signingTimeAccepted:false,ledgerAccepted:false,exportAccepted:false
+    }
+  };
+}
