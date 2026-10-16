@@ -79,6 +79,21 @@ for(const kind of ['whpp','shopee']){
   assert.equal(state.accounted,4,kind+' status categories must conserve 4 waybills');
   assert.equal(state.difference,0);
 }
+// CE/CEAF/TBKH/ALI1688 do not have return-rate buckets. If a returned
+// shipment status unexpectedly appears, it must remain visible as an exception
+// and must not be counted as ordinary delivery or hidden by the donut.
+for(const type of ['CE','CEAF','TBKH','ALI1688']){
+  const scoped=vm.runInNewContext(source.slice(accountingStart,accountingEnd)+
+    String.raw`\nbuildBusinessAccounting({finalRows:[t80,t81]},{total:2});`,{
+      business:type,t80,t81
+    },{timeout:1000});
+  assert.equal(scoped.rowsByKind.returned.length,0,type+' unsupported return must not become a hidden category');
+  assert.equal(scoped.rowsByKind.returning.length,0,type+' unsupported returning must not become a hidden category');
+  assert.equal(scoped.rowsByKind.unprocessed.length,2,type+' return evidence must be surfaced for verification');
+  assert.equal(scoped.rowsByKind.delivery.length,0,type+' returned members must not be disguised as delivery');
+  assert.equal(scoped.accounted,2);
+  assert.equal(scoped.difference,0);
+}
 const kpiStart=source.indexOf('function applyVerifiedBusinessKpis(');
 const kpiEnd=source.indexOf('\nlet v628BusinessMetricState',kpiStart);
 assert.ok(kpiStart>=0&&kpiEnd>kpiStart);
