@@ -10,7 +10,7 @@ import { getRuntimeConfig } from './db.js';
 
 export const V431_LOCAL_AUTH_SIDECAR_ID = '2026-09-05-v431-readonly-local-auth-sidecar-v1';
 export const V432_LOCAL_AUTH_SINGLE_OWNER_ID = '2026-09-05-v432-single-active-auth-sidecar-v1';
-export const V431_LOCAL_AUTH_COOKIE = 'ce_qc_local_auth_v431';
+export const V431_LOCAL_AUTH_COOKIE = process.env.CE_QC_V788_PILOT_ISOLATED==='1' ? 'ce_qc_local_auth_v788_pilot' : 'ce_qc_local_auth_v431';
 const PORT = Math.max(1024, Math.min(65535, Number(process.env.CE_QC_AUTH_SIDECAR_PORT || 5179)));
 const APP_PORT = Math.max(1024, Math.min(65535, Number(process.env.PORT || 5177)));
 const HOST = String(process.env.CE_QC_AUTH_SIDECAR_HOST || '0.0.0.0');
