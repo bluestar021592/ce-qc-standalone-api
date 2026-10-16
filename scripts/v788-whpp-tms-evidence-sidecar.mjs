@@ -15,6 +15,18 @@ const EXPECTED_TERMINAL=Object.freeze({
 const normalize=value=>String(value||'').trim().toUpperCase();
 const sha=value=>createHash('sha256').update(value).digest('hex');
 
+// Derive the exact member-set fingerprint from an independently opened
+// READ-ONLY WHPP daily source. No migrations, writes or production fallback.
+export function v788ReadSourceMembershipSignature(db){
+  const get=db.prepare("SELECT DISTINCT UPPER(TRIM(shipmentCode)) AS shipmentCode FROM business_daily_parse_rows WHERE businessType='WHPP' AND reportDate=? AND TRIM(COALESCE(shipmentCode,''))<>'' ORDER BY shipmentCode");
+  const sources=Object.entries(DATE_COUNTS).map(([date,expected])=>{
+    const codes=get.all(date).map(row=>normalize(row.shipmentCode));
+    if(codes.length!==expected||new Set(codes).size!==expected)
+      throw Error('V788_ISOLATED_SOURCE_MEMBERSHIP_CHANGED');
+    return {date,codes};
+  });
+  return v788SourceSignature(sources);
+}
 export function v788SourceSignature(sources=[]){
   const hash=createHash('sha256');
   for(const source of sources){
