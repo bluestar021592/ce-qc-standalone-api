@@ -26,7 +26,7 @@ assert.match(js,/function buildBusinessAccounting\(state=\{\},fallback=\{\}\)/,'
 // separate unfinished-return bucket; the old chain may not force every
 // business to own a hidden returned bucket.
 const start=js.indexOf('function buildBusinessAccounting(');
-const end=js.indexOf('\\nfunction v628MetricRows(',start);
+const end=js.indexOf('function v628MetricRows(',start);
 assert.ok(start>=0&&end>start,'business accounting must precede KPI drilldown');
 const classify=js.slice(start,end);
 for(const fragment of [
@@ -40,7 +40,7 @@ for(const fragment of [
   "else if(rowIsOtherNormal(row))rowsByKind.otherNormal.push(row)",
   "else rowsByKind.delivery.push(row)"
 ])assert.ok(classify.includes(fragment),'exclusive business accounting step missing: '+fragment);
-assert.match(classify,/const accounted=\\['pod','returned','returning','pending','abnormal','otherNormal','delivery','unprocessed'\\]\\.reduce/,
+assert.ok(classify.includes("const accounted=['pod','returned','returning','pending','abnormal','otherNormal','delivery','unprocessed'].reduce"),
   'business accounting must conserve disjoint status buckets');
 assert.match(js,/v631AccountingMeta/,'visible conservation audit missing');
 assert.match(js,/businessType='\+encodeURIComponent\(business\)/,'drilldown links must carry exact business type');
