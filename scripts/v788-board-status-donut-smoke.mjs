@@ -7,6 +7,8 @@ assert.ok(source.includes('otherNormal:exactCounts.otherNormal+exactCounts.unpro
 assert.ok(source.includes('exactSum===Number(m.total||0)'),'only complete disjoint accounting can drive risk category slices');
 assert.ok(source.includes('pending:0,abnormal:0,otherNormal:0'),'compact first paint must not invent overlapping Pending or abnormal status');
 assert.ok(source.includes('if(verifiedAccounting)renderDonut('),'verified exact-member data must supersede provisional state');
+assert.ok(source.includes("const disjointKinds=['delivery','pod','returned','returning'"),'exact-member state accounting must isolate status 80');
+assert.ok(source.includes('returning:exactCounts.returning'),'status 80 must reach the verified chart');
 assert.ok(source.includes("setText('kpiPodRate',Number(m.total)>0?"),'zero denominator must not show fabricated POD 0%');
 assert.ok(source.includes("setText('kpiReturnRate',Number(m.total)>0?"),'zero denominator must not show fabricated return 0%');
 const start=source.indexOf('function renderDonut(m){');
@@ -26,6 +28,21 @@ const missing=run('WHPP',{total:156,pod:100,returned:32,delivery:0,pending:0,abn
 assert.match(missing.v625BusinessLegend.innerHTML,/待核验 24/);
 const overlap=run('WHPP',{total:156,pod:124,returned:32,delivery:20,pending:0,abnormal:0,otherNormal:0});
 assert.match(overlap.v625BusinessLegend.textContent,/分类存在重叠/);
+const return80=run('WHPP',{total:20,pod:10,returned:5,returning:2,delivery:1,pending:2,abnormal:0,otherNormal:0});
+assert.match(return80.v625BusinessLegend.innerHTML,/已退回 5（25.00%）/);
+assert.match(return80.v625BusinessLegend.innerHTML,/退回中 2（10.00%）/);
+assert.match(return80.v625BusinessLegend.innerHTML,/已签收 10（50.00%）/);
+assert.doesNotMatch(return80.v625BusinessLegend.innerHTML,/待核验/);
+// shipmentStatus80 is not tracking eventCode80: only the former signals returning.
+const classifierStart=source.indexOf('function rowText(');
+const classifierEnd=source.indexOf('\nfunction rowIsPending(',classifierStart);
+assert.ok(classifierStart>=0&&classifierEnd>classifierStart);
+const classify=(input)=>vm.runInNewContext(source.slice(classifierStart,classifierEnd)+'\nrowIsReturning(input);',{input},{timeout:1000});
+assert.equal(classify({shipmentStatus:'80',currentState:'POD'}),true,'TMS 80 outranks legacy POD');
+assert.equal(classify({shipmentStatus:'81',currentState:'RETURN_IN_PROGRESS'}),false,'TMS 81 is completed returned');
+assert.equal(classify({shipmentStatus:'60',退回状态:'退回中'}),false,'TMS 60 is POD');
+assert.equal(classify({eventCode:'80'}),false,'tracking eventCode80 must not mean return in progress');
+assert.equal(classify({currentState:'RETURN_IN_PROGRESS'}),true);
 const ce=run('CE',{total:10,pod:8,returned:0,delivery:2,pending:0,abnormal:0,otherNormal:0});
 assert.doesNotMatch(ce.v625BusinessLegend.innerHTML,/已退回/);
 // Cover every business board, not just WHPP, with mutually exclusive sample states.
