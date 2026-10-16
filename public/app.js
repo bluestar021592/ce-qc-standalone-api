@@ -1988,12 +1988,18 @@ async function loadV788WhppEvidenceStatus() {
     else lines.push('尚未保存逐票证据；已完成的346票只读对账无需再上传。');
     lines.push('试用范围只限上述历史状态只读预览；未核验签收时间、历史账本闭环和正式导出均不可宣称通过。不会修改正式数据库。');
     info.textContent=lines.join(' ');
-    start.disabled=waiting||v788EvidenceInFlight||isFull||needsReview||!isCeApiSessionUsable(ceAuth)||data.platformReady!==true;
+    // All eight persisted batches only need offline verification after an
+    // APP restart. Requiring a fresh CE login here would force needless TMS
+    // credentials into a ZERO-query finalization.
+    const offlineFinalize=restartFinalize&&covered===346&&batches===8;
+    const loginMissing=!isCeApiSessionUsable(ceAuth);
+    start.disabled=waiting||v788EvidenceInFlight||isFull||needsReview
+      ||(loginMissing&&!offlineFinalize)||data.platformReady!==true;
     start.textContent=waiting?'隔离核验进行中…':isFull?'346票已留存'
       :needsReview?'需复核，禁止重复查询'
       :data.resumeAvailable?'继续安全核验（保留已有批次）':'开始隔离核验（346票）';
-    if(!isCeApiSessionUsable(ceAuth)&&!isFull)
-      info.textContent+=' CE系统接口凭证未就绪，请先在上方重新登录CE系统。';
+    if(loginMissing&&!isFull&&!offlineFinalize)
+      info.textContent+=' CE系统接口凭证未就绪，若需要继续TMS查询，请先在上方重新登录CE系统。';
     if(v788EvidencePoll){clearTimeout(v788EvidencePoll);v788EvidencePoll=null;}
     if(waiting&&currentPage==='settings')
       v788EvidencePoll=setTimeout(()=>{void loadV788WhppEvidenceStatus()},4000);
