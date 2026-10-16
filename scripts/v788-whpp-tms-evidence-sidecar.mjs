@@ -180,10 +180,10 @@ export function previewV788WhppLedgerReconciliation(sourceDb,proofDb,expectedSou
       try{raw=JSON.parse(String(found.stateJson||'{}'))}catch{}
       const state=String(found.state||raw.currentState||'').trim().toUpperCase();
       if(pod){
-        if(['RETURNED','RETURN_COMPLETED'].includes(state))result.currentOppositeTerminal++;
+        if(['RETURNED','RETURN_COMPLETED','RETURN_IN_PROGRESS','RETURNING'].includes(state))result.currentOppositeTerminal++;
         else if(state!=='POD')result.currentNeedsPODSync++;
       }else{
-        if(state==='POD')result.currentOppositeTerminal++;
+        if(['POD','RETURN_IN_PROGRESS','RETURNING'].includes(state))result.currentOppositeTerminal++;
         else if(!['RETURNED','RETURN_COMPLETED'].includes(state))result.currentNeedsReturnedSync++;
       }
     }
