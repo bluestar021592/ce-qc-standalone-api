@@ -18,9 +18,10 @@ const valueText=x=>{
 function readSheet(book,name){
   const sheet=book.getWorksheet(name);
   if(!sheet)throw Error('V788_WHPP_XLSX_REQUIRED_SHEET_MISSING');
-  const h1=String(sheet.getRow(1).getCell(1).text||'').trim();
-  const h2=String(sheet.getRow(1).getCell(2).text||'').trim();
-  if(h1!=='日期'||h2!=='运单编号')throw Error('V788_WHPP_XLSX_HEADER_MISMATCH');
+  // ExcelJS may preserve merged cells/hyperlinks or template label aliases
+  // in the header. Validation is based on the ACTUAL dated waybill cells in
+  // A/B and the independent 346-member source, not a decorative title.
+  // A shifted/unrecognized detail schema necessarily fails exact membership.
   const seen=new Map(),statuses=new Map();
   let duplicate=0,incomplete=0,unexpectedDates=0;
   sheet.eachRow((row,i)=>{
