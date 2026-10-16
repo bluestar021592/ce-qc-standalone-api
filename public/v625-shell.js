@@ -1388,21 +1388,44 @@ function buildWhppCanonicalAccounting(state={},fallback={}){
   const unresolved=uniqueDetailRows(tabs?.unresolved?.rows||[]);
   const conflicted=uniqueDetailRows([...all,...unresolved].filter(rowHasTmsConflict));
   const conflictBills=new Set(conflicted.map(detailCode));
+  // The all-member row is the canonical source for direct TMS 60/80/81.
+  // Individual POD/return tabs can lag behind it after a terminal refresh.
+  const allByCode=new Map(all.map(row=>[detailCode(row),row]));
+  const directKinds=new Set(['60','80','81']);
+  const allowedTerminal=(row,wanted)=>{
+    const current=allByCode.get(detailCode(row));
+    const currentStatus=rowTmsStatus(current||{});
+    const rowStatus=rowTmsStatus(row);
+    if(rowHasTmsConflict(current||row)||rowHasTmsConflict(row))return false;
+    if(directKinds.has(currentStatus)&&currentStatus!==wanted)return false;
+    if(directKinds.has(rowStatus)&&rowStatus!==wanted)return false;
+    return true;
+  };
   const returning=uniqueDetailRows([
     ...all.filter(rowIsReturning),
     ...unresolved.filter(rowIsReturning),
     ...(tabs?.returnInProgress?.rows||[]).filter(rowIsReturning),
     ...(tabs?.returning?.rows||[]).filter(rowIsReturning)
-  ]);
+  ]).filter(row=>allowedTerminal(row,'80'));
   const returningBills=new Set(returning.map(detailCode));
   for(const code of conflictBills)returningBills.add(code);
-  // Never count a newer status 80 again in stale POD/returned detail tabs.
   const excludeReturning=rows=>uniqueDetailRows(rows||[]).filter(row=>!returningBills.has(detailCode(row)));
-  const pod=excludeReturning(tabs?.pod?.rows);
-  const returned=excludeReturning(tabs?.returned?.rows);
-  const cancelled=excludeReturning(tabs?.cancelled?.rows);
-  const normalDiversion=excludeReturning(tabs?.normalDiversion?.rows);
-  const shops=excludeReturning([
+  // Promote explicitly verified terminal states from the canonical all-tab.
+  // Otherwise a stale POD tab can display a newer 81 as still signed, or a
+  // newer 60 can be invisible when the POD tab has not caught up.
+  const pod=uniqueDetailRows([
+    ...all.filter(row=>rowTmsStatus(row)==='60'&&allowedTerminal(row,'60')),
+    ...excludeReturning(tabs?.pod?.rows).filter(row=>allowedTerminal(row,'60'))
+  ]);
+  const returned=uniqueDetailRows([
+    ...all.filter(row=>rowTmsStatus(row)==='81'&&allowedTerminal(row,'81')),
+    ...excludeReturning(tabs?.returned?.rows).filter(row=>allowedTerminal(row,'81'))
+  ]).filter(row=>!new Set(pod.map(detailCode)).has(detailCode(row)));
+  const terminalBills=new Set([...returning,...pod,...returned,...conflicted].map(detailCode));
+  const excludeTerminal=rows=>uniqueDetailRows(rows||[]).filter(row=>!terminalBills.has(detailCode(row)));
+  const cancelled=excludeTerminal(tabs?.cancelled?.rows);
+  const normalDiversion=excludeTerminal(tabs?.normalDiversion?.rows);
+  const shops=excludeTerminal([
     ...(tabs?.phnomPenhShop?.rows||[]),
     ...(tabs?.provinceShop?.rows||[]),
     ...(tabs?.unknownShop?.rows||[])
