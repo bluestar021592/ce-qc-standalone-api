@@ -8,12 +8,13 @@ import {DatabaseSync} from 'node:sqlite';
 import {initV788Sidecar,stageV788Batch,inspectV788Sidecar,v788SourceSignature}
   from './v788-whpp-tms-evidence-sidecar.mjs';
 import {classifyWhppTmsError} from '../src/v788WhppStatusCoverage.js';
+import {getTokenFile} from '../src/authStore.js';
+import {CEClient} from '../src/ceClient.js';
 
 const DIR=path.win32.join('D:/','CE_QC_V788_验收副本');
 const SOURCE=path.win32.join(DIR,'ce_qc_monitor.db');
 const SIDECAR=path.win32.join(DIR,'V788_WHPP_TMS_逐票证据.sqlite');
 const REPORT=path.win32.join(DIR,'V788_WHPP_TMS_逐票证据验收.json');
-const TOKEN=path.win32.join('D:/','CE CCSL金边数据库','token','token.json');
 const ORIGIN='https://otwms.cambodianexpress.com';
 const TMS_URL=ORIGIN+'/api/tms-shipment/track';
 const EXPECTED=[['2026-07-01',190],['2026-07-02',156]];
@@ -54,26 +55,32 @@ function readSources(){
 }
 function token(){
   try{
-    const t=JSON.parse(fs.readFileSync(TOKEN,'utf8'));
+    const t=JSON.parse(fs.readFileSync(getTokenFile(),'utf8'));
     const access=String(t.access_token||'').trim();
     let expires=Number(t.expires_at||0);
     if(expires>0&&expires<1e11)expires*=1000;
     if(!access||!expires||expires<=Date.now()+180000)return null;
     return {access,tenant:String(t.tenantId||t.tenant_id||'000000'),
-      refresh:String(t.refresh_token||''),type:String(t.token_type||'bearer')};
+      type:String(t.token_type||'bearer')};
   }catch{return null}
 }
 async function query(codes,t){
-  const headers={'Content-Type':'application/json;charset=UTF-8',
-    'Accept':'application/json, text/plain, */*',
-    language:'zh','Tenant-Id':t.tenant,Origin:ORIGIN,Referer:ORIGIN+'/',
-    'User-Agent':'Mozilla/5.0','Blade-Auth':t.type+' '+t.access,
-    'x-access-token':t.access};
-  if(t.refresh)headers['x-refresh-token']=t.refresh;
-  const resp=await fetch(TMS_URL,{method:'POST',redirect:'error',headers,
-    body:JSON.stringify(codes),signal:AbortSignal.timeout(18000)});
-  if(!resp.ok)throw Object.assign(new Error('V788_TMS_HTTP_ERROR'),{status:resp.status});
-  const json=await resp.json();
+  // Use the same header/tenant/DNS behavior as the working CE QC client.
+  // Deliberately call the raw HTTP client: postJson/refreshTokenIfNeeded can
+  // mutate or erase the user's saved login and is forbidden for this tool.
+  const client=new CEClient();
+  const endpoint=new URL(String(client.baseURL||''));
+  if(endpoint.origin!==ORIGIN||endpoint.username||endpoint.password
+    ||(endpoint.pathname!=='/'&&endpoint.pathname!==''))
+    throw Error('V788_TMS_ORIGIN_NOT_ALLOWED');
+  const headers=client.headers();
+  const blade=String(headers['Blade-Auth']||'');
+  if(!blade.endsWith(' '+t.access)||!t.access)
+    throw Error('V788_TMS_TOKEN_SOURCE_MISMATCH');
+  const resp=await client.http.post('/api/tms-shipment/track',codes,{
+    headers,timeout:18000,maxRedirects:0
+  });
+  const json=resp?.data;
   if(json?.success!==true)throw Object.assign(new Error('V788_TMS_API_REJECTED'),{
     ceCode:json?.code,ceMsg:json?.msg||json?.message});
   if(!Array.isArray(json.data))throw Error('V788_TMS_SCHEMA_INVALID');
