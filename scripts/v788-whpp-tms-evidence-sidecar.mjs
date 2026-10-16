@@ -3,7 +3,7 @@
 // Persist only exact-requested CE shipmentCode/status/time/digest. Never store
 // raw TMS payload, client data, tokens, or inferred signing times.
 import {createHash} from 'node:crypto';
-import {explicitWhppTms60PodTime} from '../src/whppPodTimeEvidence.js';
+import {explicitWhppTms60PodTime,trustedWhppPodTime} from '../src/whppPodTimeEvidence.js';
 
 const DATE_COUNTS=Object.freeze({'2026-07-01':190,'2026-07-02':156});
 // V3 actual CE TMS readonly reconciliation, not a count inferred from labels.
@@ -77,6 +77,8 @@ export function stageV788Batch(db,{date,index,codes,rows}){
     for(const item of items){
       const saved=get.get(date,item.code);
       if(!saved||saved.shipmentStatus!==item.shipmentStatus)throw Error('V788_BATCH_REPLAY_STATUS_CHANGED');
+      if(String(saved.explicitPodTime||'')!==String(item.explicitPodTime||''))
+        throw Error('V788_BATCH_REPLAY_EXPLICIT_POD_TIME_CHANGED');
     }
     return {reused:true,matched:items.length};
   }
@@ -146,7 +148,20 @@ export function verifyV788PersistedSidecar(db,expectedSourceSignature=''){
   // Exact-member fingerprint derived from saved waybill IDs must equal the
   // original read-only source signature. Matching only 346/290/56 totals is
   // insufficient: substituted or missing waybills would otherwise look green.
-  const savedMembers=db.prepare('SELECT reportDate,shipmentCode FROM v788_tms_evidence ORDER BY reportDate,shipmentCode').all();
+  const savedMembers=db.prepare('SELECT reportDate,shipmentCode,shipmentStatus,explicitPodTime,apiDigest FROM v788_tms_evidence ORDER BY reportDate,shipmentCode').all();
+  // Revalidate SQLite evidence independently of the JSON progress report.
+  // Status 60 alone does not prove a POD time; only exact-date, whitelisted,
+  // explicit fields may count. Treat malformed/cross-status stored times
+  // and missing/invalid digests as evidence integrity failures.
+  let trustedPodTimes=0,invalidStoredEvidence=0;
+  for(const member of savedMembers){
+    const time=String(member.explicitPodTime||'').trim();
+    const valid=time&&member.shipmentStatus==='60'
+      &&trustedWhppPodTime({source:'whpp_shipment_status_60_explicit_pod_time',podTime:time},member.reportDate)===time;
+    if(valid)trustedPodTimes++;
+    else if(time)invalidStoredEvidence++;
+    if(!/^[a-f0-9]{64}$/.test(String(member.apiDigest||'')))invalidStoredEvidence++;
+  }
   const savedSources=Object.keys(DATE_COUNTS).map(date=>({
     date,codes:savedMembers.filter(item=>item.reportDate===date).map(item=>String(item.shipmentCode||'').trim().toUpperCase())
   }));
@@ -174,8 +189,13 @@ export function verifyV788PersistedSidecar(db,expectedSourceSignature=''){
     byDate[date].s60===counts.s60&&byDate[date].s81===counts.s81
       &&byDate[date].s80===0&&byDate[date].other===0);
   const verified=total===346&&invalidDates===0&&exactBatches&&terminalMatches
-    &&exactMemberSetMatches;
-  return {verified,reason:verified?'SAVED_PROOF_MATCHES_V3':'SAVED_PROOF_INCOMPLETE_OR_DRIFTED',
+    &&exactMemberSetMatches&&invalidStoredEvidence===0;
+  const podMembers=Object.values(byDate).reduce((n,day)=>n+day.s60,0);
+  return {verified,reason:invalidStoredEvidence>0?'SAVED_PROOF_TIME_OR_DIGEST_INVALID':
+    verified?'SAVED_PROOF_MATCHES_V3':'SAVED_PROOF_INCOMPLETE_OR_DRIFTED',
     storedMembers:total,batches:commits.length,byDate,exactMemberSetMatches,
-    distributionMatchesV3:terminalMatches};
+    distributionMatchesV3:terminalMatches,
+    trustedExplicitPodTimes:trustedPodTimes,
+    missingTrustedExplicitPodTimes:Math.max(0,podMembers-trustedPodTimes),
+    invalidStoredEvidence};
 }
