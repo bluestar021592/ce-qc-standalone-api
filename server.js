@@ -2236,6 +2236,8 @@ function v788StagePublicStatus(){
         pod:Number(data?.coverage?.statuses?.s60||0),
         returned:Number(data?.coverage?.statuses?.s81||0),
         podWithExplicitTime:Number(data?.coverage?.podWithExplicitTime||0),
+        distributionMatchesV3:data?.coverage?.distributionMatchesV3===true,
+        evidenceConflicts:Number(data?.coverage?.conflictingExistingStates||0),
         isolatedCopyUnchanged:data?.isolatedCopyUnchanged===true
       };
     }catch{}
