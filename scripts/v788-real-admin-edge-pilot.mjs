@@ -144,6 +144,12 @@ try{
   await cdp.send('Network.enable');
   await cdp.send('Network.setCookie',{name:'ce_qc_local_auth_v431',value:admin,url:base+'/'});
   await cdp.send('Page.navigate',{url:base+'/settings?auth=v788-real-edge'});
+  await waitFor(async()=>{
+    return await cdp.eval("document.readyState==='complete' && !!document.querySelector('#v625SettingsTabs [data-settings-tab=\"interface\"]')");
+  },'REAL_V625_SETTINGS_NAV');
+  // Click the real active-shell tab, not the deprecated index.html settings.
+  const tabClicked=await cdp.eval("(()=>{const tab=document.querySelector('#v625SettingsTabs [data-settings-tab=\"interface\"]');if(!tab)return false;tab.click();return true})()");
+  assert.equal(tabClicked,true,'actual V625 settings interface tab must be clickable');
   const info=await waitFor(async()=>{
     const data=await cdp.eval("(()=>({path:location.pathname,panel:document.getElementById('v788WhppEvidencePanel')?.hidden,button:document.getElementById('v788WhppEvidenceStart')?.disabled,title:document.getElementById('v788WhppEvidenceStart')?.textContent,info:document.getElementById('v788WhppEvidenceText')?.textContent||''}))()");
     lastUi=data;
