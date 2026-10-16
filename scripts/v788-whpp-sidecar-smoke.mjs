@@ -14,6 +14,11 @@ assert.match(server,/productionDatabaseModified:false/);
 assert.match(server,/import fsSync from 'node:fs'/);
 assert.match(server,/fsSync\.readFileSync\(v788StageReport,'utf8'\)/);
 assert.match(server,/businessStateUpdated:false/);
+assert.match(server,/new V788ReadOnlyDatabaseSync\(v788SidecarFile,\{readOnly:true\}\)/);
+assert.match(server,/verifyV788PersistedSidecar\(checkDb,String\(data\?\.sourceSignature\|\|''\)\)/);
+assert.match(server,/sidecarVerified:checked.verified===true/);
+assert.match(ui,/data.sidecarVerified===true/);
+
 assert.match(server,/distributionMatchesV3:data\?\.coverage\?\.distributionMatchesV3===true/);
 assert.match(server,/evidenceConflicts:Number\(data\?\.coverage\?\.conflictingExistingStates\|\|0\)/);
 const stageSource=fs.readFileSync('scripts/v788-whpp-stage-tms-evidence.mjs','utf8');
@@ -55,7 +60,7 @@ assert.match(ui,/继续安全核验（保留已有批次）/);
 
 
 import {DatabaseSync} from 'node:sqlite';
-import {strictWhppTmsBatch,initV788Sidecar,stageV788Batch,inspectV788Sidecar,v788SourceSignature}
+import {strictWhppTmsBatch,initV788Sidecar,stageV788Batch,inspectV788Sidecar,v788SourceSignature,verifyV788PersistedSidecar}
   from './v788-whpp-tms-evidence-sidecar.mjs';
 import {runV788Stage} from './v788-whpp-stage-tms-evidence.mjs';
 
@@ -116,12 +121,20 @@ try{
   assert.equal(audit.byDate['2026-07-02'].s81,32);
   assert.equal(audit.distributionMatchesV3,true);
   assert.equal(audit.complete,true);
+  assert.equal(verifyV788PersistedSidecar(db,sig).verified,true,
+    'actual SQLite evidence proves all 346 terminal statuses and 8 batches');
+  assert.equal(verifyV788PersistedSidecar(db,'f'.repeat(64)).verified,false,
+    'a stale JSON report signature must not certify a different sidecar');
+
   // The reported terminal totals are an independent hard gate, not merely
   // 346 rows with any status or a green batch counter.
   db.prepare('UPDATE v788_tms_evidence SET shipmentStatus=? WHERE reportDate=? AND shipmentCode=?').run('81','2026-07-01',all[0].codes[0]);
   const drift=inspectV788Sidecar(db,all);
   assert.equal(drift.distributionMatchesV3,false);
   assert.equal(drift.complete,false);
+  assert.equal(verifyV788PersistedSidecar(db,sig).verified,false,
+    'a green JSON report must not hide a manually corrupted SQLite terminal state');
+
   db.prepare('UPDATE v788_tms_evidence SET shipmentStatus=? WHERE reportDate=? AND shipmentCode=?').run('60','2026-07-01',all[0].codes[0]);
   assert.equal(inspectV788Sidecar(db,all).complete,true);
   assert.throws(()=>stageV788Batch(db,{date:'2026-07-01',index:0,
