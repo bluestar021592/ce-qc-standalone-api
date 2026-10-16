@@ -2261,6 +2261,17 @@ function v788StagePublicStatus(){
             const checked=verifyV788PersistedSidecar(checkDb,actualSourceSignature);
             saved.sidecarVerified=checked.verified===true;
             saved.sidecarCheck=checked.reason;
+            // Only disclose aggregate day-by-day statuses after both the
+            // original D: source and the proof ledger are independently read.
+            // Do not leak shipment codes or claim POD-time/ledger readiness.
+            if(checked.verified===true)saved.statusOnlyPreview={
+              source:'INDEPENDENT_ISOLATED_SQLITE',
+              dates:Object.entries(checked.byDate||{}).map(([date,v])=>({
+                date,total:Number(v.s60||0)+Number(v.s81||0),
+                pod:Number(v.s60||0),returned:Number(v.s81||0)
+              })),
+              signingTimeAccepted:false,ledgerAccepted:false,exportAccepted:false
+            };
           }finally{checkDb.close()}
         }
       }catch{
