@@ -312,6 +312,24 @@ try{
     assert.equal(contradiction.ready,false,'reverse terminal conflict must never be auto-closed');
     assert.equal(contradiction.currentOppositeTerminal,1);
     assert.equal(contradiction.reason,'RECONCILIATION_REQUIRES_MANUAL_REVIEW');
+    // A stale RETURNING state is the opposite of a confirmed POD/returned
+    // terminal event, not a harmless OPEN record eligible for auto-sync.
+    compareDb.exec('PRAGMA query_only=OFF');
+    compareDb.prepare("UPDATE shipment_current_state SET state='RETURN_IN_PROGRESS' WHERE shipmentCode='J0000'").run();
+    compareDb.exec('PRAGMA query_only=ON');
+    const returningVsPod=previewV788WhppLedgerReconciliation(compareDb,db,sig);
+    assert.equal(returningVsPod.ready,false);
+    assert.equal(returningVsPod.currentOppositeTerminal,1,
+      'TMS 60 vs RETURN_IN_PROGRESS must block closure');
+    compareDb.exec('PRAGMA query_only=OFF');
+    compareDb.prepare("UPDATE shipment_current_state SET state='RETURNING' WHERE shipmentCode='J0189'").run();
+    compareDb.prepare("UPDATE shipment_current_state SET state='OPEN' WHERE shipmentCode='J0000'").run();
+    compareDb.exec('PRAGMA query_only=ON');
+    const returningVsReturned=previewV788WhppLedgerReconciliation(compareDb,db,sig);
+    assert.equal(returningVsReturned.ready,false);
+    assert.equal(returningVsReturned.currentOppositeTerminal,1,
+      'TMS 81 vs RETURNING must block closure');
+
   }finally{compareDb.close()}
 
   // Generate a REAL XLSX using the production exporter, reopen and compare
