@@ -13,7 +13,7 @@ const ROLE_LEVEL = Object.freeze({ VIEWER: 1, OPERATOR: 2, ADMIN: 3 });
 const LOGIN_LIMIT = 5;
 const SESSION_HOURS = 8;
 const SESSION_REFRESH_THRESHOLD_MS = 2 * 60 * 60_000;
-const LOCAL_AUTH_COOKIE = 'ce_qc_local_auth_v431';
+const LOCAL_AUTH_COOKIE = process.env.CE_QC_V788_PILOT_ISOLATED==='1' ? 'ce_qc_local_auth_v788_pilot' : 'ce_qc_local_auth_v431';
 const AUTH_SIDECAR_PORT = Math.max(1024, Math.min(65535, Number(process.env.CE_QC_AUTH_SIDECAR_PORT || 5179)));
 const PURGE_STATUS_PATH=/^\/purge-status\/[a-f0-9]{48}\.json$/i;
 const PURGE_PREPARE_AUDITS=new Set(['DATA_PURGE_REQUESTED','DATA_PURGE_BACKUP_VERIFIED']);
