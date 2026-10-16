@@ -50,7 +50,9 @@ assert.ok(accountingEnd>classifierEnd);
 const t80={shipmentCode:'TEST80',shipmentStatus:'80',currentState:'RETURN_IN_PROGRESS'};
 const t60={shipmentCode:'TEST60',shipmentStatus:'60',currentState:'POD',是否POD:'是'};
 const t81={shipmentCode:'TEST81',shipmentStatus:'81',currentState:'RETURNED',退回状态:'已退回'};
-const detailed=vm.runInNewContext(source.slice(classifierStart,accountingEnd)+`\n({
+const accountingStart=source.indexOf('function detailCode(');
+assert.ok(accountingStart>=0&&accountingStart<classifierStart);
+const detailed=vm.runInNewContext(source.slice(accountingStart,accountingEnd)+`\n({
   whpp:buildWhppCanonicalAccounting(whppState,{total:3}),
   shopee:buildBusinessAccounting({finalRows:[t80,t60,t81]},{total:3})
 });`,{
