@@ -22,6 +22,14 @@ assert.match(launcher,/CE_QC_AUTH_SIDECAR_PORT='5280'/);
 assert.match(launcher,/CE_QC_AUTH_SIDECAR_HOST='127.0.0.1'/);
 assert.match(launcher,/CE_QC_EXPORT_SIDECAR_PORT='5281'/);
 assert.match(launcher,/CE_QC_V788_PILOT_ISOLATED='1'/);
+assert.match(launcher,/\$env:CE_QC_LOCAL_SESSION_SECRET=\[Convert\]::ToBase64String\(\$PilotSecretBytes\)/,
+  'isolated main process and sidecar must inherit the same ephemeral auth signing secret');
+assert.match(launcher,/CE_QC_V788_PILOT_ISOLATED','CE_QC_LOCAL_SESSION_SECRET'/,
+  'the pilot must restore any prior session-secret environment on exit');
+assert.match(launcher,/RandomNumberGenerator\]::Create\(\)/,
+  'pilot signing secret must be CSPRNG-derived rather than a shared production secret');
+assert.doesNotMatch(launcher,/Write-Host[^\n]*CE_QC_LOCAL_SESSION_SECRET|Write-Host[^\n]*PilotSecretBytes/i,
+  'never print pilot signing material to console');
 assert.match(launcher,/CE_QC_V788_PILOT_CI_NO_BROWSER/);
 const authController=fs.readFileSync('src/accessControl.js','utf8');
 const authChild=fs.readFileSync('src/localAuthSidecar.js','utf8');
