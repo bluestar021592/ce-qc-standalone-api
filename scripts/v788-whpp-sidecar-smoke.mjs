@@ -15,6 +15,10 @@ assert.match(server,/import fsSync from 'node:fs'/);
 assert.match(server,/fsSync\.readFileSync\(v788StageReport,'utf8'\)/);
 assert.match(server,/businessStateUpdated:false/);
 assert.match(server,/new V788ReadOnlyDatabaseSync\(v788SidecarFile,\{readOnly:true\}\)/);
+assert.match(server,/new V788ReadOnlyDatabaseSync\(v788SourceCopy,\{readOnly:true\}\)/);
+assert.match(server,/v788ReadSourceMembershipSignature\(srcDb\)/);
+assert.match(server,/actualSourceSignature!==reportSignature/);
+
 assert.match(server,/verifyV788PersistedSidecar\(checkDb,String\(data\?\.sourceSignature\|\|''\)\)/);
 assert.match(server,/saved\.sidecarVerified=checked\.verified===true/);
 assert.match(ui,/data.sidecarVerified===true/);
@@ -60,7 +64,7 @@ assert.match(ui,/继续安全核验（保留已有批次）/);
 
 
 import {DatabaseSync} from 'node:sqlite';
-import {strictWhppTmsBatch,initV788Sidecar,stageV788Batch,inspectV788Sidecar,v788SourceSignature,verifyV788PersistedSidecar}
+import {strictWhppTmsBatch,initV788Sidecar,stageV788Batch,inspectV788Sidecar,v788SourceSignature,verifyV788PersistedSidecar,v788ReadSourceMembershipSignature}
   from './v788-whpp-tms-evidence-sidecar.mjs';
 import {runV788Stage} from './v788-whpp-stage-tms-evidence.mjs';
 
@@ -95,6 +99,20 @@ try{
     for(let i=0;i<day.codes.length;i++)day.states.set(day.codes[i],i<(day.date==='2026-07-01'?166:124)?'POD':'RETURNED');
   }
   const sig=v788SourceSignature(all);
+  // A separate original-source read must independently reproduce the
+  // fingerprint; a perfectly shaped sidecar cannot validate itself.
+  const sourceDb=new DatabaseSync(':memory:');
+  try{
+    sourceDb.exec("CREATE TABLE business_daily_parse_rows(businessType TEXT,reportDate TEXT,shipmentCode TEXT)");
+    const write=sourceDb.prepare("INSERT INTO business_daily_parse_rows(businessType,reportDate,shipmentCode) VALUES('WHPP',?,?)");
+    for(const day of all)for(const code of day.codes)write.run(day.date,code);
+    assert.equal(v788ReadSourceMembershipSignature(sourceDb),sig);
+    // Same member COUNT but different member ID must fail source equality.
+    sourceDb.prepare("UPDATE business_daily_parse_rows SET shipmentCode='ALTERED_CODE' WHERE reportDate='2026-07-01' AND shipmentCode=?").run(all[0].codes[0]);
+    assert.notEqual(v788ReadSourceMembershipSignature(sourceDb),sig);
+    sourceDb.prepare("DELETE FROM business_daily_parse_rows WHERE reportDate='2026-07-02' AND shipmentCode=?").run(all[1].codes[0]);
+    assert.throws(()=>v788ReadSourceMembershipSignature(sourceDb),/V788_ISOLATED_SOURCE_MEMBERSHIP_CHANGED/);
+  }finally{sourceDb.close()}
   initV788Sidecar(db,sig);
   assert.throws(()=>initV788Sidecar(db,'a'.repeat(64)),/IDENTITY_MISMATCH/);
   let done=0;
