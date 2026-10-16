@@ -6,7 +6,7 @@ assert.ok(source.includes('returned:m.returned||0'),'business view must pass ret
 assert.ok(source.includes('otherNormal:exactCounts.otherNormal,unprocessed:exactCounts.unprocessed'),'unverified members must not be described as other normal states');
 assert.ok(source.includes('exactSum===Number(m.total||0)'),'only complete disjoint accounting can drive risk category slices');
 assert.ok(source.includes('pending:0,abnormal:0,otherNormal:0'),'compact first paint must not invent overlapping Pending or abnormal status');
-assert.ok(source.includes('if(verifiedAccounting)renderDonut('),'verified exact-member data must supersede provisional state');
+assert.ok(source.includes('if(verifiedAccounting){'),'verified exact-member data must supersede provisional state');
 assert.ok(source.includes("const disjointKinds=['delivery','pod','returned','returning'"),'exact-member state accounting must isolate status 80');
 assert.ok(source.includes('returning:exactCounts.returning'),'status 80 must reach the verified chart');
 assert.ok(source.includes("setText('kpiPodRate',Number(m.total)>0?"),'zero denominator must not show fabricated POD 0%');
@@ -79,6 +79,27 @@ for(const kind of ['whpp','shopee']){
   assert.equal(state.accounted,4,kind+' status categories must conserve 4 waybills');
   assert.equal(state.difference,0);
 }
+const kpiStart=source.indexOf('function applyVerifiedBusinessKpis(');
+const kpiEnd=source.indexOf('\nlet v628BusinessMetricState',kpiStart);
+assert.ok(kpiStart>=0&&kpiEnd>kpiStart);
+function verifiedKpis(type,counts,total){
+  const values={};
+  const okay=vm.runInNewContext(source.slice(kpiStart,kpiEnd)+'\napplyVerifiedBusinessKpis(counts,total,type);',{
+    counts,total,type,
+    setText:(name,value)=>{values[name]=value},
+    fmt:value=>String(value),pct:value=>value.toFixed(2)+'%'
+  },{timeout:1000});
+  return{okay,values};
+}
+const exactCard=verifiedKpis('SHOPEEVN',{pod:6,returned:2,returning:1,delivery:1,pending:0,abnormal:0,otherNormal:0,unprocessed:0},10);
+assert.equal(exactCard.okay,true);
+assert.equal(exactCard.values.kpiPodRate,'60.00%');
+assert.equal(exactCard.values.kpiReturnRate,'20.00%');
+assert.equal(exactCard.values.kpiReturned,'2');
+assert.equal(verifiedKpis('SHOPEEVN',{pod:6,returned:2,returning:1,delivery:2},10).okay,false,'partial or inconsistent status buckets must not change displayed KPIs');
+assert.equal(verifiedKpis('SHOPEEVN',{pod:0},0).okay,false,'zero denominator must never generate percentages');
+const ceCard=verifiedKpis('CE',{pod:6,returned:0,returning:0,delivery:4,pending:0,abnormal:0,otherNormal:0,unprocessed:0},10);
+assert.ok(!Object.hasOwn(ceCard.values,'kpiReturnRate'),'CE return rate remains out of scope');
 const ce=run('CE',{total:10,pod:8,returned:0,delivery:2,pending:0,abnormal:0,otherNormal:0});
 assert.doesNotMatch(ce.v625BusinessLegend.innerHTML,/已退回/);
 // Cover every business board, not just WHPP, with mutually exclusive sample states.
