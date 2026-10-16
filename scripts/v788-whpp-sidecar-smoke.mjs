@@ -93,6 +93,17 @@ assert.match(activeJs,/data\.ledgerReconciliation/,
   'V625 must display aggregate ledger differences instead of requiring manual commands');
 assert.match(activeJs,/尚未修改历史账本或正式数据库/,
   'preview must never claim the ledger has been repaired');
+assert.match(activeJs,/历史账本待核验：状态表缺失或重复/,
+  'blocked ledger preview must explain current-state missing/duplicate evidence');
+assert.match(activeJs,/账本缺失或重复/,
+  'blocked preview must explain historical ledger missing/duplicate evidence');
+assert.match(activeJs,/相反终态/,
+  'blocked preview must label opposite TMS terminal conflicts');
+assert.match(activeJs,/差异次数，并非去重运单票数/,
+  'state and ledger differences must never be mistaken for unique shipments');
+assert.match(activeJs,/ISOLATED_LEDGER_PREVIEW_UNAVAILABLE/,
+  'missing source ledger table must be reported as unavailable, not zero problems');
+
 
 assert.match(server,/saved\.independentPodTimeEvidenceChecked=true/,
   'read-only status panel may display independent POD time count only after signed SQLite proof verification');
