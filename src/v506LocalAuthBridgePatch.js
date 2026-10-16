@@ -10,7 +10,7 @@ export const V506_LOCAL_AUTH_BRIDGE_ID = '2026-09-13-v506-same-origin-auth-bridg
 export const V549_LOCAL_AUTH_TIMEOUT_ID = '2026-09-16-v549-local-auth-timeout-v2';
 const AUTH_PORT = Math.max(1024, Math.min(65535, Number(process.env.CE_QC_AUTH_SIDECAR_PORT || 5179)));
 const APP_PORT = Math.max(1024, Math.min(65535, Number(process.env.PORT || 5177)));
-const AUTH_COOKIE = 'ce_qc_local_auth_v431';
+const AUTH_COOKIE = process.env.CE_QC_V788_PILOT_ISOLATED==='1' ? 'ce_qc_local_auth_v788_pilot' : 'ce_qc_local_auth_v431';
 const REQUEST_TIMEOUT_MS = Math.max(5000, Math.min(45000, Number(process.env.CE_QC_AUTH_BRIDGE_TIMEOUT_MS || 25000)));
 const FRONTEND_TIMEOUT_MS = Math.min(60000, REQUEST_TIMEOUT_MS + 10000);
 const MAX_RESPONSE_BYTES = 128 * 1024;
@@ -264,8 +264,8 @@ export function rewriteV506LoginHtml(body) {
   return body
     .replace(directEndpoint, '/api/local-auth-proxy/login')
     .replace('},8000);fetch(', `},${FRONTEND_TIMEOUT_MS});fetch(`)
-    .replace(/登录认证8秒内未完成，独立认证服务没有响应。/g, `登录请求等待${Math.round(FRONTEND_TIMEOUT_MS / 1000)}秒仍未完成，请重试；若持续发生请检查5177→5179本地认证链路。`)
-    .replace(/独立登录通道\s+\d+，不占用质控主数据库写入锁。/g, '独立认证服务通过当前5177页面安全转发；后端负责认证超时判定。');
+    .replace(/登录认证8秒内未完成，独立认证服务没有响应。/g, `登录请求等待${Math.round(FRONTEND_TIMEOUT_MS / 1000)}秒仍未完成，请重试；若持续发生请检查${APP_PORT}→${AUTH_PORT}本地认证链路。`)
+    .replace(/独立登录通道\s+\d+，不占用质控主数据库写入锁。/g, `独立认证服务通过当前${APP_PORT}页面安全转发；后端负责认证超时判定。`);
 }
 export function v506LocalAuthBridgeMiddleware(req, res, next) {
   if (req.method === 'POST' && req.path === '/api/local-auth-proxy/login') return void proxyLogin(req, res);
