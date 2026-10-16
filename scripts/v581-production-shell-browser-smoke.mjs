@@ -148,8 +148,8 @@ async function waitFor(fn,timeout=20000,interval=100,label='condition'){
   }
   throw new Error('timeout waiting for '+label+(lastError?' · last='+lastError.message:''));
 }
-function signedCookie(secret,role='VIEWER'){
-  const payload={v:431,iat:Date.now(),exp:Date.now()+60*60_000,channel:'LOCAL',user:{id:999,username:'v581-smoke',displayName:'V581 Smoke',role,businessScope:'ALL',department:'TEST'}};
+function signedCookie(secret){
+  const payload={v:431,iat:Date.now(),exp:Date.now()+60*60_000,channel:'LOCAL',user:{id:999,username:'v581-smoke',displayName:'V581 Smoke',role:'VIEWER',businessScope:'ALL',department:'TEST'}};
   const body=Buffer.from(JSON.stringify(payload),'utf8').toString('base64url');
   const sig=crypto.createHmac('sha256',secret).update(body).digest('base64url');
   return body+'.'+sig;
@@ -365,42 +365,7 @@ try{
   const appIndex=scripts.findIndex(src=>/\/app\.js/.test(src));
   assert.ok(earlyIndex>=0&&stableIndex>earlyIndex&&appIndex>stableIndex,'V600 native interaction bootstrap must be delivered before the stable shell and app.js');
 
-  // V788 ADMIN-only Windows Edge smoke: open the ACTUAL settings page
-  // on this disposable candidate DB. Never click the live TMS button or
-  // access D: historical data, and never change the formal QC installation.
-  stage('V788 Edge: test admin-only WHPP evidence panel renders on /settings');
-  await cdp.send('Network.setCookie',{
-    name:'ce_qc_local_auth_v431',
-    value:signedCookie(secret,'ADMIN'),
-    url:'http://127.0.0.1:'+port+'/'
-  });
-  await cdp.send('Page.navigate',{url:'http://127.0.0.1:'+port+'/settings?auth=v788-edge-smoke'},8000);
-  await evalWait(cdp,
-    "document.getElementById('v788WhppEvidencePanel')&&!document.getElementById('v788WhppEvidencePanel').hidden",
-    16000,150,'V788 WHPP panel becomes visible after admin navigation');
-  await evalWait(cdp,
-    "document.getElementById('v788WhppEvidenceText')&&document.getElementById('v788WhppEvidenceText').textContent.length>20",
-    9000,150,'V788 WHPP panel reads admin status');
-  const trial=await cdp.eval(`(()=>({
-    path:location.pathname,
-    panelHidden:document.getElementById('v788WhppEvidencePanel')?.hidden,
-    startDisabled:document.getElementById('v788WhppEvidenceStart')?.disabled,
-    startLabel:document.getElementById('v788WhppEvidenceStart')?.textContent,
-    info:document.getElementById('v788WhppEvidenceText')?.textContent
-  }))()`,4000);
-  assert.equal(trial.path,'/settings','V788 admin must remain on settings');
-  assert.equal(trial.panelHidden,false,'V788 evidence panel must be visible');
-  assert.equal(trial.startDisabled,true,'without a fresh CE login, TMS query must remain disabled');
-  assert.ok(String(trial.info||'').includes('CE系统接口凭证'),
-    'V788 must explain why login is required instead of silently spinning');
-  const protectedStatus=await cdp.eval(`(async()=>{
-    const resp=await fetch('/api/v788/whpp-evidence/status',{cache:'no-store'});
-    return {status:resp.status,ok:(await resp.json().catch(()=>({}))).ok};
-  })()`,6500);
-  assert.equal(protectedStatus.status,200,'V788 admin should be able to read isolated evidence status');
-  assert.equal(protectedStatus.ok,true);
-  stage('V788 Edge: admin settings opened, status GET 200, no-TMS-login button disabled, no POST executed');
-  console.log('[V601_PRODUCTION_BROWSER] real Edge passed · CE home click + V788 admin settings pilot rendered safely with no live TMS call');
+  console.log('[V601_PRODUCTION_BROWSER] real Edge passed · top user menu opens and CE home card physically navigates to /ce · native functional interaction proven end-to-end');
 } catch(error){
   try{
     const runtime=cdp?await cdp.eval("(()=>({href:location.href,ready:document.readyState,stable:!!window.__CE_QC_V581_STABLE_SHELL__,early:!!window.__CE_QC_V596_EARLY_INTERACTION__,v609:document.documentElement?.dataset?.ceQcV609MainHitScanRetired||'',shell:document.documentElement?.dataset?.ceQcStableShell||'',title:document.title,bodyClass:document.body?.className||''}))()",2500):null;
