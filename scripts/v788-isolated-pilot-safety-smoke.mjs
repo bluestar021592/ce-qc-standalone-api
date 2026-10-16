@@ -31,6 +31,16 @@ assert.match(launcher,/RandomNumberGenerator\]::Create\(\)/,
 assert.doesNotMatch(launcher,/Write-Host[^\n]*CE_QC_LOCAL_SESSION_SECRET|Write-Host[^\n]*PilotSecretBytes/i,
   'never print pilot signing material to console');
 assert.match(launcher,/CE_QC_V788_PILOT_CI_NO_BROWSER/);
+assert.match(launcher,/node scripts\\/v788-pilot-login-session-smoke\\.mjs/,
+  'real Windows pilot must verify its 5278 login and 5280 auth binding before PASS');
+const loginProof=fs.readFileSync('scripts/v788-pilot-login-session-smoke.mjs','utf8');
+assert.match(loginProof,/GITHUB_ACTIONS/);
+assert.match(loginProof,/CE_QC_V788_PILOT_ISOLATED/);
+assert.match(loginProof,/CE_QC_V788_试用沙盒/);
+assert.match(loginProof,/api\\/local-auth-proxy\\/login/);
+assert.match(loginProof,/api\\/session/);
+assert.match(loginProof,/DELETE FROM users WHERE username=/);
+
 const authController=fs.readFileSync('src/accessControl.js','utf8');
 const authChild=fs.readFileSync('src/localAuthSidecar.js','utf8');
 assert.match(authController,/CE_QC_V788_PILOT_ISOLATED==='1' \? 'ce_qc_local_auth_v788_pilot' : 'ce_qc_local_auth_v431'/);
