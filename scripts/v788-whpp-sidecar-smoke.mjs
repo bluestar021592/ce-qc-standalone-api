@@ -424,4 +424,11 @@ try{
     assert.equal(db2.prepare('SELECT COUNT(*) n FROM v788_batch_commits').get().n,0);
   }finally{db2.close()}
 }finally{db.close()}
+const xlsxReadbackSource=fs.readFileSync('scripts/v788-existing-whpp-xlsx-readback.mjs','utf8');
+assert.match(xlsxReadbackSource,/duplicatedPodAndReturnedMembers:overlap/,
+  'same dated waybill must not belong to both XLSX POD and returned detail sheets');
+assert.match(xlsxReadbackSource,/podOutsideAllDetail:orphanPod/,
+  'orphan POD rows must block XLSX before strict TMS is available');
+assert.match(xlsxReadbackSource,/returnedOutsideAllDetail:orphanReturned/,
+  'orphan returned rows must block XLSX before strict TMS is available');
 console.log('[V788] sidecar: 346 exact members, 8 batches, replay-safe, status/time provenance, no source SQLite writes');
