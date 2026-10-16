@@ -121,6 +121,11 @@ export async function runV788Stage({execute=false}={}){
         const committed=ledger.prepare('SELECT requested FROM v788_batch_commits WHERE reportDate=? AND batchIndex=?').get(source.date,index);
         if(committed){
           if(committed.requested!==codes.length)throw Error('V788_SIDECAR_BATCH_SIZE_MISMATCH');
+          // A batch is reusable only when EVERY exact requested member is
+          // still present in the sidecar. Never silently skip a corrupt batch.
+          const saved=ledger.prepare('SELECT shipmentCode FROM v788_tms_evidence WHERE reportDate=? AND shipmentCode=?');
+          if(codes.some(code=>!saved.get(source.date,code)))
+            throw Error('V788_SIDECAR_BATCH_MEMBERS_MISSING');
           report.batches.push({date:source.date,index,requested:codes.length,result:'REUSED'});
           continue;
         }
@@ -139,7 +144,12 @@ export async function runV788Stage({execute=false}={}){
         }
         report.coverage=inspectV788Sidecar(ledger,sources);
         report.isolatedCopyUnchanged=before===identity();
+        if(!report.isolatedCopyUnchanged){
+          failure='V788_ISOLATED_SOURCE_CHANGED_DURING_READ';
+          report.batches[report.batches.length-1].sourceChanged=true;
+        }
         saveReport(report);
+        if(failure)break;
         await new Promise(resolve=>setTimeout(resolve,400));
       }
       if(failure)break;
