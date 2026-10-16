@@ -41,6 +41,18 @@ assert.match(ui,/!isCeApiSessionUsable\(ceAuth\)/);
 assert.match(ui,/const needsReview=allBatchesPresent&&!isFull/);
 assert.match(ui,/needsReview\|\|!isCeApiSessionUsable\(ceAuth\)/);
 assert.match(ui,/需复核，禁止重复查询/);
+assert.match(server,/lastStatus==='RUNNING'\?'INTERRUPTED_RETRYABLE'/,
+  'a stale last-batch RUNNING report must be resumable after a process restart');
+assert.match(server,/lastStatus==='STOPPED_RETRYABLE'\?'STOPPED_RETRYABLE'/,
+  'a persisted stop must not be lost at APP restart');
+assert.match(server,/resumeAvailable/,
+  'the APP exposes only resumable state, not raw TMS payload');
+assert.match(ui,/const restartFinalize=allBatchesPresent&&data.status==='INTERRUPTED_RETRYABLE'/,
+  'eight committed batches with interrupted final report must not be treated as contradictory');
+assert.match(ui,/const needsReview=allBatchesPresent&&!isFull&&!restartFinalize/,
+  'genuine inconsistent full evidence must still block the action');
+assert.match(ui,/继续安全核验（保留已有批次）/);
+
 
 import {DatabaseSync} from 'node:sqlite';
 import {strictWhppTmsBatch,initV788Sidecar,stageV788Batch,inspectV788Sidecar,v788SourceSignature}
