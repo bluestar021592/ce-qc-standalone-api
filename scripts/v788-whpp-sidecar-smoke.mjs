@@ -25,6 +25,9 @@ assert.doesNotMatch(stageSource,/refreshTokenIfNeeded\(/);
 assert.doesNotMatch(stageSource,/client\.shipmentTrack\(/);
 assert.doesNotMatch(stageSource,/['"]x-refresh-token['"]\s*\]/);
 assert.match(stageSource,/V788_TMS_TOKEN_SOURCE_MISMATCH/);
+assert.match(stageSource,/V788_ISOLATED_SOURCE_CHANGED_DURING_READ/);
+assert.match(stageSource,/if\(failure\)break;/);
+assert.match(stageSource,/V788_SIDECAR_BATCH_MEMBERS_MISSING/);
 
 assert.match(html,/id="v788WhppEvidencePanel"/);
 assert.match(html,/id="v788WhppEvidenceStart"/);
