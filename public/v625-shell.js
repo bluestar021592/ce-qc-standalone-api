@@ -2525,6 +2525,13 @@ async function loadV788WhppEvidenceV625(){
       for(const d of data.statusOnlyPreview?.dates||[])
         if(['2026-07-01','2026-07-02'].includes(d.date))
           lines.push(d.date+'：'+Number(d.total||0)+'票，POD '+Number(d.pod||0)+'票，已退回 '+Number(d.returned||0)+'票。');
+      // This count comes from a second read of the independent SQLite
+      // evidence, not the editable JSON progress report.
+      if(data.independentPodTimeEvidenceChecked===true){
+        lines.push('独立TMS明确签收时间：'+Number(data.independentTrustedPodTimeCount||0)+
+          '/'+Number(data.pod||0)+'票；仍缺'+Number(data.independentMissingPodTimeCount||0)+
+          '票。该证据尚未写入正式签收时间账本。');
+      }
     }else if(running)lines.push('正在核验：已保存 '+covered+'/346票，'+batches+'/8批。');
     else if(needsReview)lines.push('346票证据已存在，但来源、状态或签名校验未通过；请复核，不允许重复查询。');
     else if(data.status==='FAILED')lines.push('核验失败：'+String(data.message||'请查看登录及隔离副本状态'));
