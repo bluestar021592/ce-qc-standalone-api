@@ -346,6 +346,29 @@ try{
     });
     assert.equal(markerError.status,'BLOCKED');
     assert.ok(markerError.issues.terminalMarkerMismatch>=1);
+    // A correct all-detail sheet cannot conceal a falsified marker in a
+    // separate POD/return sheet. Read back each actual XLSX tab.
+    const alteredPod=new ExcelJS.Workbook();
+    await alteredPod.xlsx.readFile(made.file);
+    alteredPod.getWorksheet('POD明细').getRow(2).getCell(4).value='R';
+    const podMarkerPath=path.join(xlsxTemp,'wrong-pod-tab-marker.xlsx');
+    await alteredPod.xlsx.writeFile(podMarkerPath);
+    const podMarkerError=await readV788ExistingWhppXlsx({
+      sourceDb:xlsxSource,proofDb:db,workbookPath:podMarkerPath
+    });
+    assert.equal(podMarkerError.status,'BLOCKED');
+    assert.ok(podMarkerError.issues.terminalMarkerMismatch>=1);
+
+    const alteredReturn=new ExcelJS.Workbook();
+    await alteredReturn.xlsx.readFile(made.file);
+    alteredReturn.getWorksheet('退回明细').getRow(2).getCell(4).value='Y';
+    const returnMarkerPath=path.join(xlsxTemp,'wrong-return-tab-marker.xlsx');
+    await alteredReturn.xlsx.writeFile(returnMarkerPath);
+    const returnMarkerError=await readV788ExistingWhppXlsx({
+      sourceDb:xlsxSource,proofDb:db,workbookPath:returnMarkerPath
+    });
+    assert.equal(returnMarkerError.status,'BLOCKED');
+    assert.ok(returnMarkerError.issues.terminalMarkerMismatch>=1);
     // Proof disappears: still check exact membership, but never certify
     // terminal status based solely on an untrusted workbook label.
     const missingProofDb=new DatabaseSync(':memory:');
