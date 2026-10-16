@@ -58,7 +58,7 @@ import { readSelectedDateBusinessSourceTruth } from './src/v783SevenBusinessSour
 import { diagnoseWhppDailyTimingSources } from './src/v745WhppTimingSourceDiagnostics.js';
 import { requestSelectedDateTimingRepair, inspectSelectedDateTimingRepair } from './src/selectedDateTimingEvidenceRepair.js';
 import { runV788Stage } from './scripts/v788-whpp-stage-tms-evidence.mjs';
-import {verifyV788PersistedSidecar} from './scripts/v788-whpp-tms-evidence-sidecar.mjs';
+import {verifyV788PersistedSidecar,v788ReadSourceMembershipSignature} from './scripts/v788-whpp-tms-evidence-sidecar.mjs';
 import { persistentSelectedDatePodTruth, persistentWhppCompletionTruth } from './src/selectedDatePersistentTruth.js';
 import { buildCanonicalBusinessAccounting } from './src/businessAccounting.js';
 import { buildDataIntegrityReport } from './src/dataIntegrity.js';
@@ -2225,6 +2225,15 @@ let v788StageActive=false;
 let v788StageResult={status:'NOT_STARTED',updatedAt:'',message:'尚未启动'};
 const v788StageReport=String.raw`D:\CE_QC_V788_验收副本\V788_WHPP_TMS_逐票证据验收.json`;
 const v788SidecarFile=String.raw`D:\CE_QC_V788_验收副本\V788_WHPP_TMS_逐票证据.sqlite`;
+const v788SourceCopy=String.raw`D:\CE_QC_V788_验收副本\ce_qc_monitor.db`;
+function v788IsRegularExactFile(file){
+  try{
+    const stat=fsSync.lstatSync(file);
+    return stat.isFile()&&!stat.isSymbolicLink()
+      &&path.win32.normalize(fsSync.realpathSync.native(file)).toLowerCase()
+        ===path.win32.normalize(file).toLowerCase();
+  }catch{return false}
+}
 function v788StagePublicStatus(){
   let saved={sidecarVerified:false,sidecarCheck:'NOT_CHECKED'};
   if(process.platform==='win32'){
@@ -2233,18 +2242,27 @@ function v788StagePublicStatus(){
       // Only inspect the exact expected regular sidecar. Refuse symlinks or
       // redirected copies, and never open or mutate the source QC SQLite.
       try{
-        if(!fsSync.lstatSync(v788SidecarFile).isFile()
-           ||fsSync.lstatSync(v788SidecarFile).isSymbolicLink()
-           ||path.win32.normalize(fsSync.realpathSync.native(v788SidecarFile)).toLowerCase()
-             !==path.win32.normalize(v788SidecarFile).toLowerCase())
-          throw Error('UNSAFE_SIDECAR');
-        const checkDb=new V788ReadOnlyDatabaseSync(v788SidecarFile,{readOnly:true});
+        if(!v788IsRegularExactFile(v788SidecarFile)||!v788IsRegularExactFile(v788SourceCopy))
+          throw Error('V788_SIDECAR_OR_SOURCE_UNSAFE');
+        let actualSourceSignature='';
+        const srcDb=new V788ReadOnlyDatabaseSync(v788SourceCopy,{readOnly:true});
         try{
-          checkDb.exec('PRAGMA query_only=ON');
-          const checked=verifyV788PersistedSidecar(checkDb,String(data?.sourceSignature||''));
-          saved.sidecarVerified=checked.verified===true;
-          saved.sidecarCheck=checked.reason;
-        }finally{checkDb.close()}
+          srcDb.exec('PRAGMA query_only=ON');
+          actualSourceSignature=v788ReadSourceMembershipSignature(srcDb);
+        }finally{srcDb.close()}
+        const reportSignature=String(data?.sourceSignature||'');
+        if(!actualSourceSignature||actualSourceSignature!==reportSignature){
+          saved.sidecarVerified=false;
+          saved.sidecarCheck='SOURCE_MEMBERSHIP_CHANGED';
+        }else{
+          const checkDb=new V788ReadOnlyDatabaseSync(v788SidecarFile,{readOnly:true});
+          try{
+            checkDb.exec('PRAGMA query_only=ON');
+            const checked=verifyV788PersistedSidecar(checkDb,actualSourceSignature);
+            saved.sidecarVerified=checked.verified===true;
+            saved.sidecarCheck=checked.reason;
+          }finally{checkDb.close()}
+        }
       }catch{
         saved.sidecarVerified=false;
         saved.sidecarCheck='SIDECAR_NOT_VERIFIABLE';
