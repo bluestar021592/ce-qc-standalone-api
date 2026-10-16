@@ -6,6 +6,12 @@ import {createHash} from 'node:crypto';
 import {explicitWhppTms60PodTime} from '../src/whppPodTimeEvidence.js';
 
 const DATE_COUNTS=Object.freeze({'2026-07-01':190,'2026-07-02':156});
+// V3 actual CE TMS readonly reconciliation, not a count inferred from labels.
+// A later change is a REVIEW condition, never silently accepted as the same history.
+const EXPECTED_TERMINAL=Object.freeze({
+  '2026-07-01':Object.freeze({s60:166,s81:24}),
+  '2026-07-02':Object.freeze({s60:124,s81:32})
+});
 const normalize=value=>String(value||'').trim().toUpperCase();
 const sha=value=>createHash('sha256').update(value).digest('hex');
 
@@ -84,6 +90,7 @@ export function inspectV788Sidecar(db,sources=[]){
   }
   const rows=db.prepare('SELECT reportDate,shipmentCode,shipmentStatus,explicitPodTime FROM v788_tms_evidence ORDER BY reportDate,shipmentCode').all();
   const statuses={s60:0,s80:0,s81:0,other:0};
+  const byDate=Object.fromEntries(Object.keys(DATE_COUNTS).map(date=>[date,{s60:0,s80:0,s81:0,other:0}]));
   let unexpected=0,conflicts=0,podWithTime=0;
   const seen=new Set();
   for(const r of rows){
@@ -91,16 +98,22 @@ export function inspectV788Sidecar(db,sources=[]){
     if(!expected.has(key)){unexpected++;continue}
     seen.add(key);
     const status=String(r.shipmentStatus||''),state=expected.get(key);
-    statuses[status==='60'?'s60':status==='80'?'s80':status==='81'?'s81':'other']++;
+    const category=status==='60'?'s60':status==='80'?'s80':status==='81'?'s81':'other';
+    statuses[category]++;
+    byDate[r.reportDate][category]++;
     if(status==='60'&&r.explicitPodTime)podWithTime++;
     if((status==='60'&&['RETURNED','RETURN_COMPLETED','RETURNING','RETURN_IN_PROGRESS'].includes(state))
       ||(status==='81'&&['POD','RETURNING','RETURN_IN_PROGRESS'].includes(state))
       ||(status==='80'&&['POD','RETURNED','RETURN_COMPLETED'].includes(state)))conflicts++;
   }
   const batches=db.prepare('SELECT COUNT(*) AS n FROM v788_batch_commits').get().n;
+  const distributionMatches=Object.entries(EXPECTED_TERMINAL).every(([date,n])=>
+    byDate[date].s60===n.s60&&byDate[date].s81===n.s81
+      &&byDate[date].s80===0&&byDate[date].other===0);
   return {expectedMembers:expected.size,persistedMembers:seen.size,missingMembers:expected.size-seen.size,
     unexpectedMembers:unexpected,conflictingExistingStates:conflicts,
-    podWithExplicitTime:podWithTime,statuses,completedBatches:batches,expectedBatches:8,
+    podWithExplicitTime:podWithTime,statuses,byDate,distributionMatchesV3:distributionMatches,
+    completedBatches:batches,expectedBatches:8,
     complete:batches===8&&seen.size===expected.size&&unexpected===0
-      &&conflicts===0&&statuses.other===0&&statuses.s80===0};
+      &&conflicts===0&&distributionMatches};
 }
