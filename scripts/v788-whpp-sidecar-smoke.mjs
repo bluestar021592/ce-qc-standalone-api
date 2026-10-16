@@ -14,6 +14,8 @@ assert.match(server,/productionDatabaseModified:false/);
 assert.match(server,/import fsSync from 'node:fs'/);
 assert.match(server,/fsSync\.readFileSync\(v788StageReport,'utf8'\)/);
 assert.match(server,/businessStateUpdated:false/);
+assert.match(server,/distributionMatchesV3:data\?\.coverage\?\.distributionMatchesV3===true/);
+assert.match(server,/evidenceConflicts:Number\(data\?\.coverage\?\.conflictingExistingStates\|\|0\)/);
 const stageSource=fs.readFileSync('scripts/v788-whpp-stage-tms-evidence.mjs','utf8');
 // The in-APP CE system login writes a configurable tokenFile. Reject V788
 // implementations that silently read an obsolete hardcoded D:\\ token path.
@@ -36,6 +38,9 @@ assert.match(ui,/function startV788WhppEvidence\(\)/);
 assert.match(ui,/function loadV788WhppEvidenceStatus\(\)/);
 assert.match(ui,/acknowledgeIsolatedQuery:true/);
 assert.match(ui,/!isCeApiSessionUsable\(ceAuth\)/);
+assert.match(ui,/const needsReview=allBatchesPresent&&!isFull/);
+assert.match(ui,/needsReview\|\|!isCeApiSessionUsable\(ceAuth\)/);
+assert.match(ui,/需复核，禁止重复查询/);
 
 import {DatabaseSync} from 'node:sqlite';
 import {strictWhppTmsBatch,initV788Sidecar,stageV788Batch,inspectV788Sidecar,v788SourceSignature}
