@@ -138,6 +138,78 @@ export function inspectV788Sidecar(db,sources=[]){
  * This only attests to saved terminal counts/source digest, not POD time,
  * ledger closure, or actual seven-business export acceptance.
  */
+/**
+ * Dry-run reconciliation of source-copy current/ledger vs independently
+ * verified TMS 60/81. Must receive TWO read-only SQLite handles.
+ * Never emits shipment identifiers, never mutates either database and never
+ * authorizes state/ledger writes or a formally complete Excel export.
+ */
+export function previewV788WhppLedgerReconciliation(sourceDb,proofDb,expectedSourceSignature=''){
+  const proof=verifyV788PersistedSidecar(proofDb,expectedSourceSignature);
+  if(!proof.verified)return {ready:false,reason:proof.reason,productionModified:false};
+  const independent=v788ReadSourceMembershipSignature(sourceDb);
+  if(independent!==expectedSourceSignature)return {
+    ready:false,reason:'SOURCE_SIGNATURE_MISMATCH',productionModified:false
+  };
+  const data=proofDb.prepare("SELECT reportDate,shipmentCode,shipmentStatus FROM v788_tms_evidence ORDER BY reportDate,shipmentCode").all();
+  const readCurrent=sourceDb.prepare("SELECT state,stateJson FROM shipment_current_state WHERE businessType='WHPP' AND reportDate=? AND shipmentCode=?");
+  const readLedger=sourceDb.prepare("SELECT trackingStatus,terminalReason FROM qc_tracking_ledger WHERE businessType='WHPP' AND shipmentCode=?");
+  const result={ready:false,sourceMembers:data.length,strictPOD:0,strictReturned:0,
+    currentNeedsPODSync:0,currentNeedsReturnedSync:0,
+    currentOppositeTerminal:0,currentMissingOrDuplicate:0,
+    ledgerNeedsPODSync:0,ledgerNeedsReturnedSync:0,
+    ledgerOppositeTerminal:0,ledgerMissingOrDuplicate:0,
+    productionModified:false,sourceCopyModified:false,
+    signingTimeAccepted:false,exportAccepted:false};
+  const seen=new Set();
+  for(const row of data){
+    const code=normalize(row.shipmentCode);
+    // Legacy ledger lacks reportDate: cross-date member collisions would make
+    // a single-row ledger match ambiguous. Stop rather than guess.
+    if(seen.has(code))return {ready:false,reason:'CROSS_DATE_LEDGER_AMBIGUOUS',productionModified:false};
+    seen.add(code);
+    const pod=row.shipmentStatus==='60';
+    if(pod)result.strictPOD++;
+    else if(row.shipmentStatus==='81')result.strictReturned++;
+    else return {ready:false,reason:'NONTERMINAL_TMS_MEMBER',productionModified:false};
+    const current=readCurrent.all(row.reportDate,code);
+    if(current.length!==1){result.currentMissingOrDuplicate++;}
+    else{
+      const found=current[0];
+      let raw={};
+      try{raw=JSON.parse(String(found.stateJson||'{}'))}catch{}
+      const state=String(found.state||raw.currentState||'').trim().toUpperCase();
+      if(pod){
+        if(['RETURNED','RETURN_COMPLETED'].includes(state))result.currentOppositeTerminal++;
+        else if(state!=='POD')result.currentNeedsPODSync++;
+      }else{
+        if(state==='POD')result.currentOppositeTerminal++;
+        else if(!['RETURNED','RETURN_COMPLETED'].includes(state))result.currentNeedsReturnedSync++;
+      }
+    }
+    const ledgers=readLedger.all(code);
+    if(ledgers.length!==1){result.ledgerMissingOrDuplicate++;continue}
+    const ledger=ledgers[0];
+    const state=String(ledger.trackingStatus||'').trim().toUpperCase();
+    const reason=String(ledger.terminalReason||'').trim().toUpperCase();
+    // Both terminal status AND terminal reason must be synchronized: a
+    // stale OPEN with POD-looking reason is still an OPEN ledger defect.
+    if(pod){
+      if(['RETURNED','RETURN_COMPLETED'].includes(reason))result.ledgerOppositeTerminal++;
+      else if(state!=='TERMINAL'||reason!=='POD')result.ledgerNeedsPODSync++;
+    }else{
+      if(reason==='POD')result.ledgerOppositeTerminal++;
+      else if(state!=='TERMINAL'||!['RETURNED','RETURN_COMPLETED'].includes(reason))result.ledgerNeedsReturnedSync++;
+    }
+  }
+  result.ready=result.sourceMembers===346
+    &&result.strictPOD===290&&result.strictReturned===56
+    &&result.currentOppositeTerminal===0&&result.ledgerOppositeTerminal===0
+    &&result.currentMissingOrDuplicate===0&&result.ledgerMissingOrDuplicate===0;
+  result.reason=result.ready?'READONLY_RECONCILIATION_PREVIEW_ONLY':'RECONCILIATION_REQUIRES_MANUAL_REVIEW';
+  return result;
+}
+
 export function verifyV788PersistedSidecar(db,expectedSourceSignature=''){
   const signature=db.prepare("SELECT value FROM v788_meta WHERE key='source_signature' LIMIT 1").get()?.value||'';
   if(!/^[a-f0-9]{64}$/.test(String(expectedSourceSignature||''))
