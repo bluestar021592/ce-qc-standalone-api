@@ -25,7 +25,7 @@ assert.match(ui,/WHPP历史状态只读预览可用/);
 assert.match(ui,/试用范围只限上述历史状态只读预览/);
 
 
-assert.match(server,/verifyV788PersistedSidecar\(checkDb,String\(data\?\.sourceSignature\|\|''\)\)/);
+assert.match(server,/verifyV788PersistedSidecar\(checkDb,actualSourceSignature\)/);
 assert.match(server,/saved\.sidecarVerified=checked\.verified===true/);
 assert.match(ui,/data.sidecarVerified===true/);
 
