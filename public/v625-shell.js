@@ -2402,6 +2402,74 @@ function renderReports(){
   }
 }
 
+// V788 isolated WHPP trial lives in the REAL V625 shell (not the legacy app.js).
+// It never auto-queries CE TMS. Only explicit ADMIN click may run a stage.
+let v788CeSessionReady=false;
+let v788EvidencePosting=false;
+let v788EvidenceTimer=null;
+async function loadV788WhppEvidenceV625(){
+  if(page!=='settings')return;
+  const panel=byId('v788WhppEvidencePanel'),info=byId('v788WhppEvidenceText');
+  const button=byId('v788WhppEvidenceStart');
+  if(!panel||!info||!button)return;
+  try{
+    const data=await json('/api/v788/whpp-evidence/status',13000);
+    panel.hidden=false;
+    const covered=Number(data.savedMembers||0),batches=Number(data.completedBatches||0);
+    const running=data.active===true||data.status==='RUNNING';
+    const allSaved=covered===346&&batches===8;
+    const full=allSaved&&data.savedStatus==='346_TMS_ROWS_STAGED_NOT_BUSINESS_ACCEPTED'
+      &&data.sidecarVerified===true&&data.isolatedCopyUnchanged===true
+      &&data.distributionMatchesV3===true&&Number(data.evidenceConflicts||0)===0;
+    const finalizeOffline=allSaved&&data.status==='INTERRUPTED_RETRYABLE';
+    const needsReview=allSaved&&!full&&!finalizeOffline;
+    const lines=[];
+    if(full){
+      lines.push('WHPP历史状态只读预览可用：346票，POD '+Number(data.pod||0)+'票，已退回 '+Number(data.returned||0)+'票。');
+      for(const d of data.statusOnlyPreview?.dates||[])
+        if(['2026-07-01','2026-07-02'].includes(d.date))
+          lines.push(d.date+'：'+Number(d.total||0)+'票，POD '+Number(d.pod||0)+'票，已退回 '+Number(d.returned||0)+'票。');
+    }else if(running)lines.push('正在核验：已保存 '+covered+'/346票，'+batches+'/8批。');
+    else if(needsReview)lines.push('346票证据已存在，但来源、状态或签名校验未通过；请复核，不允许重复查询。');
+    else if(data.status==='FAILED')lines.push('核验失败：'+String(data.message||'请查看登录及隔离副本状态'));
+    else if(data.resumeAvailable||finalizeOffline)lines.push('上次核验中断，已保存 '+covered+'/346票、'+batches+'/8批，允许安全续查。');
+    else lines.push('尚未保存完整346票逐票证据。已经完成的只读TMS汇总不需要重新上传。');
+    lines.push('本阶段只核验历史状态；签收时间、账本、正式导出尚未放行。');
+    const loginRequired=!v788CeSessionReady&&!finalizeOffline;
+    if(loginRequired&&!full&&!running)
+      lines.push('CE系统接口凭证未就绪，请先在上方登录CE系统。');
+    info.textContent=lines.join(' ');
+    button.disabled=running||v788EvidencePosting||full||needsReview||loginRequired
+      ||data.platformReady!==true;
+    button.textContent=running?'正在核验…':full?'346票状态已核实'
+      :needsReview?'需复核，禁止重复查询'
+      :(data.resumeAvailable||finalizeOffline)?'继续安全核验（保留已有批次）':'开始隔离核验（346票）';
+    if(v788EvidenceTimer){clearTimeout(v788EvidenceTimer);v788EvidenceTimer=null}
+    if(running&&page==='settings')
+      v788EvidenceTimer=setTimeout(()=>{void loadV788WhppEvidenceV625()},4000);
+  }catch(error){
+    if(Number(error?.status)===403){panel.hidden=true;return}
+    panel.hidden=false;
+    info.textContent='核验状态暂不可用：'+String(error?.message||'请稍后刷新')+'。没有发起TMS查询。';
+    button.disabled=true;
+  }
+}
+async function startV788WhppEvidenceV625(){
+  const button=byId('v788WhppEvidenceStart');
+  if(v788EvidencePosting||button?.disabled)return;
+  if(!confirm('仅查询V788隔离副本的346票，并在独立证据库留存逐票TMS状态。不会修改正式数据库、POD时间或历史账本。确认开始？'))return;
+  v788EvidencePosting=true;
+  button.disabled=true;
+  try{
+    await post('/api/v788/whpp-evidence/start',{acknowledgeIsolatedQuery:true},12000);
+    await loadV788WhppEvidenceV625();
+  }catch(error){
+    setText('v788WhppEvidenceText','任务未启动：'+String(error?.message||'请重新登录CE系统'));
+  }finally{
+    v788EvidencePosting=false;
+  }
+}
+
 async function loadSettings(){
   const [sessionR,ceR,stateR]=await Promise.allSettled([json('/api/session',7000),json('/api/ce-auth-status',7000),json('/api/state?compact=1',7000)]);
   if(sessionR.status==='fulfilled'){
@@ -2412,7 +2480,9 @@ async function loadSettings(){
   }
   if(ceR.status==='fulfilled'){
     const a=ceR.value.authStatus||{};
-    setText('v625CeStatus',a.loggedIn&&!a.expired?'已连接':'未连接');
+    v788CeSessionReady=Boolean(a.loggedIn&&a.hasAccessToken&&!a.expired
+      &&Number(a.expiresInSeconds||0)>120);
+    setText('v625CeStatus',v788CeSessionReady?'已连接':'未连接');
     if(a.tenantId)byId('v625CeTenant').value=a.tenantId;
     if(a.account)byId('v625CeUser').value=a.account;
     note('v625CeMessage',a.loggedIn?'CE账号 '+(a.account||'—')+' 已连接':'CE系统当前未登录。',a.loggedIn?'success':'');
@@ -2433,7 +2503,7 @@ function switchSettingsTab(name){
   qa('#v625SettingsTabs [data-settings-tab]').forEach(btn=>btn.classList.toggle('active',btn.dataset.settingsTab===name));
   qa('[data-settings-panel]').forEach(panel=>panel.hidden=panel.dataset.settingsPanel!==name);
   if(name==='accounts')void loadSettingsUsers();
-  if(name==='interface')void loadSettings();
+  if(name==='interface')void loadSettings().then(()=>loadV788WhppEvidenceV625());
   if(name==='maintenance')void loadSettingsBackups();
 }
 
@@ -2822,6 +2892,8 @@ function bind(){
   qa('#v625SettingsTabs [data-settings-tab]').forEach(btn=>btn.addEventListener('click',()=>switchSettingsTab(btn.dataset.settingsTab)));
   byId('v625AddUser')?.addEventListener('click',()=>openUserEditor());byId('v625CancelUserEdit')?.addEventListener('click',closeUserEditor);byId('v625SaveUser')?.addEventListener('click',saveSettingsUser);
   byId('v625CeLogin')?.addEventListener('click',ceLogin);byId('v625CeLogout')?.addEventListener('click',ceLogout);
+  byId('v788WhppEvidenceStart')?.addEventListener('click',startV788WhppEvidenceV625);
+  byId('v788WhppEvidenceRefresh')?.addEventListener('click',loadV788WhppEvidenceV625);
   byId('v625ShopFile')?.addEventListener('change',()=>setText('v625ShopFileName',byId('v625ShopFile').files?.[0]?.name||'请选择CP码文件'));byId('v625ShopImport')?.addEventListener('click',importShop);
   byId('v780ActivateSavedShops')?.addEventListener('click',activateSavedShopCodes);
   byId('v625SettingsBackupNow')?.addEventListener('click',settingsBackupNow);
