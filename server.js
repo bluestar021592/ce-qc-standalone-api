@@ -2312,7 +2312,8 @@ function v788StagePublicStatus(){
     ?'APP重新启动后已发现未完成的隔离验收，已有批次将先核实再续查。'
     :restoredStatus==='STOPPED_RETRYABLE'?'上次隔离查询已暂停，可以从已有批次继续。'
     :v788StageResult.message;
-  return {ok:true,platformReady:process.platform==='win32',
+  const isolatedSourceReady=process.platform==='win32'&&v788IsRegularExactFile(v788SourceCopy);
+  return {ok:true,platformReady:process.platform==='win32',isolatedSourceReady,
     ...v788StageResult,...saved,status:restoredStatus,message:restoredMessage,
     active:v788StageActive,resumeAvailable,
     source:'ISOLATED_COPY_ONLY',productionDatabaseModified:false,
@@ -2324,6 +2325,9 @@ app.get('/api/v788/whpp-evidence/status',requireRole('ADMIN'),(req,res)=>{
 });
 app.post('/api/v788/whpp-evidence/start',requireRole('ADMIN'),(req,res)=>{
   if(process.platform!=='win32')return res.status(409).json({ok:false,error:'仅允许Windows隔离验收环境运行'});
+  if(!v788IsRegularExactFile(v788SourceCopy))
+    return res.status(409).json({ok:false,code:'V788_ISOLATED_SOURCE_MISSING',
+      error:'没有找到安全的D盘V788验收数据库副本。不会读取或替换为正式数据库。'});
   if(v788StageActive)return res.status(409).json({ok:false,error:'已有验收任务运行中，请勿重复启动'});
   if(req.body?.acknowledgeIsolatedQuery!==true)
     return res.status(400).json({ok:false,error:'需要确认：仅查询D盘隔离副本、独立留存证据，不修改正式业务数据'});
