@@ -86,7 +86,7 @@ const changedPod={shipmentCode:'X',shipmentStatus:'60',currentState:'POD'};
 const changedReturning={shipmentCode:'Y',shipmentStatus:'80',currentState:'RETURN_IN_PROGRESS'};
 const changedPodFromNormal={shipmentCode:'Z',shipmentStatus:'60',currentState:'POD'};
 const whppLag=vm.runInNewContext(source.slice(accountingStart,accountingEnd)+
-  '\\nbuildWhppCanonicalAccounting(whppState,{total:4});',{
+  '\nbuildWhppCanonicalAccounting(whppState,{total:4});',{
     business:'WHPP',whppState:{dashboard:{metrics:{total:4}},detailTabs:{
       all:{rows:[changedReturn,changedPod,changedReturning,changedPodFromNormal]},
       pod:{rows:[{shipmentCode:'W',shipmentStatus:'60',currentState:'POD'},
