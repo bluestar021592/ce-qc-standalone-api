@@ -6,8 +6,33 @@ import fsPromises from 'node:fs/promises';
 import ExcelJS from 'exceljs';
 import {createShopeeTemplateWorkbook} from '../src/shopeeTemplateExporter.js';
 import {readV788ExistingWhppXlsx} from './v788-existing-whpp-xlsx-readback.mjs';
+import {verifiedV788EvidenceCoverage} from '../src/v788WhppStatusCoverage.js';
 // V788 is exposed only as a deliberate ADMIN action inside the QC APP.
 // No startup auto-query and no status endpoint that leaks shipment identifiers.
+const genuine={verified:true,distributionMatchesV3:true,storedMembers:346,batches:8,
+  byDate:{
+    '2026-07-01':{s60:166,s80:0,s81:24,other:0},
+    '2026-07-02':{s60:124,s80:0,s81:32,other:0}
+  }};
+const projected=verifiedV788EvidenceCoverage(genuine);
+assert.equal(projected.independentlyVerifiedCounts,true);
+assert.equal(projected.savedMembers,346);
+assert.equal(projected.completedBatches,8);
+assert.equal(projected.pod,290);
+assert.equal(projected.returned,56);
+assert.equal(projected.statusOnlyPreview.dates.length,2);
+assert.equal(projected.statusOnlyPreview.signingTimeAccepted,false);
+assert.equal(projected.statusOnlyPreview.ledgerAccepted,false);
+assert.equal(projected.statusOnlyPreview.exportAccepted,false);
+// Progress JSON may be stale after an interruption, and must NOT supersede
+// authoritative exact-member SQLite totals after this projection is applied.
+const staleProgress={savedMembers:0,completedBatches:0,pod:0,returned:0};
+assert.deepEqual({...staleProgress,...projected}.pod,290);
+assert.equal({...staleProgress,...projected}.savedMembers,346);
+assert.equal(verifiedV788EvidenceCoverage({...genuine,verified:false}),null);
+assert.equal(verifiedV788EvidenceCoverage({...genuine,batches:7}),null);
+assert.equal(verifiedV788EvidenceCoverage({...genuine,byDate:{
+  ...genuine.byDate,'2026-07-01':{s60:167,s80:0,s81:23,other:0}}}),null);
 const server=fs.readFileSync('server.js','utf8');
 const ui=fs.readFileSync('public/app.js','utf8');
 const html=fs.readFileSync('public/index.html','utf8');
@@ -45,8 +70,8 @@ assert.match(server,/actualSourceSignature!==reportSignature/);
 
 assert.match(server,/if\(checked\.verified===true\)\{/,
   'only independently verified SQLite status evidence may produce a completed preview');
-assert.match(server,/saved\.statusOnlyPreview=\{/,
-  'verified proof should still populate the historical status preview');
+assert.match(server,/saved\\.statusOnlyPreview=independentlyVerifiedCoverage\\.statusOnlyPreview/,
+  'verified proof must supply the historical status preview');
 assert.match(server,/signingTimeAccepted:false,ledgerAccepted:false,exportAccepted:false/);
 assert.match(ui,/WHPP历史状态只读预览可用/);
 assert.match(ui,/试用范围只限上述历史状态只读预览/);
@@ -74,6 +99,15 @@ assert.match(activeJs,/该证据尚未写入正式签收时间账本/,
 assert.match(ui,/data.sidecarVerified===true/);
 
 assert.match(server,/distributionMatchesV3:data\?\.coverage\?\.distributionMatchesV3===true/);
+assert.match(server,/independentlyVerifiedCoverage=verifiedV788EvidenceCoverage\\(checked\\)/,
+  'SQLite proof must be projected independently of progress JSON');
+assert.match(server,/\\.\\.\\.\\(independentlyVerifiedCoverage\\|\\|\\{\\}\\)/,
+  'verified coverage must override any stale JSON progress totals');
+assert.match(activeJs,/data\\.independentlyVerifiedCounts===true/,
+  'completed status-only preview must require independently verified counts');
+assert.doesNotMatch(activeJs,/data\\.savedStatus==='346_TMS_ROWS_STAGED_NOT_BUSINESS_ACCEPTED'/,
+  'a stale final JSON report must not force another 346-waybill query');
+
 assert.match(server,/evidenceConflicts:Number\(data\?\.coverage\?\.conflictingExistingStates\|\|0\)/);
 const stageSource=fs.readFileSync('scripts/v788-whpp-stage-tms-evidence.mjs','utf8');
 // The in-APP CE system login writes a configurable tokenFile. Reject V788
