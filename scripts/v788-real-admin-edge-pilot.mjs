@@ -129,9 +129,11 @@ try{
   assert.equal(auditAdmin.status,200);
   assert.equal(auditAdmin.body.status,'NOT_STARTED');
   assert.equal(auditAdmin.body.productionModified,false);
-  const auditStartDenied=await httpStatus(base+'/api/v788/readonly-audit/start',admin,{
-    method:'POST',body:JSON.stringify({acknowledgeReadOnlyAudit:true}),
-    headers:{'Content-Type':'application/json'}
+  const auditStartDenied=await fetch(base+'/api/v788/readonly-audit/start',{
+    method:'POST',
+    headers:{Cookie:'ce_qc_local_auth_v431='+admin,'Content-Type':'application/json'},
+    body:JSON.stringify({acknowledgeReadOnlyAudit:true}),
+    signal:AbortSignal.timeout(6500)
   });
   assert.equal(auditStartDenied.status,409,
     'nonexistent D-drive isolated database cannot fall back to production');
