@@ -2567,7 +2567,6 @@ async function loadV788ReadOnlyAuditV625(){
       lines.push('此为数据库副本只读诊断，并非正式Excel回读或发布批准。');
     }else if(status==='BLOCKED')lines.push('隔离副本检查不可用或缺少必要数据表；未触碰正式数据库。');
     else lines.push('尚未运行真实隔离数据库验收。已有TMS证据不会因此被重新查询。');
-    info.textContent=lines.join('\n');
     if(data.isolatedSourceReady!==true)
       lines.push('没有找到安全的D盘验收副本；不能回退读取正式数据库。');
     info.textContent=lines.join('\n');
