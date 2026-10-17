@@ -33,10 +33,10 @@ function tablePresent(db,name){
 function limitedRows(stmt,...args){return stmt?stmt.all(...args):[]}
 export function summarizeV788WhppPodTimeSources(sourceDb,proofDb,expectedSignature=''){
   if(!sourceDb||!proofDb)throw Error('V788_POD_TIME_READONLY_HANDLES_REQUIRED');
-  // The caller opens both isolated SQLite files READ ONLY. query_only
-  // protects this function even if an accidental writable handle is passed.
-  sourceDb.exec('PRAGMA query_only=ON');
-  proofDb.exec('PRAGMA query_only=ON');
+  // Caller supplies two isolated READ-ONLY handles. This function executes
+  // only prepared SELECT statements and does not change connection pragmas:
+  // setting query_only on a caller-owned handle would accidentally lock later
+  // separate test transactions on that same SQLite connection.
   const proof=verifyV788PersistedSidecar(proofDb,expectedSignature);
   if(proof.verified!==true)return{
     available:false,reason:'TMS_SIDECAR_NOT_VERIFIED',
