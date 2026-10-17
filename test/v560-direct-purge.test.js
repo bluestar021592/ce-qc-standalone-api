@@ -118,8 +118,8 @@ test('V560 direct purge clears business data without creating a backup or purge 
     await assert.rejects(
       ()=>executeDirectDataPurge({phrase:DIRECT_PURGE_PHRASE,user:{email:'admin@example.test',role:'ADMIN'}}),
       /V788_PURGE_ALREADY_EMPTY/,'second destructive call must fail before any cleanup');
-    const {queueDirectDataPurge}=await import('../src/directDataPurge.js');
-    assert.throws(()=>queueDirectDataPurge({
+    const {queueDirectDataPurge:queueReplayAttempt}=await import('../src/directDataPurge.js');
+    assert.throws(()=>queueReplayAttempt({
       phrase:DIRECT_PURGE_PHRASE,user:{email:'admin@example.test',role:'ADMIN'}
     }),/V788_PURGE_ALREADY_EMPTY/,'the queue must reject replay even without the browser');
     assert.equal(Number(db.prepare('SELECT COUNT(*) c FROM daily_reports').get()?.c||0),0);
