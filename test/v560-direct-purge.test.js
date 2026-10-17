@@ -115,6 +115,29 @@ test('V560 direct purge clears business data without creating a backup or purge 
     assert.equal(duplicatePreflight.alreadyClearedNoFreshBusiness,true,
       'persistent last_full_clear_at and empty business tables must block a replay');
     assert.equal(duplicatePreflight.safeToStartClear,false);
+    // Derived tracking/cache entries do NOT prove that a new daily Excel
+    // has been imported. A regenerated background record must not unlock a
+    // second clear after the first COMMIT.
+    db.prepare('INSERT INTO qc_tracking_ledger(shipmentCode) VALUES(?)').run('V788-REBUILT-CACHE-NOT-NEW-IMPORT');
+    assert.equal(inspectDirectPurgeCp72Preflight().alreadyClearedNoFreshBusiness,true,
+      'non-source tracking rows cannot unlock a second destructive clear');
+    db.prepare('DELETE FROM qc_tracking_ledger WHERE shipmentCode=?').run('V788-REBUILT-CACHE-NOT-NEW-IMPORT');
+    // Restart in a separate Node process: the committed lock is persisted
+    // in SQLite, not just in the browser state or current backend heap.
+    const replayProbe=spawnSync(process.execPath,['--input-type=module','--eval',
+      "const {inspectDirectPurgeCp72Preflight}=await import('./src/directDataPurge.js');"+
+      "process.stdout.write('V788_REPLAY_PROBE='+"+
+      "JSON.stringify(inspectDirectPurgeCp72Preflight())+'\\n');"
+    ],{cwd:process.cwd(),encoding:'utf8',timeout:30000,env:{
+      ...process.env,DATA_DIR:dir,DB_FILE:cfg.dbFile
+    }});
+    assert.equal(replayProbe.status,0,
+      'separate-process SQLite read-only preflight should succeed: '+String(replayProbe.stderr||''));
+    const replayMatch=String(replayProbe.stdout||'').match(/V788_REPLAY_PROBE=(\{[^\r\n]*\})/);
+    assert.ok(replayMatch,'fresh backend process must show persisted purge-replay lock');
+    const replayEvidence=JSON.parse(replayMatch[1]);
+    assert.equal(replayEvidence.alreadyClearedNoFreshBusiness,true);
+    assert.equal(replayEvidence.safeToStartClear,false);
     await assert.rejects(
       ()=>executeDirectDataPurge({phrase:DIRECT_PURGE_PHRASE,user:{email:'admin@example.test',role:'ADMIN'}}),
       /V788_PURGE_ALREADY_EMPTY/,'second destructive call must fail before any cleanup');
