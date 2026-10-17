@@ -13,6 +13,10 @@ const EXPLICIT_KEYS=[
 const SOURCE_KEYS=['sidecar','podLock','savedTrack','savedEvent','savedScan','savedFinal'];
 const norm=value=>String(value||'').trim().toUpperCase();
 function safeJson(raw){
+  // Stored rows arrive as JSON text, but callers may have already parsed
+  // the TMS payload. Parsing "[object Object]" would silently drop real
+  // explicitly signed time fields and misreport missing POD evidence.
+  if(raw&&typeof raw==='object'&&!Array.isArray(raw))return raw;
   try{
     const obj=JSON.parse(String(raw||'{}'));
     return obj&&typeof obj==='object'&&!Array.isArray(obj)?obj:{};
