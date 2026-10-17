@@ -179,6 +179,11 @@ try{
   assert.equal(evidence.body.savedMembers,346);
   assert.equal(evidence.body.pod,290);
   assert.equal(evidence.body.returned,56);
+  assert.equal(evidence.body.podTimeSourceInventory?.available,true,
+    'isolated source/time inventory must be readable only after exact TMS proof');
+  assert.equal(evidence.body.podTimeSourceInventory?.podMembers,290);
+  assert.equal(evidence.body.podTimeSourceInventory?.signingTimeAccepted,false,
+    'time evidence candidates cannot be accepted as formal signing-day evidence');
   assert.equal(evidence.body.statusOnlyPreview.dates[0].pod,166);
   assert.equal(evidence.body.statusOnlyPreview.dates[1].returned,32);
   // The real Edge backend must be able to recover persisted SQLite evidence
@@ -216,6 +221,10 @@ try{
     'real Edge cannot claim a signing-time KPI when synthetic TMS status lacks explicit POD timestamps');
   assert.match(verified,/尚未写入正式签收时间账本/,
     'status-only acceptance must not imply production timing has been repaired');
+  assert.match(verified,/隔离库签收时间来源诊断/,
+    'real Edge must display the 290-member POD timestamp candidate inventory');
+  assert.match(verified,/仍无明确时间/,
+    'zero saved explicit time evidence is a blocker, not zero signing days');
   assert.match(verified,/历史账本：隔离副本账本只读检查暂不可用/,
     'missing isolated ledger tables must render an explicit no-verdict diagnostic');
   assert.doesNotMatch(verified,/历史账本待同步：POD 0票、已退回 0票/,
