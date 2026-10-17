@@ -108,6 +108,24 @@ test('V560 direct purge clears business data without creating a backup or purge 
         'direct no-backup reset must arm automatic tracking on the NEXT managed launch');
     }finally{check.close();}
 
+    // The already-committed reset must remain guarded after a browser refresh,
+    // process restart or lost status response; no second worker may be spawned.
+    const duplicatePreflight=inspectDirectPurgeCp72Preflight();
+    assert.equal(duplicatePreflight.cp72Ready,true,'72 current CP codes remain protected');
+    assert.equal(duplicatePreflight.alreadyClearedNoFreshBusiness,true,
+      'persistent last_full_clear_at and empty business tables must block a replay');
+    assert.equal(duplicatePreflight.safeToStartClear,false);
+    await assert.rejects(
+      ()=>executeDirectDataPurge({phrase:DIRECT_PURGE_PHRASE,user:{email:'admin@example.test',role:'ADMIN'}}),
+      /V788_PURGE_ALREADY_EMPTY/,'second destructive call must fail before any cleanup');
+    const {queueDirectDataPurge}=await import('../src/directDataPurge.js');
+    assert.throws(()=>queueDirectDataPurge({
+      phrase:DIRECT_PURGE_PHRASE,user:{email:'admin@example.test',role:'ADMIN'}
+    }),/V788_PURGE_ALREADY_EMPTY/,'the queue must reject replay even without the browser');
+    assert.equal(Number(db.prepare('SELECT COUNT(*) c FROM daily_reports').get()?.c||0),0);
+    assert.equal(db.prepare("SELECT value FROM app_meta WHERE key='shop_current_complete_codes_v780'").get()?.value,
+      activeBefore,'blocked replay cannot modify protected active CP configuration');
+
     // A database flag alone is not enough: the real V499 policy is evaluated
     // once on NEXT startup. Prove a new Node process removes the inherited
     // recovery disable only after this reset has committed its ready marker.
@@ -181,6 +199,11 @@ test('V560 direct purge clears business data without creating a backup or purge 
     assert.equal(reused.batchId,staged.batchId);
     assert.equal(reused.snapshotId,staged.snapshotId);
     const stageDb=getDb();
+    const afterFreshUpload=inspectDirectPurgeCp72Preflight();
+    assert.equal(afterFreshUpload.alreadyClearedNoFreshBusiness,false,
+      'a genuinely saved fresh daily import must release only the empty-database replay lock');
+    assert.equal(afterFreshUpload.safeToStartClear,true,
+      'future separately confirmed purge is eligible after new business data exists');
     assert.equal(Number(stageDb.prepare('SELECT COUNT(*) c FROM unified_import_rows').get()?.c||0),6,'first 7/1 import must contain only six fresh unified sample members');
     assert.equal(Number(stageDb.prepare('SELECT COUNT(*) c FROM shipment_daily_snapshots').get()?.c||0),6,'new snapshot membership must match fresh sample');
     assert.equal(Number(stageDb.prepare("SELECT COUNT(*) c FROM shipment_current_state WHERE state='PENDING_SCAN'").get()?.c||0),6,'new members must not inherit stale POD/return terminals');
