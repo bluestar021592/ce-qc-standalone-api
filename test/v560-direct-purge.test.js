@@ -105,6 +105,29 @@ test('V560 direct purge clears business data without creating a backup or purge 
         'direct no-backup reset must arm automatic tracking on the NEXT managed launch');
     }finally{check.close();}
 
+    // A database flag alone is not enough: the real V499 policy is evaluated
+    // once on NEXT startup. Prove a new Node process removes the inherited
+    // recovery disable only after this reset has committed its ready marker.
+    const restarted=spawnSync(process.execPath,['--input-type=module','--eval',
+      "const m=await import('./src/v499FreshStartTrackingPolicy.js');"+
+      "process.stdout.write('V788_POST_PURGE_POLICY='+"+
+      "JSON.stringify(m.inspectV499FreshStartTrackingPolicy())+'\\n');"
+    ],{cwd:process.cwd(),encoding:'utf8',timeout:30000,env:{
+      ...process.env,DATA_DIR:dir,DB_FILE:cfg.dbFile,
+      CE_QC_DISABLE_V246_TRACKING:'1',
+      CE_QC_HARD_DISABLE_V246_TRACKING:'0',
+      CE_QC_V499_FRESH_START_READY_OVERRIDE:''
+    }});
+    assert.equal(restarted.status,0,
+      'managed post-purge launch must load from persisted data: '+String(restarted.stderr||''));
+    const marker=String(restarted.stdout||'').match(/V788_POST_PURGE_POLICY=(\\{[^\\r\\n]*\\})/);
+    assert.ok(marker,'new managed launch must report evaluated tracking guard');
+    const startupPolicy=JSON.parse(marker[1]);
+    assert.equal(startupPolicy.freshStartReady,true);
+    assert.equal(startupPolicy.v246Enabled,true,
+      'post-clear managed restart must enable automatic V246 tracking');
+    assert.equal(startupPolicy.waitingForFreshStart,false);
+
     // V788: exercising the actual import store after the direct reset proves
     // the 7/1 workflow starts from empty membership (not old 8/17 caches).
     // WHPP has a separate daily-source route; test the six unified types here.
