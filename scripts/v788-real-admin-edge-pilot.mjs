@@ -208,6 +208,15 @@ try{
   },'READONLY_AUDIT_WORKER_BLOCKED_ON_INCOMPLETE_FIXTURE',15000);
   assert.equal(auditBlocked.readyToPublish,false);
   assert.equal(auditBlocked.productionModified,false);
+  assert.equal(auditBlocked.independentTmsProofReady,true,
+    'independent 346-TMS sidecar must still be visible when old audit tables are absent');
+  assert.equal(auditBlocked.independentTmsStatus,'PASS');
+  assert.equal(auditBlocked.auditSchemaAvailable,false,
+    'incomplete legacy fixture must not claim the business DB was reconciled');
+  assert.ok(auditBlocked.gates?.some(g=>g.id==='WHPP_INDEPENDENT_TMS_346'&&g.status==='PASS'));
+  assert.ok(auditBlocked.gates?.some(g=>g.id==='ISOLATED_DATABASE_AUDIT'&&g.status==='BLOCK'));
+  assert.equal(auditBlocked.podTimeInventory?.missingTimeMembers,290,
+    'complete terminal statuses cannot fabricate any missing signing timestamps');
   const sourceAfter=fs.statSync(ciSource);
   assert.equal(sourceAfter.size,sourceBefore.size);
   assert.equal(sourceAfter.mtimeMs,sourceBefore.mtimeMs);
