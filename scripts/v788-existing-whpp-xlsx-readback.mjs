@@ -15,7 +15,7 @@ const valueText=x=>{
   if(x&&typeof x==='object')return String(x.text??x.result??'');
   return String(x??'');
 };
-function readSheet(book,name){
+function readSheet(book,name,expectedDates=new Set(Object.keys(DATES))){
   const sheet=book.getWorksheet(name);
   if(!sheet)throw Error('V788_WHPP_XLSX_REQUIRED_SHEET_MISSING');
   // ExcelJS may preserve merged cells/hyperlinks or template label aliases
@@ -30,7 +30,7 @@ function readSheet(book,name){
     const code=normalize(valueText(row.getCell(2).value));
     if(!day&&!code)return;
     if(!day||!code){incomplete++;return}
-    if(!Object.hasOwn(DATES,day)){unexpectedDates++;return}
+    if(!Object.hasOwn(DATES,day)||!expectedDates.has(day)){unexpectedDates++;return}
     const key=day+'|'+code;
     if(seen.has(key))duplicate++;
     else {
@@ -40,22 +40,53 @@ function readSheet(book,name){
   });
   return {keys:new Set(seen.keys()),statuses,duplicate,incomplete,unexpectedDates};
 }
+// A duplicate dated member across two real workbooks is not an acceptable
+// substitute for two distinct daily sources, even if totals appear correct.
+function combineSheets(parts){
+  const seen=new Set(),statuses=new Map();
+  let duplicate=0,incomplete=0,unexpectedDates=0;
+  for(const part of parts){
+    duplicate+=part.duplicate;
+    incomplete+=part.incomplete;
+    unexpectedDates+=part.unexpectedDates;
+    for(const key of part.keys){
+      if(seen.has(key))duplicate++;
+      else{seen.add(key);statuses.set(key,part.statuses.get(key));}
+    }
+  }
+  return {keys:seen,statuses,duplicate,incomplete,unexpectedDates};
+}
 const diff=(expected,actual)=>({
   missing:[...expected].filter(key=>!actual.has(key)).length,
   extra:[...actual].filter(key=>!expected.has(key)).length
 });
-export async function readV788ExistingWhppXlsx({sourceDb,proofDb,workbookPath}={}){
-  if(!sourceDb||!proofDb||!workbookPath)throw Error('V788_READBACK_INPUT_REQUIRED');
-  const before=fs.lstatSync(workbookPath);
-  if(!before.isFile()||before.isSymbolicLink()||before.size<=0||before.size>75*1024*1024)
-    throw Error('V788_XLSX_NOT_SAFE_REGULAR_FILE');
-  // Resolve the source once, then verify it still refers to the very same
-  // ordinary file after parsing. The readback never follows a renamed or
-  // substituted worksheet source into a "PASS" result.
-  const physicalBefore=fs.realpathSync.native(workbookPath);
+export async function readV788ExistingWhppXlsx({
+  sourceDb,proofDb,workbookPath,workbookEntries
+}={}){
+  if(!sourceDb||!proofDb||(!workbookPath&&!workbookEntries))
+    throw Error('V788_READBACK_INPUT_REQUIRED');
+  const entries=workbookEntries??[{file:workbookPath,expectedDates:Object.keys(DATES)}];
+  if(!Array.isArray(entries)||entries.length<1||entries.length>2||
+      entries.some(x=>!x||typeof x.file!=='string'||!Array.isArray(x.expectedDates)))
+    throw Error('V788_XLSX_FILE_SET_INVALID');
+  const dates=entries.map(x=>[...new Set(x.expectedDates)]);
+  const sourceDates=Object.keys(DATES);
+  const validDateScope=entries.length===1?
+    dates[0].length===2&&sourceDates.every(d=>dates[0].includes(d)):
+    dates.every(x=>x.length===1&&sourceDates.includes(x[0]))&&
+      new Set(dates.map(x=>x[0])).size===2;
+  if(!validDateScope||new Set(entries.map(x=>x.file.toLowerCase())).size!==entries.length)
+    throw Error('V788_XLSX_DATE_SCOPE_INVALID');
+  // Read-only physical file integrity on every workbook independently.
   const fileIdentity=stat=>[stat.dev,stat.ino,stat.size,stat.mtimeMs,stat.ctimeMs].join('|');
-  if(!String(workbookPath).toLowerCase().endsWith('.xlsx'))
-    throw Error('V788_XLSX_FILE_EXTENSION_REQUIRED');
+  const verifiedFiles=entries.map(entry=>{
+    const before=fs.lstatSync(entry.file);
+    if(!before.isFile()||before.isSymbolicLink()||before.size<=0||before.size>75*1024*1024)
+      throw Error('V788_XLSX_NOT_SAFE_REGULAR_FILE');
+    if(!entry.file.toLowerCase().endsWith('.xlsx'))
+      throw Error('V788_XLSX_FILE_EXTENSION_REQUIRED');
+    return {...entry,before,physicalBefore:fs.realpathSync.native(entry.file)};
+  });
   const expectedSignature=v788ReadSourceMembershipSignature(sourceDb);
   const proof=verifyV788PersistedSidecar(proofDb,expectedSignature);
   // The independent proof is required for signed/returned sheet verification.
@@ -67,9 +98,14 @@ export async function readV788ExistingWhppXlsx({sourceDb,proofDb,workbookPath}={
     if(src.has(key))throw Error('V788_DUPLICATE_WHPP_SOURCE_MEMBER');
     src.set(key,true);
   }
-  const book=new ExcelJS.Workbook();
-  await book.xlsx.readFile(workbookPath);
-  const actual=Object.fromEntries(SHEETS.map(name=>[name,readSheet(book,name)]));
+  const foundSheets=Object.fromEntries(SHEETS.map(name=>[name,[]]));
+  for(const entry of verifiedFiles){
+    const book=new ExcelJS.Workbook();
+    await book.xlsx.readFile(entry.file);
+    const allowed=new Set(entry.expectedDates);
+    for(const name of SHEETS)foundSheets[name].push(readSheet(book,name,allowed));
+  }
+  const actual=Object.fromEntries(SHEETS.map(name=>[name,combineSheets(foundSheets[name])]));
   const all=actual['全部明细'],pod=actual['POD明细'],returned=actual['退回明细'];
   const srcSet=new Set(src.keys());
   const membership=diff(srcSet,all.keys);
@@ -116,10 +152,12 @@ export async function readV788ExistingWhppXlsx({sourceDb,proofDb,workbookPath}={
   }
   let fileStable=false;
   try{
-    const after=fs.lstatSync(workbookPath);
-    fileStable=after.isFile()&&!after.isSymbolicLink()
-      &&fs.realpathSync.native(workbookPath)===physicalBefore
-      &&fileIdentity(before)===fileIdentity(after);
+    fileStable=verifiedFiles.every(entry=>{
+      const after=fs.lstatSync(entry.file);
+      return after.isFile()&&!after.isSymbolicLink()
+        &&fs.realpathSync.native(entry.file)===entry.physicalBefore
+        &&fileIdentity(entry.before)===fileIdentity(after);
+    });
   }catch{fileStable=false}
   const foundProblems=Object.values(issues).some(x=>x!==null&&x!==0);
   const status=!fileStable?'FILE_CHANGED_DURING_READBACK':
