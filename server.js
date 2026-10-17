@@ -53,6 +53,7 @@ import {
 } from './src/businessStore.js';
 import { createPurgeChallenge, executePurge } from './src/dataPurge.js';
 import { queueDirectDataPurge, getDirectDataPurgeStatus, inspectDirectPurgeCp72Preflight, DIRECT_PURGE_ID } from './src/directDataPurge.js';
+import {inspectV788InstalledVersionEvidence} from './src/v788InstalledVersionEvidence.js';
 import { buildHomeQualitySummary, buildHomeQualitySummaryWithArchive, diagnoseSelectedDateTiming } from './src/homeQualitySummary.js';
 import { diagnoseV736Timing } from './src/v736TimingDiagnostics.js';
 import { readSelectedDateBusinessSourceTruth } from './src/v783SevenBusinessSourceTruth.js';
@@ -1021,7 +1022,8 @@ const directPurgeTerminalAudits = new Set();
 app.get('/api/admin/data-purge/direct/preflight', requireRole('ADMIN'), (req,res)=>{
   res.setHeader('Cache-Control','no-store');
   const check=inspectDirectPurgeCp72Preflight();
-  res.json({...check,requiresAdministratorConfirmation:true,
+  const version=inspectV788InstalledVersionEvidence();
+  res.json({...check,version,requiresAdministratorConfirmation:true,
     freshBusinessExcelVerified:false,formalUpdateVerified:false,
     readyForAutomaticDeletion:false});
 });

@@ -57,6 +57,8 @@ test('V560 direct purge clears business data without creating a backup or purge 
     assert.equal(cpReady.activeCpCount,72);
     assert.equal(cpReady.backupCreated,false);
     assert.equal(cpReady.existingBackupsPreserved,true);
+    assert.equal(cpReady.dataStorageReady,true,
+      'a reachable configured primary data root is required before any clear');
     for(const name of ['shop_cp_codes','shop_cp_import_snapshots','shop_active_code_set_history']){
       assert.ok(!BUSINESS_DATA_TABLES.includes(name),`historical CP configuration may not be cleared: ${name}`);
     }
@@ -332,6 +334,10 @@ test('V560 direct recovery console has no backup step and posts only the direct 
     'clear dialog must check 72 active store codes BEFORE the destructive action');
   assert.match(js,/!cp72PreflightReady/,
     'no CP72 match disables irreversible clear');
+  assert.match(js,/installedOnLocalMain!==true/,
+    'candidate branch must not expose official clear dialog');
+  assert.match(js,/cachedMainMatchesInstalled!==true/,
+    'official clear dialog must show the exact locally installed main commit');
   assert.match(js,/原有备份已保留/,
     'success message must match real non-backup-creating, preserve-existing-backups behavior');
   assert.doesNotMatch(js,/未创建或保留 CE QC 业务备份/,

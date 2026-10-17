@@ -125,9 +125,13 @@ function readProtectedActiveShopSet(db){
 // transaction always revalidates the list inside BEGIN IMMEDIATE.
 export function inspectDirectPurgeCp72Preflight(){
   const cfg=getRuntimeConfig();
+  if(cfg.usingFallbackDataDir)return {
+    ok:true,cp72Ready:false,activeCpCount:0,code:'PRIMARY_DATA_STORAGE_UNAVAILABLE',
+    dataStorageReady:false,backupCreated:false,existingBackupsPreserved:true
+  };
   if(!fs.existsSync(cfg.dbFile))return {
     ok:true,cp72Ready:false,activeCpCount:0,code:'ACTIVE_CP72_DB_MISSING',
-    backupCreated:false,existingBackupsPreserved:true
+    dataStorageReady:true,backupCreated:false,existingBackupsPreserved:true
   };
   let db;
   try{
@@ -136,12 +140,13 @@ export function inspectDirectPurgeCp72Preflight(){
     const value=readProtectedActiveShopSet(db);
     const members=JSON.parse(value).members;
     return {ok:true,cp72Ready:true,activeCpCount:members.length,
-      code:'ACTIVE_CP72_VALID',backupCreated:false,existingBackupsPreserved:true};
+      code:'ACTIVE_CP72_VALID',dataStorageReady:true,
+      backupCreated:false,existingBackupsPreserved:true};
   }catch(error){
     const code=String(error?.message||'').includes('V788_PURGE_CP72_MISSING')
       ?'ACTIVE_CP72_MISSING':'ACTIVE_CP72_INVALID_OR_UNREADABLE';
     return {ok:true,cp72Ready:false,activeCpCount:0,code,
-      backupCreated:false,existingBackupsPreserved:true};
+      dataStorageReady:true,backupCreated:false,existingBackupsPreserved:true};
   }finally{try{db?.close()}catch{}}
 }
 
@@ -150,8 +155,10 @@ export function inspectDirectPurgeCp72Preflight(){
 // independently revalidates again immediately before DELETE.
 function assertCp72SafeBeforeCleanup(){
   const cfg=getRuntimeConfig();
+  if(cfg.usingFallbackDataDir)
+    throw new Error('V788_PURGE_PRIMARY_STORAGE_MISSING: 主数据盘不可用，禁止回退到其他数据库执行清空');
   if(!fs.existsSync(cfg.dbFile))
-    throw new Error('V788_PURGE_CP72_MISSING: 隔离的当前数据库不存在，禁止清空');
+    throw new Error('V788_PURGE_CP72_MISSING: 当前数据库不存在，禁止清空');
   const db=new DatabaseSync(cfg.dbFile,{readOnly:true});
   try{
     db.exec('PRAGMA query_only=ON');

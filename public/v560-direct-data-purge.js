@@ -84,10 +84,15 @@
       alert('72个门店编码的只读预检暂不可用，清空已安全停止。未删除任何数据。');
       return;
     }
-    cp72PreflightReady=preflight.cp72Ready===true&&Number(preflight.activeCpCount)===72;
+    cp72PreflightReady=preflight.cp72Ready===true&&Number(preflight.activeCpCount)===72
+      &&preflight.dataStorageReady===true;
     if(!cp72PreflightReady)
-      return alert('清空已被阻止：当前72个CP有效门店编码未完整验证。请先修复门店配置；没有删除任何数据。');
-    if(!global.confirm('打开清空向导？系统不会新建备份，现有备份仍会保留。只有最终确认后才删除业务数据。'))return;
+      return alert('清空已被阻止：72个有效CP门店码不完整，或主数据盘不可用。没有删除任何数据。');
+    const installed=preflight.version||{};
+    if(installed.installedOnLocalMain!==true||installed.cachedMainMatchesInstalled!==true)
+      return alert('清空已被阻止：当前不是与本机 origin/main 一致的正式 main 安装版本。候选版/本地旧版不能作为正式清空入口。');
+    if(!global.confirm('本机安装提交 '+String(installed.installedCommit||'').slice(0,12)+
+      ' 已与本地 main 记录一致；此检查不代表已联网确认最新版。打开清空向导？已有备份保留，只有最终确认后才删除业务数据。'))return;
     openedAt=Date.now();
     const dialog=node('directPurgeDialog');if(dialog)dialog.hidden=false;
     const phrase=node('directPurgePhrase');if(phrase)phrase.value='';

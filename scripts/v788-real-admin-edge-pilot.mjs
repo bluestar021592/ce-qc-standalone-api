@@ -133,6 +133,11 @@ try{
   assert.equal(directPreflightAdmin.body.existingBackupsPreserved,true);
   assert.equal(directPreflightAdmin.body.readyForAutomaticDeletion,false);
   assert.equal(directPreflightAdmin.body.formalUpdateVerified,false);
+  assert.equal(directPreflightAdmin.body.version?.liveRemoteVersionVerified,false);
+  assert.equal(directPreflightAdmin.body.version?.installedThroughManagedUpdaterVerified,false);
+  assert.equal(directPreflightAdmin.body.version?.installedCommit.length,40,
+    'read-only preflight must identify the actual checked-out SHA');
+  assert.equal(typeof directPreflightAdmin.body.version?.installedBranch,'string');
   assert.equal(JSON.stringify(directPreflightAdmin.body).includes('CP100001'),false,
     'preflight must not reveal active CP code membership');
   const auditViewer=await httpStatus(base+'/api/v788/readonly-audit/status',viewer);
