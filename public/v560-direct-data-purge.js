@@ -6,6 +6,7 @@
   let active=false;
   let timer=null;
   let cp72PreflightReady=false;
+  let requiresReconciliation=false;
   const node=id=>document.getElementById(id);
   const escapeText=value=>String(value??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
 
@@ -62,7 +63,7 @@
     const countdown=node('directPurgeCountdown');
     const remain=Math.max(0,5-elapsedSeconds());
     if(countdown)countdown.textContent=remain>0?`请等待 ${remain} 秒`:'已完成安全倒计时，可最终确认清空';
-    if(button)button.disabled=active||!cp72PreflightReady||remain>0||String(phrase?.value||'')!==PHRASE;
+    if(button)button.disabled=active||requiresReconciliation||!cp72PreflightReady||remain>0||String(phrase?.value||'')!==PHRASE;
   }
   function startClock(){
     clearInterval(timer);
@@ -73,6 +74,7 @@
 
   async function openDirectDataPurge(){
     if(active)return;
+    if(requiresReconciliation)return alert('上一笔直接清空请求的结果需要只读核对，本页面禁止再次提交。请先核对后台业务表与任务状态。');
     cp72PreflightReady=false;
     const session=await ensureAdminSession();
     if(!session)return;
@@ -158,7 +160,8 @@
       }catch(error){
         if(error?.terminalPurgeJobFailure===true
           || String(error?.code||'')==='DIRECT_PURGE_FAILED'
-          || String(error?.code||'').startsWith('DIRECT_PURGE_WORKER'))throw error;
+          || String(error?.code||'').startsWith('DIRECT_PURGE_WORKER')
+          || (Number(error?.status||0)>=400&&Number(error?.status||0)<500))throw error;
         failures+=1;
         if(failures>=20)throw error;
       }
@@ -189,11 +192,15 @@
       if(preview)preview.innerHTML=`<div class="purge-success"><b>全部业务数据已直接清空。</b><br>共删除 <b>${deleted.toLocaleString()}</b> 行业务记录。<br><small>本次未新建备份，原有备份已保留；用户、权限、72个CP配置及审计已保留。请先通过原来的系统快捷方式完整关闭并重新打开 APP，重新登录后再上传日报，以便自动轨迹追踪读取新启动标记。</small></div>`;
     }catch(error){
       active=false;
+      // The request may have reached the worker even if its final response is
+      // unavailable. Freeze this destructive wizard until an independent read-only
+      // reconciliation; NEVER silently re-enable its submit button.
+      requiresReconciliation=true;
+      cp72PreflightReady=false;
+      if(button)button.disabled=true;
+      if(phrase)phrase.disabled=true;
       if(isAuthExpired(error)){redirectToLogin();return;}
-      if(phrase)phrase.disabled=false;
-      if(preview)preview.innerHTML=`<div class="purge-error"><b>直接清空未完成。</b><br>${escapeText(error.message||error)}<br><small>未显示成功前不要重复点击；把此错误直接发给开发处理即可。</small></div>`;
-      openedAt=Date.now()-5000;
-      startClock();
+      if(preview)preview.innerHTML=`<div class="purge-error"><b>清空结果尚不能确认为成功或未执行，已禁止重复提交。</b><br>${escapeText(error.message||error)}<br><small>先只读核对后台任务状态、业务表及72个门店编码，再决定后续操作。请勿再次清空或上传新日报。</small></div>`;
       return;
     }
     active=false;
@@ -203,7 +210,7 @@
   global.closeDirectDataPurge=closeDirectDataPurge;
   global.executeDirectDataPurge=executeDirectDataPurge;
   global.updateDirectPurgeButton=updateDirectPurgeButton;
-  global.__CE_QC_V560_DIRECT_PURGE__={patchId:PATCH_ID,getStatus:()=>({active,openedAt})};
+  global.__CE_QC_V560_DIRECT_PURGE__={patchId:PATCH_ID,getStatus:()=>({active,openedAt,requiresReconciliation})};
   Promise.resolve().then(()=>ensureAdminSession()).catch(error=>{
     const preview=node('directPurgePreview');
     if(preview)preview.innerHTML=`<div class="purge-error"><b>管理员身份检查失败。</b><br>${escapeText(error?.message||error)}</div>`;
