@@ -12,7 +12,7 @@ import {v788ReadSourceMembershipSignature,verifyV788PersistedSidecar}
 import {summarizeV788WhppPodTimeSources}
   from './v788-whpp-pod-time-source-inventory.mjs';
 
-const PROOF_FILE=String.raw\`D:\CE_QC_V788_验收副本\V788_WHPP_TMS_逐票证据.sqlite\`;
+const PROOF_FILE=String.raw`D:\CE_QC_V788_验收副本\V788_WHPP_TMS_逐票证据.sqlite`;
 function fingerprint(file){
   const stat=fs.lstatSync(file);
   if(!stat.isFile()||stat.isSymbolicLink()||stat.size<=0)
