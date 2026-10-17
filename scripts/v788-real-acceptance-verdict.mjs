@@ -7,8 +7,13 @@ export function buildV788AcceptanceVerdict(audit){
   if(!audit||audit.readOnly!==true||!audit.whpp?.totals)
     throw new Error('只读数据审计结果缺失，禁止误判为验收通过');
   const results=[],totals=audit.whpp.totals,source=audit.sevenBusinessSource||{};
+  const sourceDays=Array.isArray(source.byDate)?source.byDate:[];
+  const sourceDates=new Set(sourceDays.map(day=>String(day?.date||'')));
+  const missingRequiredDates=[...EXPECTED.keys()].filter(date=>!sourceDates.has(date));
+  const repeatedSourceDates=sourceDays.length-sourceDates.size;
   results.push(check('ACTIVE_CP_72',
-    audit.active72?.status==='ACTIVE_72'?'PASS':'BLOCK',
+    audit.active72?.status==='ACTIVE_72'&&Number(audit.active72?.count)===72
+      &&Number(audit.active72?.uniqueCount)===72?'PASS':'BLOCK',
     {activeCount:Number(audit.active72?.count||0),uniqueCount:Number(audit.active72?.uniqueCount||0)}));
   for(const [date,expected] of EXPECTED){
     const found=audit.whpp.byDate?.find(x=>x.date===date);
@@ -17,14 +22,20 @@ export function buildV788AcceptanceVerdict(audit){
       {date,expectedMembers:expected,actualMembers:Number(found?.sourceMembers||0)}));
   }
   results.push(check('SEVEN_BUSINESS_LATEST_SOURCES',
-    source.available&&Array.isArray(source.byDate)&&source.byDate.length>0
-      &&source.byDate.every(day=>day.latestValidUnifiedBatchPresent===true
+    source.available===true&&sourceDays.length>=EXPECTED.size
+      &&sourceDays.length===Number(source.datesChecked)
+      &&missingRequiredDates.length===0&&repeatedSourceDates===0
+      &&Array.isArray(source.blockedDates)&&source.blockedDates.length===0
+      &&sourceDays.every(day=>day.latestValidUnifiedBatchPresent===true
         &&day.completedValidUnifiedBatch===true&&day.reconciled===true)?'PASS':'BLOCK',
     {datesChecked:Number(source.datesChecked||0),
+      actualSourceDateRows:sourceDays.length,
+      missingRequiredDates:missingRequiredDates.length,
+      duplicateSourceDates:repeatedSourceDates,
       unfinishedLatestValidDates:(source.blockedDates||[]).length,
-      missingUnifiedSourceDates:(source.byDate||[]).filter(day=>day.latestValidUnifiedBatchPresent!==true).length,
-      incompleteUnifiedSourceDates:(source.byDate||[]).filter(day=>day.latestValidUnifiedBatchPresent===true&&day.completedValidUnifiedBatch!==true).length,
-      unbalancedDates:(source.byDate||[]).filter(day=>day.reconciled!==true).length,
+      missingUnifiedSourceDates:sourceDays.filter(day=>day.latestValidUnifiedBatchPresent!==true).length,
+      incompleteUnifiedSourceDates:sourceDays.filter(day=>day.latestValidUnifiedBatchPresent===true&&day.completedValidUnifiedBatch!==true).length,
+      unbalancedDates:sourceDays.filter(day=>day.reconciled!==true).length,
       sourceMembershipOnly:true}));
   results.push(check('WHPP_TERMINAL_CONFLICTS',
     Number(totals.contradiction||0)===0&&Number(totals.ledgerTerminalContradictingTms||0)===0&&Number(totals.savedTmsCurrentConflict||0)===0
@@ -51,13 +62,21 @@ export function buildV788AcceptanceVerdict(audit){
       coveragePct:totals.trustedPodTimeCoveragePct,
       note:'仅统计来源可核实的独立POD时间锁；不把状态60或旧文本当作签收时间'}));
   results.push(check('WHPP_TERMINAL_EVIDENCE',
-    Number(totals.sourceMembers||0)>0&&Number(totals.labelOnlyTerminal||0)===0
-      &&Number(totals.otherUnverified||0)===0?'PASS':'REVIEW',
-    {labelOnlyTerminal:Number(totals.labelOnlyTerminal||0),
+    Number(totals.sourceMembers)===346
+      &&Number(totals.strictPOD)===290&&Number(totals.strictReturned)===56
+      &&Number(totals.returning80||0)===0
+      &&Number(totals.latePODPendingState||0)===0
+      &&Number(totals.lateReturnedPendingState||0)===0
+      &&Number(totals.labelOnlyTerminal||0)===0
+      &&Number(totals.otherUnverified||0)===0
+      &&Number(totals.contradiction||0)===0?'PASS':'REVIEW',
+    {sourceMembers:Number(totals.sourceMembers||0),
+      labelOnlyTerminal:Number(totals.labelOnlyTerminal||0),
       otherUnverified:Number(totals.otherUnverified||0),
       strictPOD:Number(totals.strictPOD||0),
       strictReturned:Number(totals.strictReturned||0),
-      returning80:Number(totals.returning80||0)}));
+      returning80:Number(totals.returning80||0),
+      expectedPOD:290,expectedReturned:56}));
   // This audit does not generate or inspect real seven-business XLSX files.
   results.push(check('REAL_EXCEL_DETAIL_READBACK','REVIEW',
     {reason:'只读SQLite来源核验不能替代真实Excel文件逐票回读'}));
