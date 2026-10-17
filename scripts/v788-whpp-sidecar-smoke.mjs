@@ -45,6 +45,15 @@ assert.match(activeShell,/id="v788ReadOnlyAuditStart"/,
   'real settings must expose the no-download read-only audit action');
 assert.match(server,/new V788AuditWorker\(/,
   'read-only acceptance must run off the backend event loop');
+const readonlyWorker=fs.readFileSync('scripts/v788-inapp-readonly-audit-worker.mjs','utf8');
+assert.match(readonlyWorker,/verifyV788PersistedSidecar\(proofDb,signature\)/,
+  'in-app full audit must independently reverify persisted per-waybill TMS evidence');
+assert.match(readonlyWorker,/ISOLATED_DATABASE_AUDIT/,
+  'old database schema unavailability must be reported without suppressing independently valid TMS evidence');
+assert.match(readonlyWorker,/readyToPublish:false/,
+  'independent TMS success must never become permission to publish');
+assert.match(activeJs,/独立TMS证据库：已核实346票逐票成员/,
+  'real settings must separate independent TMS evidence from legacy DB reconciliation');
 assert.match(server,/app\.post\('\/api\/v788\/readonly-audit\/start',requireRole\('ADMIN'\)/,
   'audit must be explicit ADMIN action, not an automatic startup scan');
 assert.match(server,/acknowledgeReadOnlyAudit!==true/,
