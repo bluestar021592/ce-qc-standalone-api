@@ -1692,6 +1692,12 @@ async function v765LoadBusinessDetailLane({reportDate,snapshotId,m,options,gener
   }
 }
 async function loadBusiness(options={}){
+  // A prior business/date request is never allowed to paint a newer route,
+  // including the slow full timing fallback and detail hydration lane.
+  const generation=++v765BoardLoadGeneration;
+  const targetBusiness=business;
+  const stillSelected=()=>page==='business'&&business===targetBusiness&&
+    generation===v765BoardLoadGeneration;
   // V756 navigation-first: URL context is authoritative for first paint.
   // Never block a board switch on /api/import/unified-latest before asking for its compact state.
   const whppOnlyAction=byId('v641WhppScanPending');
@@ -1712,7 +1718,14 @@ async function loadBusiness(options={}){
     const summaryPromise=new Promise(resolve=>setTimeout(resolve,900))
       .then(()=>json('/api/home-quality-summary?'+summaryQuery.toString(),10000).catch(()=>null));
 
-    const r=await json('/api/business-state/'+business+'?'+stateQuery.toString(),10000);
+    const r=await json('/api/business-state/'+targetBusiness+'?'+stateQuery.toString(),10000);
+    if(!stillSelected())return;
+    const responseDate=String(r.reportDate||'').slice(0,10);
+    const responseSnapshot=String(r.snapshotId||'');
+    if(baseReportDate&&responseDate&&responseDate!==baseReportDate)
+      throw new Error('业务快照返回日期与当前选择不一致，已停止渲染');
+    if(requestedSnapshot&&responseSnapshot&&responseSnapshot!==requestedSnapshot)
+      throw new Error('业务快照与当前选择的快照ID不一致，已停止渲染');
     const state=r.state||{},m=metricState(state);
     const snapshotId=r.snapshotId||requestedSnapshot||latest?.snapshotId||'';
     const reportDate=r.reportDate||baseReportDate||latest?.reportDate||'';
@@ -1776,7 +1789,8 @@ async function loadBusiness(options={}){
 
     // Fast summary/timing updates are useful, but never gate the board's first paint.
     void summaryPromise.then(summary=>{
-      if(!summary)return;
+      if(!summary||!stillSelected()||
+        String(v628BusinessReportDate||'').slice(0,10)!==String(reportDate).slice(0,10))return;
       const evidenceState=state?.historicalEvidenceRecovery?.state||summary?.historicalEvidenceRecovery?.state||'';
       const timingRepairRunning=Boolean(summary?.timingEvidenceRepair?.active);
       if(evidenceState==='RUNNING'||timingRepairRunning)scheduleHistoricalEvidenceRefresh('business');
@@ -1793,8 +1807,10 @@ async function loadBusiness(options={}){
         void json('/api/home-quality-summary?'+fullTimingQuery.toString(),25000).then(full=>{
           const sameDate=full?.reportDate===reportDate;
           const currentDate=String(byId('v625FromDate')?.value||'').slice(0,10)===reportDate;
-          const days=sameDate?full?.timing?.[business]?.overall?.avgDays:null;
-          if(currentDate&&days!=null&&Number.isFinite(Number(days)))
+          const days=sameDate?full?.timing?.[targetBusiness]?.overall?.avgDays:null;
+          if(stillSelected()&&currentDate&&
+             String(v628BusinessReportDate||'').slice(0,10)===String(reportDate).slice(0,10)&&
+             days!=null&&Number.isFinite(Number(days)))
             setText('kpiAvgDays',Number(days).toFixed(2).replace(/\.00$/,''));
         }).catch(()=>{});
       }
@@ -1802,10 +1818,10 @@ async function loadBusiness(options={}){
 
     // V765: the business summary is already visible. Run 5,000-row
     // workspace/integrity reads in a deferred lane with a bounded 20s cache.
-    const generation=++v765BoardLoadGeneration;
     setText('v637BusinessIntegrity','正在后台读取完整性明细…');
-    void v765LoadBusinessDetailLane({reportDate,snapshotId,m,options,generation,targetBusiness:business});
+    void v765LoadBusinessDetailLane({reportDate,snapshotId,m,options,generation,targetBusiness});
   }catch(e){
+    if(!stillSelected())return;
     const whppOnlyAction=byId('v641WhppScanPending');
     if(whppOnlyAction){whppOnlyAction.hidden=true;whppOnlyAction.style.setProperty('display','none','important');}
     byId('v625BusinessRows').innerHTML='<tr><td colspan="7">业务快照暂未读取：'+esc(e.message)+'</td></tr>';
