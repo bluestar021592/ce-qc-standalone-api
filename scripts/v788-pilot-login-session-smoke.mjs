@@ -57,7 +57,55 @@ try{
   const session=await getJson(base+'/api/session',{headers:{Cookie:cookie}});
   assert.equal(session.status,200,'5278 must accept the signed same-origin session');
   assert.equal(session.body?.user?.username,username,'session must match the isolated test account');
-  console.log('[V788_PILOT_LOGIN] PASS real 5278→5280 login, Set-Cookie, and /api/session; no V787 access');
+  const baseToken=cookie.split('=')[1];
+  const makeSignedCookie=(change)=>{
+    const [encoded]=baseToken.split('.');
+    const original=JSON.parse(Buffer.from(encoded,'base64url').toString('utf8'));
+    const updated={...original,...change};
+    const body=Buffer.from(JSON.stringify(updated),'utf8').toString('base64url');
+    const mac=crypto.createHmac('sha256',process.env.CE_QC_LOCAL_SESSION_SECRET)
+      .update(body).digest('base64url');
+    return 'ce_qc_local_auth_v788_pilot='+body+'.'+mac;
+  };
+  // Real main-port session renewal: a logged-in operator who is actively
+  // working near the end of the 8h window must not suddenly lose the session.
+  const nearExpiry=makeSignedCookie({
+    iat:Date.now()-7*60*60_000,exp:Date.now()+15*60_000
+  });
+  const renewed=await getJson(base+'/api/session',{headers:{Cookie:nearExpiry}});
+  assert.equal(renewed.status,200,'active near-expired session must be renewed over 5280');
+  const rotated=String(renewed.headers.get('set-cookie')||'');
+  assert.ok(rotated.startsWith('ce_qc_local_auth_v788_pilot='),
+    'main 5278 must issue a fresh signed HttpOnly cookie via authenticated sidecar');
+  assert.match(rotated,/HttpOnly/);
+  assert.match(rotated,/SameSite=Strict/);
+  const rotatedToken=rotated.split(';')[0].split('=')[1];
+  const rotatedPayload=JSON.parse(Buffer.from(rotatedToken.split('.')[0],'base64url').toString('utf8'));
+  assert.ok(Number(rotatedPayload.exp)>Date.now()+6*60*60_000,
+    'renewed active session must have a new bounded lifetime');
+  assert.equal((await getJson(base+'/api/session',{headers:{Cookie:rotated.split(';')[0]}})).status,200,
+    'rotated cookie should remain usable after a new request');
+
+  // Renewals MUST reread the current account from the independent read-only
+  // users store: reduced role cannot retain an old ADMIN credential.
+  db.prepare('UPDATE users SET role=? WHERE username=?').run('VIEWER',username);
+  const downgraded=await getJson(base+'/api/session',{headers:{Cookie:nearExpiry}});
+  assert.equal(downgraded.status,200);
+  assert.equal(downgraded.body?.user?.role,'VIEWER',
+    'live account role downgrade must propagate during renewal');
+
+  db.prepare('UPDATE users SET enabled=0 WHERE username=?').run(username);
+  const inactive=await getJson(base+'/api/session',{headers:{Cookie:nearExpiry}});
+  assert.notEqual(inactive.status,200,'disabled accounts must NOT renew an old session');
+  const expiredCookie=makeSignedCookie({
+    iat:Date.now()-9*60*60_000,exp:Date.now()-1000
+  });
+  const forbidden=await getJson('http://127.0.0.1:5280/api/local-auth/renew',{
+    method:'POST',headers:{'content-type':'application/json'},
+    body:JSON.stringify({token:expiredCookie.split('=')[1]})
+  });
+  assert.equal(forbidden.status,401,'expired HMAC cookie must not be renewed directly');
+  console.log('[V788_PILOT_LOGIN] PASS login, SameSite session, read-only sliding renewal, revoked-user and expired-cookie fail-closed; no V787 access');
 }finally{
   try{if(inserted)db.prepare('DELETE FROM users WHERE username=?').run(username)}
   finally{db.close()}
