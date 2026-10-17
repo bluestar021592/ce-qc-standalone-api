@@ -176,7 +176,7 @@ for(const type of ['SHOPEECN','SHOPEEVN']){
 const other=run('WHPP',{total:10,pod:7,returned:1,delivery:0,pending:0,abnormal:0,otherNormal:2});
 assert.match(other.v625BusinessLegend.innerHTML,/其他正常状态 2（20.00%）/);
 assert.ok(source.includes("fullTimingQuery.delete('fast')"),'full date signing evidence must not remain in compact-only source');
-assert.ok(source.includes('full?.timing?.[business]?.overall?.avgDays'),'signing KPI must share full timing evidence source with overview');
+assert.ok(source.includes('full?.timing?.[targetBusiness]?.overall?.avgDays'),'signing KPI must share full timing evidence source with overview');
 const zero=run('SHOPEECN',{total:0,pod:0,returned:0,delivery:0,pending:0,abnormal:0,otherNormal:0});
 assert.match(zero.v625BusinessLegend.textContent,/暂无数据/,'empty business/date must say no data');
 assert.equal(zero.v625BusinessDonut.style.background,'var(--v625-border,#dce5ef)','empty business/date must not show a red donut');
