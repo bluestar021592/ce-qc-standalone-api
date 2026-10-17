@@ -6,7 +6,7 @@ const business=document.body.dataset.business||'';
 const q=s=>document.querySelector(s);
 const qa=s=>[...document.querySelectorAll(s)];
 const byId=id=>document.getElementById(id);
-const num=v=>Number.isFinite(Number(v))?Number(v):null;
+const num=v=>v===null||v===undefined||v===''?null:(Number.isFinite(Number(v))?Number(v):null);
 const fmt=v=>v===null||v===undefined?'—':Number(v).toLocaleString('zh-CN');
 const pct=v=>v===null||v===undefined?'—':Number(v).toFixed(2).replace(/\.00$/,'')+'%';
 const esc=v=>String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
@@ -223,10 +223,12 @@ function metricState(state={}){
   const returning=num(first(state,['dashboard.metrics.returnInProgress','dashboard.metrics.returning','returnInProgress','returning']))??0;
   const cancelled=num(first(state,['dashboard.metrics.cancelled','cancelled']))??0;
   const explicitDelivery=num(first(state,['dashboard.metrics.delivery','dashboard.metrics.deliveryStay','dashboard.categories.deliveryTotal']));
-  const delivery=explicitDelivery??Math.max(0,total-pod-returned-cancelled);
   const normalDiversion=num(first(state,['dashboard.metrics.normalDiversion']))??0;
   const shopTotal=num(first(state,['dashboard.metrics.shopTotal']))??0;
   const otherNormal=Math.max(0,cancelled+normalDiversion+shopTotal);
+  // A missing authoritative delivery count must not classify TMS 80 returns
+  // or normal diversions as parcels still out for delivery.
+  const delivery=explicitDelivery??Math.max(0,total-pod-returned-returning-otherNormal);
   const avgDays=num(first(state,['dashboard.metrics.avgPodDays','avgPodDays','dashboard.avgPodDays']));
   return{total,pod,podRate:total?pod/total*100:0,pending,oc,unresolved,returned,returning,cancelled,delivery,normalDiversion,shopTotal,otherNormal,avgDays};
 }
@@ -1744,9 +1746,9 @@ async function loadBusiness(options={}){
       pod:Number(m.pod||0),
       pending:Number(m.pending||0),
       abnormal:Number(m.unresolved||0),
-      returned:Number(m.returned||0),
+      returned:Number(m.returned||0),returning:Number(m.returning||0),
       otherNormal:Number(m.otherNormal||0),
-      unprocessed:Math.max(0,Number(m.total||0)-Number(m.pod||0)-Number(m.returned||0)-Number(m.otherNormal||0)-Number(m.delivery||0))
+      unprocessed:Math.max(0,Number(m.total||0)-Number(m.pod||0)-Number(m.returned||0)-Number(m.returning||0)-Number(m.otherNormal||0)-Number(m.delivery||0))
     };
     const a=v631BusinessAccounting;
     const accountingCounts=a.counts||Object.fromEntries(Object.entries(a.rowsByKind||{}).map(([k,v])=>[k,Array.isArray(v)?v.length:Number(v||0)]));
