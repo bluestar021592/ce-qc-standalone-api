@@ -2293,11 +2293,16 @@ function v788StagePublicStatus(){
                 const previewSource=new V788ReadOnlyDatabaseSync(v788SourceCopy,{readOnly:true});
                 try{
                   previewSource.exec('PRAGMA query_only=ON');
-                  saved.ledgerReconciliation=previewV788WhppLedgerReconciliation(
-                    previewSource,checkDb,actualSourceSignature);
-                  // Extra saved-signing-time inventory is READ ONLY and may
-                  // fail independently. The 346 terminal statuses are not
-                  // invalidated if an optional legacy evidence table is absent.
+                  // Ledger and signing evidence have separate schemas and
+                  // must fail independently. A missing legacy ledger table
+                  // cannot hide otherwise readable stored POD time candidates.
+                  try{
+                    saved.ledgerReconciliation=previewV788WhppLedgerReconciliation(
+                      previewSource,checkDb,actualSourceSignature);
+                  }catch{
+                    saved.ledgerReconciliation={ready:false,reason:'ISOLATED_LEDGER_PREVIEW_UNAVAILABLE',
+                      productionModified:false};
+                  }
                   try{
                     saved.podTimeSourceInventory=summarizeV788WhppPodTimeSources(
                       previewSource,checkDb,actualSourceSignature);
@@ -2311,6 +2316,9 @@ function v788StagePublicStatus(){
               }catch{
                 saved.ledgerReconciliation={ready:false,reason:'ISOLATED_LEDGER_PREVIEW_UNAVAILABLE',
                   productionModified:false};
+                saved.podTimeSourceInventory={available:false,
+                  reason:'ISOLATED_POD_TIME_INVENTORY_UNAVAILABLE',
+                  signingTimeAccepted:false,productionModified:false};
               }
               saved.statusOnlyPreview=independentlyVerifiedCoverage.statusOnlyPreview;
             }
