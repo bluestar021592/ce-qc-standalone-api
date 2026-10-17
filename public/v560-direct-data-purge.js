@@ -150,10 +150,15 @@
         if(state==='FAILED'){
           const error=new Error(status.error||status.message||'直接清空失败。');
           error.code=String(status.code||'DIRECT_PURGE_FAILED');
+          // Terminal worker failure is authoritative; do not retry a FAILED job
+          // just because the backend uses a non-DIRECT_PURGE error code.
+          error.terminalPurgeJobFailure=true;
           throw error;
         }
       }catch(error){
-        if(String(error?.code||'')==='DIRECT_PURGE_FAILED'||String(error?.code||'').startsWith('DIRECT_PURGE_WORKER'))throw error;
+        if(error?.terminalPurgeJobFailure===true
+          || String(error?.code||'')==='DIRECT_PURGE_FAILED'
+          || String(error?.code||'').startsWith('DIRECT_PURGE_WORKER'))throw error;
         failures+=1;
         if(failures>=20)throw error;
       }
