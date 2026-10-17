@@ -2568,7 +2568,11 @@ async function loadV788ReadOnlyAuditV625(){
     }else if(status==='BLOCKED')lines.push('隔离副本检查不可用或缺少必要数据表；未触碰正式数据库。');
     else lines.push('尚未运行真实隔离数据库验收。已有TMS证据不会因此被重新查询。');
     info.textContent=lines.join('\n');
-    button.disabled=running||v788ReadOnlyAuditPosting;
+    if(data.isolatedSourceReady!==true)
+      lines.push('没有找到安全的D盘验收副本；不能回退读取正式数据库。');
+    info.textContent=lines.join('\n');
+    button.disabled=running||v788ReadOnlyAuditPosting
+      ||data.platformReady!==true||data.isolatedSourceReady!==true;
     button.textContent=running?'只读核验中…':'只读核验现有隔离副本';
     if(v788ReadOnlyAuditTimer){clearTimeout(v788ReadOnlyAuditTimer);v788ReadOnlyAuditTimer=null}
     if(running)v788ReadOnlyAuditTimer=setTimeout(()=>{void loadV788ReadOnlyAuditV625()},4000);

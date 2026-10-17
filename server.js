@@ -2413,6 +2413,8 @@ let v788ReadOnlyAuditActive=false;
 app.get('/api/v788/readonly-audit/status',requireRole('ADMIN'),(req,res)=>{
   res.setHeader('Cache-Control','no-store');
   res.json({ok:true,...v788ReadOnlyAuditState,active:v788ReadOnlyAuditActive,
+    platformReady:process.platform==='win32',
+    isolatedSourceReady:process.platform==='win32'&&v788IsRegularExactFile(v788SourceCopy),
     readyToPublish:false,productionModified:false});
 });
 app.post('/api/v788/readonly-audit/start',requireRole('ADMIN'),(req,res)=>{
