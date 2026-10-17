@@ -89,6 +89,12 @@ assert.match(server,/verifyV788PersistedSidecar\(checkDb,actualSourceSignature\)
 assert.match(server,/saved\.sidecarVerified=checked\.verified===true/);
 assert.match(server,/previewV788WhppLedgerReconciliation\(/,
   'status route must reconcile ledger only from independently opened SQLite proof');
+assert.match(server,/summarizeV788WhppPodTimeSources\(/,
+  'real ADMIN route must list saved signing-time sources without querying TMS');
+assert.match(activeJs,/隔离库签收时间来源诊断/,
+  'active V625 view must distinguish missing time from conflicting candidates');
+assert.match(activeJs,/时间候选仅供后续逐票核验/,
+  'saved time candidates cannot be presented as formal signing-day acceptance');
 assert.match(activeJs,/data\.ledgerReconciliation/,
   'V625 must display aggregate ledger differences instead of requiring manual commands');
 assert.match(activeJs,/尚未修改历史账本或正式数据库/,
@@ -172,6 +178,7 @@ import {DatabaseSync} from 'node:sqlite';
 import {strictWhppTmsBatch,initV788Sidecar,stageV788Batch,inspectV788Sidecar,v788SourceSignature,verifyV788PersistedSidecar,v788ReadSourceMembershipSignature,previewV788WhppLedgerReconciliation}
   from './v788-whpp-tms-evidence-sidecar.mjs';
 import {runV788Stage} from './v788-whpp-stage-tms-evidence.mjs';
+import {summarizeV788WhppPodTimeSources} from './v788-whpp-pod-time-source-inventory.mjs';
 
 // No actual network, auth, D drive, or file access on the default command.
 assert.deepEqual(await runV788Stage(),{
@@ -315,7 +322,53 @@ try{
         led.run(code,stale?'OPEN':'TERMINAL',stale?'':pod?'POD':'RETURNED');
       }
     }
+    // An isolated source may have NO saved signing timestamps: report
+    // missing evidence explicitly instead of using TMS 60 as a fake POD day.
     compareDb.exec('PRAGMA query_only=ON');
+    const emptyTimeInventory=summarizeV788WhppPodTimeSources(compareDb,db,sig);
+    assert.equal(emptyTimeInventory.podMembers,290);
+    assert.equal(emptyTimeInventory.timeCandidateMembers,0);
+    assert.equal(emptyTimeInventory.missingTimeMembers,290);
+    assert.equal(emptyTimeInventory.signingTimeAccepted,false);
+    compareDb.exec('PRAGMA query_only=OFF');
+    compareDb.exec(
+      "CREATE TABLE business_pod_locks(businessType TEXT,shipmentCode TEXT,podTime TEXT,source TEXT);"+
+      "CREATE TABLE business_shipment_tracks(businessType TEXT,reportDate TEXT,shipmentCode TEXT,shipmentStatus TEXT,rawJson TEXT);"+
+      "CREATE TABLE business_scan_results(businessType TEXT,reportDate TEXT,shipmentCode TEXT,isPod INTEGER,orderStatus TEXT,rawJson TEXT);"+
+      "CREATE TABLE business_final_rows(businessType TEXT,reportDate TEXT,shipmentCode TEXT,isPod INTEGER,rawJson TEXT)"
+    );
+    compareDb.prepare("INSERT INTO business_pod_locks VALUES('WHPP',?,?,?)")
+      .run('J0000','2026-07-04 10:00:00','whpp_saved_scan_pod_time');
+    compareDb.prepare("INSERT INTO business_shipment_tracks VALUES('WHPP','2026-07-01','J0000','60',?)")
+      .run(JSON.stringify({shipmentStatus:'60',signedAt:'2026-07-04 10:00:00'}));
+    const insertScan=compareDb.prepare("INSERT INTO business_scan_results VALUES('WHPP','2026-07-01',?,1,'85',?)");
+    const insertFinal=compareDb.prepare("INSERT INTO business_final_rows VALUES('WHPP','2026-07-01',?,1,?)");
+    insertScan.run('J0000',JSON.stringify({podTime:'2026-07-04 10:00:00'}));
+    insertFinal.run('J0000',JSON.stringify({signedAt:'2026-07-04 10:00:00'}));
+    insertScan.run('J0001',JSON.stringify({signedAt:'2026-07-05 10:00:00'}));
+    insertFinal.run('J0001',JSON.stringify({signedAt:'2026-07-06 10:00:00'}));
+    insertScan.run('J0002',JSON.stringify({lastUpdateDate:'2026-07-07 15:00:00'}));
+    // Returned shipments are never included in the signing-time POD count.
+    compareDb.prepare("INSERT INTO business_pod_locks VALUES('WHPP',?,?,?)")
+      .run('J0189','2026-07-08 12:00:00','whpp_saved_scan_pod_time');
+    compareDb.exec('PRAGMA query_only=ON');
+    const inventory=summarizeV788WhppPodTimeSources(compareDb,db,sig);
+    assert.equal(inventory.available,true);
+    assert.equal(inventory.podMembers,290);
+    assert.equal(inventory.timeCandidateMembers,2);
+    assert.equal(inventory.missingTimeMembers,288);
+    assert.equal(inventory.conflictingTimeMembers,1,
+      'different explicit signing moments must remain a manual evidence conflict');
+    assert.equal(inventory.unambiguousTimeCandidateMembers,1);
+    assert.equal(inventory.bySource.sidecar,0);
+    assert.equal(inventory.bySource.podLock,1);
+    assert.equal(inventory.bySource.savedTrack,1);
+    assert.equal(inventory.bySource.savedScan,2);
+    assert.equal(inventory.bySource.savedFinal,2);
+    assert.equal(inventory.signingTimeAccepted,false);
+    assert.equal(inventory.productionModified,false);
+    assert.equal(JSON.stringify(inventory).includes('J0000'),false,
+      'POD time inventory must not leak shipment identifiers');
     const beforeSource=compareDb.prepare('SELECT total_changes() AS n').get().n;
     const beforeSidecar=db.prepare('SELECT total_changes() AS n').get().n;
     const recon=previewV788WhppLedgerReconciliation(compareDb,db,sig);
