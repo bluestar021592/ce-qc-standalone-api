@@ -153,6 +153,12 @@ async function run(){
     returned:readback.returned??null,
     issues:readback.issues||null
   }));
+  // Revalidate independent SQLite evidence AFTER the real XLSX has been read.
+  // A copy or sidecar replacement mid-scan cannot produce an accepted result.
+  if(fingerprint(file)!==before)throw Error('ISOLATED_SOURCE_CHANGED_DURING_EXCEL_READBACK');
+  if(independent.proofFileFingerprint&&
+      fingerprint(PROOF_FILE)!==independent.proofFileFingerprint)
+    throw Error('ISOLATED_PROOF_CHANGED_DURING_EXCEL_READBACK');
   const counts={
     passed:gates.filter(g=>g.status==='PASS').length,
     blocked:gates.filter(g=>g.status==='BLOCK').length,
