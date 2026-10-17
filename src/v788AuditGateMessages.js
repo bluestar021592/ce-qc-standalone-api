@@ -63,6 +63,19 @@ export function explainV788Gate(g={}){
         count(d.strictReturned)+' 票；需与290和56的独立状态证据逐票对应。',
       next:'用独立TMS证据核对旧库缺失/未同步成员；独立证据完整不等于旧账本已更新。'};
   }
+  if(id==='WHPP_EXISTING_REAL_XLSX'){
+    if(g.status==='PASS')return {label:'WHPP已有真实导出文件逐票回读',
+      summary:'已从系统现有导出文件逐票核对 '+count(d.rows)+
+        ' 票（POD '+count(d.pod)+'，已退回 '+count(d.returned)+'），并与隔离日报成员及独立TMS证明一致。',
+      next:'仅WHPP 7月1日至2日文件通过；七业务综合真实Excel与签收时间仍须单独验收。'};
+    if(d.status==='NOT_FOUND'||d.status==='NOT_CHECKED')return {
+      label:'WHPP已有真实导出文件逐票回读',
+      summary:'未发现可验收的既有两日WHPP Excel，或独立TMS/主导出盘未就绪；没有生成或下载假报表。',
+      next:'优先使用已有正式导出文件；缺文件时维持待证据核验，不要求重复上传日报。'};
+    return {label:'WHPP已有真实导出文件逐票回读',
+      summary:'已有导出Excel文件无法通过逐票来源/终态校验（'+String(d.reason||d.status||'不一致')+'）。',
+      next:'需核对真实导出的日期、全部明细、POD、退回分表；不得覆盖真实文件或修改业务库。'};
+  }
   if(id==='REAL_EXCEL_DETAIL_READBACK'){
     return {label:'真实Excel逐票回读',
       summary:'仅完成SQLite来源审计；尚未验证真实日报或导出Excel每票的终态与数量。',
