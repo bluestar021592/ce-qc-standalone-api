@@ -129,7 +129,7 @@ async function run(){
         proofDb=new DatabaseSync(PROOF_FILE,{readOnly:true});
         proofDb.exec('PRAGMA query_only=ON');
         const checked=await readV788ExistingWhppXlsx({
-          sourceDb,proofDb,workbookPath:match.file
+          sourceDb,proofDb,workbookEntries:match.workbookEntries
         });
         readback={status:checked.status,rows:Number(checked.readbackRows||0),
           pod:Number(checked.readbackPodRows||0),
