@@ -120,7 +120,7 @@ test('V560 direct purge clears business data without creating a backup or purge 
     }});
     assert.equal(restarted.status,0,
       'managed post-purge launch must load from persisted data: '+String(restarted.stderr||''));
-    const marker=String(restarted.stdout||'').match(/V788_POST_PURGE_POLICY=(\\{[^\\r\\n]*\\})/);
+    const marker=String(restarted.stdout||'').match(/V788_POST_PURGE_POLICY=(\{[^\r\n]*\})/);
     assert.ok(marker,'new managed launch must report evaluated tracking guard');
     const startupPolicy=JSON.parse(marker[1]);
     assert.equal(startupPolicy.freshStartReady,true);
