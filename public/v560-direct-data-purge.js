@@ -76,7 +76,14 @@
     cp72PreflightReady=false;
     const session=await ensureAdminSession();
     if(!session)return;
-    const preflight=await requestJson('/api/admin/data-purge/direct/preflight',{},10000);
+    let preflight;
+    try{
+      preflight=await requestJson('/api/admin/data-purge/direct/preflight',{},10000);
+    }catch(error){
+      if(isAuthExpired(error)){redirectToLogin();return;}
+      alert('72个门店编码的只读预检暂不可用，清空已安全停止。未删除任何数据。');
+      return;
+    }
     cp72PreflightReady=preflight.cp72Ready===true&&Number(preflight.activeCpCount)===72;
     if(!cp72PreflightReady)
       return alert('清空已被阻止：当前72个CP有效门店编码未完整验证。请先修复门店配置；没有删除任何数据。');
