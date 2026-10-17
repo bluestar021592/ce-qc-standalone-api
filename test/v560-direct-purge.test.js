@@ -338,6 +338,10 @@ test('V560 direct recovery console has no backup step and posts only the direct 
     'candidate branch must not expose official clear dialog');
   assert.match(js,/cachedMainMatchesInstalled!==true/,
     'official clear dialog must show the exact locally installed main commit');
+  assert.match(js,/formalUpdateVerified!==true/,
+    'candidate or old main without post-install proof must not show purge dialog');
+  assert.match(fs.readFileSync('server.js','utf8'),/code:'V788_MANAGED_RELEASE_REQUIRED'/,
+    'ADMIN API must independently block callers bypassing the protected UI');
   assert.match(js,/原有备份已保留/,
     'success message must match real non-backup-creating, preserve-existing-backups behavior');
   assert.doesNotMatch(js,/未创建或保留 CE QC 业务备份/,
