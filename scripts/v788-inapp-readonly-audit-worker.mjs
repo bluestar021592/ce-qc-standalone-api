@@ -11,6 +11,7 @@ import {v788ReadSourceMembershipSignature,verifyV788PersistedSidecar}
   from './v788-whpp-tms-evidence-sidecar.mjs';
 import {summarizeV788WhppPodTimeSources}
   from './v788-whpp-pod-time-source-inventory.mjs';
+import {presentV788AuditGates} from '../src/v788AuditGateMessages.js';
 
 const PROOF_FILE=String.raw`D:\CE_QC_V788_验收副本\V788_WHPP_TMS_逐票证据.sqlite`;
 function fingerprint(file){
@@ -130,7 +131,7 @@ function run(){
     normalizedReturned:Number(totals.normalizedReturned||0),
     ledgerOpenWithNormalizedTerminal:Number(totals.ledgerOpenWithNormalizedTerminal||0),
     trustedPodLockOnPOD:Number(totals.trustedPodLockOnPOD||0),
-    gates
+    gates:presentV788AuditGates(gates)
   };
 }
 try{

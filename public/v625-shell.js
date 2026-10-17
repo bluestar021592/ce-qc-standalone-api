@@ -2571,10 +2571,11 @@ async function loadV788ReadOnlyAuditV625(){
         Number(data.ledgerOpenWithNormalizedTerminal||0)+'票，可信POD时间锁 '+
         Number(data.trustedPodLockOnPOD||0)+'票。');
       for(const gate of data.gates.filter(g=>g.status!=='PASS')){
-        const name=v788GateNames[gate.id]||
-          (String(gate.id||'').startsWith('WHPP_DAILY_SOURCE_')?'WHPP '+String(gate.id).slice(-10)+'日报来源':'其他验收项');
+        const name=String(gate.label||v788GateNames[gate.id]||'其他验收项');
+        const summary=String(gate.summary||'证据不足，需进一步核对');
+        const next=String(gate.next||'保留阻断，不修改正式数据');
         lines.push('['+(gate.status==='BLOCK'?'阻断':'待核验')+'] '+name+
-          '：'+JSON.stringify(gate.detail||{}));
+          '：'+summary+' 处理方向：'+next);
       }
       lines.push('此为数据库副本只读诊断，并非正式Excel回读或发布批准。');
     }else if(status==='BLOCKED')lines.push('隔离副本检查不可用或缺少必要数据表；未触碰正式数据库。');

@@ -7,6 +7,7 @@ import ExcelJS from 'exceljs';
 import {createShopeeTemplateWorkbook} from '../src/shopeeTemplateExporter.js';
 import {readV788ExistingWhppXlsx} from './v788-existing-whpp-xlsx-readback.mjs';
 import {verifiedV788EvidenceCoverage} from '../src/v788WhppStatusCoverage.js';
+import {explainV788Gate,presentV788AuditGates} from '../src/v788AuditGateMessages.js';
 // V788 is exposed only as a deliberate ADMIN action inside the QC APP.
 // No startup auto-query and no status endpoint that leaks shipment identifiers.
 const genuine={verified:true,distributionMatchesV3:true,storedMembers:346,batches:8,
@@ -24,6 +25,25 @@ assert.equal(projected.statusOnlyPreview.dates.length,2);
 assert.equal(projected.statusOnlyPreview.signingTimeAccepted,false);
 assert.equal(projected.statusOnlyPreview.ledgerAccepted,false);
 assert.equal(projected.statusOnlyPreview.exportAccepted,false);
+const friendly=presentV788AuditGates([
+  {id:'WHPP_INDEPENDENT_TMS_346',status:'PASS',detail:{}},
+  {id:'WHPP_LEDGER_VS_CURRENT',status:'BLOCK',
+    detail:{openLedgerWithPODOrReturned:346,terminalLedgerWithUnfinished:0}},
+  {id:'WHPP_POD_SIGNING_TIME',status:'REVIEW',
+    detail:{podMembers:290,trustedSavedPodTimes:0,missingTrustedSavedPodTimes:290}},
+  {id:'REAL_EXCEL_DETAIL_READBACK',status:'REVIEW',detail:{}}
+]);
+assert.equal(friendly.length,4);
+assert.equal(friendly[0].status,'PASS');
+assert.match(friendly[1].summary,/346/);
+assert.match(friendly[2].summary,/290/);
+assert.match(friendly[3].next,/真实Excel/);
+assert.equal(JSON.stringify(friendly).includes('shipmentCode'),false,
+  'user-facing acceptance cannot expose raw waybill data');
+assert.deepEqual(presentV788AuditGates([]),[]);
+assert.match(explainV788Gate({id:'SEVEN_BUSINESS_LATEST_SOURCES',
+  detail:{missingRequiredDates:1}}).summary,/缺失 1/);
+
 // Progress JSON may be stale after an interruption, and must NOT supersede
 // authoritative exact-member SQLite totals after this projection is applied.
 const staleProgress={savedMembers:0,completedBatches:0,pod:0,returned:0};
@@ -60,6 +80,11 @@ assert.match(server,/acknowledgeReadOnlyAudit!==true/,
   'read-only audit must require explicit opt-in');
 assert.match(activeJs,/只读核验现有隔离副本/,
   'read-only acceptance must be actionable without command files');
+assert.match(activeJs,/String\(gate\.summary\|\|/,
+  'real settings must display readable audit findings rather than raw technical JSON');
+assert.match(fs.readFileSync('scripts/v788-inapp-readonly-audit-worker.mjs','utf8'),
+  /presentV788AuditGates\(gates\)/,
+  'worker must project individual results to privacy-safe user guidance');
 assert.match(activeShell,/data-settings-panel="interface"/);
 assert.match(activeJs,/loadV788WhppEvidenceV625/);
 assert.match(activeJs,/startV788WhppEvidenceV625/);
