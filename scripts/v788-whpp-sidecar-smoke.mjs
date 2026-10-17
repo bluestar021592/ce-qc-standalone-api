@@ -521,8 +521,55 @@ try{
     const discovered=findV788ExistingWhppExport(xlsxTemp);
     assert.equal(discovered.status,'FOUND','one-click audit must locate a genuine existing export');
     assert.equal(discovered.file,made.file);
+    assert.equal(discovered.kind,'COMBINED');
     assert.equal(findV788ExistingWhppExport(path.join(xlsxTemp,'not-created')).status,'NOT_FOUND',
       'missing export must stay missing, never trigger an export or synthetic pass');
+
+    // Users may have ALREADY exported the two days separately rather than
+    // generating one combined report. Both must be present and independently
+    // verified; one date alone can NEVER claim 346-member completeness.
+    const dailyDir=path.join(xlsxTemp,'existing-daily');
+    await fsPromises.mkdir(dailyDir);
+    const firstDay=await createShopeeTemplateWorkbook({
+      type:'WHPP',periodType:'daily',
+      range:{from:all[0].date,to:all[0].date},
+      snapshots:[snapshotRows[0]],outputDir:dailyDir
+    });
+    const onlyOne=findV788ExistingWhppExport(dailyDir);
+    assert.equal(onlyOne.status,'NOT_FOUND');
+    assert.equal(onlyOne.reason,'DAILY_PAIR_INCOMPLETE');
+    const secondDay=await createShopeeTemplateWorkbook({
+      type:'WHPP',periodType:'daily',
+      range:{from:all[1].date,to:all[1].date},
+      snapshots:[snapshotRows[1]],outputDir:dailyDir
+    });
+    const dailyPair=findV788ExistingWhppExport(dailyDir);
+    assert.equal(dailyPair.status,'FOUND');
+    assert.equal(dailyPair.kind,'TWO_DAILY');
+    assert.deepEqual(dailyPair.workbookEntries.map(x=>x.file),[firstDay.file,secondDay.file]);
+    const dailyReadback=await readV788ExistingWhppXlsx({
+      sourceDb:xlsxSource,proofDb:db,workbookEntries:dailyPair.workbookEntries
+    });
+    assert.equal(dailyReadback.status,'XLSX_CONTENT_VERIFIED');
+    assert.equal(dailyReadback.readbackRows,346);
+    assert.equal(dailyReadback.readbackPodRows,290);
+    assert.equal(dailyReadback.readbackReturnedRows,56);
+    const wrongDateScope=await readV788ExistingWhppXlsx({
+      sourceDb:xlsxSource,proofDb:db,
+      workbookEntries:dailyPair.workbookEntries.map((x,i)=>({
+        file:x.file,expectedDates:[all[1-i].date]
+      }))
+    });
+    assert.equal(wrongDateScope.status,'BLOCKED',
+      'real daily Excel rows cannot be credited to the wrong source day');
+    assert.equal(wrongDateScope.issues.unexpectedDateRows,346);
+    await assert.rejects(readV788ExistingWhppXlsx({
+      sourceDb:xlsxSource,proofDb:db,
+      workbookEntries:dailyPair.workbookEntries.map((x,i)=>({
+        file:firstDay.file,expectedDates:[all[i].date]
+      }))
+    }),/V788_XLSX_DATE_SCOPE_INVALID/,
+    'the same Excel file cannot count as both original days');
     xlsxSource.exec('PRAGMA query_only=ON');
     const beforeRead=xlsxSource.prepare('SELECT total_changes() n').get().n;
     const actual=await readV788ExistingWhppXlsx({
