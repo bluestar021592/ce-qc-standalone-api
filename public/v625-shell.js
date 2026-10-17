@@ -2574,7 +2574,8 @@ async function loadV788WhppEvidenceV625(){
         const src=timeSources.bySource||{};
         lines.push('证据来源次数：独立TMS '+n(src.sidecar)+
           '、POD时间锁 '+n(src.podLock)+'、已存TMS轨迹 '+
-          n(src.savedTrack)+'、扫描 '+n(src.savedScan)+'、最终记录 '+
+          n(src.savedTrack)+'、已存轨迹事件 '+n(src.savedEvent)+
+          '、扫描 '+n(src.savedScan)+'、最终记录 '+
           n(src.savedFinal)+'。同一票可存在多处来源，不能直接相加。');
         lines.push('时间候选仅供后续逐票核验，尚未批准写入签收时间或计算平均签收天数。');
       }else if(timeSources)

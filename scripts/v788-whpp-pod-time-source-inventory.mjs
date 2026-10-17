@@ -11,7 +11,7 @@ const EXPLICIT_KEYS=[
   'deliveryCompletedAt','deliveredAt','deliveredTime','signedTime',
   'signedAt','signTime','signDateTime','actualDeliveryTime'
 ];
-const SOURCE_KEYS=['sidecar','podLock','savedTrack','savedScan','savedFinal'];
+const SOURCE_KEYS=['sidecar','podLock','savedTrack','savedEvent','savedScan','savedFinal'];
 const norm=value=>String(value||'').trim().toUpperCase();
 function safeJson(raw){
   try{
@@ -48,11 +48,13 @@ export function summarizeV788WhppPodTimeSources(sourceDb,proofDb,expectedSignatu
   };
   const exists=Object.fromEntries([
     ['podLock','business_pod_locks'],['savedTrack','business_shipment_tracks'],
+    ['savedEvent','business_track_events'],
     ['savedScan','business_scan_results'],['savedFinal','business_final_rows']
   ].map(([key,table])=>[key,tablePresent(sourceDb,table)]));
   const statements={
     podLock:exists.podLock?sourceDb.prepare("SELECT podTime,source FROM business_pod_locks WHERE businessType='WHPP' AND shipmentCode=?"):null,
     savedTrack:exists.savedTrack?sourceDb.prepare("SELECT shipmentStatus,rawJson FROM business_shipment_tracks WHERE businessType='WHPP' AND reportDate=? AND shipmentCode=?"):null,
+    savedEvent:exists.savedEvent?sourceDb.prepare("SELECT rawJson FROM business_track_events WHERE businessType='WHPP' AND reportDate=? AND shipmentCode=? ORDER BY id"):null,
     savedScan:exists.savedScan?sourceDb.prepare("SELECT isPod,orderStatus,rawJson FROM business_scan_results WHERE businessType='WHPP' AND reportDate=? AND shipmentCode=?"):null,
     savedFinal:exists.savedFinal?sourceDb.prepare("SELECT isPod,rawJson FROM business_final_rows WHERE businessType='WHPP' AND reportDate=? AND shipmentCode=?"):null
   };
@@ -99,6 +101,13 @@ export function summarizeV788WhppPodTimeSources(sourceDb,proofDb,expectedSignatu
       add('savedTrack',explicitWhppTms60PodTime({
         ...safeJson(tracks[0].rawJson),shipmentStatus:'60'
       },date));
+    }
+    // Stored event history may carry explicit signedAt/POD time, but its
+    // generic eventTime/creationDate/lastUpdateDate is never a POD timestamp.
+    // Sidecar has independently attested that this exact member is TMS 60.
+    const events=limitedRows(statements.savedEvent,date,code);
+    for(const event of events){
+      add('savedEvent',pickExplicit(event.rawJson,'whpp_strict_track_event',date));
     }
     const scans=limitedRows(statements.savedScan,date,code);
     if(scans.length>1)invalidOrAmbiguousRows++;

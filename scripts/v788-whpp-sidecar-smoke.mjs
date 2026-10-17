@@ -334,6 +334,7 @@ try{
     compareDb.exec(
       "CREATE TABLE business_pod_locks(businessType TEXT,shipmentCode TEXT,podTime TEXT,source TEXT);"+
       "CREATE TABLE business_shipment_tracks(businessType TEXT,reportDate TEXT,shipmentCode TEXT,shipmentStatus TEXT,rawJson TEXT);"+
+      "CREATE TABLE business_track_events(id INTEGER PRIMARY KEY,businessType TEXT,reportDate TEXT,shipmentCode TEXT,rawJson TEXT);"+
       "CREATE TABLE business_scan_results(businessType TEXT,reportDate TEXT,shipmentCode TEXT,isPod INTEGER,orderStatus TEXT,rawJson TEXT);"+
       "CREATE TABLE business_final_rows(businessType TEXT,reportDate TEXT,shipmentCode TEXT,isPod INTEGER,rawJson TEXT)"
     );
@@ -348,6 +349,10 @@ try{
     insertScan.run('J0001',JSON.stringify({signedAt:'2026-07-05 10:00:00'}));
     insertFinal.run('J0001',JSON.stringify({signedAt:'2026-07-06 10:00:00'}));
     insertScan.run('J0002',JSON.stringify({lastUpdateDate:'2026-07-07 15:00:00'}));
+    const insertEvent=compareDb.prepare("INSERT INTO business_track_events(businessType,reportDate,shipmentCode,rawJson) VALUES('WHPP','2026-07-01',?,?)");
+    insertEvent.run('J0002',JSON.stringify({signedAt:'2026-07-08 13:00:00'}));
+    // Generic eventTime must never become a POD date.
+    insertEvent.run('J0003',JSON.stringify({eventTime:'2026-07-10 16:00:00',lastUpdateDate:'2026-07-11 12:00:00'}));
     // Returned shipments are never included in the signing-time POD count.
     compareDb.prepare("INSERT INTO business_pod_locks VALUES('WHPP',?,?,?)")
       .run('J0189','2026-07-08 12:00:00','whpp_saved_scan_pod_time');
@@ -355,14 +360,15 @@ try{
     const inventory=summarizeV788WhppPodTimeSources(compareDb,db,sig);
     assert.equal(inventory.available,true);
     assert.equal(inventory.podMembers,290);
-    assert.equal(inventory.timeCandidateMembers,2);
-    assert.equal(inventory.missingTimeMembers,288);
+    assert.equal(inventory.timeCandidateMembers,3);
+    assert.equal(inventory.missingTimeMembers,287);
     assert.equal(inventory.conflictingTimeMembers,1,
       'different explicit signing moments must remain a manual evidence conflict');
-    assert.equal(inventory.unambiguousTimeCandidateMembers,1);
+    assert.equal(inventory.unambiguousTimeCandidateMembers,2);
     assert.equal(inventory.bySource.sidecar,0);
     assert.equal(inventory.bySource.podLock,1);
     assert.equal(inventory.bySource.savedTrack,1);
+    assert.equal(inventory.bySource.savedEvent,1);
     assert.equal(inventory.bySource.savedScan,2);
     assert.equal(inventory.bySource.savedFinal,2);
     assert.equal(inventory.signingTimeAccepted,false);

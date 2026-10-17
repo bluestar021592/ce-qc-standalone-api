@@ -184,6 +184,8 @@ try{
   assert.equal(evidence.body.podTimeSourceInventory?.podMembers,290);
   assert.equal(evidence.body.podTimeSourceInventory?.signingTimeAccepted,false,
     'time evidence candidates cannot be accepted as formal signing-day evidence');
+  assert.equal(evidence.body.podTimeSourceInventory?.sourceTablesPresent?.savedEvent,false,
+    'Edge fixture has no historical event table and must expose absence, not a fabricated event timestamp');
   assert.equal(evidence.body.statusOnlyPreview.dates[0].pod,166);
   assert.equal(evidence.body.statusOnlyPreview.dates[1].returned,32);
   // The real Edge backend must be able to recover persisted SQLite evidence
