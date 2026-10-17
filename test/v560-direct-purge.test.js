@@ -519,7 +519,7 @@ test('V788 managed release proof never trusts stale or wrong-branch Git metadata
     const receiptPath=path.join(root,'logs','v788_managed_install_receipt.json');
     const receipt={schemaVersion:1,mode:'INSTALLED',installedCommit:sha,
       remoteCommit:sha,candidateGatePassed:true,verifiedAt:new Date().toISOString()};
-    fs.writeFileSync(receiptPath,'\\uFEFF'+JSON.stringify(receipt));
+    fs.writeFileSync(receiptPath,'\uFEFF'+JSON.stringify(receipt));
     assert.equal(read().formalUpdateVerified,true,'exact installation receipt may validate a verified main checkout');
     assert.equal(read().liveRemoteVersionVerified,false,'cached branch SHA never proves live internet freshness');
     fs.writeFileSync(receiptPath,JSON.stringify({...receipt,remoteCommit:'0'.repeat(40)}));
