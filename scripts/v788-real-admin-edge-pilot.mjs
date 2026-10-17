@@ -215,6 +215,22 @@ try{
     'incomplete legacy fixture must not claim the business DB was reconciled');
   assert.ok(auditBlocked.gates?.some(g=>g.id==='WHPP_INDEPENDENT_TMS_346'&&g.status==='PASS'));
   assert.ok(auditBlocked.gates?.some(g=>g.id==='ISOLATED_DATABASE_AUDIT'&&g.status==='BLOCK'));
+  const legacyGate=auditBlocked.gates.find(g=>g.id==='ISOLATED_DATABASE_AUDIT');
+  assert.match(legacyGate.label,/隔离数据库结构/);
+  assert.match(legacyGate.summary,/数据表缺失/);
+  assert.match(legacyGate.next,/修复隔离副本/);
+  const independentGate=auditBlocked.gates.find(g=>g.id==='WHPP_INDEPENDENT_TMS_346');
+  assert.match(independentGate.summary,/290票POD、56票已退回/);
+  assert.equal(JSON.stringify(auditBlocked).includes('CI_FAKE_J0000'),false,
+    'ADMIN response must not expose original waybill identifiers');
+  assert.equal(await cdp.eval("(()=>{const b=document.getElementById('v788ReadOnlyAuditRefresh');if(!b)return false;b.click();return true})()"),true);
+  const friendlyUi=await waitFor(async()=>{
+    const v=await cdp.eval("document.getElementById('v788ReadOnlyAuditText')?.textContent||''");
+    return String(v).includes('隔离数据库结构')&&String(v).includes('处理方向')?v:false;
+  },'READONLY_AUDIT_FRIENDLY_UI',10000);
+  assert.match(friendlyUi,/历史验收需要的数据表缺失/);
+  assert.doesNotMatch(friendlyUi,/\\\"reason\\\"|\\"LEGACY_SOURCE_TABLES_OR_SCHEMA_UNAVAILABLE\\"/,
+    'real Edge must not show raw gate diagnostic JSON instead of user instructions');
   assert.equal(auditBlocked.podTimeInventory?.missingTimeMembers,290,
     'complete terminal statuses cannot fabricate any missing signing timestamps');
   const sourceAfter=fs.statSync(ciSource);
