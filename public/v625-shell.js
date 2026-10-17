@@ -2564,6 +2564,21 @@ async function loadV788WhppEvidenceV625(){
           '/'+Number(data.pod||0)+'票；仍缺'+Number(data.independentMissingPodTimeCount||0)+
           '票。该证据尚未写入正式签收时间账本。');
       }
+      const timeSources=data.podTimeSourceInventory;
+      if(timeSources?.available===true){
+        const n=value=>Math.max(0,Number.isFinite(Number(value))?Math.floor(Number(value)):0);
+        lines.push('隔离库签收时间来源诊断：290票POD中，存在明确时间候选 '+
+          n(timeSources.timeCandidateMembers)+'票，仍无明确时间 '+
+          n(timeSources.missingTimeMembers)+'票，跨来源时间冲突 '+
+          n(timeSources.conflictingTimeMembers)+'票。');
+        const src=timeSources.bySource||{};
+        lines.push('证据来源次数：独立TMS '+n(src.sidecar)+
+          '、POD时间锁 '+n(src.podLock)+'、已存TMS轨迹 '+
+          n(src.savedTrack)+'、扫描 '+n(src.savedScan)+'、最终记录 '+
+          n(src.savedFinal)+'。同一票可存在多处来源，不能直接相加。');
+        lines.push('时间候选仅供后续逐票核验，尚未批准写入签收时间或计算平均签收天数。');
+      }else if(timeSources)
+        lines.push('隔离库签收时间来源诊断未完成，不能将缺少证据直接认作0票。');
       const rec=data.ledgerReconciliation;
       if(rec?.ready===true){
         lines.push('旧账本待同步：POD '+Number(rec.ledgerNeedsPODSync||0)+
