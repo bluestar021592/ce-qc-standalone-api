@@ -2539,7 +2539,8 @@ const v788GateNames={
   WHPP_LEDGER_VS_CURRENT:'WHPP历史账本',
   WHPP_POD_SIGNING_TIME:'WHPP可信签收时间',
   WHPP_TERMINAL_EVIDENCE:'WHPP直接TMS终态证据',
-  REAL_EXCEL_DETAIL_READBACK:'真实Excel逐票回读'
+  REAL_EXCEL_DETAIL_READBACK:'七业务真实Excel逐票回读',
+  WHPP_EXISTING_REAL_XLSX:'WHPP已有真实导出文件逐票回读'
 };
 async function loadV788ReadOnlyAuditV625(){
   if(page!=='settings')return;
@@ -2570,6 +2571,12 @@ async function loadV788ReadOnlyAuditV625(){
       else lines.push('旧业务库 WHPP '+Number(data.members||0)+'票，旧OPEN账本与终态不一致 '+
         Number(data.ledgerOpenWithNormalizedTerminal||0)+'票，可信POD时间锁 '+
         Number(data.trustedPodLockOnPOD||0)+'票。');
+      if(data.existingWhppExcel?.status==='XLSX_CONTENT_VERIFIED'){
+        const e=data.existingWhppExcel;
+        lines.push('本机已有WHPP真实Excel逐票回读通过：总票 '+Number(e.rows||0)+
+          '，POD '+Number(e.pod||0)+'，已退回 '+Number(e.returned||0)+
+          '。这不代表七业务综合Excel或历史签收时间通过。');
+      }
       for(const gate of data.gates.filter(g=>g.status!=='PASS')){
         const name=String(gate.label||v788GateNames[gate.id]||'其他验收项');
         const summary=String(gate.summary||'证据不足，需进一步核对');
