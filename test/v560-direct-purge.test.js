@@ -278,7 +278,7 @@ test('V560 direct recovery console has no backup step and posts only the direct 
   assert.match(js,/INTERNAL_AUTH_REQUIRED/,'direct purge must recognize the explicit session-expired API code');
   assert.match(js,/独立后台线程/,'UI must expose detached execution progress');
   assert.match(js,/永久清除全部业务数据/);
-  assert.match(js,/最终确认：现在将直接永久清空全部业务数据/);
+  assert.match(js,/最终确认：永久清空全部业务数据及可再生成业务文件/);
   assert.doesNotMatch(js,/\/api\/admin\/data-purge\/(?:prepare|execute)/);
   assert.match(access,/const rawReturnTo = String\(req\.query\?\.returnTo/,'login page must accept a same-origin return target');
   assert.match(access,/safeReturnToJson/,'login return target must be JSON-escaped before inline script use');
