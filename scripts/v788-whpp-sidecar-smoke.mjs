@@ -703,7 +703,7 @@ try{
   }finally{db2.close()}
 }finally{db.close()}
 const xlsxReadbackSource=fs.readFileSync('scripts/v788-existing-whpp-xlsx-readback.mjs','utf8');
-assert.match(xlsxReadbackSource,/fs\.realpathSync\.native\(workbookPath\)/,
+assert.match(xlsxReadbackSource,/fs\.realpathSync\.native\(entry\.file\)/,
   'real source must be checked for path replacement on both sides of readback');
 assert.match(xlsxReadbackSource,/stat\.dev,stat\.ino,stat\.size,stat\.mtimeMs,stat\.ctimeMs/,
   'source metadata must detect same-size replacements and inode changes');
