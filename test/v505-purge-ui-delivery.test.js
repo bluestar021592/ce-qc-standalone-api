@@ -233,3 +233,66 @@ test('V545 retries EXECUTE once only after explicit final confirmation and recov
   assert.deepEqual(result.alerts,[]);
   assert.equal(result.confirms.length,2);
 });
+
+test('V788 direct no-backup purge stops polling after a terminal FAILED response, even for a V788 error code',async()=>{
+  const source=read('public/v560-direct-data-purge.js');
+  const phrase='永久清除全部业务数据';
+  const nodes=new Map(), alerts=[];
+  let now=1_000_000, statusReads=0, deletePosts=0;
+  const node=id=>{
+    if(!nodes.has(id))nodes.set(id,{
+      id,hidden:true,disabled:false,value:'',innerHTML:'',textContent:''
+    });
+    return nodes.get(id);
+  };
+  class AdvancingDate extends Date {
+    static now(){now+=7000;return now;}
+  }
+  const context={
+    AbortController,Date:AdvancingDate,
+    console:{info(){},warn(){},error(){}},
+    document:{getElementById:node},
+    alert:message=>alerts.push(String(message)),
+    confirm:()=>true,
+    setInterval:()=>1,clearInterval(){},
+    setTimeout:callback=>{queueMicrotask(callback);return 1;},
+    clearTimeout(){},
+    fetch:async(url,options={})=>{
+      if(url==='/api/session')
+        return responseJson({ok:true,user:{role:'ADMIN'}});
+      if(url==='/api/admin/data-purge/direct/preflight')
+        return responseJson({ok:true,cp72Ready:true,activeCpCount:72,
+          dataStorageReady:true,version:{
+            installedOnLocalMain:true,cachedMainMatchesInstalled:true,
+            formalUpdateVerified:true,installedThroughManagedUpdaterVerified:true,
+            installedCommit:'a'.repeat(40)
+          }});
+      if(url==='/api/admin/data-purge/direct'&&options.method==='POST'){
+        deletePosts++;
+        return responseJson({ok:true,jobId:'v788-terminal-failure',status:'QUEUED'},202);
+      }
+      if(url.startsWith('/api/admin/data-purge/direct/status?jobId=')){
+        statusReads++;
+        return responseJson({
+          ok:true,jobId:'v788-terminal-failure',status:'FAILED',
+          code:'V788_CP72_CHANGED',error:'CP门店配置变动，事务已安全回滚'
+        });
+      }
+      throw Error('Unexpected request: '+url);
+    }
+  };
+  context.window=context;
+  vm.runInNewContext(source,context,{filename:'v560-direct-data-purge.js'});
+  await context.openDirectDataPurge();
+  node('directPurgePhrase').value=phrase;
+  context.updateDirectPurgeButton();
+  assert.equal(node('directPurgeExecuteButton').disabled,false,
+    'exact phrase and elapsed countdown allow explicit submit in isolated UI test');
+  await context.executeDirectDataPurge();
+  assert.equal(deletePosts,1,'must submit the confirmed destructive action at most once');
+  assert.equal(statusReads,1,'terminal FAILED must stop polling on first response regardless of error prefix');
+  assert.match(node('directPurgePreview').innerHTML,/CP门店配置变动，事务已安全回滚/);
+  assert.doesNotMatch(node('directPurgePreview').innerHTML,/全部业务数据已直接清空/);
+  assert.equal(context.__CE_QC_V560_DIRECT_PURGE__.getStatus().active,false);
+  assert.deepEqual(alerts,[]);
+});
