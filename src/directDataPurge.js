@@ -120,6 +120,28 @@ function readProtectedActiveShopSet(db){
   return value;
 }
 
+// A previous successful clear is committed with last_full_clear_at in the same
+// SQLite transaction as the deleted business rows. That durable marker must
+// prevent a SECOND deletion if the browser loses the result or 5177 restarts.
+// After real new business rows arrive, a separately confirmed future reset
+// may be requested. Checking row existence (rather than COUNT(*)) stays fast.
+function alreadyClearedWithoutNewBusiness(db){
+  const last=String(db.prepare("SELECT value FROM app_meta WHERE key='last_full_clear_at'").get()?.value||'').trim();
+  if(!last)return false;
+  const existing=new Set(db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(x=>String(x.name||'')));
+  for(const table of BUSINESS_DATA_TABLES){
+    if(!existing.has(table))continue;
+    if(db.prepare(`SELECT 1 FROM "${table}" LIMIT 1`).get())return false;
+  }
+  return true;
+}
+function assertNotAlreadyCleared(db){
+  if(!alreadyClearedWithoutNewBusiness(db))return;
+  const error=new Error('V788_PURGE_ALREADY_EMPTY: 上一次清空已经提交，当前未发现新导入的业务数据。禁止重复清空；请核对上次结果并重新启动后导入日报。');
+  error.code='V788_PURGE_ALREADY_EMPTY';
+  throw error;
+}
+
 // ADMIN preflight checks the exact 72-code activation using an independent
 // read-only SQLite connection. This does not authorize a live purge: the
 // transaction always revalidates the list inside BEGIN IMMEDIATE.
@@ -139,9 +161,12 @@ export function inspectDirectPurgeCp72Preflight(){
     db.exec('PRAGMA query_only=ON');
     const value=readProtectedActiveShopSet(db);
     const members=JSON.parse(value).members;
+    const alreadyClearedNoFreshBusiness=alreadyClearedWithoutNewBusiness(db);
     return {ok:true,cp72Ready:true,activeCpCount:members.length,
-      code:'ACTIVE_CP72_VALID',dataStorageReady:true,
-      backupCreated:false,existingBackupsPreserved:true};
+      code:alreadyClearedNoFreshBusiness?'V788_PURGE_ALREADY_EMPTY':'ACTIVE_CP72_VALID',
+      alreadyClearedNoFreshBusiness,
+      safeToStartClear:!alreadyClearedNoFreshBusiness,
+      dataStorageReady:true,backupCreated:false,existingBackupsPreserved:true};
   }catch(error){
     const code=String(error?.message||'').includes('V788_PURGE_CP72_MISSING')
       ?'ACTIVE_CP72_MISSING':'ACTIVE_CP72_INVALID_OR_UNREADABLE';
@@ -163,6 +188,7 @@ function assertCp72SafeBeforeCleanup(){
   try{
     db.exec('PRAGMA query_only=ON');
     readProtectedActiveShopSet(db);
+    assertNotAlreadyCleared(db);
   }finally{db.close()}
 }
 
@@ -179,6 +205,9 @@ function directResetTransaction(db,onProgress=()=>{}){
     db.exec('BEGIN IMMEDIATE');
     transactionStarted=true;
     const protectedShopSet=readProtectedActiveShopSet(db);
+    // Recheck under BEGIN IMMEDIATE: prior clear or concurrent state change
+    // cannot slip through a stale preflight or queued worker.
+    assertNotAlreadyCleared(db);
     onProgress({status:'RUNNING',stage:'DELETE_TABLES',message:'已取得数据库写锁，开始清空业务表。',completedTables:0,totalTables:clearTargets.length});
     for(let index=0;index<clearTargets.length;index+=1){
       const table=clearTargets[index];
