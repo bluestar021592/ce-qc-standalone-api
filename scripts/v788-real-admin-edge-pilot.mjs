@@ -188,6 +188,32 @@ try{
   process.env.NODE_ENV='test';
   createV788SyntheticEvidence();
   syntheticCreated=true;
+  // Exercise the real one-click asynchronous worker on a fake D: copy.
+  // The disposable fixture has no historical ledger/CP tables, so the
+  // worker MUST return BLOCKED without touching source or running CE TMS.
+  const ciSource=String.raw`D:\CE_QC_V788_验收副本\ce_qc_monitor.db`;
+  const sourceBefore=fs.statSync(ciSource);
+  const launchAudit=await fetch(base+'/api/v788/readonly-audit/start',{
+    method:'POST',
+    headers:{Cookie:'ce_qc_local_auth_v431='+admin,'Content-Type':'application/json'},
+    body:JSON.stringify({acknowledgeReadOnlyAudit:true}),
+    signal:AbortSignal.timeout(6500)
+  });
+  assert.equal(launchAudit.status,202,
+    'ADMIN must be able to start a genuinely read-only audit without CE login');
+  const auditBlocked=await waitFor(async()=>{
+    const response=await httpStatus(base+'/api/v788/readonly-audit/status',admin);
+    const state=response.body;
+    return state.active===false&&state.status==='BLOCKED'?state:false;
+  },'READONLY_AUDIT_WORKER_BLOCKED_ON_INCOMPLETE_FIXTURE',15000);
+  assert.equal(auditBlocked.readyToPublish,false);
+  assert.equal(auditBlocked.productionModified,false);
+  const sourceAfter=fs.statSync(ciSource);
+  assert.equal(sourceAfter.size,sourceBefore.size);
+  assert.equal(sourceAfter.mtimeMs,sourceBefore.mtimeMs);
+  assert.equal(cdp.urls.filter(x=>x.includes('/api/v788/whpp-evidence/start')).length,0,
+    'read-only audit must never trigger a live TMS request');
+  console.log('[V788_REAL_EDGE] PASS one-click worker: no raw data, missing tables are BLOCKED, source unchanged');
   const evidence=await httpStatus(base+'/api/v788/whpp-evidence/status',admin);
   assert.equal(evidence.status,200);
   assert.equal(evidence.body.sidecarVerified,true,'real source and sidecar must both validate');
