@@ -52,7 +52,7 @@ import {
   resetBusinessRunForReport, saveBusinessSnapshot, saveBusinessState, updateBusinessRunLock
 } from './src/businessStore.js';
 import { createPurgeChallenge, executePurge } from './src/dataPurge.js';
-import { queueDirectDataPurge, getDirectDataPurgeStatus, DIRECT_PURGE_ID } from './src/directDataPurge.js';
+import { queueDirectDataPurge, getDirectDataPurgeStatus, inspectDirectPurgeCp72Preflight, DIRECT_PURGE_ID } from './src/directDataPurge.js';
 import { buildHomeQualitySummary, buildHomeQualitySummaryWithArchive, diagnoseSelectedDateTiming } from './src/homeQualitySummary.js';
 import { diagnoseV736Timing } from './src/v736TimingDiagnostics.js';
 import { readSelectedDateBusinessSourceTruth } from './src/v783SevenBusinessSourceTruth.js';
@@ -1015,6 +1015,16 @@ app.get('/api/state/last-report', async (req, res) => {
 });
 
 const directPurgeTerminalAudits = new Set();
+
+// This is an advisory, read-only CP72 check; the destructive SQLite
+// transaction repeats its own authoritative validation before DELETE.
+app.get('/api/admin/data-purge/direct/preflight', requireRole('ADMIN'), (req,res)=>{
+  res.setHeader('Cache-Control','no-store');
+  const check=inspectDirectPurgeCp72Preflight();
+  res.json({...check,requiresAdministratorConfirmation:true,
+    freshBusinessExcelVerified:false,formalUpdateVerified:false,
+    readyForAutomaticDeletion:false});
+});
 
 app.post('/api/admin/data-purge/direct', requireRole('ADMIN'), async (req, res) => {
   try {

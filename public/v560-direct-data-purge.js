@@ -5,6 +5,7 @@
   let openedAt=0;
   let active=false;
   let timer=null;
+  let cp72PreflightReady=false;
   const node=id=>document.getElementById(id);
   const escapeText=value=>String(value??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
 
@@ -61,7 +62,7 @@
     const countdown=node('directPurgeCountdown');
     const remain=Math.max(0,5-elapsedSeconds());
     if(countdown)countdown.textContent=remain>0?`请等待 ${remain} 秒`:'已完成安全倒计时，可最终确认清空';
-    if(button)button.disabled=active||remain>0||String(phrase?.value||'')!==PHRASE;
+    if(button)button.disabled=active||!cp72PreflightReady||remain>0||String(phrase?.value||'')!==PHRASE;
   }
   function startClock(){
     clearInterval(timer);
@@ -72,14 +73,19 @@
 
   async function openDirectDataPurge(){
     if(active)return;
+    cp72PreflightReady=false;
     const session=await ensureAdminSession();
     if(!session)return;
-    if(!global.confirm('打开直接清空向导？不会创建新备份，也不会启用V505安全封锁。只有最终再次确认后才会删除业务数据。'))return;
+    const preflight=await requestJson('/api/admin/data-purge/direct/preflight',{},10000);
+    cp72PreflightReady=preflight.cp72Ready===true&&Number(preflight.activeCpCount)===72;
+    if(!cp72PreflightReady)
+      return alert('清空已被阻止：当前72个CP有效门店编码未完整验证。请先修复门店配置；没有删除任何数据。');
+    if(!global.confirm('打开清空向导？系统不会新建备份，现有备份仍会保留。只有最终确认后才删除业务数据。'))return;
     openedAt=Date.now();
     const dialog=node('directPurgeDialog');if(dialog)dialog.hidden=false;
     const phrase=node('directPurgePhrase');if(phrase)phrase.value='';
     const preview=node('directPurgePreview');
-    if(preview)preview.innerHTML='<div class="purge-warning"><b>直接清空模式：不创建备份，不启用安全封锁。</b><br><small>仍使用 ADMIN 权限校验、5秒倒计时、最终确认和单次 SQLite 事务。用户、权限、配置、白名单和审计会保留；CE QC 历史备份和可再生成业务文件会同步清理。</small></div>';
+    if(preview)preview.innerHTML='<div class="purge-warning"><b>72个有效CP门店编码已通过只读预检。</b><br><small>不会新建备份；现有备份会保留。清空仅删除业务表及可再生成业务文件，历史证据归档会清理。用户、权限、72个有效CP配置与审计保留；后台还会在事务中再次核验CP配置。</small></div>';
     startClock();
   }
   function closeDirectDataPurge(){
@@ -97,8 +103,7 @@
     COMMITTING:'正在提交清空事务',
     COMMITTED:'清空事务已提交',
     RECLAIMING_SPACE:'正在释放数据库磁盘空间',
-    FILE_CLEANUP:'正在清理备份和业务缓存',
-    FILE_CLEANUP:'正在清理临时文件',
+    FILE_CLEANUP:'正在清理可再生成业务文件（已有备份保留）',
     SUCCEEDED:'清空完成',
     FAILED:'清空失败'
   };
@@ -148,7 +153,7 @@
     updateDirectPurgeButton();
     const button=node('directPurgeExecuteButton');
     if(button?.disabled)return alert('请准确输入“永久清除全部业务数据”，并等待5秒倒计时结束。');
-    if(!global.confirm('最终确认：现在将直接永久清空全部业务数据。不会创建新备份。用户、权限、配置、白名单和审计会保留；CE QC 历史备份和可再生成业务文件会同步清理。是否继续？'))return;
+    if(!global.confirm('最终确认：永久清空全部业务数据及可再生成业务文件。不会新建备份，已有备份会保留；72个CP门店编码、用户、权限、配置和审计也会保留。是否继续？'))return;
     active=true;stopClock();
     if(button)button.disabled=true;
     const phrase=node('directPurgePhrase');if(phrase)phrase.disabled=true;
@@ -162,7 +167,7 @@
       renderJobStatus(queued,started);
       const result=await waitForDirectPurge(queued,started);
       const deleted=Number(result.deletedRows||0);
-      if(preview)preview.innerHTML=`<div class="purge-success"><b>全部业务数据已直接清空。</b><br>共删除 <b>${deleted.toLocaleString()}</b> 行业务记录。<br><small>未创建或保留 CE QC 业务备份；用户、权限、配置、白名单和审计已保留。现在可以重新上传新的日报数据。</small></div>`;
+      if(preview)preview.innerHTML=`<div class="purge-success"><b>全部业务数据已直接清空。</b><br>共删除 <b>${deleted.toLocaleString()}</b> 行业务记录。<br><small>本次未新建备份，原有备份已保留；用户、权限、72个CP配置及审计已保留。现在可以开始重新上传日报。</small></div>`;
     }catch(error){
       active=false;
       if(isAuthExpired(error)){redirectToLogin();return;}

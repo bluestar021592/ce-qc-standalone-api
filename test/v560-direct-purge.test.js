@@ -50,6 +50,12 @@ test('V560 direct purge clears business data without creating a backup or purge 
       .run('shop_current_complete_codes_v780',activeBefore,new Date().toISOString());
     assert.equal(getActiveCompleteShopSet(db)?.members?.length,72,'pre-clear active CP list must validate as 72');
     assert.equal(getShopCodeMap().size,72,'current CP detector must use only activated 72 members');
+    const {inspectDirectPurgeCp72Preflight}=await import('../src/directDataPurge.js');
+    const cpReady=inspectDirectPurgeCp72Preflight();
+    assert.equal(cpReady.cp72Ready,true,'CP preflight must be read-only and find the exact 72 codes');
+    assert.equal(cpReady.activeCpCount,72);
+    assert.equal(cpReady.backupCreated,false);
+    assert.equal(cpReady.existingBackupsPreserved,true);
     for(const name of ['shop_cp_codes','shop_cp_import_snapshots','shop_active_code_set_history']){
       assert.ok(!BUSINESS_DATA_TABLES.includes(name),`historical CP configuration may not be cleared: ${name}`);
     }
@@ -153,6 +159,8 @@ test('V560 direct purge clears business data without creating a backup or purge 
     // destructive clear and must not remove freshly imported July members.
     stageDb.prepare("UPDATE app_meta SET value=? WHERE key='shop_current_complete_codes_v780'")
       .run(JSON.stringify({...activeConfig,members:activeMembers.slice(0,71)}));
+    assert.equal(inspectDirectPurgeCp72Preflight().cp72Ready,false,
+      'preflight must refuse 71 codes before opening the destructive dialog');
     await assert.rejects(
       ()=>executeDirectDataPurge({phrase:DIRECT_PURGE_PHRASE,user:{email:'admin@example.test',role:'ADMIN'}}),
       /V788_PURGE_CP72_INVALID/,
@@ -165,6 +173,8 @@ test('V560 direct purge clears business data without creating a backup or purge 
     // Absent active CP72 activation must also fail closed. Otherwise the
     // subsequent import could silently revive the retired 95-code whitelist.
     stageDb.prepare("DELETE FROM app_meta WHERE key='shop_current_complete_codes_v780'").run();
+    assert.equal(inspectDirectPurgeCp72Preflight().cp72Ready,false,
+      'preflight must refuse missing CP activation before deleting anything');
     await assert.rejects(
       ()=>executeDirectDataPurge({phrase:DIRECT_PURGE_PHRASE,user:{email:'admin@example.test',role:'ADMIN'}}),
       /V788_PURGE_CP72_MISSING/,
@@ -175,6 +185,8 @@ test('V560 direct purge clears business data without creating a backup or purge 
       'rejected missing-CP purge must leave WHPP reimport intact');
     stageDb.prepare("INSERT INTO app_meta(key,value,updatedAt) VALUES(?,?,?)")
       .run('shop_current_complete_codes_v780',activeBefore,new Date().toISOString());
+    assert.equal(inspectDirectPurgeCp72Preflight().cp72Ready,true,
+      'restored complete activation is eligible again for a separate deliberate reset');
 
 
 
@@ -250,6 +262,16 @@ test('V560 direct recovery console has no backup step and posts only the direct 
   assert.doesNotMatch(html,/备份并继续|purgeBackupConfirmed|v505-data-purge-recovery\.js/);
   assert.match(html,/v560-direct-data-purge\.js\?v=20260921-v568-1/);
   assert.match(js,/\/api\/admin\/data-purge\/direct/);
+  assert.match(js,/\/api\/admin\/data-purge\/direct\/preflight/,
+    'clear dialog must check 72 active store codes BEFORE the destructive action');
+  assert.match(js,/!cp72PreflightReady/,
+    'no CP72 match disables irreversible clear');
+  assert.match(js,/原有备份已保留/,
+    'success message must match real non-backup-creating, preserve-existing-backups behavior');
+  assert.doesNotMatch(js,/未创建或保留 CE QC 业务备份/,
+    'false claim that old backups were deleted must never return');
+  assert.doesNotMatch(html,/现有 CE QC 备份、业务证据归档和可再生成文件会.*删除/,
+    'preflight explanation must not promise to delete backups that backend preserves');
   assert.match(js,/\/api\/admin\/data-purge\/direct\/status\?jobId=/,'UI must poll detached worker status instead of waiting on the destructive request');
   assert.match(js,/\/api\/session/,'direct purge must verify a fresh authenticated session before exposing destructive controls');
   assert.match(js,/encodeURIComponent\(RETURN_TO\)/,'expired sessions must redirect through login and return to the purge console');
