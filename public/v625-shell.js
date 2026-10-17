@@ -2555,7 +2555,19 @@ async function loadV788ReadOnlyAuditV625(){
       const n=data.counts||{};
       lines.push('检查结果：'+status+'；通过 '+Number(n.passed||0)+
         '、阻断 '+Number(n.blocked||0)+'、待核验 '+Number(n.reviewing||0)+' 项。');
-      lines.push('WHPP '+Number(data.members||0)+'票，旧OPEN账本与终态不一致 '+
+      if(data.independentTmsProofReady===true){
+        lines.push('独立TMS证据库：已核实346票逐票成员（POD 290、已退回 56），仅代表历史终态证据完整。');
+        const timing=data.podTimeInventory;
+        if(timing?.available===true)
+          lines.push('独立来源签收时间候选 '+Number(timing.timeCandidateMembers||0)+
+            '票；无明确时间 '+Number(timing.missingTimeMembers||0)+
+            '票；待复核 '+Number(timing.manualReviewMembers||0)+
+            '票。候选并非正式签收时间。');
+      }else
+        lines.push('独立TMS逐票证据未通过签名和来源校验，不能据此放行。');
+      if(data.auditSchemaAvailable!==true)
+        lines.push('旧业务库验收表缺失或结构不兼容，历史账本/门店/七业务暂不能出结论。');
+      else lines.push('旧业务库 WHPP '+Number(data.members||0)+'票，旧OPEN账本与终态不一致 '+
         Number(data.ledgerOpenWithNormalizedTerminal||0)+'票，可信POD时间锁 '+
         Number(data.trustedPodLockOnPOD||0)+'票。');
       for(const gate of data.gates.filter(g=>g.status!=='PASS')){
