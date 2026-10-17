@@ -135,6 +135,16 @@ try{
   assert.equal(directPreflightAdmin.body.formalUpdateVerified,false);
   assert.equal(directPreflightAdmin.body.version?.liveRemoteVersionVerified,false);
   assert.equal(directPreflightAdmin.body.version?.installedThroughManagedUpdaterVerified,false);
+  assert.equal(directPreflightAdmin.body.version?.formalUpdateVerified,false);
+  const bypass=await fetch(base+'/api/admin/data-purge/direct',{
+    method:'POST',
+    headers:{Cookie:'ce_qc_local_auth_v431='+admin,'Content-Type':'application/json'},
+    body:JSON.stringify({phrase:'永久清除全部业务数据'}),
+    signal:AbortSignal.timeout(6500)
+  });
+  assert.equal(bypass.status,409,
+    'ADMIN API bypass cannot skip managed release requirement');
+  assert.equal((await bypass.json()).code,'V788_MANAGED_RELEASE_REQUIRED');
   assert.equal(directPreflightAdmin.body.version?.installedCommit.length,40,
     'read-only preflight must identify the actual checked-out SHA');
   assert.equal(typeof directPreflightAdmin.body.version?.installedBranch,'string');
