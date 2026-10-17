@@ -253,7 +253,19 @@ function Test-AddressInUseLog {
 
 function Test-BackendProcessAlive($Backend) {
     if (-not $Backend -or -not $Backend.Id) { return $false }
-    try { return $null -ne (Get-Process -Id $Backend.Id -ErrorAction SilentlyContinue) } catch { return $false }
+    # Start-Process -PassThru owns a real System.Diagnostics.Process handle.
+    # On Windows Get-Process may still enumerate an already-exited process
+    # while its handle remains open. The actual exit signal is authoritative.
+    try {
+        $Backend.Refresh()
+        if ($Backend.HasExited) { return $false }
+        return $true
+    } catch {
+        try {
+            $candidate = Get-Process -Id $Backend.Id -ErrorAction Stop
+            return (-not $candidate.HasExited)
+        } catch { return $false }
+    }
 }
 
 function Get-BackendExitCode($Backend) {

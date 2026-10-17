@@ -6,7 +6,7 @@ const business=document.body.dataset.business||'';
 const q=s=>document.querySelector(s);
 const qa=s=>[...document.querySelectorAll(s)];
 const byId=id=>document.getElementById(id);
-const num=v=>Number.isFinite(Number(v))?Number(v):null;
+const num=v=>v===null||v===undefined||v===''?null:(Number.isFinite(Number(v))?Number(v):null);
 const fmt=v=>v===null||v===undefined?'—':Number(v).toLocaleString('zh-CN');
 const pct=v=>v===null||v===undefined?'—':Number(v).toFixed(2).replace(/\.00$/,'')+'%';
 const esc=v=>String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
@@ -220,14 +220,17 @@ function metricState(state={}){
   const oc=num(first(state,['dashboard.metrics.ocCurrent','dashboard.metrics.oc1','dashboard.categories.ocTotal','oc']))??0;
   const unresolved=num(first(state,['dashboard.metrics.unresolved','dashboard.abnormalCount','unresolved']))??Math.max(0,total-pod);
   const returned=num(first(state,['dashboard.metrics.returned','returned']))??0;
+  const returning=num(first(state,['dashboard.metrics.returnInProgress','dashboard.metrics.returning','returnInProgress','returning']))??0;
   const cancelled=num(first(state,['dashboard.metrics.cancelled','cancelled']))??0;
   const explicitDelivery=num(first(state,['dashboard.metrics.delivery','dashboard.metrics.deliveryStay','dashboard.categories.deliveryTotal']));
-  const delivery=explicitDelivery??Math.max(0,total-pod-returned-cancelled);
   const normalDiversion=num(first(state,['dashboard.metrics.normalDiversion']))??0;
   const shopTotal=num(first(state,['dashboard.metrics.shopTotal']))??0;
   const otherNormal=Math.max(0,cancelled+normalDiversion+shopTotal);
+  // A missing authoritative delivery count must not classify TMS 80 returns
+  // or normal diversions as parcels still out for delivery.
+  const delivery=explicitDelivery??Math.max(0,total-pod-returned-returning-otherNormal);
   const avgDays=num(first(state,['dashboard.metrics.avgPodDays','avgPodDays','dashboard.avgPodDays']));
-  return{total,pod,podRate:total?pod/total*100:0,pending,oc,unresolved,returned,cancelled,delivery,normalDiversion,shopTotal,otherNormal,avgDays};
+  return{total,pod,podRate:total?pod/total*100:0,pending,oc,unresolved,returned,returning,cancelled,delivery,normalDiversion,shopTotal,otherNormal,avgDays};
 }
 
 function renderTrend(rootId,points=[]){
@@ -265,14 +268,46 @@ function renderMiniTrend(rootId,points=[],tone='#1677f2'){
 }
 
 function renderDonut(m){
-  const total=Math.max(1,m.total);
+  // Keep mutually exclusive status slices; dashboard overlays (OC/Pending gaps)
+  // must never be added as extra parcels on top of the same shipment.
+  const total=Math.max(0,Number(m.total)||0);
+  const count=value=>Math.max(0,Math.trunc(Number(value)||0));
+  const returnCapable=['WHPP','SHOPEECN','SHOPEEVN'].includes(business);
   const parts=[
-    ['派送中',m.delivery,'#1677f2'],['已签收',m.pod,'#20b979'],['Pending',m.pending,'#f5a623'],['异常',m.unresolved,'#ef4b50']
+    ['派送中',count(m.delivery),'#1677f2'],
+    ['已签收',count(m.pod),'#20b979'],
+    ...(returnCapable?[
+      ['已退回',count(m.returned),'#e98945'],
+      ['退回中',count(m.returning),'#d97706']
+    ]:[]),
+    ['Pending',count(m.pending),'#f5a623'],
+    ['异常',count(m.abnormal),'#ef4b50'],
+    ['其他正常状态',count(m.otherNormal),'#8c9bab'],
+    ['待核验',count(m.unprocessed),'#c5cfdb']
   ];
+  const accounted=parts.reduce((sum,item)=>sum+item[1],0);
+  const donut=byId('v625BusinessDonut');
+  const legend=byId('v625BusinessLegend');
+  if(accounted>total){
+    if(donut)donut.style.background='var(--v625-border,#dce5ef)';
+    if(legend)legend.textContent='状态分类存在重叠：已分类 '+fmt(accounted)+' / 总票 '+fmt(total)+'，等待核验';
+    return;
+  }
+  if(total===0){
+    if(donut)donut.style.background='var(--v625-border,#dce5ef)';
+    if(legend)legend.textContent='暂无数据（所选日期和业务无有效日报成员）';
+    return;
+  }
+  if(accounted<total)parts.find(part=>part[0]==='待核验')[1]+=total-accounted;
+  const denominator=Math.max(1,total);
   let at=0;const stops=[];
-  for(const[,value,color]of parts){const next=at+(value/total*100);stops.push(color+' '+at+'% '+next+'%');at=next}
-  const donut=byId('v625BusinessDonut');if(donut)donut.style.background='conic-gradient('+stops.join(',')+')';
-  const legend=byId('v625BusinessLegend');if(legend)legend.innerHTML=parts.map(([name,value,color])=>'<div><i style="background:'+color+'"></i><span>'+esc(name)+' '+fmt(value)+'（'+pct(value/total*100)+'）</span></div>').join('');
+  for(const[,value,color]of parts){
+    const next=at+(value/denominator*100);
+    if(value>0)stops.push(color+' '+at+'% '+next+'%');
+    at=next;
+  }
+  if(donut)donut.style.background=stops.length?'conic-gradient('+stops.join(',')+')':'var(--v625-border,#dce5ef)';
+  if(legend)legend.innerHTML=parts.filter(([,value])=>value>0).map(([name,value,color])=>'<div><i style="background:'+color+'"></i><span>'+esc(name)+' '+fmt(value)+'（'+pct(value/denominator*100)+'）</span></div>').join('');
 }
 async function loadSession(){
   try{
@@ -1261,6 +1296,24 @@ function renderTimingMissing(type){
 let v628BusinessWorkspaceRows=[];
 let v630BusinessDetailTabs={};
 let v631BusinessAccounting={rowsByKind:{},total:0,accounted:0,difference:0};
+function applyVerifiedBusinessKpis(kinds={},total=0,targetBusiness=''){
+  const denominator=Number(total);
+  const parts=['delivery','pod','returned','returning','pending','abnormal','otherNormal','unprocessed'];
+  if(!Number.isSafeInteger(denominator)||denominator<=0)return false;
+  if(parts.some(key=>!Number.isSafeInteger(Number(kinds[key]??0))||Number(kinds[key]??0)<0))return false;
+  const assigned=parts.reduce((sum,key)=>sum+Number(kinds[key]||0),0);
+  if(assigned!==denominator)return false;
+  setText('kpiDelivery',fmt(kinds.delivery||0));
+  setText('kpiPod',fmt(kinds.pod||0));
+  setText('kpiPodRate',pct(Number(kinds.pod||0)*100/denominator));
+  setText('kpiPending',fmt(kinds.pending||0));
+  setText('kpiOtherNormal',fmt(kinds.otherNormal||0));
+  if(['WHPP','SHOPEECN','SHOPEEVN'].includes(targetBusiness)){
+    setText('kpiReturned',fmt(kinds.returned||0));
+    setText('kpiReturnRate',pct(Number(kinds.returned||0)*100/denominator));
+  }
+  return true;
+}
 let v628BusinessMetricState={};
 let v628BusinessReportDate='';
 let v748QualityRows={shopArrived:[],pendingGap:[],oc2Plus:[]};
@@ -1280,8 +1333,44 @@ function tabRows(...keys){
 function detailCode(row={}){return String(row.shipmentCode||row.运单号||row.waybill||'').trim().toUpperCase()}
 function uniqueDetailRows(rows=[]){const map=new Map();for(const row of rows){const code=detailCode(row);if(code&&!map.has(code))map.set(code,row)}return[...map.values()]}
 function rowText(row={}){return [row.primaryCategory,row.主分类,row.异常分类,row.currentState,row.scanNormalizedState,row.退回状态,row.specialState,row.shopState,row.最后节点,row.latestEventDesc,row.QC判断].map(v=>String(v||'')).join(' ').toUpperCase()}
-function rowIsPod(row={}){const text=rowText(row);return row.是否POD==='是'||String(row.orderStatus||'')==='85'||/(^|\s)(POD|已签收|签收成功|已妥投|DELIVERED|SIGNED)(\s|$)/i.test(text)&&!/未签收|未妥投|签收失败/.test(text)}
-function rowIsReturned(row={}){const text=rowText(row);return !/未退回|非退回|待退回|退回处理中|NOT_RETURNED|PENDING_RETURN/i.test(text)&&/(已退回|退回完成|RETURN_COMPLETED|RETURNED)/i.test(text)}
+function rowTmsStatus(row={}){return String(row?.shipmentStatus??row?.shipmentTrack?.shipmentStatus??'').trim()}
+function rowHasTmsConflict(row={}){
+  const code=rowTmsStatus(row),state=String(row?.currentState||'').trim().toUpperCase();
+  return row?.shipmentStatusConflict===true||row?.truthEvidence?.tmsContradiction===true
+    ||state==='PENDING_VERIFICATION'
+    ||(code==='60'&&['RETURNED','RETURN_COMPLETED','RETURN_IN_PROGRESS','RETURNING'].includes(state))
+    ||(code==='81'&&state==='POD')
+    ||(code==='80'&&['POD','RETURNED','RETURN_COMPLETED'].includes(state));
+}
+function rowIsPod(row={}){
+  if(rowHasTmsConflict(row))return false;
+  const code=rowTmsStatus(row);
+  if(code==='60')return true;
+  if(code==='80'||code==='81')return false;
+  const text=rowText(row);
+  return row.是否POD==='是'||String(row.orderStatus||'')==='85'
+    ||/(^|\s)(POD|已签收|签收成功|已妥投|DELIVERED|SIGNED)(\s|$)/i.test(text)&&!/未签收|未妥投|签收失败/.test(text);
+}
+function rowIsReturned(row={}){
+  if(rowHasTmsConflict(row))return false;
+  const code=rowTmsStatus(row);
+  if(code==='81')return true;
+  if(code==='60'||code==='80')return false;
+  const text=rowText(row);
+  return !/未退回|非退回|待退回|退回处理中|NOT_RETURNED|PENDING_RETURN/i.test(text)
+    &&/(已退回|退回完成|RETURN_COMPLETED|RETURNED)/i.test(text);
+}
+// TMS shipmentStatus 80 is RETURNING, never signed or completed return.
+// Do not read tracking eventCode 80 here: that code means POD in a different API.
+function rowIsReturning(row={}){
+  if(rowHasTmsConflict(row))return false;
+  const code=rowTmsStatus(row);
+  if(code==='80')return true;
+  if(code==='60'||code==='81')return false;
+  const state=String(row?.currentState||'').trim().toUpperCase();
+  return state==='RETURN_IN_PROGRESS'||state==='RETURNING'
+    ||/^(退回中|退回处理中|正在退回|返仓途中)$/.test(String(row?.退回状态||'').trim());
+}
 function rowIsPending(row={}){return Number(row.Pending次数||row.Pending天数||row.pendingDistinctDayCount||0)>0||/(^|\s)PENDING(\s|$)|Pending/i.test(rowText(row))}
 function rowIsAbnormal(row={}){
   const text=rowText(row);
@@ -1298,19 +1387,57 @@ function buildWhppCanonicalAccounting(state={},fallback={}){
   const tabs=state?.detailTabs||state?.dashboard?.detailTabs||{};
   const metrics=state?.dashboard?.metrics||{};
   const all=uniqueDetailRows(tabs?.all?.rows||[]);
-  const pod=uniqueDetailRows(tabs?.pod?.rows||[]);
-  const returned=uniqueDetailRows(tabs?.returned?.rows||[]);
-  const cancelled=uniqueDetailRows(tabs?.cancelled?.rows||[]);
-  const normalDiversion=uniqueDetailRows(tabs?.normalDiversion?.rows||[]);
-  const shops=uniqueDetailRows([
+  const unresolved=uniqueDetailRows(tabs?.unresolved?.rows||[]);
+  const conflicted=uniqueDetailRows([...all,...unresolved].filter(rowHasTmsConflict));
+  const conflictBills=new Set(conflicted.map(detailCode));
+  // The all-member row is the canonical source for direct TMS 60/80/81.
+  // Individual POD/return tabs can lag behind it after a terminal refresh.
+  const allByCode=new Map(all.map(row=>[detailCode(row),row]));
+  const directKinds=new Set(['60','80','81']);
+  const allowedTerminal=(row,wanted)=>{
+    const current=allByCode.get(detailCode(row));
+    const currentStatus=rowTmsStatus(current||{});
+    const rowStatus=rowTmsStatus(row);
+    if(rowHasTmsConflict(current||row)||rowHasTmsConflict(row))return false;
+    if(directKinds.has(currentStatus)&&currentStatus!==wanted)return false;
+    if(directKinds.has(rowStatus)&&rowStatus!==wanted)return false;
+    return true;
+  };
+  const returning=uniqueDetailRows([
+    ...all.filter(rowIsReturning),
+    ...unresolved.filter(rowIsReturning),
+    ...(tabs?.returnInProgress?.rows||[]).filter(rowIsReturning),
+    ...(tabs?.returning?.rows||[]).filter(rowIsReturning)
+  ]).filter(row=>allowedTerminal(row,'80'));
+  const returningBills=new Set(returning.map(detailCode));
+  for(const code of conflictBills)returningBills.add(code);
+  const excludeReturning=rows=>uniqueDetailRows(rows||[]).filter(row=>!returningBills.has(detailCode(row)));
+  // Promote explicitly verified terminal states from the canonical all-tab.
+  // Otherwise a stale POD tab can display a newer 81 as still signed, or a
+  // newer 60 can be invisible when the POD tab has not caught up.
+  const pod=uniqueDetailRows([
+    ...all.filter(row=>rowTmsStatus(row)==='60'&&allowedTerminal(row,'60')),
+    ...excludeReturning(tabs?.pod?.rows).filter(row=>allowedTerminal(row,'60'))
+  ]);
+  const podBills=new Set(pod.map(detailCode));
+  const returned=uniqueDetailRows([
+    ...all.filter(row=>rowTmsStatus(row)==='81'&&allowedTerminal(row,'81')),
+    ...excludeReturning(tabs?.returned?.rows).filter(row=>allowedTerminal(row,'81'))
+  ]).filter(row=>!podBills.has(detailCode(row)));
+  const terminalBills=new Set([...returning,...pod,...returned,...conflicted].map(detailCode));
+  const excludeTerminal=rows=>uniqueDetailRows(rows||[]).filter(row=>!terminalBills.has(detailCode(row)));
+  const cancelled=excludeTerminal(tabs?.cancelled?.rows);
+  const normalDiversion=excludeTerminal(tabs?.normalDiversion?.rows);
+  const shops=excludeTerminal([
     ...(tabs?.phnomPenhShop?.rows||[]),
     ...(tabs?.provinceShop?.rows||[]),
     ...(tabs?.unknownShop?.rows||[])
   ]);
-  const unresolved=uniqueDetailRows(tabs?.unresolved?.rows||[]);
-  const assigned=new Set([...pod,...returned,...cancelled,...normalDiversion,...shops].map(detailCode));
+  const assigned=new Set([...returning,...pod,...returned,...cancelled,...normalDiversion,...shops].map(detailCode));
   const pending=[],abnormal=[],delivery=[],unprocessed=[];
   for(const row of unresolved){
+    if(assigned.has(detailCode(row)))continue;
+    if(rowHasTmsConflict(row)){unprocessed.push(row);assigned.add(detailCode(row));continue;}
     if(rowIsPending(row))pending.push(row);
     else if(rowIsAbnormal(row))abnormal.push(row);
     else if(Number(row.派送中停留天数||row.派送中天数||0)>0||/派送中/.test(rowText(row)))delivery.push(row);
@@ -1322,9 +1449,9 @@ function buildWhppCanonicalAccounting(state={},fallback={}){
     if(code&&!assigned.has(code)){unprocessed.push(row);assigned.add(code)}
   }
   const otherNormal=uniqueDetailRows([...cancelled,...normalDiversion,...shops]);
-  const rowsByKind={total:all,pod,returned,pending,abnormal,otherNormal,delivery,unprocessed};
+  const rowsByKind={total:all,pod,returned,returning,pending,abnormal,otherNormal,delivery,unprocessed};
   const total=Number(metrics.total||fallback.total||all.length||0);
-  const accounted=['pod','returned','pending','abnormal','otherNormal','delivery','unprocessed'].reduce((n,key)=>n+rowsByKind[key].length,0);
+  const accounted=['pod','returned','returning','pending','abnormal','otherNormal','delivery','unprocessed'].reduce((n,key)=>n+rowsByKind[key].length,0);
   return{total,accounted,difference:total-accounted,rowsByKind,canonical:true};
 }
 function buildBusinessAccounting(state={},fallback={}){
@@ -1336,18 +1463,25 @@ function buildBusinessAccounting(state={},fallback={}){
     [];
   const source=uniqueDetailRows(authoritativeRows||[]);
   const total=Number(fallback.total||source.length||0);
-  if(!source.length)return{total,accounted:0,difference:total,rowsByKind:{total:[],pod:[],returned:[],pending:[],abnormal:[],otherNormal:[],delivery:[]}};
-  const rowsByKind={total:source,pod:[],returned:[],pending:[],abnormal:[],otherNormal:[],delivery:[],unprocessed:[]};
+  if(!source.length)return{total,accounted:0,difference:total,rowsByKind:{total:[],pod:[],returned:[],returning:[],pending:[],abnormal:[],otherNormal:[],delivery:[],unprocessed:[]}};
+  const rowsByKind={total:source,pod:[],returned:[],returning:[],pending:[],abnormal:[],otherNormal:[],delivery:[],unprocessed:[]};
+  const returnCapable=['WHPP','SHOPEECN','SHOPEEVN'].includes(business);
   for(const row of source){
-    if(row.finalRowAvailable===false)rowsByKind.unprocessed.push(row);
+    if(rowHasTmsConflict(row))rowsByKind.unprocessed.push(row);
+    // Return states are only defined for WHPP/Shopee. On other businesses,
+    // preserve the parcel as a visible verification exception instead of
+    // hiding it in an undisplayed return slice or mislabelling it as delivery.
+    else if(!returnCapable&&(rowIsReturning(row)||rowIsReturned(row)))rowsByKind.unprocessed.push(row);
+    else if(returnCapable&&rowIsReturning(row))rowsByKind.returning.push(row);
+    else if(row.finalRowAvailable===false)rowsByKind.unprocessed.push(row);
     else if(rowIsPod(row))rowsByKind.pod.push(row);
-    else if(rowIsReturned(row))rowsByKind.returned.push(row);
+    else if(returnCapable&&rowIsReturned(row))rowsByKind.returned.push(row);
     else if(rowIsPending(row))rowsByKind.pending.push(row);
     else if(rowIsAbnormal(row))rowsByKind.abnormal.push(row);
     else if(rowIsOtherNormal(row))rowsByKind.otherNormal.push(row);
     else rowsByKind.delivery.push(row);
   }
-  const accounted=['pod','returned','pending','abnormal','otherNormal','delivery','unprocessed'].reduce((n,key)=>n+rowsByKind[key].length,0);
+  const accounted=['pod','returned','returning','pending','abnormal','otherNormal','delivery','unprocessed'].reduce((n,key)=>n+rowsByKind[key].length,0);
   return{total:total||source.length,accounted,difference:(total||source.length)-accounted,rowsByKind};
 }
 function v628MetricRows(kind){
@@ -1362,7 +1496,7 @@ function v628MetricRows(kind){
 }
 function renderKpiDetail(kind){
   const panel=byId('v628KpiDetailPanel'),tbody=byId('v628KpiDetailRows');if(!panel||!tbody)return;
-  const labels={total:'总票数',delivery:'派送中',pod:'已签收(POD)',pending:'Pending',abnormal:'异常',returned:'退回件',otherNormal:'其他正常状态',unprocessed:'待处理',shopArrived:'到达门店',pendingGap:'Pending不连续',oc2Plus:'OC 2天+'};
+  const labels={total:'总票数',delivery:'派送中',pod:'已签收(POD)',pending:'Pending',abnormal:'异常',returned:'已退回',returning:'退回中',otherNormal:'其他正常状态',unprocessed:'待处理',shopArrived:'到达门店',pendingGap:'Pending不连续',oc2Plus:'OC 2天+'};
   const rows=v628MetricRows(kind);
   qa('[data-kpi-detail]').forEach(el=>el.classList.toggle('active',el.dataset.kpiDetail===kind));
   setText('v628KpiDetailTitle',(labels[kind]||'指标')+'明细');
@@ -1520,6 +1654,17 @@ async function v765LoadBusinessDetailLane({reportDate,snapshotId,m,options,gener
     if(v628BusinessWorkspaceRows.length&&!workspaceTruncated){
       const detailed=buildBusinessAccounting({finalRows:v628BusinessWorkspaceRows},m);
       v631BusinessAccounting=detailed;
+      // Only complete, untruncated selected-date member sets can overwrite
+      // compact board metrics. Partial workspace previews never change KPIs.
+      if(Number(wr.allRowCount||0)===Number(m.total)
+         &&detailed.rowsByKind.total.length===Number(m.total)
+         &&detailed.accounted===Number(m.total)){
+        const complete=Object.fromEntries(['delivery','pod','returned','returning','pending','abnormal','otherNormal','unprocessed']
+          .map(key=>[key,detailed.rowsByKind[key]?.length||0]));
+        if(applyVerifiedBusinessKpis(complete,m.total,targetBusiness)){
+          renderDonut({total:m.total,...complete});
+        }
+      }
       if(!bi)setText('v631AccountingMeta','已归类 '+fmt(detailed.accounted)+' / '+fmt(m.total)+' · 差异 '+fmt(Math.max(0,m.total-detailed.accounted)));
     }
     if(!options.skipQualityRefresh){
@@ -1549,6 +1694,12 @@ async function v765LoadBusinessDetailLane({reportDate,snapshotId,m,options,gener
   }
 }
 async function loadBusiness(options={}){
+  // A prior business/date request is never allowed to paint a newer route,
+  // including the slow full timing fallback and detail hydration lane.
+  const generation=++v765BoardLoadGeneration;
+  const targetBusiness=business;
+  const stillSelected=()=>page==='business'&&business===targetBusiness&&
+    generation===v765BoardLoadGeneration;
   // V756 navigation-first: URL context is authoritative for first paint.
   // Never block a board switch on /api/import/unified-latest before asking for its compact state.
   const whppOnlyAction=byId('v641WhppScanPending');
@@ -1569,7 +1720,14 @@ async function loadBusiness(options={}){
     const summaryPromise=new Promise(resolve=>setTimeout(resolve,900))
       .then(()=>json('/api/home-quality-summary?'+summaryQuery.toString(),10000).catch(()=>null));
 
-    const r=await json('/api/business-state/'+business+'?'+stateQuery.toString(),10000);
+    const r=await json('/api/business-state/'+targetBusiness+'?'+stateQuery.toString(),10000);
+    if(!stillSelected())return;
+    const responseDate=String(r.reportDate||'').slice(0,10);
+    const responseSnapshot=String(r.snapshotId||'');
+    if(baseReportDate&&responseDate&&responseDate!==baseReportDate)
+      throw new Error('业务快照返回日期与当前选择不一致，已停止渲染');
+    if(requestedSnapshot&&responseSnapshot&&responseSnapshot!==requestedSnapshot)
+      throw new Error('业务快照与当前选择的快照ID不一致，已停止渲染');
     const state=r.state||{},m=metricState(state);
     const snapshotId=r.snapshotId||requestedSnapshot||latest?.snapshotId||'';
     const reportDate=r.reportDate||baseReportDate||latest?.reportDate||'';
@@ -1588,9 +1746,9 @@ async function loadBusiness(options={}){
       pod:Number(m.pod||0),
       pending:Number(m.pending||0),
       abnormal:Number(m.unresolved||0),
-      returned:Number(m.returned||0),
+      returned:Number(m.returned||0),returning:Number(m.returning||0),
       otherNormal:Number(m.otherNormal||0),
-      unprocessed:Math.max(0,Number(m.total||0)-Number(m.pod||0)-Number(m.returned||0)-Number(m.otherNormal||0)-Number(m.delivery||0))
+      unprocessed:Math.max(0,Number(m.total||0)-Number(m.pod||0)-Number(m.returned||0)-Number(m.returning||0)-Number(m.otherNormal||0)-Number(m.delivery||0))
     };
     const a=v631BusinessAccounting;
     const accountingCounts=a.counts||Object.fromEntries(Object.entries(a.rowsByKind||{}).map(([k,v])=>[k,Array.isArray(v)?v.length:Number(v||0)]));
@@ -1598,36 +1756,74 @@ async function loadBusiness(options={}){
     const counts=accountingObserved>0?accountingCounts:fastCounts;
 
     setText('kpiTotal',fmt(m.total||a.total));setText('kpiDelivery',fmt(counts.delivery??m.delivery));setText('kpiPod',fmt(counts.pod??m.pod));
-    setText('kpiPodRate',pct(m.total?Number(m.pod||0)*100/Number(m.total):0));
+    setText('kpiPodRate',Number(m.total)>0?pct(Number(m.pod||0)*100/Number(m.total)):'—');
     setText('kpiPending',fmt(counts.pending??m.pending));setText('kpiOpen',fmt(m.unresolved));setText('kpiOc',fmt(m.oc));
     setText('v631AccountingMeta',state.snapshotStatus==='COMPLETED'
       ?('当前日报 '+fmt(m.total)+' 票 · 快速看板已就绪')
       :'正式结果仍在处理中');
-    setText('kpiAvgDays',m.avgDays==null?'—':Number(m.avgDays).toFixed(2).replace(/\.00$/,''));
+    setText('kpiAvgDays',m.avgDays==null||(m.pod>0&&Number(m.avgDays)<=0)?'—':Number(m.avgDays).toFixed(2).replace(/\.00$/,''));
     const returnCapable=['WHPP','SHOPEECN','SHOPEEVN'].includes(business);
     if(byId('kpiReturnedCard'))byId('kpiReturnedCard').hidden=!returnCapable;if(byId('kpiReturnRateCard'))byId('kpiReturnRateCard').hidden=!returnCapable;
-    if(returnCapable){setText('kpiReturned',fmt(m.returned||0));setText('kpiReturnRate',pct(m.total?Number(m.returned||0)*100/Number(m.total):0))}
+    if(returnCapable){setText('kpiReturned',fmt(m.returned||0));setText('kpiReturnRate',Number(m.total)>0?pct(Number(m.returned||0)*100/Number(m.total)):'—')}
     if(byId('kpiOtherCard')){byId('kpiOtherCard').hidden=false;setText('kpiOtherNormal',fmt(m.otherNormal||0))}
     if(byId('kpiUnprocessedCard')){byId('kpiUnprocessedCard').hidden=true;setText('kpiUnprocessed',fmt(0))}
-    renderDonut({total:m.total,delivery:m.delivery||0,pod:m.pod||0,pending:m.pending||0,unresolved:m.unresolved||0});
+    // Prefer disjoint exact-member accounting. OC and Pending KPIs can be
+    // overlapping risk flags, so they must not be summed into a status donut.
+    const disjointKinds=['delivery','pod','returned','returning','pending','abnormal','otherNormal','unprocessed'];
+    const exactRows=a.rowsByKind||{};
+    const hasExactRows=disjointKinds.some(key=>Array.isArray(exactRows[key])&&exactRows[key].length>0);
+    const exactCounts=Object.fromEntries(disjointKinds.map(key=>[key,Array.isArray(exactRows[key])?exactRows[key].length:0]));
+    const exactSum=disjointKinds.reduce((sum,key)=>sum+exactCounts[key],0);
+    const verifiedAccounting=hasExactRows&&exactSum===Number(m.total||0);
+    // Preserve V636 compact first paint while detail/accounting hydrates.
+    // Risk indicators are deliberately not included in provisional slices.
+    renderDonut({total:m.total,delivery:m.delivery||0,pod:m.pod||0,returned:m.returned||0,returning:m.returning||0,pending:0,abnormal:0,otherNormal:0,unprocessed:0});
+    if(verifiedAccounting){
+      renderDonut({
+        total:m.total,delivery:exactCounts.delivery,pod:exactCounts.pod,
+        returned:exactCounts.returned,returning:exactCounts.returning,pending:exactCounts.pending,
+        abnormal:exactCounts.abnormal,
+        otherNormal:exactCounts.otherNormal,unprocessed:exactCounts.unprocessed
+      });
+      // Keep displayed POD/returned ratios in lockstep with exact member status.
+      applyVerifiedBusinessKpis(exactCounts,m.total,business);
+    }
 
     // Fast summary/timing updates are useful, but never gate the board's first paint.
     void summaryPromise.then(summary=>{
-      if(!summary)return;
+      if(!summary||!stillSelected()||
+        String(v628BusinessReportDate||'').slice(0,10)!==String(reportDate).slice(0,10))return;
       const evidenceState=state?.historicalEvidenceRecovery?.state||summary?.historicalEvidenceRecovery?.state||'';
       const timingRepairRunning=Boolean(summary?.timingEvidenceRepair?.active);
       if(evidenceState==='RUNNING'||timingRepairRunning)scheduleHistoricalEvidenceRefresh('business');
       else if(evidenceState==='COMPLETED'||summary?.timingEvidenceRepair)stopHistoricalEvidenceRefresh();
       const timing=summary?.reportDate===reportDate?summary?.timing?.[business]:null;
-      if(timing?.overall?.avgDays!=null)setText('kpiAvgDays',Number(timing.overall.avgDays).toFixed(2).replace(/\.00$/,''));
+      if(timing?.overall?.avgDays!=null&&Number.isFinite(Number(timing.overall.avgDays))){
+        setText('kpiAvgDays',Number(timing.overall.avgDays).toFixed(2).replace(/\.00$/,''));
+      }else if(m.pod>0&&['TBKH','WHPP','SHOPEECN','SHOPEEVN'].includes(business)){
+        // The compact/fast home response may omit signing timing. The main board
+        // must use the same full selected-date timing source as the overview,
+        // without blocking the initial business-card render.
+        const fullTimingQuery=new URLSearchParams(summaryQuery);
+        fullTimingQuery.delete('fast');
+        void json('/api/home-quality-summary?'+fullTimingQuery.toString(),25000).then(full=>{
+          const sameDate=full?.reportDate===reportDate;
+          const currentDate=String(byId('v625FromDate')?.value||'').slice(0,10)===reportDate;
+          const days=sameDate?full?.timing?.[targetBusiness]?.overall?.avgDays:null;
+          if(stillSelected()&&currentDate&&
+             String(v628BusinessReportDate||'').slice(0,10)===String(reportDate).slice(0,10)&&
+             days!=null&&Number.isFinite(Number(days)))
+            setText('kpiAvgDays',Number(days).toFixed(2).replace(/\.00$/,''));
+        }).catch(()=>{});
+      }
     });
 
     // V765: the business summary is already visible. Run 5,000-row
     // workspace/integrity reads in a deferred lane with a bounded 20s cache.
-    const generation=++v765BoardLoadGeneration;
     setText('v637BusinessIntegrity','正在后台读取完整性明细…');
-    void v765LoadBusinessDetailLane({reportDate,snapshotId,m,options,generation,targetBusiness:business});
+    void v765LoadBusinessDetailLane({reportDate,snapshotId,m,options,generation,targetBusiness});
   }catch(e){
+    if(!stillSelected())return;
     const whppOnlyAction=byId('v641WhppScanPending');
     if(whppOnlyAction){whppOnlyAction.hidden=true;whppOnlyAction.style.setProperty('display','none','important');}
     byId('v625BusinessRows').innerHTML='<tr><td colspan="7">业务快照暂未读取：'+esc(e.message)+'</td></tr>';
@@ -2348,6 +2544,218 @@ function renderReports(){
   }
 }
 
+// V788 isolated WHPP trial lives in the REAL V625 shell (not the legacy app.js).
+// It never auto-queries CE TMS. Only explicit ADMIN click may run a stage.
+let v788CeSessionReady=false;
+let v788ReadOnlyAuditPosting=false;
+let v788ReadOnlyAuditTimer=null;
+const v788GateNames={
+  ACTIVE_CP_72:'72个有效门店编码',
+  SEVEN_BUSINESS_LATEST_SOURCES:'七业务最新日报来源',
+  WHPP_TERMINAL_CONFLICTS:'WHPP终态冲突',
+  WHPP_LATE_TMS_NEEDS_STATE_SYNC:'WHPP旧状态待同步',
+  WHPP_LEDGER_VS_CURRENT:'WHPP历史账本',
+  WHPP_POD_SIGNING_TIME:'WHPP可信签收时间',
+  WHPP_TERMINAL_EVIDENCE:'WHPP直接TMS终态证据',
+  REAL_EXCEL_DETAIL_READBACK:'七业务真实Excel逐票回读',
+  WHPP_EXISTING_REAL_XLSX:'WHPP已有真实导出文件逐票回读'
+};
+async function loadV788ReadOnlyAuditV625(){
+  if(page!=='settings')return;
+  const info=byId('v788ReadOnlyAuditText'),button=byId('v788ReadOnlyAuditStart');
+  if(!info||!button)return;
+  try{
+    const data=await json('/api/v788/readonly-audit/status',13000);
+    const running=data.active===true||data.status==='RUNNING';
+    const status=String(data.status||'NOT_STARTED');
+    const lines=[];
+    if(running)lines.push('只读验收正在检查隔离副本，请勿重复启动。');
+    else if(data.ok===true&&Array.isArray(data.gates)){
+      const n=data.counts||{};
+      lines.push('检查结果：'+status+'；通过 '+Number(n.passed||0)+
+        '、阻断 '+Number(n.blocked||0)+'、待核验 '+Number(n.reviewing||0)+' 项。');
+      if(data.independentTmsProofReady===true){
+        lines.push('独立TMS证据库：已核实346票逐票成员（POD 290、已退回 56），仅代表历史终态证据完整。');
+        const timing=data.podTimeInventory;
+        if(timing?.available===true)
+          lines.push('独立来源签收时间候选 '+Number(timing.timeCandidateMembers||0)+
+            '票；无明确时间 '+Number(timing.missingTimeMembers||0)+
+            '票；待复核 '+Number(timing.manualReviewMembers||0)+
+            '票。候选并非正式签收时间。');
+      }else
+        lines.push('独立TMS逐票证据未通过签名和来源校验，不能据此放行。');
+      if(data.auditSchemaAvailable!==true)
+        lines.push('旧业务库验收表缺失或结构不兼容，历史账本/门店/七业务暂不能出结论。');
+      else lines.push('旧业务库 WHPP '+Number(data.members||0)+'票，旧OPEN账本与终态不一致 '+
+        Number(data.ledgerOpenWithNormalizedTerminal||0)+'票，可信POD时间锁 '+
+        Number(data.trustedPodLockOnPOD||0)+'票。');
+      if(data.existingWhppExcel?.status==='XLSX_CONTENT_VERIFIED'){
+        const e=data.existingWhppExcel;
+        lines.push('本机已有WHPP真实Excel逐票回读通过：总票 '+Number(e.rows||0)+
+          '，POD '+Number(e.pod||0)+'，已退回 '+Number(e.returned||0)+
+          '。这不代表七业务综合Excel或历史签收时间通过。');
+      }
+      for(const gate of data.gates.filter(g=>g.status!=='PASS')){
+        const name=String(gate.label||v788GateNames[gate.id]||'其他验收项');
+        const summary=String(gate.summary||'证据不足，需进一步核对');
+        const next=String(gate.next||'保留阻断，不修改正式数据');
+        lines.push('['+(gate.status==='BLOCK'?'阻断':'待核验')+'] '+name+
+          '：'+summary+' 处理方向：'+next);
+      }
+      lines.push('此为数据库副本只读诊断，并非正式Excel回读或发布批准。');
+    }else if(status==='BLOCKED')lines.push('隔离副本检查不可用或缺少必要数据表；未触碰正式数据库。');
+    else lines.push('尚未运行真实隔离数据库验收。已有TMS证据不会因此被重新查询。');
+    if(data.isolatedSourceReady!==true)
+      lines.push('没有找到安全的D盘验收副本；不能回退读取正式数据库。');
+    info.textContent=lines.join('\n');
+    button.disabled=running||v788ReadOnlyAuditPosting
+      ||data.platformReady!==true||data.isolatedSourceReady!==true;
+    button.textContent=running?'只读核验中…':'只读核验现有隔离副本';
+    if(v788ReadOnlyAuditTimer){clearTimeout(v788ReadOnlyAuditTimer);v788ReadOnlyAuditTimer=null}
+    if(running)v788ReadOnlyAuditTimer=setTimeout(()=>{void loadV788ReadOnlyAuditV625()},4000);
+  }catch(error){
+    if(Number(error?.status)===403)return;
+    info.textContent='只读核验状态无法读取，未发起TMS查询。';
+    button.disabled=true;
+  }
+}
+async function startV788ReadOnlyAuditV625(){
+  const button=byId('v788ReadOnlyAuditStart');
+  if(v788ReadOnlyAuditPosting||button?.disabled)return;
+  v788ReadOnlyAuditPosting=true;button.disabled=true;
+  try{
+    await post('/api/v788/readonly-audit/start',{acknowledgeReadOnlyAudit:true},12000);
+    await loadV788ReadOnlyAuditV625();
+  }catch{
+    setText('v788ReadOnlyAuditText','隔离只读核验未启动。未查询TMS，未修改正式数据库。');
+  }finally{v788ReadOnlyAuditPosting=false}
+}
+let v788EvidencePosting=false;
+let v788EvidenceTimer=null;
+async function loadV788WhppEvidenceV625(){
+  if(page!=='settings')return;
+  const panel=byId('v788WhppEvidencePanel'),info=byId('v788WhppEvidenceText');
+  const button=byId('v788WhppEvidenceStart');
+  if(!panel||!info||!button)return;
+  try{
+    const data=await json('/api/v788/whpp-evidence/status',13000);
+    panel.hidden=false;
+    void loadV788ReadOnlyAuditV625();
+    const covered=Number(data.savedMembers||0),batches=Number(data.completedBatches||0);
+    const running=data.active===true||data.status==='RUNNING';
+    const allSaved=covered===346&&batches===8;
+    // Verified proof from the independent SQLite, not last-run JSON progress,
+    // owns completion. A stale/interrupted report must not hide saved evidence
+    // or encourage a second 346-waybill TMS query.
+    const full=allSaved&&data.independentlyVerifiedCounts===true
+      &&data.sidecarVerified===true&&data.isolatedSourceReady===true
+      &&data.distributionMatchesV3===true
+      &&data.statusOnlyPreview?.source==='INDEPENDENT_ISOLATED_SQLITE';
+    const finalizeOffline=allSaved&&data.status==='INTERRUPTED_RETRYABLE';
+    const needsReview=allSaved&&!full&&!finalizeOffline;
+    const lines=[];
+    if(full){
+      lines.push('WHPP历史状态只读预览可用：346票，POD '+Number(data.pod||0)+'票，已退回 '+Number(data.returned||0)+'票。');
+      for(const d of data.statusOnlyPreview?.dates||[])
+        if(['2026-07-01','2026-07-02'].includes(d.date))
+          lines.push(d.date+'：'+Number(d.total||0)+'票，POD '+Number(d.pod||0)+'票，已退回 '+Number(d.returned||0)+'票。');
+      // This count comes from a second read of the independent SQLite
+      // evidence, not the editable JSON progress report.
+      if(data.independentPodTimeEvidenceChecked===true){
+        lines.push('独立TMS明确签收时间：'+Number(data.independentTrustedPodTimeCount||0)+
+          '/'+Number(data.pod||0)+'票；仍缺'+Number(data.independentMissingPodTimeCount||0)+
+          '票。该证据尚未写入正式签收时间账本。');
+      }
+      const timeSources=data.podTimeSourceInventory;
+      if(timeSources?.available===true){
+        const n=value=>Math.max(0,Number.isFinite(Number(value))?Math.floor(Number(value)):0);
+        lines.push('隔离库签收时间来源诊断：290票POD中，存在明确时间候选 '+
+          n(timeSources.timeCandidateMembers)+'票，仍无明确时间 '+
+          n(timeSources.missingTimeMembers)+'票，跨来源时间冲突 '+
+          n(timeSources.conflictingTimeMembers)+'票，重复/歧义来源 '+
+          n(timeSources.ambiguousSourceMembers)+'票。');
+        const src=timeSources.bySource||{};
+        lines.push('证据来源次数：独立TMS '+n(src.sidecar)+
+          '、POD时间锁 '+n(src.podLock)+'、已存TMS轨迹 '+
+          n(src.savedTrack)+'、已存轨迹事件 '+n(src.savedEvent)+
+          '、扫描 '+n(src.savedScan)+'、最终记录 '+
+          n(src.savedFinal)+'。同一票可存在多处来源，不能直接相加。');
+        lines.push('其中无冲突且无重复来源候选 '+n(timeSources.unambiguousTimeCandidateMembers)+
+          '票，需人工复核 '+n(timeSources.manualReviewMembers)+
+          '票（不同原因可能重叠）。候选时间尚未批准用于签收天数。');
+      }else if(timeSources)
+        lines.push('隔离库签收时间来源诊断未完成，不能将缺少证据直接认作0票。');
+      const rec=data.ledgerReconciliation;
+      if(rec?.ready===true){
+        lines.push('旧账本待同步：POD '+Number(rec.ledgerNeedsPODSync||0)+
+          '票、已退回 '+Number(rec.ledgerNeedsReturnedSync||0)+'票；当前状态待同步：POD '+
+          Number(rec.currentNeedsPODSync||0)+'票、已退回 '+
+          Number(rec.currentNeedsReturnedSync||0)+'票。');
+        lines.push('该结果仅为独立副本只读对账；尚未修改历史账本或正式数据库。');
+      }else if(rec){
+        // A blocked reconciliation must explain the *aggregate* reason.
+        // Never surface waybill IDs, raw ledger entries or unsafe file paths.
+        const n=key=>Math.max(0,Number.isFinite(Number(rec[key]))?Math.floor(Number(rec[key])):0);
+        const missing=n('currentMissingOrDuplicate')+n('ledgerMissingOrDuplicate');
+        const opposite=n('currentOppositeTerminal')+n('ledgerOppositeTerminal');
+        const needsPod=n('currentNeedsPODSync')+n('ledgerNeedsPODSync');
+        const needsReturn=n('currentNeedsReturnedSync')+n('ledgerNeedsReturnedSync');
+        if(rec.reason==='ISOLATED_LEDGER_PREVIEW_UNAVAILABLE')
+          lines.push('历史账本：隔离副本账本只读检查暂不可用，不能据此判断账本已闭环。');
+        else if(['SOURCE_SIGNATURE_MISMATCH','CROSS_DATE_LEDGER_AMBIGUOUS','NONTERMINAL_TMS_MEMBER'].includes(rec.reason))
+          lines.push('历史账本：证据存在来源差异、跨日期歧义或非终态记录，必须人工核验，禁止自动同步。');
+        else{
+          lines.push('历史账本待核验：状态表缺失或重复 '+n('currentMissingOrDuplicate')+
+            ' 票，账本缺失或重复 '+n('ledgerMissingOrDuplicate')+
+            ' 票，相反终态 '+opposite+' 处；');
+          lines.push('旧记录待同步线索：POD '+needsPod+' 处、已退回 '+needsReturn+
+            ' 处。统计为状态表与账本差异次数，并非去重运单票数。');
+        }
+        lines.push('对账未通过，仅展示隔离副本汇总；尚未修改历史账本或正式数据库。');
+      }
+    }else if(running)lines.push('正在核验：已保存 '+covered+'/346票，'+batches+'/8批。');
+    else if(needsReview)lines.push('346票证据已存在，但来源、状态或签名校验未通过；请复核，不允许重复查询。');
+    else if(data.status==='FAILED')lines.push('核验失败：'+String(data.message||'请查看登录及隔离副本状态'));
+    else if(data.resumeAvailable||finalizeOffline)lines.push('上次核验中断，已保存 '+covered+'/346票、'+batches+'/8批，允许安全续查。');
+    else lines.push('尚未保存完整346票逐票证据。已经完成的只读TMS汇总不需要重新上传。');
+    lines.push('本阶段只核验历史状态；签收时间、账本、正式导出尚未放行。');
+    if(data.isolatedSourceReady!==true)
+      lines.push('没有找到安全的D盘V788验收副本。此页面不会读取正式数据库，也不会启动TMS查询。');
+    const loginRequired=!v788CeSessionReady&&!finalizeOffline;
+    if(loginRequired&&!full&&!running)
+      lines.push('CE系统接口凭证未就绪，请先在上方登录CE系统。');
+    info.textContent=lines.join(' ');
+    button.disabled=running||v788EvidencePosting||full||needsReview||loginRequired
+      ||data.platformReady!==true||data.isolatedSourceReady!==true;
+    button.textContent=running?'正在核验…':full?'346票状态已核实'
+      :needsReview?'需复核，禁止重复查询'
+      :(data.resumeAvailable||finalizeOffline)?'继续安全核验（保留已有批次）':'开始隔离核验（346票）';
+    if(v788EvidenceTimer){clearTimeout(v788EvidenceTimer);v788EvidenceTimer=null}
+    if(running&&page==='settings')
+      v788EvidenceTimer=setTimeout(()=>{void loadV788WhppEvidenceV625()},4000);
+  }catch(error){
+    if(Number(error?.status)===403){panel.hidden=true;return}
+    panel.hidden=false;
+    info.textContent='核验状态暂不可用：'+String(error?.message||'请稍后刷新')+'。没有发起TMS查询。';
+    button.disabled=true;
+  }
+}
+async function startV788WhppEvidenceV625(){
+  const button=byId('v788WhppEvidenceStart');
+  if(v788EvidencePosting||button?.disabled)return;
+  if(!confirm('仅查询V788隔离副本的346票，并在独立证据库留存逐票TMS状态。不会修改正式数据库、POD时间或历史账本。确认开始？'))return;
+  v788EvidencePosting=true;
+  button.disabled=true;
+  try{
+    await post('/api/v788/whpp-evidence/start',{acknowledgeIsolatedQuery:true},12000);
+    await loadV788WhppEvidenceV625();
+  }catch(error){
+    setText('v788WhppEvidenceText','任务未启动：'+String(error?.message||'请重新登录CE系统'));
+  }finally{
+    v788EvidencePosting=false;
+  }
+}
+
 async function loadSettings(){
   const [sessionR,ceR,stateR]=await Promise.allSettled([json('/api/session',7000),json('/api/ce-auth-status',7000),json('/api/state?compact=1',7000)]);
   if(sessionR.status==='fulfilled'){
@@ -2358,7 +2766,9 @@ async function loadSettings(){
   }
   if(ceR.status==='fulfilled'){
     const a=ceR.value.authStatus||{};
-    setText('v625CeStatus',a.loggedIn&&!a.expired?'已连接':'未连接');
+    v788CeSessionReady=Boolean(a.loggedIn&&a.hasAccessToken&&!a.expired
+      &&Number(a.expiresInSeconds||0)>120);
+    setText('v625CeStatus',v788CeSessionReady?'已连接':'未连接');
     if(a.tenantId)byId('v625CeTenant').value=a.tenantId;
     if(a.account)byId('v625CeUser').value=a.account;
     note('v625CeMessage',a.loggedIn?'CE账号 '+(a.account||'—')+' 已连接':'CE系统当前未登录。',a.loggedIn?'success':'');
@@ -2379,7 +2789,7 @@ function switchSettingsTab(name){
   qa('#v625SettingsTabs [data-settings-tab]').forEach(btn=>btn.classList.toggle('active',btn.dataset.settingsTab===name));
   qa('[data-settings-panel]').forEach(panel=>panel.hidden=panel.dataset.settingsPanel!==name);
   if(name==='accounts')void loadSettingsUsers();
-  if(name==='interface')void loadSettings();
+  if(name==='interface')void loadSettings().then(()=>loadV788WhppEvidenceV625());
   if(name==='maintenance')void loadSettingsBackups();
 }
 
@@ -2582,8 +2992,8 @@ async function settingsBackupNow(){
     await loadSettingsBackups();
   }catch(e){note('v625SettingsBackupMessage','备份失败：'+e.message,'error')}
 }
-async function ceLogin(){try{const r=await post('/api/ce-login',{tenantId:byId('v625CeTenant').value||'000000',username:byId('v625CeUser').value.trim(),password:byId('v625CePassword').value},30000);byId('v625CePassword').value='';setText('v625CeStatus','已连接');note('v625CeMessage','CE登录成功：'+(r.authStatus?.account||''),'success')}catch(e){note('v625CeMessage','登录失败：'+e.message,'error')}}
-async function ceLogout(){try{await post('/api/ce-logout',{},15000);setText('v625CeStatus','未连接');note('v625CeMessage','已退出CE系统。','success')}catch(e){note('v625CeMessage','退出失败：'+e.message,'error')}}
+async function ceLogin(){try{const r=await post('/api/ce-login',{tenantId:byId('v625CeTenant').value||'000000',username:byId('v625CeUser').value.trim(),password:byId('v625CePassword').value},30000);byId('v625CePassword').value='';setText('v625CeStatus','已连接');note('v625CeMessage','CE登录成功：'+(r.authStatus?.account||''),'success');await loadSettings();void loadV788WhppEvidenceV625()}catch(e){note('v625CeMessage','登录失败：'+e.message,'error')}}
+async function ceLogout(){try{await post('/api/ce-logout',{},15000);v788CeSessionReady=false;setText('v625CeStatus','未连接');note('v625CeMessage','已退出CE系统。','success');void loadV788WhppEvidenceV625()}catch(e){note('v625CeMessage','退出失败：'+e.message,'error')}}
 let v780CandidateShopSource = '';
 let v780CandidateShopHash = '';
 async function loadCompleteShopStatus(){
@@ -2768,6 +3178,10 @@ function bind(){
   qa('#v625SettingsTabs [data-settings-tab]').forEach(btn=>btn.addEventListener('click',()=>switchSettingsTab(btn.dataset.settingsTab)));
   byId('v625AddUser')?.addEventListener('click',()=>openUserEditor());byId('v625CancelUserEdit')?.addEventListener('click',closeUserEditor);byId('v625SaveUser')?.addEventListener('click',saveSettingsUser);
   byId('v625CeLogin')?.addEventListener('click',ceLogin);byId('v625CeLogout')?.addEventListener('click',ceLogout);
+  byId('v788WhppEvidenceStart')?.addEventListener('click',startV788WhppEvidenceV625);
+  byId('v788WhppEvidenceRefresh')?.addEventListener('click',loadV788WhppEvidenceV625);
+  byId('v788ReadOnlyAuditStart')?.addEventListener('click',startV788ReadOnlyAuditV625);
+  byId('v788ReadOnlyAuditRefresh')?.addEventListener('click',loadV788ReadOnlyAuditV625);
   byId('v625ShopFile')?.addEventListener('change',()=>setText('v625ShopFileName',byId('v625ShopFile').files?.[0]?.name||'请选择CP码文件'));byId('v625ShopImport')?.addEventListener('click',importShop);
   byId('v780ActivateSavedShops')?.addEventListener('click',activateSavedShopCodes);
   byId('v625SettingsBackupNow')?.addEventListener('click',settingsBackupNow);

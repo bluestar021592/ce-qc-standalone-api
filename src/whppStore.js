@@ -503,10 +503,23 @@ function terminalReason(row = {}) {
 }
 
 function isPod(row = {}) {
-  return row.是否POD === '是' || row.POD状态 === 'POD' || String(row.currentState || '').toUpperCase() === 'POD';
+  // Latest shipmentStatus 60/80/81 outranks old POD text and scan flags.
+  // A RETURNING(80) or RETURNED(81) member must never re-close as POD.
+  const code=String(row.shipmentStatus??row.shipmentTrack?.shipmentStatus??'').trim();
+  if(code==='80'||code==='81')return false;
+  if(code==='60')return true;
+  return row.是否POD === '是' || row.POD状态 === 'POD'
+    ||String(row.currentState||'').toUpperCase()==='POD';
 }
 function isReturned(row = {}) {
-  return row.退回状态 === '已退回' || ['RETURNED','RETURN_COMPLETED'].includes(String(row.currentState || '').toUpperCase()) || categoryOf(row) === '退回';
+  // V788: a broad "退回" category means return-related, NOT completed
+  // return. Only shipmentStatus=81 or explicit completed-return evidence may
+  // close the WHPP lifecycle. In particular status=80 is still in transit.
+  const code=String(row.shipmentStatus??row.shipmentTrack?.shipmentStatus??'').trim();
+  if(code==='80'||code==='60')return false;
+  if(code==='81')return true;
+  return row.退回状态==='已退回'
+    ||['RETURNED','RETURN_COMPLETED'].includes(String(row.currentState||'').toUpperCase());
 }
 function categoryOf(row = {}) { return String(row.primaryCategory || row.主分类 || row.异常分类 || ''); }
 function billOf(row = {}) { return String(row.shipmentCode || row.运单号 || row.waybill || '').trim().toUpperCase(); }

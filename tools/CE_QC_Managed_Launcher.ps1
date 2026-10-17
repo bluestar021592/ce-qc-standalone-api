@@ -12,6 +12,48 @@ function Write-ManagedLog([string]$Text, [ConsoleColor]$Color = [ConsoleColor]::
   Write-Host $Text -ForegroundColor $Color
 }
 
+# Exact release SHA record, only after successful managed install.
+function Write-V788ManagedInstallReceipt([string]$InstalledCommit,[string]$RemoteCommit) {
+  if ($InstalledCommit -notmatch '^[0-9a-f]{40}$' -or $InstalledCommit -ne $RemoteCommit) {
+    throw 'V788 receipt requires exact installed and remote SHA match.'
+  }
+  $receiptPath = Join-Path $LauncherLogDir 'v788_managed_install_receipt.json'
+  $tempPath = $receiptPath+'.'+[Guid]::NewGuid().ToString('N')+'.tmp'
+  $payload = @{
+    schemaVersion = 1
+    mode = 'INSTALLED'
+    installedCommit = $InstalledCommit.ToLowerInvariant()
+    remoteCommit = $RemoteCommit.ToLowerInvariant()
+    candidateGatePassed = $true
+    verifiedAt = (Get-Date).ToUniversalTime().ToString('o')
+  } | ConvertTo-Json -Compress
+  try {
+    Set-Content -LiteralPath $tempPath -Value $payload -Encoding UTF8
+    Move-Item -LiteralPath $tempPath -Destination $receiptPath -Force
+    Write-ManagedLog '[UPDATE] Exact managed release SHA recorded.' DarkCyan
+  } catch {
+    Write-ManagedLog '[UPDATE] No release receipt; direct purge stays blocked.' Yellow
+    try { Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue } catch {}
+  }
+}
+
+# The first V788 release may be installed by an older launcher which could
+# not emit a receipt. On NEXT boot, re-run the bounded candidate gate for the
+# already-installed exact SHA; do not permanently block legitimate upgrades.
+function Test-V788ManagedInstallReceipt([string]$ExpectedCommit) {
+  $file=Join-Path $LauncherLogDir 'v788_managed_install_receipt.json'
+  try {
+    if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { return $false }
+    $r=Get-Content -LiteralPath $file -Raw -Encoding UTF8 | ConvertFrom-Json
+    return ($r.schemaVersion -eq 1 -and $r.mode -eq 'INSTALLED' -and
+      $r.candidateGatePassed -eq $true -and
+      [string]$r.installedCommit -eq $ExpectedCommit -and
+      [string]$r.remoteCommit -eq $ExpectedCommit)
+  } catch {
+    return $false
+  }
+}
+
 # Native stdout must never leak into a PowerShell function's return value. Candidate
 # validation is a Boolean contract; output pollution previously made a rejected
 # candidate look truthy and allowed installation to continue.
@@ -367,6 +409,17 @@ function Invoke-SafeAutoUpdate {
   }
   $remote = Get-GitText @('rev-parse','origin/main')
   if ($current -eq $remote) {
+    if (-not (Test-V788ManagedInstallReceipt $current)) {
+      Write-ManagedLog '[UPDATE] Release receipt absent after an older launcher update. Revalidating installed main SHA safely...' DarkCyan
+      # Never mint a receipt just because HEAD equals cached origin/main:
+      # rerun the same bounded detached-worktree go-live candidate tests.
+      $recoverResult=@(Test-RemoteCandidate $remote $current)
+      if ($recoverResult.Count -eq 1 -and $recoverResult[0] -eq $true) {
+        Write-V788ManagedInstallReceipt $current $remote
+      } else {
+        Write-ManagedLog '[UPDATE] Installed main candidate revalidation failed; direct purge remains blocked.' Yellow
+      }
+    }
     Write-ManagedLog "[UPDATE] Already current: $($current.Substring(0,8))." Green
     return
   }
@@ -394,6 +447,7 @@ function Invoke-SafeAutoUpdate {
     Write-ManagedLog '[UPDATE] Dependencies changed; refreshing node_modules...' Cyan
     Invoke-Exe $script:NpmExe @('ci','--prefer-offline','--no-audit','--no-fund') | Out-Null
   }
+  Write-V788ManagedInstallReceipt $installed $remote
   Write-ManagedLog "[UPDATE] Installed verified exact version $($installed.Substring(0,8)). Database was not rewritten by updater." Green
 }
 

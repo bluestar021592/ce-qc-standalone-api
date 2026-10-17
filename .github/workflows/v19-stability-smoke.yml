@@ -60,6 +60,25 @@ jobs:
             }
             if (-not $firstPid) { throw 'Initial backend did not become ready.' }
             Write-Host "Initial backend PID=$firstPid"
+            # An HTTP listener may respond before Start_CE_QC.ps1 has passed
+            # its OWN startup gate and entered the restart supervisor loop.
+            # Killing it during that window tests initial-start failure,
+            # not crash recovery. Require the real supervisor armed marker.
+            $supervisorArmed = $false
+            foreach ($i in 1..60) {
+              Start-Sleep -Seconds 1
+              $log = Get-Content v19-launcher.out.log -Raw -ErrorAction SilentlyContinue
+              if ($log -match 'BACKEND READY - local web response verified' -and
+                  $log -match 'Automatic backend restart: ENABLED') {
+                $supervisorArmed = $true
+                break
+              }
+              if ($launcher.HasExited) { break }
+            }
+            if (-not $supervisorArmed) {
+              throw 'Backend listener responded, but supervisor did not finish arming before crash test.'
+            }
+            Write-Host 'Launcher reached BACKEND READY and enabled automatic restart; injecting crash now.'
 
             Stop-Process -Id $firstPid -Force
 
