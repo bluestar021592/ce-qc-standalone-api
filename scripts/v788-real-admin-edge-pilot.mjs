@@ -123,6 +123,18 @@ try{
   assert.equal(accepted.body.ok,true);
   assert.equal(accepted.body.readyToPublish,false);
   assert.equal(accepted.body.businessStateUpdated,false);
+  // Direct purge preflight must be ADMIN-only, read-only, privacy-safe and
+  // must never create a backup or accept an unverified CP store whitelist.
+  const directPreflightViewer=await httpStatus(base+'/api/admin/data-purge/direct/preflight',viewer);
+  assert.equal(directPreflightViewer.status,403);
+  const directPreflightAdmin=await httpStatus(base+'/api/admin/data-purge/direct/preflight',admin);
+  assert.equal(directPreflightAdmin.status,200);
+  assert.equal(directPreflightAdmin.body.backupCreated,false);
+  assert.equal(directPreflightAdmin.body.existingBackupsPreserved,true);
+  assert.equal(directPreflightAdmin.body.readyForAutomaticDeletion,false);
+  assert.equal(directPreflightAdmin.body.formalUpdateVerified,false);
+  assert.equal(JSON.stringify(directPreflightAdmin.body).includes('CP100001'),false,
+    'preflight must not reveal active CP code membership');
   const auditViewer=await httpStatus(base+'/api/v788/readonly-audit/status',viewer);
   assert.equal(auditViewer.status,403,'VIEWER must never inspect private acceptance evidence');
   const auditAdmin=await httpStatus(base+'/api/v788/readonly-audit/status',admin);
