@@ -66,6 +66,13 @@ function sessionSecret() {
   }
   return cachedSecret;
 }
+// Password resets invalidate future session renewals without exporting the
+// stored password hash (or opening the heavy main DB on the web process).
+function credentialTag(row){
+  return crypto.createHmac('sha256',sessionSecret())
+    .update('local-auth-credential:'+String(row.id)+':'+String(row.passwordHash||''))
+    .digest('base64url');
+}
 function sign(payload) {
   const body = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
   const sig = crypto.createHmac('sha256', sessionSecret()).update(body).digest('base64url');
@@ -193,13 +200,18 @@ const server = http.createServer(async (req, res) => {
           !previous.user?.id||!previous.user?.username)
         return json(req,res,401,{ok:false,code:'LOCAL_AUTH_RENEW_EXPIRED_OR_INVALID'});
       const row=readAuthRow(cleanUsername(previous.user.username));
-      if(!row||String(row.id)!==String(previous.user.id)||
+      const currentTag=row?credentialTag(row):'';
+      const storedTag=String(previous?.credentialTag||'');
+      const matchingCredential=storedTag.length===currentTag.length&&
+        storedTag.length>0&&crypto.timingSafeEqual(Buffer.from(storedTag),Buffer.from(currentTag));
+      if(!row||String(row.id)!==String(previous.user.id)||!matchingCredential||
           !Number(row.enabled)||
           (row.expiresAt&&Date.parse(row.expiresAt)<=now)||
           (row.lockedUntil&&Date.parse(row.lockedUntil)>now))
         return json(req,res,401,{ok:false,code:'LOCAL_AUTH_RENEW_ACCOUNT_INACTIVE'});
       const next={v:431,iat:now,exp:now+SESSION_HOURS*60*60_000,
-        channel:previous.channel,user:publicUser(row,previous.channel)};
+        channel:previous.channel,user:publicUser(row,previous.channel),
+        credentialTag:currentTag};
       const cookie=`${V431_LOCAL_AUTH_COOKIE}=${sign(next)}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${SESSION_HOURS*3600}`;
       return json(req,res,200,{ok:true,user:next.user,expiresAt:new Date(next.exp).toISOString(),
         authMode:'V431_READONLY_RENEWAL'}, {'set-cookie':cookie});
@@ -228,7 +240,8 @@ const server = http.createServer(async (req, res) => {
     if (row.lockedUntil && Date.parse(row.lockedUntil) > Date.now()) return json(req, res, 423, { ok: false, error: '账号暂时锁定，请稍后再试。' });
     clearFailures(username, req);
     const exp = Date.now() + SESSION_HOURS * 60 * 60_000;
-    const payload = { v: 431, iat: Date.now(), exp, channel, user: publicUser(row, channel) };
+    const payload = { v: 431, iat: Date.now(), exp, channel,
+      user: publicUser(row, channel),credentialTag:credentialTag(row) };
     const token = sign(payload);
     const cookie = `${V431_LOCAL_AUTH_COOKIE}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${SESSION_HOURS * 3600}`;
     console.log(`[CE-QC][V431_AUTH_OK] user=${username} channel=${channel} ms=${Date.now() - startedAt}`);
