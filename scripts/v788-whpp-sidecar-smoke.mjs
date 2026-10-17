@@ -562,7 +562,8 @@ try{
     });
     assert.equal(wrongDateScope.status,'BLOCKED',
       'real daily Excel rows cannot be credited to the wrong source day');
-    assert.equal(wrongDateScope.issues.unexpectedDateRows,346);
+    assert.equal(wrongDateScope.issues.unexpectedDateRows,692,
+      'all details plus POD and returned tabs must reject every wrong-day entry');
     await assert.rejects(readV788ExistingWhppXlsx({
       sourceDb:xlsxSource,proofDb:db,
       workbookEntries:dailyPair.workbookEntries.map((x,i)=>({
