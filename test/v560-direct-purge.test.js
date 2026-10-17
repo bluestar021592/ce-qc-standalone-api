@@ -159,6 +159,11 @@ test('V560 direct purge clears business data without creating a backup or purge 
     // destructive clear and must not remove freshly imported July members.
     stageDb.prepare("UPDATE app_meta SET value=? WHERE key='shop_current_complete_codes_v780'")
       .run(JSON.stringify({...activeConfig,members:activeMembers.slice(0,71)}));
+    // Refused reset must not even retire legacy purge status artifacts.
+    const legacyJobDir=path.join(cfg.backupsDir,'.purge_prepare_jobs');
+    fs.mkdirSync(legacyJobDir,{recursive:true});
+    const legacyJob=path.join(legacyJobDir,'preserve-when-invalid.job.json');
+    fs.writeFileSync(legacyJob,JSON.stringify({status:'FAILED',jobId:'SAFE-LEGACY'}));
     assert.equal(inspectDirectPurgeCp72Preflight().cp72Ready,false,
       'preflight must refuse 71 codes before opening the destructive dialog');
     await assert.rejects(
@@ -167,6 +172,14 @@ test('V560 direct purge clears business data without creating a backup or purge 
       'incomplete active 72-code CP list must block irreversible purge');
     assert.equal(Number(stageDb.prepare('SELECT COUNT(*) c FROM unified_import_rows').get()?.c||0),6,
       'rejected purge must preserve fresh unified members');
+    assert.equal(fs.existsSync(legacyJob),true,
+      'invalid CP72 must not retire legacy files before rejecting destructive action');
+    const {queueDirectDataPurge}=await import('../src/directDataPurge.js');
+    assert.throws(()=>queueDirectDataPurge({
+      phrase:DIRECT_PURGE_PHRASE,user:{email:'admin@example.test',role:'ADMIN'}
+    }),/V788_PURGE_CP72_INVALID/,'invalid CP72 must block even detached purge queue');
+    assert.equal(fs.existsSync(legacyJob),true,
+      'rejected queue must leave legacy task ownership intact');
     assert.equal(Number(stageDb.prepare("SELECT COUNT(*) c FROM business_daily_parse_rows WHERE businessType='WHPP'").get()?.c||0),1,
       'rejected purge must preserve fresh WHPP source');
     stageDb.prepare("UPDATE app_meta SET value=? WHERE key='shop_current_complete_codes_v780'").run(activeBefore);
@@ -187,6 +200,9 @@ test('V560 direct purge clears business data without creating a backup or purge 
       .run('shop_current_complete_codes_v780',activeBefore,new Date().toISOString());
     assert.equal(inspectDirectPurgeCp72Preflight().cp72Ready,true,
       'restored complete activation is eligible again for a separate deliberate reset');
+    // Cleanup fixture deliberately after a rejected request: no delete action
+    // should have modified it, whether invoked directly or through the queue.
+    fs.rmSync(legacyJob,{force:true});
 
 
 

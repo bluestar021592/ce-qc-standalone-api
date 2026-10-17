@@ -145,6 +145,20 @@ export function inspectDirectPurgeCp72Preflight(){
   }finally{try{db?.close()}catch{}}
 }
 
+// Queue and worker both invoke this gate BEFORE retiring old jobs or
+// making any other filesystem change. The BEGIN IMMEDIATE transaction
+// independently revalidates again immediately before DELETE.
+function assertCp72SafeBeforeCleanup(){
+  const cfg=getRuntimeConfig();
+  if(!fs.existsSync(cfg.dbFile))
+    throw new Error('V788_PURGE_CP72_MISSING: 隔离的当前数据库不存在，禁止清空');
+  const db=new DatabaseSync(cfg.dbFile,{readOnly:true});
+  try{
+    db.exec('PRAGMA query_only=ON');
+    readProtectedActiveShopSet(db);
+  }finally{db.close()}
+}
+
 function directResetTransaction(db,onProgress=()=>{}){
   const now=nowIso();
   const existing=new Set(db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(row=>String(row.name||'')));
@@ -255,6 +269,9 @@ function compactPurgedDatabase(dbFile,onProgress=()=>{}){
 export async function executeDirectDataPurge({phrase,user={},onProgress=()=>{}}={}){
   if(String(phrase||'')!==DIRECT_PURGE_PHRASE)throw new Error(`请输入完整确认短语：${DIRECT_PURGE_PHRASE}`);
   const administrator=String(user.email||user.username||'');
+  // The prior implementation retired legacy task files BEFORE checking CP72.
+  // Refuse entirely before touching a file when active config is invalid.
+  assertCp72SafeBeforeCleanup();
   onProgress({status:'RUNNING',stage:'RETIRING_LEGACY',message:'正在结束旧的备份/清空任务状态。'});
   const retiredLegacyJobs=retireLegacyPurgeArtifacts();
   await new Promise(resolve=>setTimeout(resolve,350));
@@ -337,6 +354,10 @@ export function queueDirectDataPurge({phrase,user={}}={}){
       return {...publicDirectJob(existing),reused:true};
     }
   }
+
+  // Reject invalid CP activation before creating a job or starting a
+  // destructive worker. The worker repeats this gate before side effects.
+  assertCp72SafeBeforeCleanup();
 
   const jobId=crypto.randomUUID();
   const startedAt=Date.now();
