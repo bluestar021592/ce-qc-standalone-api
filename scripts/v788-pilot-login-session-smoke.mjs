@@ -94,6 +94,18 @@ try{
   assert.equal(downgraded.body?.user?.role,'VIEWER',
     'live account role downgrade must propagate during renewal');
 
+  // Password rotation invalidates renewal rights for cookies minted before
+  // the change, even if their old HMAC/expiry are still mathematically valid.
+  const rotatedPasswordHash=bcrypt.hashSync(crypto.randomBytes(36).toString('base64url'),8);
+  db.prepare('UPDATE users SET passwordHash=? WHERE username=?')
+    .run(rotatedPasswordHash,username);
+  const afterPasswordReset=await getJson(base+'/api/session',{
+    headers:{Cookie:nearExpiry}
+  });
+  assert.notEqual(afterPasswordReset.status,200,
+    'an old session may not receive renewed privileges after password rotation');
+  db.prepare('UPDATE users SET passwordHash=? WHERE username=?').run(hash,username);
+
   db.prepare('UPDATE users SET enabled=0 WHERE username=?').run(username);
   const inactive=await getJson(base+'/api/session',{headers:{Cookie:nearExpiry}});
   assert.notEqual(inactive.status,200,'disabled accounts must NOT renew an old session');
@@ -105,7 +117,7 @@ try{
     body:JSON.stringify({token:expiredCookie.split('=')[1]})
   });
   assert.equal(forbidden.status,401,'expired HMAC cookie must not be renewed directly');
-  console.log('[V788_PILOT_LOGIN] PASS login, SameSite session, read-only sliding renewal, revoked-user and expired-cookie fail-closed; no V787 access');
+  console.log('[V788_PILOT_LOGIN] PASS login, SameSite session, read-only sliding renewal, password-reset, revoked-user and expired-cookie fail-closed; no V787 access');
 }finally{
   try{if(inserted)db.prepare('DELETE FROM users WHERE username=?').run(username)}
   finally{db.close()}
