@@ -11,6 +11,37 @@ assert.ok(source.includes("const disjointKinds=['delivery','pod','returned','ret
 assert.ok(source.includes('returning:exactCounts.returning'),'status 80 must reach the verified chart');
 assert.ok(source.includes("setText('kpiPodRate',Number(m.total)>0?"),'zero denominator must not show fabricated POD 0%');
 assert.ok(source.includes("setText('kpiReturnRate',Number(m.total)>0?"),'zero denominator must not show fabricated return 0%');
+// Verify real browser numeric normalization and the provisional TMS-80
+// conservation. A missing signing time MUST remain null, never a fake 0 days.
+const normalizerStart=source.indexOf('const num=v=>');
+const normalizerEnd=source.indexOf('async function request(',normalizerStart);
+const metricStart=source.indexOf('function metricState(state={}){');
+const metricEnd=source.indexOf('\nfunction renderTrend(',metricStart);
+assert.ok(normalizerStart>=0&&normalizerEnd>normalizerStart&&metricStart>=0&&metricEnd>metricStart);
+const numericSource=source.slice(normalizerStart,normalizerEnd)+
+  source.slice(metricStart,metricEnd);
+const numeric=vm.runInNewContext(numericSource+
+  '\n({missing:num(null),undefinedNumber:num(undefined),empty:num(""),zero:num(0),'+
+  'status:metricState(input)});',{
+    input:{total:20,pod:10,returned:5,returning:2,
+      dashboard:{metrics:{normalDiversion:1,shopTotal:1}}}
+  },{timeout:1000});
+assert.equal(numeric.missing,null,'null evidence must stay null rather than a false zero');
+assert.equal(numeric.undefinedNumber,null,'missing metric must stay unknown');
+assert.equal(numeric.empty,null,'blank numeric evidence must not become zero');
+assert.equal(numeric.zero,0,'an actual numeric zero remains distinguishable');
+assert.equal(numeric.status.avgDays,null,'missing WHPP POD-time evidence must display —');
+assert.equal(numeric.status.returning,2,'TMS 80 remains a separately counted state');
+assert.equal(numeric.status.otherNormal,2,'normal diversions have their own state');
+assert.equal(numeric.status.delivery,1,'TMS 80 and normal diversion must not be fabricated as delivery');
+assert.equal(numeric.status.delivery+numeric.status.pod+numeric.status.returned+
+  numeric.status.returning+numeric.status.otherNormal,20,
+  'provisional business state must conserve exact date-member denominator');
+assert.ok(source.includes('returning:Number(m.returning||0)'),
+  'fast-card state must carry TMS 80 separately');
+assert.ok(source.includes('-Number(m.returning||0)-Number(m.otherNormal||0)-'),
+  'the unknown counter cannot count TMS 80 twice');
+
 const start=source.indexOf('function renderDonut(m){');
 const end=source.indexOf('\nasync function loadSession()',start);
 assert.ok(start>=0&&end>start,'business donut source must exist');
