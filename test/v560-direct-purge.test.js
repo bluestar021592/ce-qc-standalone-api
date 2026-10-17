@@ -493,3 +493,48 @@ test('V568 no-backup cleanup script is syntax-valid and launcher wires it before
   assert.match(start,/local-login\.html\?v=20260922-v581-1/,'launcher must cache-bust the installed V581 stable login shell');
   assert.match(server,/local-login\.html/);
 });
+
+
+test('V788 managed release proof never trusts stale or wrong-branch Git metadata',async()=>{
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'ce-qc-v788-release-proof-'));
+  const git=(...args)=>{
+    const p=spawnSync('git',['-C',root,...args],{encoding:'utf8',timeout:15000});
+    assert.equal(p.status,0,'isolated Git fixture error: '+args.join(' ')+' '+p.stderr);
+    return String(p.stdout||'').trim();
+  };
+  try{
+    const init=spawnSync('git',['init','-q',root],{encoding:'utf8',timeout:15000});
+    assert.equal(init.status,0,'Git unavailable for exact-install witness test');
+    git('config','user.email','release-fixture@example.test');
+    git('config','user.name','Release Fixture');
+    fs.writeFileSync(path.join(root,'fixture.txt'),'one');
+    git('add','fixture.txt');git('commit','-q','-m','isolated-release');
+    git('checkout','-q','-B','main');
+    const sha=git('rev-parse','HEAD');
+    git('update-ref','refs/remotes/origin/main',sha);
+    const {inspectV788InstalledVersionEvidence}=await import('../src/v788InstalledVersionEvidence.js');
+    let read=()=>inspectV788InstalledVersionEvidence({projectRoot:root});
+    assert.equal(read().formalUpdateVerified,false,'main == cached remote is NOT update proof');
+    fs.mkdirSync(path.join(root,'logs'),{recursive:true});
+    const receiptPath=path.join(root,'logs','v788_managed_install_receipt.json');
+    const receipt={schemaVersion:1,mode:'INSTALLED',installedCommit:sha,
+      remoteCommit:sha,candidateGatePassed:true,verifiedAt:new Date().toISOString()};
+    fs.writeFileSync(receiptPath,'\\uFEFF'+JSON.stringify(receipt));
+    assert.equal(read().formalUpdateVerified,true,'exact installation receipt may validate a verified main checkout');
+    assert.equal(read().liveRemoteVersionVerified,false,'cached branch SHA never proves live internet freshness');
+    fs.writeFileSync(receiptPath,JSON.stringify({...receipt,remoteCommit:'0'.repeat(40)}));
+    assert.equal(read().formalUpdateVerified,false,'mismatched receipt remote SHA must fail closed');
+    fs.writeFileSync(receiptPath,JSON.stringify({...receipt,candidateGatePassed:false}));
+    assert.equal(read().formalUpdateVerified,false,'receipt without candidate tests must be refused');
+    fs.writeFileSync(receiptPath,JSON.stringify(receipt));
+    git('checkout','-q','-b','candidate');
+    assert.equal(read().formalUpdateVerified,false,'working candidate branch must never authorize a destructive clear');
+    git('checkout','-q','main');
+    fs.writeFileSync(path.join(root,'fixture.txt'),'two');
+    git('add','fixture.txt');git('commit','-q','-m','later');
+    git('update-ref','refs/remotes/origin/main',git('rev-parse','HEAD'));
+    assert.equal(read().formalUpdateVerified,false,'old receipt expires when installed SHA changes');
+  }finally{
+    fs.rmSync(root,{recursive:true,force:true,maxRetries:15,retryDelay:100});
+  }
+});
