@@ -294,5 +294,20 @@ test('V788 direct no-backup purge stops polling after a terminal FAILED response
   assert.match(node('directPurgePreview').innerHTML,/CP门店配置变动，事务已安全回滚/);
   assert.doesNotMatch(node('directPurgePreview').innerHTML,/全部业务数据已直接清空/);
   assert.equal(context.__CE_QC_V560_DIRECT_PURGE__.getStatus().active,false);
-  assert.deepEqual(alerts,[]);
+  assert.equal(context.__CE_QC_V560_DIRECT_PURGE__.getStatus().requiresReconciliation,true,
+    'an uncertain destructive result must lock the current wizard');
+  assert.equal(node('directPurgeExecuteButton').disabled,true,
+    'failure must never silently re-enable the irreversible submit button');
+  assert.match(node('directPurgePreview').innerHTML,/已禁止重复提交/);
+  await context.openDirectDataPurge();
+  assert.equal(alerts.length,1,'second attempt on same page must be blocked');
+  assert.match(alerts[0],/上一笔直接清空请求的结果需要只读核对/);
+});
+
+test('V788 direct purge treats permanent task-status HTTP errors as non-retryable',()=>{
+  const source=read('public/v560-direct-data-purge.js');
+  assert.match(source,/Number\(error\?\.status\|\|0\)>=400&&Number\(error\?\.status\|\|0\)<500/,
+    'unknown or unauthorized job must not run twenty repeated status requests');
+  assert.match(source,/requiresReconciliation=true;/,
+    'unknown result must trigger destructive resubmission lock');
 });
