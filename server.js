@@ -60,6 +60,7 @@ import { requestSelectedDateTimingRepair, inspectSelectedDateTimingRepair } from
 import { runV788Stage } from './scripts/v788-whpp-stage-tms-evidence.mjs';
 import { verifiedV788EvidenceCoverage } from './src/v788WhppStatusCoverage.js';
 import {verifyV788PersistedSidecar,v788ReadSourceMembershipSignature,previewV788WhppLedgerReconciliation} from './scripts/v788-whpp-tms-evidence-sidecar.mjs';
+import {summarizeV788WhppPodTimeSources} from './scripts/v788-whpp-pod-time-source-inventory.mjs';
 import { persistentSelectedDatePodTruth, persistentWhppCompletionTruth } from './src/selectedDatePersistentTruth.js';
 import { buildCanonicalBusinessAccounting } from './src/businessAccounting.js';
 import { buildDataIntegrityReport } from './src/dataIntegrity.js';
@@ -2294,6 +2295,18 @@ function v788StagePublicStatus(){
                   previewSource.exec('PRAGMA query_only=ON');
                   saved.ledgerReconciliation=previewV788WhppLedgerReconciliation(
                     previewSource,checkDb,actualSourceSignature);
+                  // Extra saved-signing-time inventory is READ ONLY and may
+                  // fail independently. The 346 terminal statuses are not
+                  // invalidated if an optional legacy evidence table is absent.
+                  try{
+                    saved.podTimeSourceInventory=summarizeV788WhppPodTimeSources(
+                      previewSource,checkDb,actualSourceSignature);
+                  }catch{
+                    saved.podTimeSourceInventory={
+                      available:false,reason:'ISOLATED_POD_TIME_INVENTORY_UNAVAILABLE',
+                      signingTimeAccepted:false,productionModified:false
+                    };
+                  }
                 }finally{previewSource.close()}
               }catch{
                 saved.ledgerReconciliation={ready:false,reason:'ISOLATED_LEDGER_PREVIEW_UNAVAILABLE',
