@@ -123,6 +123,18 @@ try{
   assert.equal(accepted.body.ok,true);
   assert.equal(accepted.body.readyToPublish,false);
   assert.equal(accepted.body.businessStateUpdated,false);
+  const auditViewer=await httpStatus(base+'/api/v788/readonly-audit/status',viewer);
+  assert.equal(auditViewer.status,403,'VIEWER must never inspect private acceptance evidence');
+  const auditAdmin=await httpStatus(base+'/api/v788/readonly-audit/status',admin);
+  assert.equal(auditAdmin.status,200);
+  assert.equal(auditAdmin.body.status,'NOT_STARTED');
+  assert.equal(auditAdmin.body.productionModified,false);
+  const auditStartDenied=await httpStatus(base+'/api/v788/readonly-audit/start',admin,{
+    method:'POST',body:JSON.stringify({acknowledgeReadOnlyAudit:true}),
+    headers:{'Content-Type':'application/json'}
+  });
+  assert.equal(auditStartDenied.status,409,
+    'nonexistent D-drive isolated database cannot fall back to production');
   assert.equal(accepted.body.isolatedSourceReady,false,
     'temporary Windows runner without D: acceptance copy must prohibit real TMS start');
   console.log('[V788_REAL_EDGE] ADMIN GET 200; VIEWER GET 403; isolated source absent and safely blocked');
@@ -162,6 +174,8 @@ try{
       &&String(data.info).includes('CE系统接口凭证')?data:false;
   },'ADMIN_SETTINGS_UI',30000);
   assert.equal(info.button,true,'No CE credentials means no TMS start');
+  assert.equal(await cdp.eval("!!document.getElementById('v788ReadOnlyAuditStart')"),true,
+    'real settings must display one-click isolated read-only acceptance');
   assert.match(String(info.title||''),/核验/);
   assert.equal(cdp.urls.filter(x=>x.includes('/api/v788/whpp-evidence/start')).length,0,
     'Loading settings must not auto-start CE TMS');

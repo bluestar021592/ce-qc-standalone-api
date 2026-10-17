@@ -41,6 +41,16 @@ const activeJs=fs.readFileSync('public/v625-shell.js','utf8');
 assert.match(activeShell,/id="v788WhppEvidencePanel"/,
   'real V625 settings MUST render the feature; legacy index.html does not render on /settings');
 assert.match(activeShell,/id="v788WhppEvidenceStart"/);
+assert.match(activeShell,/id="v788ReadOnlyAuditStart"/,
+  'real settings must expose the no-download read-only audit action');
+assert.match(server,/new V788AuditWorker\(/,
+  'read-only acceptance must run off the backend event loop');
+assert.match(server,/app\.post\('\/api\/v788\/readonly-audit\/start',requireRole\('ADMIN'\)/,
+  'audit must be explicit ADMIN action, not an automatic startup scan');
+assert.match(server,/acknowledgeReadOnlyAudit!==true/,
+  'read-only audit must require explicit opt-in');
+assert.match(activeJs,/只读核验现有隔离副本/,
+  'read-only acceptance must be actionable without command files');
 assert.match(activeShell,/data-settings-panel="interface"/);
 assert.match(activeJs,/loadV788WhppEvidenceV625/);
 assert.match(activeJs,/startV788WhppEvidenceV625/);

@@ -2529,6 +2529,66 @@ function renderReports(){
 // V788 isolated WHPP trial lives in the REAL V625 shell (not the legacy app.js).
 // It never auto-queries CE TMS. Only explicit ADMIN click may run a stage.
 let v788CeSessionReady=false;
+let v788ReadOnlyAuditPosting=false;
+let v788ReadOnlyAuditTimer=null;
+const v788GateNames={
+  ACTIVE_CP_72:'72个有效门店编码',
+  SEVEN_BUSINESS_LATEST_SOURCES:'七业务最新日报来源',
+  WHPP_TERMINAL_CONFLICTS:'WHPP终态冲突',
+  WHPP_LATE_TMS_NEEDS_STATE_SYNC:'WHPP旧状态待同步',
+  WHPP_LEDGER_VS_CURRENT:'WHPP历史账本',
+  WHPP_POD_SIGNING_TIME:'WHPP可信签收时间',
+  WHPP_TERMINAL_EVIDENCE:'WHPP直接TMS终态证据',
+  REAL_EXCEL_DETAIL_READBACK:'真实Excel逐票回读'
+};
+async function loadV788ReadOnlyAuditV625(){
+  if(page!=='settings')return;
+  const info=byId('v788ReadOnlyAuditText'),button=byId('v788ReadOnlyAuditStart');
+  if(!info||!button)return;
+  try{
+    const data=await json('/api/v788/readonly-audit/status',13000);
+    const running=data.active===true||data.status==='RUNNING';
+    const status=String(data.status||'NOT_STARTED');
+    const lines=[];
+    if(running)lines.push('只读验收正在检查隔离副本，请勿重复启动。');
+    else if(data.ok===true&&Array.isArray(data.gates)){
+      const n=data.counts||{};
+      lines.push('检查结果：'+status+'；通过 '+Number(n.passed||0)+
+        '、阻断 '+Number(n.blocked||0)+'、待核验 '+Number(n.reviewing||0)+' 项。');
+      lines.push('WHPP '+Number(data.members||0)+'票，旧OPEN账本与终态不一致 '+
+        Number(data.ledgerOpenWithNormalizedTerminal||0)+'票，可信POD时间锁 '+
+        Number(data.trustedPodLockOnPOD||0)+'票。');
+      for(const gate of data.gates.filter(g=>g.status!=='PASS')){
+        const name=v788GateNames[gate.id]||
+          (String(gate.id||'').startsWith('WHPP_DAILY_SOURCE_')?'WHPP '+String(gate.id).slice(-10)+'日报来源':'其他验收项');
+        lines.push('['+(gate.status==='BLOCK'?'阻断':'待核验')+'] '+name+
+          '：'+JSON.stringify(gate.detail||{}));
+      }
+      lines.push('此为数据库副本只读诊断，并非正式Excel回读或发布批准。');
+    }else if(status==='BLOCKED')lines.push('隔离副本检查不可用或缺少必要数据表；未触碰正式数据库。');
+    else lines.push('尚未运行真实隔离数据库验收。已有TMS证据不会因此被重新查询。');
+    info.textContent=lines.join('\n');
+    button.disabled=running||v788ReadOnlyAuditPosting;
+    button.textContent=running?'只读核验中…':'只读核验现有隔离副本';
+    if(v788ReadOnlyAuditTimer){clearTimeout(v788ReadOnlyAuditTimer);v788ReadOnlyAuditTimer=null}
+    if(running)v788ReadOnlyAuditTimer=setTimeout(()=>{void loadV788ReadOnlyAuditV625()},4000);
+  }catch(error){
+    if(Number(error?.status)===403)return;
+    info.textContent='只读核验状态无法读取，未发起TMS查询。';
+    button.disabled=true;
+  }
+}
+async function startV788ReadOnlyAuditV625(){
+  const button=byId('v788ReadOnlyAuditStart');
+  if(v788ReadOnlyAuditPosting||button?.disabled)return;
+  v788ReadOnlyAuditPosting=true;button.disabled=true;
+  try{
+    await post('/api/v788/readonly-audit/start',{acknowledgeReadOnlyAudit:true},12000);
+    await loadV788ReadOnlyAuditV625();
+  }catch{
+    setText('v788ReadOnlyAuditText','隔离只读核验未启动。未查询TMS，未修改正式数据库。');
+  }finally{v788ReadOnlyAuditPosting=false}
+}
 let v788EvidencePosting=false;
 let v788EvidenceTimer=null;
 async function loadV788WhppEvidenceV625(){
@@ -2539,6 +2599,7 @@ async function loadV788WhppEvidenceV625(){
   try{
     const data=await json('/api/v788/whpp-evidence/status',13000);
     panel.hidden=false;
+    void loadV788ReadOnlyAuditV625();
     const covered=Number(data.savedMembers||0),batches=Number(data.completedBatches||0);
     const running=data.active===true||data.status==='RUNNING';
     const allSaved=covered===346&&batches===8;
@@ -3078,6 +3139,8 @@ function bind(){
   byId('v625CeLogin')?.addEventListener('click',ceLogin);byId('v625CeLogout')?.addEventListener('click',ceLogout);
   byId('v788WhppEvidenceStart')?.addEventListener('click',startV788WhppEvidenceV625);
   byId('v788WhppEvidenceRefresh')?.addEventListener('click',loadV788WhppEvidenceV625);
+  byId('v788ReadOnlyAuditStart')?.addEventListener('click',startV788ReadOnlyAuditV625);
+  byId('v788ReadOnlyAuditRefresh')?.addEventListener('click',loadV788ReadOnlyAuditV625);
   byId('v625ShopFile')?.addEventListener('change',()=>setText('v625ShopFileName',byId('v625ShopFile').files?.[0]?.name||'请选择CP码文件'));byId('v625ShopImport')?.addEventListener('click',importShop);
   byId('v780ActivateSavedShops')?.addEventListener('click',activateSavedShopCodes);
   byId('v625SettingsBackupNow')?.addEventListener('click',settingsBackupNow);

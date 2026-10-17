@@ -5,6 +5,7 @@ import path from 'path';
 import fs from 'fs/promises';
 import fsSync from 'node:fs';
 import {DatabaseSync as V788ReadOnlyDatabaseSync} from 'node:sqlite';
+import {Worker as V788AuditWorker} from 'node:worker_threads';
 import { fileURLToPath } from 'url';
 import { networkInterfaces } from 'os';
 import { spawn } from 'node:child_process';
@@ -2402,6 +2403,61 @@ app.post('/api/v788/whpp-evidence/start',requireRole('ADMIN'),(req,res)=>{
     }finally{v788StageActive=false}
   });
   res.status(202).json({ok:true,status:'RUNNING',message:'隔离证据查询已开始，请在本页面查看进度'});
+});
+
+// Explicit ADMIN-only read-only audit of the existing D: acceptance copy.
+// The worker keeps SQLite scanning off the UI server's event loop. It never
+// starts TMS, writes an output file, clears data or touches production.
+let v788ReadOnlyAuditState={status:'NOT_STARTED',updatedAt:'',message:'尚未核验'};
+let v788ReadOnlyAuditActive=false;
+app.get('/api/v788/readonly-audit/status',requireRole('ADMIN'),(req,res)=>{
+  res.setHeader('Cache-Control','no-store');
+  res.json({ok:true,...v788ReadOnlyAuditState,active:v788ReadOnlyAuditActive,
+    readyToPublish:false,productionModified:false});
+});
+app.post('/api/v788/readonly-audit/start',requireRole('ADMIN'),(req,res)=>{
+  if(process.platform!=='win32'||!v788IsRegularExactFile(v788SourceCopy))
+    return res.status(409).json({ok:false,code:'V788_ISOLATED_SOURCE_MISSING',
+      error:'D盘验收副本不可用；未读取正式数据库。'});
+  if(v788ReadOnlyAuditActive||v788StageActive)
+    return res.status(409).json({ok:false,code:'V788_READONLY_AUDIT_BUSY',
+      error:'已有隔离核验在运行，本次未重复执行。'});
+  if(req.body?.acknowledgeReadOnlyAudit!==true)
+    return res.status(400).json({ok:false,code:'V788_READONLY_AUDIT_ACK_REQUIRED',
+      error:'请先确认只读核对已有D盘隔离副本，不查询TMS、不写入业务数据。'});
+  v788ReadOnlyAuditActive=true;
+  v788ReadOnlyAuditState={status:'RUNNING',updatedAt:new Date().toISOString(),
+    message:'正在对现有D盘隔离副本进行只读核验；不查询TMS'};
+  try{
+    const worker=new V788AuditWorker(
+      new URL('./scripts/v788-inapp-readonly-audit-worker.mjs',import.meta.url));
+    let settled=false;
+    const finish=result=>{
+      if(settled)return;
+      settled=true;
+      v788ReadOnlyAuditActive=false;
+      v788ReadOnlyAuditState={...result,
+        status:String(result?.status||'BLOCKED'),
+        updatedAt:new Date().toISOString(),
+        message:result?.ok===true?'隔离只读审计完成；阻断项见下方'
+          :'隔离副本审计未完成，不允许据此发布或修改正式数据库'};
+    };
+    worker.once('message',finish);
+    worker.once('error',()=>finish({ok:false,status:'BLOCKED',
+      code:'ISOLATED_AUDIT_WORKER_FAILED'}));
+    worker.once('exit',code=>{
+      if(code!==0)finish({ok:false,status:'BLOCKED',
+        code:'ISOLATED_AUDIT_WORKER_EXIT'});
+    });
+  }catch{
+    v788ReadOnlyAuditActive=false;
+    v788ReadOnlyAuditState={ok:false,status:'BLOCKED',
+      code:'ISOLATED_AUDIT_WORKER_UNAVAILABLE',updatedAt:new Date().toISOString(),
+      message:'隔离只读审计无法启动；未修改正式数据库'};
+    return res.status(503).json(v788ReadOnlyAuditState);
+  }
+  res.status(202).json({ok:true,status:'RUNNING',
+    readyToPublish:false,productionModified:false});
 });
 
 app.post('/api/timing-repair/start', (req,res)=>{

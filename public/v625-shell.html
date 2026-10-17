@@ -529,6 +529,14 @@
                 <button id="v788WhppEvidenceStart" class="v625-btn primary" type="button" disabled>开始隔离核验（346票）</button>
                 <button id="v788WhppEvidenceRefresh" class="v625-btn outline" type="button">刷新核验结果</button>
               </div>
+              <div class="v625-section-head"><h3>真实隔离数据库只读验收</h3><span>不查询TMS</span></div>
+              <p class="v625-inline-note">直接读取现有D盘验收副本，核验七业务来源、72个有效门店码、WHPP状态及POD时间锁和历史账本。只显示汇总阻断项，不生成或下载文件。</p>
+              <div id="v788ReadOnlyAuditText" class="v625-inline-note" role="status" aria-live="polite" style="white-space:pre-line">尚未运行只读验收。</div>
+              <div class="v625-button-row">
+                <button id="v788ReadOnlyAuditStart" class="v625-btn outline" type="button" disabled>只读核验现有隔离副本</button>
+                <button id="v788ReadOnlyAuditRefresh" class="v625-btn outline" type="button">刷新只读验收结果</button>
+              </div>
+              <p class="v625-inline-note">只读数据库检查并不能代替真实Excel逐票回读。任何阻断或待核验证据均不授权清空、重传或正式发布。</p>
               <p class="v625-inline-note">只读状态预览不等于可信签收天数、历史账本及正式导出已通过。</p>
             </section>
           </div>
