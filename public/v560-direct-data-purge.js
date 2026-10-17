@@ -89,8 +89,10 @@
     if(!cp72PreflightReady)
       return alert('清空已被阻止：72个有效CP门店码不完整，或主数据盘不可用。没有删除任何数据。');
     const installed=preflight.version||{};
-    if(installed.installedOnLocalMain!==true||installed.cachedMainMatchesInstalled!==true)
-      return alert('清空已被阻止：当前不是与本机 origin/main 一致的正式 main 安装版本。候选版/本地旧版不能作为正式清空入口。');
+    if(installed.installedOnLocalMain!==true||installed.cachedMainMatchesInstalled!==true
+      ||installed.formalUpdateVerified!==true
+      ||installed.installedThroughManagedUpdaterVerified!==true)
+      return alert('清空已被阻止：没有正式托管更新器的安装凭据；候选版、旧版或手工切换main都不能清空。');
     if(!global.confirm('本机安装提交 '+String(installed.installedCommit||'').slice(0,12)+
       ' 已与本地 main 记录一致；此检查不代表已联网确认最新版。打开清空向导？已有备份保留，只有最终确认后才删除业务数据。'))return;
     openedAt=Date.now();
