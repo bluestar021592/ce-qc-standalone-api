@@ -129,7 +129,11 @@ function alreadyClearedWithoutNewBusiness(db){
   const last=String(db.prepare("SELECT value FROM app_meta WHERE key='last_full_clear_at'").get()?.value||'').trim();
   if(!last)return false;
   const existing=new Set(db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(x=>String(x.name||'')));
-  for(const table of BUSINESS_DATA_TABLES){
+  // Only authoritative newly IMPORTED waybill membership can unlock another
+  // destructive reset. A scheduler may regenerate dashboard/cache/track rows
+  // even while the user has NOT imported a single new daily report.
+  const importMemberTables=['daily_parse_rows','business_daily_parse_rows','unified_import_rows'];
+  for(const table of importMemberTables){
     if(!existing.has(table))continue;
     if(db.prepare(`SELECT 1 FROM "${table}" LIMIT 1`).get())return false;
   }
