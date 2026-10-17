@@ -2434,9 +2434,14 @@ app.post('/api/v788/readonly-audit/start',requireRole('ADMIN'),(req,res)=>{
     const worker=new V788AuditWorker(
       new URL('./scripts/v788-inapp-readonly-audit-worker.mjs',import.meta.url));
     let settled=false;
+    const watchdog=setTimeout(()=>{
+      void worker.terminate();
+      finish({ok:false,status:'BLOCKED',code:'ISOLATED_AUDIT_TIMEOUT'});
+    },90000);
     const finish=result=>{
       if(settled)return;
       settled=true;
+      clearTimeout(watchdog);
       v788ReadOnlyAuditActive=false;
       v788ReadOnlyAuditState={...result,
         status:String(result?.status||'BLOCKED'),
@@ -2448,8 +2453,8 @@ app.post('/api/v788/readonly-audit/start',requireRole('ADMIN'),(req,res)=>{
     worker.once('error',()=>finish({ok:false,status:'BLOCKED',
       code:'ISOLATED_AUDIT_WORKER_FAILED'}));
     worker.once('exit',code=>{
-      if(code!==0)finish({ok:false,status:'BLOCKED',
-        code:'ISOLATED_AUDIT_WORKER_EXIT'});
+      if(!settled)finish({ok:false,status:'BLOCKED',
+        code:code===0?'ISOLATED_AUDIT_NO_RESULT':'ISOLATED_AUDIT_WORKER_EXIT'});
     });
   }catch{
     v788ReadOnlyAuditActive=false;
