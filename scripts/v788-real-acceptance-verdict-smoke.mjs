@@ -30,6 +30,31 @@ assert.equal(buildV788AcceptanceVerdict(missingUnified).gates.find(x=>x.id==='SE
 let incompleteUnified=clone();incompleteUnified.sevenBusinessSource.byDate[1].completedValidUnifiedBatch=false;
 assert.equal(buildV788AcceptanceVerdict(incompleteUnified).releaseDecision,'BLOCKED',
   'reconciled members must not mask incomplete newest unified import');
+// The latest seven-business source must cover BOTH exact WHPP acceptance
+// dates; all-green results for only one day are not enough to publish.
+let onlyOneDay=clone();
+onlyOneDay.sevenBusinessSource.byDate=onlyOneDay.sevenBusinessSource.byDate.slice(0,1);
+onlyOneDay.sevenBusinessSource.datesChecked=1;
+let oneDayVerdict=buildV788AcceptanceVerdict(onlyOneDay);
+assert.equal(oneDayVerdict.releaseDecision,'BLOCKED');
+assert.equal(oneDayVerdict.gates.find(x=>x.id==='SEVEN_BUSINESS_LATEST_SOURCES').detail.missingRequiredDates,1);
+let repeatedDay=clone();repeatedDay.sevenBusinessSource.byDate.push({...repeatedDay.sevenBusinessSource.byDate[0]});
+repeatedDay.sevenBusinessSource.datesChecked=3;
+assert.equal(buildV788AcceptanceVerdict(repeatedDay).releaseDecision,'BLOCKED');
+let staleDateCount=clone();staleDateCount.sevenBusinessSource.datesChecked=1;
+assert.equal(buildV788AcceptanceVerdict(staleDateCount).releaseDecision,'BLOCKED');
+let blockedDates=clone();blockedDates.sevenBusinessSource.blockedDates=['2026-07-01'];
+assert.equal(buildV788AcceptanceVerdict(blockedDates).releaseDecision,'BLOCKED');
+let notReally72=clone();notReally72.active72.uniqueCount=71;
+assert.equal(buildV788AcceptanceVerdict(notReally72).releaseDecision,'BLOCKED');
+let missingTerminal=clone();missingTerminal.whpp.totals.strictPOD=0;
+const noTerminalVerdict=buildV788AcceptanceVerdict(missingTerminal);
+assert.equal(noTerminalVerdict.gates.find(x=>x.id==='WHPP_TERMINAL_EVIDENCE').status,'REVIEW',
+  'absence of strict TMS proof cannot pass even if legacy labels and conflicts are zero');
+let returnedShort=clone();returnedShort.whpp.totals.strictReturned=55;
+assert.equal(buildV788AcceptanceVerdict(returnedShort).gates.find(x=>x.id==='WHPP_TERMINAL_EVIDENCE').status,'REVIEW');
+let returningStill=clone();returningStill.whpp.totals.returning80=1;
+assert.equal(buildV788AcceptanceVerdict(returningStill).gates.find(x=>x.id==='WHPP_TERMINAL_EVIDENCE').status,'REVIEW');
 let open=clone();open.whpp.totals.ledgerOpenWithNormalizedTerminal=346;
 const blocked=buildV788AcceptanceVerdict(open);
 assert.equal(blocked.releaseDecision,'BLOCKED');
