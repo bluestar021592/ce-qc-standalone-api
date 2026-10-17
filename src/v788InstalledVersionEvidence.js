@@ -7,6 +7,15 @@ import path from 'node:path';
 import {getRuntimeConfig} from './db.js';
 
 const SHA=/^[0-9a-f]{40}$/i;
+function readManagedReceipt(root){
+  try{
+    const file=path.join(root,'logs','v788_managed_install_receipt.json');
+    const stat=fs.lstatSync(file);
+    if(!stat.isFile()||stat.isSymbolicLink()||stat.size>8192)return null;
+    const obj=JSON.parse(fs.readFileSync(file,'utf8').replace(/^\uFEFF/,''));
+    return obj&&typeof obj==='object'&&!Array.isArray(obj)?obj:null;
+  }catch{return null}
+}
 function git(args,root){
   try{
     const value=execFileSync('git',['-C',root,...args],{
@@ -16,8 +25,8 @@ function git(args,root){
     return value.slice(0,80);
   }catch{return ''}
 }
-export function inspectV788InstalledVersionEvidence(){
-  const root=getRuntimeConfig().projectRoot;
+export function inspectV788InstalledVersionEvidence({projectRoot}={}){
+  const root=projectRoot||getRuntimeConfig().projectRoot;
   const tracked=fs.existsSync(path.join(root,'.git'));
   const commit=tracked?git(['rev-parse','--verify','HEAD'],root):'';
   const branch=tracked?git(['symbolic-ref','--short','HEAD'],root):'';
@@ -25,16 +34,25 @@ export function inspectV788InstalledVersionEvidence(){
   const installedCommit=SHA.test(commit)?commit.toLowerCase():'';
   const cachedMainCommit=SHA.test(localRemoteMain)?localRemoteMain.toLowerCase():'';
   const mainCheckout=branch==='main'&&Boolean(installedCommit);
+  const matchesMain=Boolean(mainCheckout&&cachedMainCommit&&installedCommit===cachedMainCommit);
+  const receipt=readManagedReceipt(root);
+  const receiptSha=String(receipt?.installedCommit||'').toLowerCase();
+  const receiptRemote=String(receipt?.remoteCommit||'').toLowerCase();
+  const releaseInstalled=Boolean(process.platform==='win32'||projectRoot)
+    &&matchesMain&&receipt?.schemaVersion===1&&receipt?.mode==='INSTALLED'
+    &&receipt?.candidateGatePassed===true&&SHA.test(receiptSha)
+    &&SHA.test(receiptRemote)&&receiptSha===installedCommit
+    &&receiptRemote===cachedMainCommit;
   return {
     installedCommit,installedBranch:branch.slice(0,64)||'UNKNOWN',
     cachedOriginMainCommit:cachedMainCommit,
     installedOnLocalMain:mainCheckout,
-    cachedMainMatchesInstalled:Boolean(mainCheckout&&cachedMainCommit
-      &&installedCommit===cachedMainCommit),
+    cachedMainMatchesInstalled:matchesMain,
     metadataAvailable:Boolean(installedCommit),
-    // A locally cached remote ref is not an online update attestation.
+    // Receipt is recorded only after an exact-SHA install; do not claim this
+    // confirms current GitHub availability or the real Excel acceptance.
     liveRemoteVersionVerified:false,
-    formalUpdateVerified:false,
-    installedThroughManagedUpdaterVerified:false
+    formalUpdateVerified:releaseInstalled,
+    installedThroughManagedUpdaterVerified:releaseInstalled
   };
 }
