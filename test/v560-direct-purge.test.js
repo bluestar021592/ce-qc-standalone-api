@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { spawnSync } from 'node:child_process';
+import XLSX from 'xlsx';
 
 test('V560 direct purge clears business data without creating a backup or purge seal',async()=>{
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'ce-qc-v560-direct-'));
@@ -132,27 +133,51 @@ test('V560 direct purge clears business data without creating a backup or purge 
     // the 7/1 workflow starts from empty membership (not old 8/17 caches).
     // WHPP has a separate daily-source route; test the six unified types here.
     const {saveUnifiedImport}=await import('../src/unifiedImportStore.js');
+    const {parseUnifiedDailyExcel}=await import('../src/unifiedExcelParser.js');
     const reimportTypes=['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN'];
-    const freshRows=reimportTypes.map((type,i)=>({
-      shipmentCode:'V788010726'+String(i+1).padStart(5,'0'),
-      businessType:type,regionCode:type==='SHOPEEVN'?'PV':'PP',
-      recipientRaw:'',recipientNormalized:'',sheetName:'V788-FIXTURE',
-      rowNumber:i+2,classificationReason:'AFTER_PURGE_FIXTURE',
-      classificationSource:'TEST_ONLY',classificationMatchedValue:'',
-      classificationWarning:''
-    }));
-    const classificationCounts=Object.fromEntries(reimportTypes.map(type=>[type,1]));
-    const staged=saveUnifiedImport({
-      reportDate:'2026-07-01',fileHash:'v788-post-purge-synthetic',
-      dateDetectionSource:'SYNTHETIC_TEST',dateCandidates:['2026-07-01'],
-      dateWasManuallyCorrected:false,containerFormat:'TEST',
-      classificationCounts,
-      sourceReconciliation:{balanced:true,validUniqueWaybills:6,classifiedWaybills:6},
-      regionCounts:{},summary:{validUniqueWaybills:6},
-      sheetDiagnostics:[],warnings:[],rows:freshRows
-    },'V788_SYNTHETIC_ACCEPTANCE');
+    // Exercise the SAME BIFF8 Excel parser as a user-uploaded legacy XLS,
+    // after destructive reset in an isolated temporary DB. A handcrafted
+    // rows[] object could miss actual spreadsheet classification defects.
+    const realBiff8=path.join(dir,'V788-post-reset-0701.xls');
+    const rowsFromWorkbook=[
+      ['运单号','日报日期','收件人','省份标识','客户名称'],
+      ['CC260701373001','2026-07-01','GENERAL','PP','GENERAL'],
+      ['CC260701373002','2026-07-01','GENERAL','PP','CCAF'],
+      ['TBKH260701373003','2026-07-01','GENERAL','PV','GENERAL'],
+      ['CC260701373004','2026-07-01','ALI1688','PV','GENERAL'],
+      ['CC260701373005','2026-07-01','SHOPEECN','PP','GENERAL'],
+      ['CC260701373006','2026-07-01','SHOPEEVN','PV','GENERAL']
+    ];
+    const worksheet=XLSX.utils.aoa_to_sheet(rowsFromWorkbook);
+    worksheet['!ref']='A1:AZ5000';
+    const workbook=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook,worksheet,'日报');
+    XLSX.writeFile(workbook,realBiff8,{bookType:'biff8'});
+    assert.equal(fs.readFileSync(realBiff8).subarray(0,4).toString('hex').toUpperCase(),'D0CF11E0',
+      'post-reset import must consume a real OLE BIFF8 xls, not an XLSX renamed to .xls');
+    const parsed=parseUnifiedDailyExcel(realBiff8,{reportDate:'2026-07-01',originalName:'7-1.xls'});
+    assert.equal(parsed.containerFormat,'OLE_XLS');
+    assert.equal(parsed.sourceReconciliation?.balanced,true);
+    assert.equal(parsed.summary?.validUniqueWaybills,6);
+    assert.equal(parsed.classificationCounts?.WHPP,0,
+      'WHPP members remain on their separate daily-source route');
+    for(const type of reimportTypes)
+      assert.equal(parsed.classificationCounts?.[type],1,
+        'each of the six unified boards must classify exactly one BIFF8 member: '+type);
+    assert.equal(parsed.sheetDiagnostics?.[0]?.rangeClamped,true,
+      'inflated legacy workbook UsedRange cannot hang fresh upload');
+    const freshRows=parsed.rows;
+    const classificationCounts=parsed.classificationCounts;
+    const staged=saveUnifiedImport(parsed,'V788_REAL_BIFF8_AFTER_PURGE');
     assert.equal(staged.reportDate,'2026-07-01');
     assert.equal(staged.sameDateOverwrite,false,'first reimport after purge cannot reuse a stale July batch');
+    assert.equal(staged.containerFormat,'OLE_XLS');
+    // Explicit exact-file reuse must preserve the new batch and avoid
+    // duplicating source members on an accidental immediate resubmission.
+    const reused=saveUnifiedImport(parsed,'V788_REAL_BIFF8_DUPLICATE',{reuseExactDuplicate:true});
+    assert.equal(reused.duplicateFile,true);
+    assert.equal(reused.batchId,staged.batchId);
+    assert.equal(reused.snapshotId,staged.snapshotId);
     const stageDb=getDb();
     assert.equal(Number(stageDb.prepare('SELECT COUNT(*) c FROM unified_import_rows').get()?.c||0),6,'first 7/1 import must contain only six fresh unified sample members');
     assert.equal(Number(stageDb.prepare('SELECT COUNT(*) c FROM shipment_daily_snapshots').get()?.c||0),6,'new snapshot membership must match fresh sample');
