@@ -168,6 +168,46 @@ const server = http.createServer(async (req, res) => {
     }
     catch (error) { return json(req, res, 503, { ok: false, id: V431_LOCAL_AUTH_SIDECAR_ID, ownerId: V432_LOCAL_AUTH_SINGLE_OWNER_ID, dbReady: false, error: String(error?.message || error) }); }
   }
+  // Renewal is reached only over the backend→sidecar loopback link. Re-check
+  // the active user through the existing READ-ONLY auth connection before
+  // signing a new bounded session. No main business DB write or new login.
+  if(req.method==='POST'&&url.pathname==='/api/local-auth/renew'){
+    const remote=ipOnly(req.socket?.remoteAddress||'');
+    if(remote!=='127.0.0.1'&&remote!=='::1')
+      return json(req,res,403,{ok:false,code:'LOCAL_AUTH_RENEW_LOOPBACK_REQUIRED'});
+    try{
+      const data=await body(req);
+      const token=String(data?.token||'');
+      const [encoded,sig,extra]=token.split('.');
+      if(!encoded||!sig||extra||token.length>8192)
+        return json(req,res,401,{ok:false,code:'LOCAL_AUTH_RENEW_INVALID'});
+      const expected=crypto.createHmac('sha256',sessionSecret()).update(encoded).digest('base64url');
+      const left=Buffer.from(sig),right=Buffer.from(expected);
+      if(left.length!==right.length||!crypto.timingSafeEqual(left,right))
+        return json(req,res,401,{ok:false,code:'LOCAL_AUTH_RENEW_INVALID'});
+      const previous=JSON.parse(Buffer.from(encoded,'base64url').toString('utf8'));
+      const now=Date.now();
+      if(previous?.v!==431||Number(previous.exp)<=now||
+          !['LOCAL','LAN'].includes(previous?.channel)||
+          !Number.isSafeInteger(previous.iat)||previous.iat>now+60_000||
+          !previous.user?.id||!previous.user?.username)
+        return json(req,res,401,{ok:false,code:'LOCAL_AUTH_RENEW_EXPIRED_OR_INVALID'});
+      const row=readAuthRow(cleanUsername(previous.user.username));
+      if(!row||String(row.id)!==String(previous.user.id)||
+          !Number(row.enabled)||
+          (row.expiresAt&&Date.parse(row.expiresAt)<=now)||
+          (row.lockedUntil&&Date.parse(row.lockedUntil)>now))
+        return json(req,res,401,{ok:false,code:'LOCAL_AUTH_RENEW_ACCOUNT_INACTIVE'});
+      const next={v:431,iat:now,exp:now+SESSION_HOURS*60*60_000,
+        channel:previous.channel,user:publicUser(row,previous.channel)};
+      const cookie=`${V431_LOCAL_AUTH_COOKIE}=${sign(next)}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${SESSION_HOURS*3600}`;
+      return json(req,res,200,{ok:true,user:next.user,expiresAt:new Date(next.exp).toISOString(),
+        authMode:'V431_READONLY_RENEWAL'}, {'set-cookie':cookie});
+    }catch(error){
+      const busy=/SQLITE_BUSY|database is locked/i.test(String(error?.message||error));
+      return json(req,res,busy?503:401,{ok:false,code:busy?'LOCAL_AUTH_RENEW_DB_BUSY':'LOCAL_AUTH_RENEW_INVALID'});
+    }
+  }
   if (req.method !== 'POST' || url.pathname !== '/api/local-auth/login') return json(req, res, 404, { ok: false, error: 'Not found.' });
   const channel = localChannel(req);
   if (!channel) return json(req, res, 403, { ok: false, error: '当前访问来源不允许本机/LAN登录。' });
