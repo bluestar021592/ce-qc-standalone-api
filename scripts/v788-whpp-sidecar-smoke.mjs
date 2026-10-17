@@ -6,6 +6,7 @@ import fsPromises from 'node:fs/promises';
 import ExcelJS from 'exceljs';
 import {createShopeeTemplateWorkbook} from '../src/shopeeTemplateExporter.js';
 import {readV788ExistingWhppXlsx} from './v788-existing-whpp-xlsx-readback.mjs';
+import {findV788ExistingWhppExport} from './v788-find-existing-whpp-export.mjs';
 import {verifiedV788EvidenceCoverage} from '../src/v788WhppStatusCoverage.js';
 import {explainV788Gate,presentV788AuditGates} from '../src/v788AuditGateMessages.js';
 // V788 is exposed only as a deliberate ADMIN action inside the QC APP.
@@ -517,6 +518,11 @@ try{
       range:{from:'2026-07-01',to:'2026-07-02'},
       snapshots:snapshotRows,outputDir:xlsxTemp
     });
+    const discovered=findV788ExistingWhppExport(xlsxTemp);
+    assert.equal(discovered.status,'FOUND','one-click audit must locate a genuine existing export');
+    assert.equal(discovered.file,made.file);
+    assert.equal(findV788ExistingWhppExport(path.join(xlsxTemp,'not-created')).status,'NOT_FOUND',
+      'missing export must stay missing, never trigger an export or synthetic pass');
     xlsxSource.exec('PRAGMA query_only=ON');
     const beforeRead=xlsxSource.prepare('SELECT total_changes() n').get().n;
     const actual=await readV788ExistingWhppXlsx({
@@ -533,6 +539,12 @@ try{
       // must reject it instead of following a mutable alias to a new file.
       const alias=path.join(xlsxTemp,'linked-source.xlsx');
       await fsPromises.symlink(made.file,alias,'file');
+      const linkedFolder=path.join(os.tmpdir(),'v788-export-linked-'+path.basename(xlsxTemp));
+      await fsPromises.symlink(xlsxTemp,linkedFolder,'dir');
+      try{
+        assert.equal(findV788ExistingWhppExport(linkedFolder).status,'UNAVAILABLE',
+          'an export directory redirection must never qualify as a real workbook');
+      }finally{await fsPromises.rm(linkedFolder,{force:true})}
       await assert.rejects(
         readV788ExistingWhppXlsx({sourceDb:xlsxSource,proofDb:db,workbookPath:alias}),
         /V788_XLSX_NOT_SAFE_REGULAR_FILE/
@@ -653,4 +665,11 @@ assert.match(xlsxReadbackSource,/podOutsideAllDetail:orphanPod/,
   'orphan POD rows must block XLSX before strict TMS is available');
 assert.match(xlsxReadbackSource,/returnedOutsideAllDetail:orphanReturned/,
   'orphan returned rows must block XLSX before strict TMS is available');
-console.log('[V788] sidecar: 346 exact members, 8 batches, replay-safe, status/time provenance, no source SQLite writes');
+const inAppWorker=fs.readFileSync('scripts/v788-inapp-readonly-audit-worker.mjs','utf8');
+assert.match(inAppWorker,/findV788ExistingWhppExport\(exportsConfig\.exportsDir\)/,
+  'in-app ADMIN audit must try existing real export without generating a file');
+assert.match(inAppWorker,/await readV788ExistingWhppXlsx\(/,
+  'a discovered existing XLSX must be re-opened and checked against source and TMS');
+assert.match(inAppWorker,/WHPP_EXISTING_REAL_XLSX/,
+  'WHPP readback must remain a separate gate from seven-business Excel completion');
+console.log('[V788] sidecar: 346 exact members, existing export discovery, replay-safe, no source SQLite writes');
