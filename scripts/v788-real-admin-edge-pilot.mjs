@@ -182,6 +182,8 @@ try{
   assert.equal(evidence.body.podTimeSourceInventory?.available,true,
     'isolated source/time inventory must be readable only after exact TMS proof');
   assert.equal(evidence.body.podTimeSourceInventory?.podMembers,290);
+  assert.equal(evidence.body.podTimeSourceInventory?.manualReviewMembers,0,
+    'synthetic complete proof with zero timing evidence has no fabricated conflicts');
   assert.equal(evidence.body.podTimeSourceInventory?.signingTimeAccepted,false,
     'time evidence candidates cannot be accepted as formal signing-day evidence');
   assert.equal(evidence.body.podTimeSourceInventory?.sourceTablesPresent?.savedEvent,false,

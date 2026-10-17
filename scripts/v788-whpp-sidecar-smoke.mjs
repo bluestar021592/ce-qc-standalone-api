@@ -349,6 +349,18 @@ try{
     insertScan.run('J0001',JSON.stringify({signedAt:'2026-07-05 10:00:00'}));
     insertFinal.run('J0001',JSON.stringify({signedAt:'2026-07-06 10:00:00'}));
     insertScan.run('J0002',JSON.stringify({lastUpdateDate:'2026-07-07 15:00:00'}));
+    // Two different named POD timestamps within ONE saved scan must be
+    // detected as conflicting rather than accepting the first field only.
+    insertScan.run('J0004',JSON.stringify({
+      podTime:'2026-07-09 10:00:00',signedAt:'2026-07-10 11:00:00'
+    }));
+    // A duplicate TMS source row cannot be treated as a clean signing
+    // candidate even when a separate valid scan timestamp exists.
+    compareDb.prepare("INSERT INTO business_shipment_tracks VALUES('WHPP','2026-07-01','J0005','60',?)")
+      .run(JSON.stringify({shipmentStatus:'60',signedAt:'2026-07-09 11:00:00'}));
+    compareDb.prepare("INSERT INTO business_shipment_tracks VALUES('WHPP','2026-07-01','J0005','60',?)")
+      .run(JSON.stringify({shipmentStatus:'60',signedAt:'2026-07-10 11:00:00'}));
+    insertScan.run('J0005',JSON.stringify({signedAt:'2026-07-10 11:00:00'}));
     const insertEvent=compareDb.prepare("INSERT INTO business_track_events(businessType,reportDate,shipmentCode,rawJson) VALUES('WHPP','2026-07-01',?,?)");
     insertEvent.run('J0002',JSON.stringify({signedAt:'2026-07-08 13:00:00'}));
     // Generic eventTime must never become a POD date.
@@ -360,16 +372,21 @@ try{
     const inventory=summarizeV788WhppPodTimeSources(compareDb,db,sig);
     assert.equal(inventory.available,true);
     assert.equal(inventory.podMembers,290);
-    assert.equal(inventory.timeCandidateMembers,3);
-    assert.equal(inventory.missingTimeMembers,287);
-    assert.equal(inventory.conflictingTimeMembers,1,
+    assert.equal(inventory.timeCandidateMembers,5);
+    assert.equal(inventory.missingTimeMembers,285);
+    assert.equal(inventory.conflictingTimeMembers,2,
       'different explicit signing moments must remain a manual evidence conflict');
     assert.equal(inventory.unambiguousTimeCandidateMembers,2);
+    assert.equal(inventory.ambiguousSourceMembers,1,
+      'duplicate saved evidence must not appear as unambiguous signed time');
+    assert.equal(inventory.manualReviewMembers,3,
+      'count distinct POD members needing time or source ambiguity review');
+    assert.equal(inventory.byDate['2026-07-01'].unambiguousTimeCandidateMembers,2);
     assert.equal(inventory.bySource.sidecar,0);
     assert.equal(inventory.bySource.podLock,1);
     assert.equal(inventory.bySource.savedTrack,1);
     assert.equal(inventory.bySource.savedEvent,1);
-    assert.equal(inventory.bySource.savedScan,2);
+    assert.equal(inventory.bySource.savedScan,4);
     assert.equal(inventory.bySource.savedFinal,2);
     assert.equal(inventory.signingTimeAccepted,false);
     assert.equal(inventory.productionModified,false);

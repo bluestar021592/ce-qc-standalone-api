@@ -3,8 +3,7 @@
 // No production access, no HTTP calls, no ledger/time-lock writes, no waybill IDs in results.
 import {v788ReadSourceMembershipSignature,verifyV788PersistedSidecar}
   from './v788-whpp-tms-evidence-sidecar.mjs';
-import {trustedWhppPodTime,explicitWhppTms60PodTime}
-  from '../src/whppPodTimeEvidence.js';
+import {trustedWhppPodTime} from '../src/whppPodTimeEvidence.js';
 
 const EXPLICIT_KEYS=[
   'podTime','POD时间','签收时间','podDateTime','podDate','deliveryTime',
@@ -19,13 +18,15 @@ function safeJson(raw){
     return obj&&typeof obj==='object'&&!Array.isArray(obj)?obj:{};
   }catch{return {}}
 }
-function pickExplicit(raw,source,date){
-  const obj=safeJson(raw);
+function pickExplicitAll(raw,source,date){
+  const obj=safeJson(raw),values=new Set();
+  // Inspect ALL explicitly named signing fields. Picking only the first
+  // would silently hide two contradictory POD times within the SAME row.
   for(const key of EXPLICIT_KEYS){
     const value=trustedWhppPodTime({source,podTime:obj[key]},date);
-    if(value)return value;
+    if(value)values.add(value);
   }
-  return '';
+  return [...values];
 }
 function tablePresent(db,name){
   return !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=? LIMIT 1").get(name);
@@ -61,10 +62,13 @@ export function summarizeV788WhppPodTimeSources(sourceDb,proofDb,expectedSignatu
   const rows=proofDb.prepare("SELECT reportDate,shipmentCode,shipmentStatus,explicitPodTime FROM v788_tms_evidence ORDER BY reportDate,shipmentCode").all();
   const sourceCounts=Object.fromEntries(SOURCE_KEYS.map(k=>[k,0]));
   const byDate=Object.fromEntries(['2026-07-01','2026-07-02'].map(date=>[date,{
-    podMembers:0,timeCandidateMembers:0,missingTimeMembers:0,conflictingTimeMembers:0
+    podMembers:0,timeCandidateMembers:0,missingTimeMembers:0,
+    conflictingTimeMembers:0,ambiguousSourceMembers:0,manualReviewMembers:0,
+    unambiguousTimeCandidateMembers:0
   }]));
   const seenCodes=new Set();
   let podMembers=0,timeCandidateMembers=0,missingTimeMembers=0,conflictingTimeMembers=0;
+  let ambiguousSourceMembers=0,manualReviewMembers=0,unambiguousTimeCandidateMembers=0;
   let invalidOrAmbiguousRows=0;
   for(const row of rows){
     const code=norm(row.shipmentCode),date=String(row.reportDate||'');
@@ -82,49 +86,57 @@ export function summarizeV788WhppPodTimeSources(sourceDb,proofDb,expectedSignatu
     };
     podMembers++;byDate[date].podMembers++;
     const times=new Set(),found=new Set();
-    const add=(source,time)=>{
-      if(!time)return;
-      found.add(source);
-      times.add(time);
+    let sourceAmbiguous=false;
+    const add=(source,candidates)=>{
+      for(const time of candidates||[]){
+        if(!time)continue;
+        found.add(source);
+        times.add(time);
+      }
     };
-    add('sidecar',trustedWhppPodTime({
+    add('sidecar',[trustedWhppPodTime({
       source:'whpp_shipment_status_60_explicit_pod_time',
       podTime:row.explicitPodTime
-    },date));
+    },date)]);
     const locks=limitedRows(statements.podLock,code);
-    if(locks.length>1)invalidOrAmbiguousRows++;
+    if(locks.length>1){invalidOrAmbiguousRows++;sourceAmbiguous=true;}
     else if(locks.length===1)
-      add('podLock',trustedWhppPodTime(locks[0],date));
+      add('podLock',[trustedWhppPodTime(locks[0],date)]);
     const tracks=limitedRows(statements.savedTrack,date,code);
-    if(tracks.length>1)invalidOrAmbiguousRows++;
+    if(tracks.length>1){invalidOrAmbiguousRows++;sourceAmbiguous=true;}
     else if(tracks.length===1&&String(tracks[0].shipmentStatus)==='60'){
-      add('savedTrack',explicitWhppTms60PodTime({
-        ...safeJson(tracks[0].rawJson),shipmentStatus:'60'
-      },date));
+      const saved=safeJson(tracks[0].rawJson);
+      if(saved.shipmentStatus&&String(saved.shipmentStatus).trim()!=='60'){
+        invalidOrAmbiguousRows++;sourceAmbiguous=true;
+      }else add('savedTrack',pickExplicitAll(saved,
+        'whpp_shipment_status_60_explicit_pod_time',date));
     }
     // Stored event history may carry explicit signedAt/POD time, but its
     // generic eventTime/creationDate/lastUpdateDate is never a POD timestamp.
     // Sidecar has independently attested that this exact member is TMS 60.
     const events=limitedRows(statements.savedEvent,date,code);
     for(const event of events){
-      add('savedEvent',pickExplicit(event.rawJson,'whpp_strict_track_event',date));
+      add('savedEvent',pickExplicitAll(event.rawJson,'whpp_strict_track_event',date));
     }
     const scans=limitedRows(statements.savedScan,date,code);
-    if(scans.length>1)invalidOrAmbiguousRows++;
+    if(scans.length>1){invalidOrAmbiguousRows++;sourceAmbiguous=true;}
     else if(scans.length===1
       &&(Number(scans[0].isPod)===1||String(scans[0].orderStatus)==='85'))
-      add('savedScan',pickExplicit(scans[0].rawJson,'whpp_saved_scan_pod_time',date));
+      add('savedScan',pickExplicitAll(scans[0].rawJson,'whpp_saved_scan_pod_time',date));
     const finals=limitedRows(statements.savedFinal,date,code);
-    if(finals.length>1)invalidOrAmbiguousRows++;
+    if(finals.length>1){invalidOrAmbiguousRows++;sourceAmbiguous=true;}
     else if(finals.length===1&&Number(finals[0].isPod)===1)
-      add('savedFinal',pickExplicit(finals[0].rawJson,'whpp_saved_final_pod_time',date));
+      add('savedFinal',pickExplicitAll(finals[0].rawJson,'whpp_saved_final_pod_time',date));
     for(const source of found)sourceCounts[source]++;
     if(!times.size){missingTimeMembers++;byDate[date].missingTimeMembers++;}
-    else{
-      timeCandidateMembers++;byDate[date].timeCandidateMembers++;
-      if(times.size>1){
-        conflictingTimeMembers++;byDate[date].conflictingTimeMembers++;
-      }
+    else{timeCandidateMembers++;byDate[date].timeCandidateMembers++;}
+    if(times.size>1){conflictingTimeMembers++;byDate[date].conflictingTimeMembers++;}
+    if(sourceAmbiguous){ambiguousSourceMembers++;byDate[date].ambiguousSourceMembers++;}
+    if(times.size>1||sourceAmbiguous){
+      manualReviewMembers++;byDate[date].manualReviewMembers++;
+    }else if(times.size===1){
+      unambiguousTimeCandidateMembers++;
+      byDate[date].unambiguousTimeCandidateMembers++;
     }
   }
   // This is an inventory of explicit saved timestamps, NOT approval to
@@ -133,7 +145,8 @@ export function summarizeV788WhppPodTimeSources(sourceDb,proofDb,expectedSignatu
     version:'V788_WHPP_POD_TIME_SOURCE_INVENTORY_V1',
     available:true,reason:'CANDIDATES_FOR_MANUAL_EVIDENCE_REVIEW',
     podMembers,timeCandidateMembers,missingTimeMembers,conflictingTimeMembers,
-    unambiguousTimeCandidateMembers:timeCandidateMembers-conflictingTimeMembers,
+    unambiguousTimeCandidateMembers,
+    ambiguousSourceMembers,manualReviewMembers,
     ambiguousSourceRows:invalidOrAmbiguousRows,
     bySource:sourceCounts,byDate,
     sourceTablesPresent:exists,
