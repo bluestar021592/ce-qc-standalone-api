@@ -93,8 +93,10 @@ assert.match(server,/summarizeV788WhppPodTimeSources\(/,
   'real ADMIN route must list saved signing-time sources without querying TMS');
 assert.match(activeJs,/隔离库签收时间来源诊断/,
   'active V625 view must distinguish missing time from conflicting candidates');
-assert.match(activeJs,/时间候选仅供后续逐票核验/,
+assert.match(activeJs,/候选时间尚未批准用于签收天数/,
   'saved time candidates cannot be presented as formal signing-day acceptance');
+assert.match(activeJs,/无冲突且无重复来源候选/,
+  'review-required candidates must not be included in the unambiguous count');
 assert.match(activeJs,/data\.ledgerReconciliation/,
   'V625 must display aggregate ledger differences instead of requiring manual commands');
 assert.match(activeJs,/尚未修改历史账本或正式数据库/,
