@@ -39,6 +39,7 @@ function harness(){
     metricState:x=>x,
     fmt:x=>String(x??0),
     pct:x=>Number(x).toFixed(2)+'%',
+    esc:x=>String(x).replace(/[&<>"']/g,'_'),
     setText(id,value){reads.set(id,String(value))},
     renderDonut(){},applyVerifiedBusinessKpis(){return true},
     v765LoadBusinessDetailLane(){return Promise.resolve()},
