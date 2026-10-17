@@ -311,3 +311,46 @@ test('V788 direct purge treats permanent task-status HTTP errors as non-retryabl
   assert.match(source,/requiresReconciliation=true;/,
     'unknown result must trigger destructive resubmission lock');
 });
+
+
+test('V788 direct purge browser rejects an already-cleared empty DB before showing confirmation',async()=>{
+  const source=read('public/v560-direct-data-purge.js');
+  const nodes=new Map(), alerts=[];
+  let deletePosts=0, confirms=0,preflightReads=0;
+  const node=id=>{
+    if(!nodes.has(id))nodes.set(id,{id,disabled:false,value:'',hidden:true,innerHTML:'',textContent:''});
+    return nodes.get(id);
+  };
+  const context={
+    AbortController,
+    console:{info(){},warn(){},error(){}},
+    document:{getElementById:node},
+    location:{replace(){throw Error('Unexpected login redirect')}},
+    alert:x=>alerts.push(String(x)),
+    confirm:()=>{confirms++;return true;},
+    setTimeout:()=>1,clearTimeout(){},
+    setInterval:()=>1,clearInterval(){},
+    fetch:async(url,options={})=>{
+      if(url==='/api/session')return responseJson({ok:true,user:{role:'ADMIN'}});
+      if(url==='/api/admin/data-purge/direct/preflight'){
+        preflightReads++;
+        return responseJson({ok:true,cp72Ready:true,activeCpCount:72,
+          dataStorageReady:true,alreadyClearedNoFreshBusiness:true,safeToStartClear:false,
+          code:'V788_PURGE_ALREADY_EMPTY'});
+      }
+      if(url==='/api/admin/data-purge/direct'&&options.method==='POST'){
+        deletePosts++;return responseJson({ok:true},202);
+      }
+      throw Error('Unexpected request: '+url);
+    }
+  };
+  context.window=context;
+  vm.runInNewContext(source,context,{filename:'v560-direct-data-purge.js'});
+  await context.openDirectDataPurge();
+  assert.equal(preflightReads,1,'fresh server preflight must run before opening any destructive dialog');
+  assert.equal(node('directPurgeDialog').hidden,true);
+  assert.equal(deletePosts,0,'a previously emptied database must not receive another DELETE');
+  assert.equal(confirms,0,'previously committed purge must bypass destructive confirmation entirely');
+  assert.equal(alerts.length,1);
+  assert.match(alerts[0],/上一笔清空已提交/);
+});
