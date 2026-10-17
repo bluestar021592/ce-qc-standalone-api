@@ -1030,6 +1030,9 @@ app.get('/api/admin/data-purge/direct/preflight', requireRole('ADMIN'), (req,res
 
 app.post('/api/admin/data-purge/direct', requireRole('ADMIN'), async (req, res) => {
   try {
+    if(inspectV788InstalledVersionEvidence().formalUpdateVerified!==true)
+      return res.status(409).json({ok:false,code:'V788_MANAGED_RELEASE_REQUIRED',
+        error:'当前未验证通过正式托管更新器安装的版本，禁止直接清空。'});
     const queued = queueDirectDataPurge({ phrase: req.body?.phrase, user: req.user });
     try { auditAction(req, 'DATA_PURGE_DIRECT_QUEUED', { direct: true, jobId: queued.jobId, reused: queued.reused === true, patchId: DIRECT_PURGE_ID }); } catch {}
     return res.status(202).json(queued);
