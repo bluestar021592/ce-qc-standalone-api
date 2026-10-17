@@ -101,6 +101,8 @@ test('V560 direct purge clears business data without creating a backup or purge 
       assert.equal(check.prepare("SELECT value FROM app_meta WHERE key='data_purge_last_commit_receipt'").get(),undefined,'direct purge must not leave a V505 commit receipt');
       assert.equal(String(check.prepare("SELECT value FROM app_meta WHERE key='last_processed_report_date'").get()?.value||''),'');
       assert.ok(String(check.prepare("SELECT value FROM app_meta WHERE key='last_full_clear_at'").get()?.value||''));
+      assert.equal(check.prepare("SELECT value FROM app_meta WHERE key='v499_fresh_start_tracking_ready'").get()?.value,'1',
+        'direct no-backup reset must arm automatic tracking on the NEXT managed launch');
     }finally{check.close();}
 
     // V788: exercising the actual import store after the direct reset proves
@@ -346,6 +348,8 @@ test('V561 queues direct purge immediately and reports detached worker progress 
       assert.equal(Number(check.prepare('SELECT COUNT(*) count FROM daily_reports').get()?.count||0),0);
       const active=check.prepare("SELECT value FROM app_meta WHERE key='shop_current_complete_codes_v780'").get();
       assert.equal(JSON.parse(active?.value||'{}')?.members?.length,72,'detached direct purge must retain 72 active CP members');
+      assert.equal(check.prepare("SELECT value FROM app_meta WHERE key='v499_fresh_start_tracking_ready'").get()?.value,'1',
+        'detached direct purge worker must arm managed auto tracking after restart');
     }finally{check.close();}
   }finally{
     try{closeDb();}catch{}

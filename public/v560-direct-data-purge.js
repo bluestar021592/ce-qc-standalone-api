@@ -174,7 +174,7 @@
       renderJobStatus(queued,started);
       const result=await waitForDirectPurge(queued,started);
       const deleted=Number(result.deletedRows||0);
-      if(preview)preview.innerHTML=`<div class="purge-success"><b>全部业务数据已直接清空。</b><br>共删除 <b>${deleted.toLocaleString()}</b> 行业务记录。<br><small>本次未新建备份，原有备份已保留；用户、权限、72个CP配置及审计已保留。现在可以开始重新上传日报。</small></div>`;
+      if(preview)preview.innerHTML=`<div class="purge-success"><b>全部业务数据已直接清空。</b><br>共删除 <b>${deleted.toLocaleString()}</b> 行业务记录。<br><small>本次未新建备份，原有备份已保留；用户、权限、72个CP配置及审计已保留。请先通过原来的系统快捷方式完整关闭并重新打开 APP，重新登录后再上传日报，以便自动轨迹追踪读取新启动标记。</small></div>`;
     }catch(error){
       active=false;
       if(isAuthExpired(error)){redirectToLogin();return;}

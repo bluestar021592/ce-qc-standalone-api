@@ -48,6 +48,12 @@ assert.match(runtime, /CAMBODIA_0200_30DAY_AUTO/);
 assert.match(runtime, /v246_daily_0200_success_date/);
 
 assert.match(directPurge, /key LIKE 'v246_daily_0200_%'/, 'direct full purge must reset V246 02:00 success/failure state');
+assert.match(fs.readFileSync('src/directDataPurge.js','utf8'),
+  /meta\.run\('v499_fresh_start_tracking_ready','1',now\)/,
+  'direct no-backup purge must also arm managed fresh-start tracking in the reset transaction');
+assert.match(fs.readFileSync('public/v560-direct-data-purge.js','utf8'),
+  /重新打开 APP，重新登录后再上传日报/,
+  'successful purge must tell operator to restart before expecting V246 auto tracking');
 assert.match(worker, /key LIKE 'v246_daily_0200_%'/, 'isolated clean purge must reset V246 02:00 success/failure state');
 assert.match(worker, /meta\.run\(FRESH_START_READY_KEY,'1',now\)/, 'isolated full purge must arm fresh-start tracking for the next managed restart');
 assert.match(purgePatch, /CE_QC_PurgeDeleteWorker\.mjs/);

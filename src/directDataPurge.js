@@ -193,6 +193,11 @@ function directResetTransaction(db,onProgress=()=>{}){
     meta.run('last_processed_report_date','',now);
     meta.run('last_full_clear_at',now,now);
     meta.run('current_snapshot_id','',now);
+    // The managed launcher reads this marker when it NEXT starts.
+    // Without it, V499 continues disabling V246 tracking even after
+    // the user has deliberately cleared old business data.
+    // Keep the marker in the SAME transaction as the verified reset.
+    meta.run('v499_fresh_start_tracking_ready','1',now);
     meta.run('v108_performance_indexes_ready','1',now);
     db.prepare(`DELETE FROM app_meta WHERE key LIKE 'carry_refresh_%' OR key LIKE 'v246_daily_0200_%' OR key IN (?,?,?,?)`).run(CACHE_WORKER_ACTIVE_KEY,CACHE_WORKER_ACTIVE_UNTIL_KEY,PURGE_BLOCK_KEY,PURGE_COMMIT_RECEIPT_KEY);
     onProgress({status:'RUNNING',stage:'COMMITTING',message:'校验完成，正在提交清空事务。',deletedRows:Object.values(before).reduce((sum,value)=>sum+Number(value||0),0)});
