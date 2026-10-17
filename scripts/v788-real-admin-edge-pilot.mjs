@@ -229,7 +229,7 @@ try{
     return String(v).includes('隔离数据库结构')&&String(v).includes('处理方向')?v:false;
   },'READONLY_AUDIT_FRIENDLY_UI',10000);
   assert.match(friendlyUi,/历史验收需要的数据表缺失/);
-  assert.doesNotMatch(friendlyUi,/\\\"reason\\\"|\\"LEGACY_SOURCE_TABLES_OR_SCHEMA_UNAVAILABLE\\"/,
+  assert.doesNotMatch(friendlyUi,/"reason"|LEGACY_SOURCE_TABLES_OR_SCHEMA_UNAVAILABLE/,
     'real Edge must not show raw gate diagnostic JSON instead of user instructions');
   assert.equal(auditBlocked.podTimeInventory?.missingTimeMembers,290,
     'complete terminal statuses cannot fabricate any missing signing timestamps');
