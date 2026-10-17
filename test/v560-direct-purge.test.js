@@ -260,7 +260,7 @@ test('V560 direct recovery console has no backup step and posts only the direct 
   assert.match(html,/直接清空业务数据/);
   assert.match(html,/不创建新备份、不启用安全封锁/);
   assert.doesNotMatch(html,/备份并继续|purgeBackupConfirmed|v505-data-purge-recovery\.js/);
-  assert.match(html,/v560-direct-data-purge\.js\?v=20260921-v568-1/);
+  assert.match(html,/v560-direct-data-purge\.js\?v=20261017-v788-cp72-1/);
   assert.match(js,/\/api\/admin\/data-purge\/direct/);
   assert.match(js,/\/api\/admin\/data-purge\/direct\/preflight/,
     'clear dialog must check 72 active store codes BEFORE the destructive action');
