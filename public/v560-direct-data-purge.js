@@ -87,9 +87,11 @@
       return;
     }
     cp72PreflightReady=preflight.cp72Ready===true&&Number(preflight.activeCpCount)===72
-      &&preflight.dataStorageReady===true;
+      &&preflight.dataStorageReady===true&&preflight.safeToStartClear===true;
+    if(preflight.alreadyClearedNoFreshBusiness===true)
+      return alert('检测到上一笔清空已提交，当前业务表仍为空。禁止重复清空；请先重新启动APP并按流程上传新的日报。');
     if(!cp72PreflightReady)
-      return alert('清空已被阻止：72个有效CP门店码不完整，或主数据盘不可用。没有删除任何数据。');
+      return alert('清空已被阻止：72个有效CP门店码不完整、主数据盘不可用或安全预检未通过。没有删除任何数据。');
     const installed=preflight.version||{};
     if(installed.installedOnLocalMain!==true||installed.cachedMainMatchesInstalled!==true
       ||installed.formalUpdateVerified!==true
