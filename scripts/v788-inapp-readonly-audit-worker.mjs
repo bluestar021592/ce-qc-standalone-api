@@ -2,6 +2,9 @@
 // ADMIN-triggered worker only. No TMS HTTP calls, generated files or DB writes.
 // Fail closed, never leak waybills / credentials / local paths.
 import fs from 'node:fs';
+import {getRuntimeConfig} from '../src/db.js';
+import {findV788ExistingWhppExport} from './v788-find-existing-whpp-export.mjs';
+import {readV788ExistingWhppXlsx} from './v788-existing-whpp-xlsx-readback.mjs';
 import {DatabaseSync} from 'node:sqlite';
 import {parentPort} from 'node:worker_threads';
 import {auditDatabaseFile} from './v788-whpp-real-readonly-audit.mjs';
@@ -81,7 +84,7 @@ function inspectStoredTms(file,expectedSourceFingerprint){
       throw Error('ISOLATED_PROOF_CHANGED_DURING_CHECK');
   }
 }
-function run(){
+async function run(){
   if(process.platform!=='win32')throw Error('WINDOWS_ISOLATION_REQUIRED');
   const file=validateIsolatedCopy(DEFAULT_COPY);
   const before=fingerprint(file);
@@ -110,6 +113,46 @@ function run(){
       reason:'LEGACY_SOURCE_TABLES_OR_SCHEMA_UNAVAILABLE'})
   ];
   gates.push(independent.independentTmsGate);
+  // Read already generated WHPP XLSX straight from the configured exports
+  // directory; never export, regenerate, overwrite or upload a workbook.
+  // This independent check is limited to WHPP 7/1 + 7/2, not seven-business
+  // Excel acceptance. No path or waybill is exposed to the browser.
+  const exportsConfig=getRuntimeConfig();
+  let readback={status:'NOT_CHECKED',reason:'SOURCE_TMS_PROOF_NOT_READY'};
+  if(independent.proofReady===true&&!exportsConfig.usingFallbackDataDir){
+    const match=findV788ExistingWhppExport(exportsConfig.exportsDir);
+    if(match.status==='FOUND'){
+      let sourceDb,proofDb;
+      try{
+        sourceDb=new DatabaseSync(file,{readOnly:true});
+        sourceDb.exec('PRAGMA query_only=ON');
+        proofDb=new DatabaseSync(PROOF_FILE,{readOnly:true});
+        proofDb.exec('PRAGMA query_only=ON');
+        const checked=await readV788ExistingWhppXlsx({
+          sourceDb,proofDb,workbookPath:match.file
+        });
+        readback={status:checked.status,rows:Number(checked.readbackRows||0),
+          pod:Number(checked.readbackPodRows||0),
+          returned:Number(checked.readbackReturnedRows||0),
+          issues:checked.issues};
+      }catch{
+        readback={status:'BLOCKED',reason:'EXPORT_READBACK_FAILED'};
+      }finally{
+        try{sourceDb?.close()}catch{}
+        try{proofDb?.close()}catch{}
+      }
+    }else readback={status:match.status,reason:match.reason};
+  }else if(exportsConfig.usingFallbackDataDir){
+    readback={status:'NOT_CHECKED',reason:'PRIMARY_EXPORT_STORAGE_UNAVAILABLE'};
+  }
+  const exportGateStatus=readback.status==='XLSX_CONTENT_VERIFIED'?'PASS':
+    readback.status==='NOT_FOUND'||readback.status==='NOT_CHECKED'?'REVIEW':'BLOCK';
+  gates.push(gate('WHPP_EXISTING_REAL_XLSX',exportGateStatus,{
+    status:readback.status,reason:readback.reason||'',
+    rows:readback.rows??null,pod:readback.pod??null,
+    returned:readback.returned??null,
+    issues:readback.issues||null
+  }));
   const counts={
     passed:gates.filter(g=>g.status==='PASS').length,
     blocked:gates.filter(g=>g.status==='BLOCK').length,
@@ -125,6 +168,8 @@ function run(){
     independentTmsStatus:independent.independentTmsStatus,
     independentTmsProofReady:independent.proofReady,
     podTimeInventory:independent.podTimeInventory||null,
+    existingWhppExcel:{status:readback.status,rows:readback.rows??null,
+      pod:readback.pod??null,returned:readback.returned??null},
     counts,
     members:Number(totals.sourceMembers||0),
     normalizedPOD:Number(totals.normalizedPOD||0),
@@ -134,11 +179,11 @@ function run(){
     gates:presentV788AuditGates(gates)
   };
 }
-try{
-  parentPort?.postMessage(run());
-}catch{
+run().then(result=>{
+  parentPort?.postMessage(result);
+}).catch(()=>{
   parentPort?.postMessage({
     ok:false,status:'BLOCKED',code:'ISOLATED_AUDIT_UNAVAILABLE',
     readOnly:true,readyToPublish:false,productionModified:false
   });
-}
+});
