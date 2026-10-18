@@ -3152,17 +3152,52 @@ async function pollDirectPurge(jobId){
   }
   throw new Error('清空任务超时');
 }
+let v788MainClearSubmitting=false;
 async function clearAllBusinessData(){
-  if(!confirm('确认清空全部业务数据？\n\n将删除日报、分类、扫描、轨迹、POD、异常和统计数据；账号、权限、CE设置、门店CP码及已有数据库备份会保留。'))return;
-  note('v626ClearStatus','正在提交一键清空任务…');
+  if(v788MainClearSubmitting)return;
+  v788MainClearSubmitting=true;
+  const clearButton=byId('v626ClearAllData');
+  if(clearButton)clearButton.disabled=true;
   try{
-    const r=await post('/api/admin/data-purge/direct',{phrase:'永久清除全部业务数据'},30000);
+    // Do not use an earlier dashboard snapshot or cached green flag here.
+    // The official installed main version and protected CP72 must be checked
+    // from the live server immediately BEFORE both confirmations.
+    const preflight=await json('/api/admin/data-purge/direct/preflight',13000);
+    const v=preflight?.version||{};
+    const official=v.formalUpdateVerified===true&&
+      v.installedThroughManagedUpdaterVerified===true&&
+      v.installedOnLocalMain===true&&v.cachedMainMatchesInstalled===true;
+    if(!official)throw new Error('未安装已验收的正式托管更新版本；候选分支不可清空。');
+    if(preflight?.cp72Ready!==true||Number(preflight.activeCpCount)!==72||
+      preflight.dataStorageReady!==true||preflight.safeToStartClear!==true||
+      preflight.alreadyClearedNoFreshBusiness===true)
+      throw new Error('72个有效CP码、主数据盘或上次清空防重放未通过检查，已拒绝清空。');
+    const commit=String(v.installedCommit||'').slice(0,12);
+    const understood=confirm('首次确认：本机正式版本 '+commit+
+      ' 已核实，72个有效CP码已保留。\n\n即将永久清空日报、POD、退回、轨迹及其他业务数据和可再生成业务文件；不会新建备份，已有备份保留。账号、权限及门店CP名单保留。\n\n本操作不可撤销，确认继续？');
+    if(!understood){
+      note('v626ClearStatus','管理员取消了首次确认，业务数据未修改。');
+      return;
+    }
+    // Require an actual second deliberate action, not a literal phrase
+    // hardcoded into a POST fired by a single click.
+    const phrase=prompt('最终二次确认：请输入“永久清除全部业务数据”完整文字后，才允许执行。\n\n取消或输入不一致均不删除。','');
+    if(phrase!=='永久清除全部业务数据'){
+      note('v626ClearStatus','二次确认口令不一致或已取消，未执行清空。');
+      return;
+    }
+    note('v626ClearStatus','管理员二次确认完成，正在提交清空任务…');
+    const r=await post('/api/admin/data-purge/direct',{phrase},30000);
     const result=await pollDirectPurge(r.jobId);
     note('v626ClearStatus','业务数据已全部清空；已有备份已保留。共删除 '+fmt(result.deletedRows||0)+' 行。','success');
     v765InvalidateAllProofCache();
     v765BoardDetailCache.clear();
     v626LatestImport=null;v626OpenRows=[];renderOpenPodRows();await loadBackups();
-  }catch(e){note('v626ClearStatus','清空失败：'+e.message,'error')}
+  }catch(e){note('v626ClearStatus','清空未执行或失败：'+String(e?.message||e),'error')}
+  finally{
+    v788MainClearSubmitting=false;
+    if(clearButton)clearButton.disabled=false;
+  }
 }
 async function loadUsers(){
   try{
