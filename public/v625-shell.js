@@ -2544,6 +2544,67 @@ function renderReports(){
   }
 }
 
+// V788: read-only delivery status available independently of the historical
+// D: acceptance copy. No downloads, production writes or TMS requests.
+let v788FormalReadinessLoading=false;
+async function loadV788FormalReadinessV625(){
+  if(page!=='settings')return;
+  const out=byId('v788FormalReadinessText');
+  const button=byId('v788FormalReadinessRefresh');
+  if(!out||v788FormalReadinessLoading)return;
+  v788FormalReadinessLoading=true;
+  if(button)button.disabled=true;
+  out.textContent='正在读取本机已安装版本、72个CP码与隔离验收状态（只读）…';
+  try{
+    const results=await Promise.allSettled([
+      json('/api/admin/data-purge/direct/preflight',13000),
+      json('/api/v788/readonly-audit/status',13000)
+    ]);
+    const release=results[0].status==='fulfilled'?results[0].value:null;
+    const audit=results[1].status==='fulfilled'?results[1].value:null;
+    const lines=[];
+    // The two protected endpoints actually responding confirms this instance
+    // is running; it is NOT evidence that it is installed on official main.
+    const running=Boolean(release&&audit?.ok===true);
+    lines.push('当前系统后端：'+(running?'已响应（管理员只读接口）':'未能完整验证；请检查登录或后台'));
+    const version=release?.version||{};
+    const installed=String(version.installedCommit||'');
+    const formal=version.formalUpdateVerified===true&&
+      version.installedThroughManagedUpdaterVerified===true&&
+      version.installedOnLocalMain===true&&version.cachedMainMatchesInstalled===true;
+    lines.push('本机安装版本：'+(installed?installed.slice(0,12):'无法核实')+
+      '；所在分支 '+String(version.installedBranch||'未知'));
+    lines.push('正式托管更新：'+(formal?'本机安装凭据已验证':'未验证，不允许把候选版视为正式版'));
+    const shops=release?.cp72Ready===true&&Number(release.activeCpCount)===72&&
+      release.dataStorageReady===true;
+    lines.push('72个有效CP门店配置：'+(shops?'有效名单72个，主数据盘可读':'未达到正式检查条件'));
+    lines.push('D盘历史隔离副本：'+(audit?.isolatedSourceReady===true?'已有安全副本，可人工触发只读核验':'未找到可安全读取的既有副本'));
+    const checked=String(audit?.existingWhppExcel?.status||'');
+    lines.push('WHPP 7月1日至2日真实Excel：'+
+      (checked==='XLSX_CONTENT_VERIFIED'?'已有逐票回读通过（仅WHPP）':
+        checked?'当前状态 '+checked+'；未通过正式Excel验收':'尚未执行或未完成真实Excel逐票回读'));
+    lines.push('历史数据库只读验收：'+
+      (audit?.ok===true&&Array.isArray(audit?.gates)?
+        String(audit.status||'待核验')+'；阻断 '+Number(audit.counts?.blocked||0)+
+        '、待核验 '+Number(audit.counts?.reviewing||0):
+        '尚未取得可采信的隔离验收结果'));
+    lines.push('七业务真实日报导入、终态、签收天数与报表：仍须独立实机验收');
+    lines.push('旧业务数据清空：此检查不授权清空；必须另行管理员二次确认');
+    if(!running)lines.push('下一步：先恢复正式后台及管理员登录，重新执行只读检查。');
+    else if(!formal)lines.push('下一步：先走正式候选版本审核、合并发布与托管更新；当前不得清空。');
+    else if(!shops)lines.push('下一步：核查当前72个有效门店码及主数据盘，不可使用旧名单凑数。');
+    else if(audit?.isolatedSourceReady!==true)
+      lines.push('下一步：从现有文件确认隔离副本；该检查不会退回读取正式数据库。');
+    else lines.push('下一步：通过下方隔离只读验收，并核对真实Excel、七业务和导出；通过前不清空。');
+    out.textContent=lines.join('\n');
+  }catch{
+    out.textContent='本机交付状态检查失败。未触发更新、清空、TMS查询或业务写入。';
+  }finally{
+    v788FormalReadinessLoading=false;
+    if(button)button.disabled=false;
+  }
+}
+
 // V788 isolated WHPP trial lives in the REAL V625 shell (not the legacy app.js).
 // It never auto-queries CE TMS. Only explicit ADMIN click may run a stage.
 let v788CeSessionReady=false;
@@ -2789,7 +2850,7 @@ function switchSettingsTab(name){
   qa('#v625SettingsTabs [data-settings-tab]').forEach(btn=>btn.classList.toggle('active',btn.dataset.settingsTab===name));
   qa('[data-settings-panel]').forEach(panel=>panel.hidden=panel.dataset.settingsPanel!==name);
   if(name==='accounts')void loadSettingsUsers();
-  if(name==='interface')void loadSettings().then(()=>loadV788WhppEvidenceV625());
+  if(name==='interface'){void loadV788FormalReadinessV625();void loadSettings().then(()=>loadV788WhppEvidenceV625());}
   if(name==='maintenance')void loadSettingsBackups();
 }
 
@@ -3182,6 +3243,7 @@ function bind(){
   byId('v788WhppEvidenceRefresh')?.addEventListener('click',loadV788WhppEvidenceV625);
   byId('v788ReadOnlyAuditStart')?.addEventListener('click',startV788ReadOnlyAuditV625);
   byId('v788ReadOnlyAuditRefresh')?.addEventListener('click',loadV788ReadOnlyAuditV625);
+  byId('v788FormalReadinessRefresh')?.addEventListener('click',loadV788FormalReadinessV625);
   byId('v625ShopFile')?.addEventListener('change',()=>setText('v625ShopFileName',byId('v625ShopFile').files?.[0]?.name||'请选择CP码文件'));byId('v625ShopImport')?.addEventListener('click',importShop);
   byId('v780ActivateSavedShops')?.addEventListener('click',activateSavedShopCodes);
   byId('v625SettingsBackupNow')?.addEventListener('click',settingsBackupNow);
