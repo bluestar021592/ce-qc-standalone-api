@@ -89,7 +89,8 @@ assert.match(fs.readFileSync('scripts/v788-inapp-readonly-audit-worker.mjs','utf
 assert.match(activeShell,/data-settings-panel="interface"/);
 assert.match(activeJs,/loadV788WhppEvidenceV625/);
 assert.match(activeJs,/startV788WhppEvidenceV625/);
-assert.match(activeJs,/if\(name==='interface'\)void loadSettings\(\)\.then\(\(\)=>loadV788WhppEvidenceV625\(\)\)/);
+assert.match(activeJs,/if\(name==='interface'\)\{void loadV788FormalReadinessV625\(\);void loadSettings\(\)\.then\(\(\)=>loadV788WhppEvidenceV625\(\)\);\}/,
+  'interface tab must open the new readonly installation gate AND preserve legacy WHPP source audits');
 assert.match(activeJs,/acknowledgeIsolatedQuery:true/);
 assert.match(activeJs,/sidecarVerified===true/);
 assert.match(activeJs,/CE系统接口凭证未就绪/);
