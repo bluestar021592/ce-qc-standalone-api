@@ -202,6 +202,28 @@ try{
     return data?.path==='/settings'&&data.panel===false
       &&String(data.info).includes('CE系统接口凭证')?data:false;
   },'ADMIN_SETTINGS_UI',30000);
+  // The NEW formal readiness panel is independent of missing D: audit copy.
+  // Exercise the actual shipped Windows Edge DOM, using existing ADMIN-only
+  // read-only GET endpoints; no installation, TMS or direct-purge POST occurs.
+  const deliveryPanel=await cdp.eval("(()=>({panel:!!document.getElementById('v788FormalReadinessPanel'),button:!!document.getElementById('v788FormalReadinessRefresh')}))()");
+  assert.equal(deliveryPanel.panel,true,'real settings must render one-click local delivery checklist');
+  assert.equal(deliveryPanel.button,true,'real settings must have a readable delivery refresh');
+  const readOnlyClicked=await cdp.eval("(()=>{const b=document.getElementById('v788FormalReadinessRefresh');if(!b)return false;b.click();return true})()");
+  assert.equal(readOnlyClicked,true);
+  const deliveryResult=await waitFor(async()=>{
+    const value=await cdp.eval("document.getElementById('v788FormalReadinessText')?.textContent||''");
+    return String(value).includes('本机安装版本')&&String(value).includes('72个有效CP门店配置')?value:false;
+  },'FORMAL_LOCAL_DELIVERY_STATUS',16000);
+  assert.match(deliveryResult,/未验证，不允许把候选版视为正式版/,
+    'uninstalled CI branch can never advertise official managed main');
+  assert.match(deliveryResult,/旧业务数据清空：此检查不授权清空/,
+    'a completed readonly check may never authorize destructive reset');
+  assert.match(deliveryResult,/D盘历史隔离副本：未找到可安全读取的既有副本/,
+    'missing real D: source remains missing and cannot fall back to prod');
+  assert.equal(cdp.urls.filter(x=>x.includes('/api/admin/data-purge/direct')&&
+    !x.includes('/preflight')).length,0,
+    'read-only settings must not invoke destructive purge POST');
+  console.log('[V788_REAL_EDGE] PASS real delivery status DOM: official SHA unverified, D absent, CP72 blocked, 0 purge POST');
   assert.equal(info.button,true,'No CE credentials means no TMS start');
   assert.equal(await cdp.eval("!!document.getElementById('v788ReadOnlyAuditStart')"),true,
     'real settings must display one-click isolated read-only acceptance');
