@@ -10,7 +10,7 @@ assert.match(js,/qa\('\[data-kpi-detail\]'\)\.forEach\(card=>/,
   'rate card must share existing click/keyboard drilldown wiring');
 assert.match(js,/v788BusinessAbnormalRow\(row,reportDate,targetBusiness\)/,
   'business anomaly rows must be traceable rather than ending in plain text');
-assert.match(html,/v625-shell\.js\?v=20261019-v788-2&patch=788/,
+assert.match(html,/v625-shell\.js\?v=20261019-v788-action-1&patch=788/,
   'changed interaction JS must not remain in old browser cache');
 
 const start=js.indexOf('function rowTr(values){');
