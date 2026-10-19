@@ -36,6 +36,16 @@ assert.ok(alreadyCurrent.indexOf('Test-RemoteCandidate $remote $current') <
   'already-current branch must execute real go-live tests BEFORE minting proof');
 assert.match(launcher,/\$recoverResult\.Count -eq 1 -and \$recoverResult\[0\] -eq \$true/,
   'failed / polluted revalidation cannot be accepted');
+assert.match(launcher,/schemaVersion -is \[int\]/,
+  'PowerShell receipt must require a numeric schemaVersion as Node does');
+assert.match(launcher,/candidateGatePassed -is \[bool\]/,
+  'PowerShell receipt must require a boolean candidateGatePassed as Node does');
+assert.match(launcher,/mode -ceq 'INSTALLED'/,
+  'PowerShell receipt mode comparison must match backend case-sensitive check');
+assert.match(launcher,/info.Length -gt 8192/,
+  'oversized receipt must be rejected before parsing');
+assert.match(launcher,/FileAttributes\]::ReparsePoint/,
+  'PowerShell receipt must reject filesystem redirection just like backend');
 assert.ok(launcher.indexOf('Write-V788ManagedInstallReceipt $installed $remote')
   >launcher.indexOf('$installed = Install-VerifiedCommitLocally $current $remote'),
   'managed install receipt must never precede installation');
