@@ -69,6 +69,7 @@ import { buildDataIntegrityReport } from './src/dataIntegrity.js';
 import { v766ReadJob, v766ClearReadCache } from './src/v766ReadJobCoordinator.js';
 import { qcDetailRead } from './src/qcActionDetailRead.js';
 import { inspectStage0UpdateProbe } from './src/v788Stage0UpdateProbe.js';
+import { v788IsCurrentSpecialNonDelivery } from './src/v788SpecialOpenTruth.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -1850,13 +1851,23 @@ app.get('/api/tracking-workspace', async (req, res) => {
         if(!bill||dailySet.has(type+'|'+bill))continue;
         let state={};
         try{state=JSON.parse(String(row.stateJson||'{}'))||{}}catch{}
+        const carryCurrentState=String(row.currentState||state.currentState||state.scanNormalizedState||'未完结');
+        const specialExcluded=v788IsCurrentSpecialNonDelivery({
+          currentState:carryCurrentState,specialState:state.specialState,
+          shipmentStatus:state.shipmentStatus
+        });
+        // Existing OPEN ledger rows are not edited. Only the read-only
+        // unfinished-POD workspace stops treating terminal special routing as
+        // pending delivery. A later live Pending/OC/RETURNING stays visible.
         historicalCarryRows.push({
           shipmentCode:bill,businessType:type,reportDate:row.sourceReportDate,
-          sourceReportDate:row.sourceReportDate,historicalCarry:true,isClosed:false,isActionable:true,
-          currentState:String(row.currentState||state.currentState||state.scanNormalizedState||'未完结'),
+          sourceReportDate:row.sourceReportDate,historicalCarry:true,
+          isClosed:specialExcluded,isActionable:!specialExcluded,
+          currentState:carryCurrentState,specialState:state.specialState||'',
           category:String(state.primaryCategory||state.currentMainCategory||'历史未完结'),
           lastEventTime:String(row.lastEventTime||row.lastCheckedAt||''),
-          lastCheckedAt:String(row.lastCheckedAt||''),queryStatus:String(row.apiStatus||'需更新'),
+          lastCheckedAt:String(row.lastCheckedAt||''),
+          queryStatus:specialExcluded?'特殊节点跳过':String(row.apiStatus||'需更新'),
           pendingNonContinuous:false,oc2Plus:false,shopArrivedCurrent:false
         });
       }
@@ -1957,6 +1968,7 @@ app.get('/api/tracking-workspace', async (req, res) => {
       const extra=[...found].filter(key=>!required.has(key));
       openSourceCoverage={expected:required.size,observed:found.size,missing:missing.length,extra:extra.length,
         historicalCarryCount:historicalCarryRows.length,
+        excludedCurrentSpecialCarry:historicalCarryRows.filter(row=>row.isClosed).length,
         earliestCarryDate:historicalCarryRows.map(row=>row.sourceReportDate).filter(Boolean).sort()[0]||reportDate,
         historicalCarryError,
         complete:required.size>0&&missing.length===0&&extra.length===0&&!historicalCarryError,
@@ -3122,9 +3134,10 @@ function workspaceRows(state = {}, businessType = 'CCSL') {
     const specialState = row.specialState || row.primaryCategory || row.主分类 || '';
     const shopState = row.shopState || row.shopStatus || row.门店状态 || row.storeFlowState || '';
     const category = row.primaryCategory || row.主分类 || row.异常分类 || '';
-    const normalizedSpecial=String(specialState||'').trim().toUpperCase().replace(/^(?:CEL|CE):/,'');
-    const specialClosed=['SELF_PICKUP','CECN_RETENTION','CEZT_RETENTION','CCSL580_RETENTION',
-      'CECN','CEZT','CCSL580'].includes(normalizedSpecial);
+    const specialClosed=v788IsCurrentSpecialNonDelivery({
+      currentState:row.currentState||row.scanNormalizedState,
+      specialState,shipmentStatus:terminalCode
+    });
     const normalFinal = category === '正常分流节点' || row.matchedRule === 'NORMAL_FINAL_HUB';
     // WHPP terminal cancellation must follow its saved analysis and close
     // status, never a bare scan orderStatus=10 or an unverified text hint.

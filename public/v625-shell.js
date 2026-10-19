@@ -930,7 +930,19 @@ function renderOpenPodRows(){
         ? [row.shipmentCode,row.businessType,row.currentState||row.category||row.queryStatus||'未完成',row.lastEventTime||row.lastCheckedAt||'—']
         : [row.shipmentCode,row.businessType,row.currentState||row.category||'未完成',row.queryStatus||'需更新',row.lastEventTime||row.lastCheckedAt||'—'];
       for(const value of values){const td=document.createElement('td');td.textContent=value||'—';tr.appendChild(td)}
-      const td=document.createElement('td');const a=document.createElement('a');a.href='/tracking?auth=v625&code='+encodeURIComponent(row.shipmentCode||'');a.textContent='查看轨迹';td.appendChild(a);tr.appendChild(td);tbody.appendChild(tr);
+      const td=document.createElement('td');
+      const code=String(row.shipmentCode||'').trim().toUpperCase();
+      const date=String(row.sourceReportDate||row.reportDate||'').slice(0,10);
+      const type=String(row.businessType||'').trim().toUpperCase();
+      if(code&&/^\d{4}-\d{2}-\d{2}$/.test(date)
+        &&['CE','CEAF','TBKH','ALI1688','WHPP','SHOPEECN','SHOPEEVN'].includes(type)){
+        const a=document.createElement('a');
+        a.href='/tracking?auth=v625&code='+encodeURIComponent(code)
+          +'&reportDate='+encodeURIComponent(date)
+          +'&businessType='+encodeURIComponent(type);
+        a.textContent='查看该票轨迹';td.appendChild(a);
+      }else td.textContent='单号/日期/业务待核验';
+      tr.appendChild(td);tbody.appendChild(tr);
     }
   }
 }
