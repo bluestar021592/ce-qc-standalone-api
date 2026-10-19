@@ -1705,7 +1705,7 @@ async function v765LoadBusinessDetailLane({reportDate,snapshotId,m,options,gener
     const rows=v628BusinessWorkspaceRows.filter(x=>x.isActionable).slice(0,8);
     const tbody=byId('v625BusinessRows');tbody.replaceChildren();
     if(!rows.length){tbody.innerHTML='<tr><td colspan="7">当前日报暂无异常记录</td></tr>'}
-    else for(const row of rows){tbody.appendChild(rowTr([row.shipmentCode,row.businessType,row.category||row.queryStatus||'异常',row.pendingDays||row.ocDays||'—',row.currentState||row.queryStatus||'—',row.latestTime||row.lastEventTime||'—','查看']))}
+    else for(const row of rows){tbody.appendChild(v788BusinessAbnormalRow(row,reportDate,targetBusiness))}
   }catch(error){
     if(stillSelected())setText('v631AccountingMeta','明细暂未就绪：'+String(error?.message||error));
   }
@@ -1847,6 +1847,32 @@ async function loadBusiness(options={}){
   }
 }
 function rowTr(values){const tr=document.createElement('tr');for(const v of values){const td=document.createElement('td');td.textContent=v??'—';tr.appendChild(td)}return tr}
+
+// V788: every visible "查看" action must link to one real waybill in the
+// selected business/date. Generic table rowTr() deliberately stays text-only.
+function v788BusinessAbnormalRow(row={},reportDate='',selectedBusiness=''){
+  const code=detailCode(row),date=String(reportDate||'').slice(0,10);
+  const owner=String(selectedBusiness||'').trim().toUpperCase();
+  const tr=rowTr([
+    code||'—',owner||'—',row.category||row.queryStatus||'异常',
+    row.pendingDays||row.ocDays||'—',row.currentState||row.queryStatus||'—',
+    row.latestTime||row.lastEventTime||'—',''
+  ]);
+  const action=tr.lastElementChild;
+  if(code&&/^\d{4}-\d{2}-\d{2}$/.test(date)
+    &&['CE','CEAF','TBKH','ALI1688','WHPP','SHOPEECN','SHOPEEVN'].includes(owner)){
+    const link=document.createElement('a');
+    link.textContent='查看该票';
+    link.href='/tracking?auth=v625&code='+encodeURIComponent(code)
+      +'&reportDate='+encodeURIComponent(date)
+      +'&businessType='+encodeURIComponent(owner);
+    action.appendChild(link);
+  }else{
+    action.textContent=code?'缺少业务/日期 · 待核验':'缺少运单号 · 待核验';
+  }
+  return tr;
+}
+
 
 let runBusy=false;
 async function refreshImportCanonicalClassification(reportDate=''){
