@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import {v788IsCurrentSpecialNonDelivery} from '../src/v788SpecialOpenTruth.js';
 const server=fs.readFileSync(new URL('../server.js',import.meta.url),'utf8');
 const shell=fs.readFileSync(new URL('../public/v625-shell.js',import.meta.url),'utf8');
 const html=fs.readFileSync(new URL('../public/v625-shell.html',import.meta.url),'utf8');
@@ -44,12 +45,13 @@ assert.equal(caseRow.shipmentCode,'ABC0001');
 assert.equal(caseRow.latestNode,'','unknown track description must stay unknown');
 
 const serverFn=server.slice(server.indexOf('function workspaceRows('),server.indexOf('function persistReconciliationDiagnostics('));
-const getRows=new Function('workspacePendingNonContinuous','workspaceStoreArrived','workspaceOcDays','billOfWorkspace',
+const getRows=new Function('workspacePendingNonContinuous','workspaceStoreArrived','workspaceOcDays','billOfWorkspace','v788IsCurrentSpecialNonDelivery',
   serverFn+';return workspaceRows;')(
     row=>Boolean(row.pendingNonContinuous),
     row=>Boolean(row.shopArrivedCurrent),
     row=>Number(row.ocDays||0),
-    row=>String(row.shipmentCode||'').toUpperCase()
+    row=>String(row.shipmentCode||'').toUpperCase(),
+    v788IsCurrentSpecialNonDelivery
   );
 const examples=[
  {shipmentCode:'POD60',shipmentStatus:'60',ocDays:7,pendingNonContinuous:true},

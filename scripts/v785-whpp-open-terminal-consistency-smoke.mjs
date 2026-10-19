@@ -1,14 +1,15 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import {v788IsCurrentSpecialNonDelivery} from '../src/v788SpecialOpenTruth.js';
 
 const server=fs.readFileSync(new URL('../server.js',import.meta.url),'utf8').replace(/\r\n?/g,'\n');
 const shell=fs.readFileSync(new URL('../public/v625-shell.js',import.meta.url),'utf8');
 const from=server.indexOf('function workspaceRows('),to=server.indexOf('function persistReconciliationDiagnostics(',from);
 assert.ok(from>0&&to>from,'exact production workspace converter must be present');
-const convert=new Function('billOfWorkspace','workspacePendingNonContinuous','workspaceStoreArrived','workspaceOcDays',
+const convert=new Function('billOfWorkspace','workspacePendingNonContinuous','workspaceStoreArrived','workspaceOcDays','v788IsCurrentSpecialNonDelivery',
   server.slice(from,to)+'\nreturn workspaceRows;')(
   row=>String(row.shipmentCode||'').toUpperCase(),
-  ()=>false,()=>false,()=>0
+  ()=>false,()=>false,()=>0,v788IsCurrentSpecialNonDelivery
 );
 const date='2026-07-02';
 const row=(code,extras={})=>({shipmentCode:code,businessType:'WHPP',reportDate:date,primaryCategory:'退回',truthEvidence:{pod:false,returned:false},...extras});
