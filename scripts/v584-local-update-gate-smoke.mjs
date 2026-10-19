@@ -46,6 +46,14 @@ assert.match(launcher,/info.Length -gt 8192/,
   'oversized receipt must be rejected before parsing');
 assert.match(launcher,/FileAttributes\]::ReparsePoint/,
   'PowerShell receipt must reject filesystem redirection just like backend');
+assert.equal((launcher.match(/^function Invoke-Exe\(/gm)||[]).length,1,
+  'launcher must contain exactly one executable startup/receipt definition: Invoke-Exe');
+assert.equal((launcher.match(/^function Invoke-SafeAutoUpdate\b/gm)||[]).length,1,
+  'duplicate launcher startup flow must be rejected');
+assert.equal((launcher.match(/^function Test-V788ManagedInstallReceipt\(/gm)||[]).length,1,
+  'duplicate V788 receipt validator must be rejected');
+assert.doesNotMatch(launcher,/^\}\s+-and\s*$/m,
+  'truncated receipt code appended after launcher must be rejected');
 assert.ok(launcher.indexOf('Write-V788ManagedInstallReceipt $installed $remote')
   >launcher.indexOf('$installed = Install-VerifiedCommitLocally $current $remote'),
   'managed install receipt must never precede installation');
