@@ -69,7 +69,7 @@ import { buildDataIntegrityReport } from './src/dataIntegrity.js';
 import { v766ReadJob, v766ClearReadCache } from './src/v766ReadJobCoordinator.js';
 import { qcDetailRead } from './src/qcActionDetailRead.js';
 import { inspectStage0UpdateProbe } from './src/v788Stage0UpdateProbe.js';
-import { v788IsCurrentSpecialNonDelivery } from './src/v788SpecialOpenTruth.js';
+import { v788IsCurrentSpecialNonDelivery, v788ResolveCarryCurrentState } from './src/v788SpecialOpenTruth.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -1851,7 +1851,7 @@ app.get('/api/tracking-workspace', async (req, res) => {
         if(!bill||dailySet.has(type+'|'+bill))continue;
         let state={};
         try{state=JSON.parse(String(row.stateJson||'{}'))||{}}catch{}
-        const carryCurrentState=String(row.currentState||state.currentState||state.scanNormalizedState||'未完结');
+        const carryCurrentState=v788ResolveCarryCurrentState(row.currentState,state.currentState,state.scanNormalizedState);
         const specialExcluded=v788IsCurrentSpecialNonDelivery({
           currentState:carryCurrentState,specialState:state.specialState,
           shipmentStatus:state.shipmentStatus
