@@ -60,6 +60,7 @@ import { buildCanonicalBusinessAccounting } from './src/businessAccounting.js';
 import { buildDataIntegrityReport } from './src/dataIntegrity.js';
 import { v766ReadJob, v766ClearReadCache } from './src/v766ReadJobCoordinator.js';
 import { qcDetailRead } from './src/qcActionDetailRead.js';
+import { inspectStage0UpdateProbe } from './src/v788Stage0UpdateProbe.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -301,6 +302,13 @@ app.get('/api/health', async (req, res) => {
     },
     dashboardCache: getDashboardCacheStatus()
   });
+});
+
+// Deliberately small main-branch delivery probe: no database open, writes,
+// actual V788 acceptance decision or external web requests.
+app.get('/api/admin/v788-stage0-update', requireRole('ADMIN'), (req,res)=>{
+  res.setHeader('Cache-Control','no-store');
+  res.json(inspectStage0UpdateProbe(__dirname));
 });
 
 app.get('/api/session', (req, res) => {
