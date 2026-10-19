@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 // Exercise the actual shipped KPI renderer, not a rewritten model of it.
+const gate=fs.readFileSync('scripts/v584-local-candidate-gate.mjs','utf8');
+assert.match(gate,/scripts\/v788-kpi-detail-paging-smoke\.mjs/,'updater must test paged KPI before managed release');
 const js=fs.readFileSync('public/v625-shell.js','utf8');
 const html=fs.readFileSync('public/v625-shell.html','utf8');
 const begin=js.indexOf('const V788_KPI_PAGE_SIZE=100;');
