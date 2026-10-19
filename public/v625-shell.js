@@ -1494,18 +1494,32 @@ function v628MetricRows(kind){
   if(kind==='total'&&Array.isArray(v631BusinessAccounting?.rowsByKind?.total))return v631BusinessAccounting.rowsByKind.total;
   return [];
 }
-function renderKpiDetail(kind){
+// V788: keep drilldown DOM bounded while retaining the full canonical count.
+const V788_KPI_PAGE_SIZE=100;
+let v788KpiKind='',v788KpiPage=0;
+function renderKpiDetail(kind,requestedPage=0,shouldScroll=true){
   const panel=byId('v628KpiDetailPanel'),tbody=byId('v628KpiDetailRows');if(!panel||!tbody)return;
   const labels={total:'总票数',delivery:'派送中',pod:'已签收(POD)',pending:'Pending',abnormal:'异常',returned:'已退回',returning:'退回中',otherNormal:'其他正常状态',unprocessed:'待处理',shopArrived:'到达门店',pendingGap:'Pending不连续',oc2Plus:'OC 2天+'};
   const rows=v628MetricRows(kind);
+  const pages=Math.max(1,Math.ceil(rows.length/V788_KPI_PAGE_SIZE));
+  const pageIndex=Math.min(pages-1,Math.max(0,Math.trunc(Number(requestedPage)||0)));
+  const start=pageIndex*V788_KPI_PAGE_SIZE;
+  const visible=rows.slice(start,start+V788_KPI_PAGE_SIZE);
+  v788KpiKind=kind;v788KpiPage=pageIndex;
+  const prev=byId('v788KpiDetailPrevious'),next=byId('v788KpiDetailNext');
+  if(prev)prev.disabled=pageIndex===0||rows.length===0;
+  if(next)next.disabled=pageIndex>=pages-1||rows.length===0;
   qa('[data-kpi-detail]').forEach(el=>el.classList.toggle('active',el.dataset.kpiDetail===kind));
   setText('v628KpiDetailTitle',(labels[kind]||'指标')+'明细');
-  setText('v628KpiDetailMeta',v628BusinessReportDate+' · '+business+' · '+rows.length+' 票');
+  setText('v628KpiDetailMeta',v628BusinessReportDate+' · '+business+' · 共 '+rows.length+' 票'+
+    (rows.length?' · 显示 '+(start+1)+'–'+(start+visible.length)+' 票 · 第 '+(pageIndex+1)+'/'+pages+' 页':''));
   tbody.replaceChildren();
-  if(!rows.length)tbody.innerHTML='<tr><td colspan="7">当前指标暂无对应运单</td></tr>';
-  else for(const row of rows){
+  if(!rows.length)tbody.innerHTML='<tr><td colspan="7">'+
+    (Number(v628BusinessMetricState?.[kind]??0)>0?'指标有票数，但缺少对应逐票证据；不能视为0票。':'当前指标暂无对应运单。')+
+    '</td></tr>';
+  else for(const row of visible){
     const tr=document.createElement('tr');
-    const code=row.shipmentCode||row.运单号||'';
+    const code=detailCode(row);
     const qualityStatus=kind==='shopArrived'
       ?('到达门店'+(row.shopName||row.shopCode?' · '+[row.shopName,row.shopCode].filter(Boolean).join(' / '):''))
       :kind==='pendingGap'
@@ -1521,11 +1535,14 @@ function renderKpiDetail(kind){
       const td=document.createElement('td');td.textContent=value||'—';tr.appendChild(td);
     }
     const action=document.createElement('td'),a=document.createElement('a');
-    a.href='/tracking?auth=v625&code='+encodeURIComponent(code)+'&reportDate='+encodeURIComponent(v628BusinessReportDate||'')+'&businessType='+encodeURIComponent(business);
-    a.textContent='查看轨迹';action.appendChild(a);tr.appendChild(action);tbody.appendChild(tr);
+    if(code){
+      a.href='/tracking?auth=v625&code='+encodeURIComponent(code)+'&reportDate='+encodeURIComponent(v628BusinessReportDate||'')+'&businessType='+encodeURIComponent(business);
+      a.textContent='查看该票轨迹';action.appendChild(a);
+    }else action.textContent='无运单号 · 待核验';
+    tr.appendChild(action);tbody.appendChild(tr);
   }
   panel.hidden=false;
-  panel.scrollIntoView({behavior:'smooth',block:'start'});
+  if(shouldScroll)panel.scrollIntoView({behavior:'smooth',block:'start'});
 }
 function applyV748QualitySignals(payload={}){
   const q=payload.qualitySignals||{};
@@ -2216,7 +2233,7 @@ function note(id,msg,tone=''){const el=byId(id);if(!el)return;el.textContent=msg
 async function queryTrack(){
   const code=byId('v625TrackCode').value.trim();if(!code){setText('v625TrackMeta','请输入运单号');return}
   const wanted=code.toUpperCase(),source=currentParams().get('source')||'';
-  setText('v625TrackMeta','查询中…');byId('v625TrackTimeline').innerHTML='<div class="v625-empty-state">查询中…</div>';
+  setText('v625TrackMeta','运单 '+code+' · 查询中…');byId('v625TrackTimeline').innerHTML='<div class="v625-empty-state">查询中…</div>';
   try{
     const r=await post('/api/track-query',{businessType:byId('v625TrackBusiness').value,shipmentCodes:[code],reportDate:byId('v625TrackDate').value||today()},60000);
     const rowBill=row=>String(row?.shipmentCode||row?.waybill||row?.orderNo||row?.trackingNo||'').trim().toUpperCase();
@@ -2265,10 +2282,10 @@ async function queryTrack(){
       root.innerHTML='<div class="v625-empty-state">'+(source==='timing-backfill'?'该运单当前没有可显示的历史轨迹或时间证据；系统会继续等待后续日报出现最终派件时间后自动回补。':'当前没有查到本地或接口轨迹/状态证据。')+'</div>';
     }
     const suffix=source==='timing-backfill'&&events.length===0?' · 当前仍缺少可用于签收天数的轨迹时间/日报派件时间':'';
-    setText('v625TrackMeta','查询完成 · '+events.length+' 个轨迹节点 · '+statusEvidence.length+' 条状态证据'+(r.localEvidence?' · 含本地已保存证据':'')+suffix);
+    setText('v625TrackMeta','运单 '+code+' · 查询完成 · '+events.length+' 个轨迹节点 · '+statusEvidence.length+' 条状态证据'+(r.localEvidence?' · 含本地已保存证据':'')+suffix);
   }catch(e){
     byId('v625TrackTimeline').innerHTML='<div class="v625-empty-state">'+esc(e.message)+'</div>';
-    setText('v625TrackMeta','查询失败 · '+String(e?.message||e));
+    setText('v625TrackMeta','运单 '+code+' · 查询失败 · '+String(e?.message||e));
   }
 }
 // QC action center V1: evidence-backed read-only queue. It never submits
@@ -3221,6 +3238,8 @@ function bind(){
     location.search=p.toString();
   });
   qa('[data-timing-missing]').forEach(btn=>btn.addEventListener('click',()=>renderTimingMissing(btn.dataset.timingMissing)));
+  byId('v788KpiDetailPrevious')?.addEventListener('click',()=>renderKpiDetail(v788KpiKind,v788KpiPage-1,false));
+  byId('v788KpiDetailNext')?.addEventListener('click',()=>renderKpiDetail(v788KpiKind,v788KpiPage+1,false));
   qa('[data-kpi-detail]').forEach(card=>{
     const open=()=>renderKpiDetail(card.dataset.kpiDetail||'total');
     card.addEventListener('click',open);
