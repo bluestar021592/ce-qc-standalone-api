@@ -84,7 +84,30 @@ try {
   Invoke-SafeAutoUpdate
   Assert ($global:revalidateCount -eq 4) 'recovery must rerun for a newly accepted candidate'
   Assert ((Test-V788ManagedInstallReceipt $release) -eq $true) 'accepted candidate must create matching receipt'
-  Write-Output '[V788_RECEIPT_RUNTIME] PASS no proof, revalidate, valid proof, stale proof, failed proof and recovery'
+
+  # JSON accepted by loose PowerShell coercion but rejected by the actual
+  # Node backend must trigger a fresh candidate gate, not a permanent deadlock.
+  $badReceipts=@(
+    (@{schemaVersion='1';mode='INSTALLED';candidateGatePassed=$true;installedCommit=$release;remoteCommit=$release}),
+    (@{schemaVersion=1;mode='INSTALLED';candidateGatePassed='true';installedCommit=$release;remoteCommit=$release}),
+    (@{schemaVersion=1;mode='installed';candidateGatePassed=$true;installedCommit=$release;remoteCommit=$release}),
+    (@{schemaVersion=1;mode='INSTALLED';candidateGatePassed=$true;installedCommit='NOT_A_SHA';remoteCommit=$release})
+  )
+  foreach ($bad in $badReceipts) {
+    $bad | ConvertTo-Json -Compress | Set-Content -LiteralPath $receiptPath -Encoding UTF8
+    Assert ((Test-V788ManagedInstallReceipt $release) -eq $false) 'backend-incompatible receipt must be rejected'
+    $global:revalidateResponse=$false
+    $before=$global:revalidateCount
+    Invoke-SafeAutoUpdate
+    Assert ($global:revalidateCount -eq ($before+1)) 'bad receipt must revalidate'
+    Assert ((Test-V788ManagedInstallReceipt $release) -eq $false) 'failed candidate must never repair bad proof'
+  }
+  ('x'*9000) | Set-Content -LiteralPath $receiptPath -Encoding UTF8
+  Assert ((Test-V788ManagedInstallReceipt $release) -eq $false) 'oversized receipt must be rejected'
+  $global:revalidateResponse=$true
+  Invoke-SafeAutoUpdate
+  Assert ((Test-V788ManagedInstallReceipt $release) -eq $true) 'valid gate must recover after malformed proof'
+  Write-Output '[V788_RECEIPT_RUNTIME] PASS missing, valid, stale, failed, typed malformed, oversized and recovered receipt; no actual SQLite writes'
 } finally {
   Remove-Item -LiteralPath $case -Force -Recurse -ErrorAction SilentlyContinue
 }
