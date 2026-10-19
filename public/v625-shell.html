@@ -548,6 +548,15 @@
               <p class="v625-inline-note">只读数据库检查并不能代替真实Excel逐票回读。任何阻断或待核验证据均不授权清空、重传或正式发布。</p>
               <p class="v625-inline-note">只读状态预览不等于可信签收天数、历史账本及正式导出已通过。</p>
             </section>
+
+            <section class="v625-panel" id="v788Stage0UpdatePanel">
+              <div class="v625-section-head"><h2>正式更新是否到达本机</h2><span>阶段0 · 只读检查</span></div>
+              <p class="v625-inline-note">这是检测桌面启动器有没有收到正式main更新的第一步，不是V788正式验收。不会打开数据库、上传数据或清空业务。</p>
+              <div id="v788Stage0UpdateResult" class="v625-inline-note" role="status" aria-live="polite" style="white-space:pre-line">打开接口设置后自动检查；也可以点击下方按钮。</div>
+              <div class="v625-button-row">
+                <button id="v788Stage0UpdateRefresh" type="button" class="v625-btn outline">检查本机版本（只读）</button>
+              </div>
+            </section>
           </div>
 
           <div class="v625-settings-tab-panel" data-settings-panel="maintenance" hidden>
@@ -713,5 +722,6 @@
     </div>
   </div>
   <script src="/v625-shell.js?v=20261018-v788-1&patch=788" defer></script>
+  <script src="/v788-stage0-update.js?v=20261019-stage0-1" defer></script>
 </body>
 </html>
