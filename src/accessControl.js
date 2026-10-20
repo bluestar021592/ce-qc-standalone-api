@@ -13,7 +13,7 @@ const ROLE_LEVEL = Object.freeze({ VIEWER: 1, OPERATOR: 2, ADMIN: 3 });
 const LOGIN_LIMIT = 5;
 const SESSION_HOURS = 8;
 const SESSION_REFRESH_THRESHOLD_MS = 2 * 60 * 60_000;
-const LOCAL_AUTH_COOKIE = 'ce_qc_local_auth_v431';
+const LOCAL_AUTH_COOKIE = process.env.CE_QC_V788_PILOT_ISOLATED==='1' ? 'ce_qc_local_auth_v788_pilot' : 'ce_qc_local_auth_v431';
 const AUTH_SIDECAR_PORT = Math.max(1024, Math.min(65535, Number(process.env.CE_QC_AUTH_SIDECAR_PORT || 5179)));
 const PURGE_STATUS_PATH=/^\/purge-status\/[a-f0-9]{48}\.json$/i;
 const PURGE_PREPARE_AUDITS=new Set(['DATA_PURGE_REQUESTED','DATA_PURGE_BACKUP_VERIFIED']);
@@ -122,6 +122,7 @@ export async function accessIdentity(req, res, next) {
       return denyPageOrApi(req, res, 403, 'Access denied', publicHost ? `Please use https://${publicHost}` : 'Contact the system administrator.');
     }
     let user = readLocalAuthSession(req, channel);
+    if (user) user=await refreshLocalAuthSessionIfNeeded(req,res,user,channel);
     if (user) {
       req.user = user;
       req.accessMode = channel;
@@ -322,8 +323,74 @@ function readLocalAuthSession(req, channel) {
     if (payload?.v !== 431 || Number(payload?.exp || 0) <= Date.now() || payload?.channel !== channel) return null;
     const user = payload?.user || {};
     if (!user.username || !['VIEWER', 'OPERATOR', 'ADMIN'].includes(String(user.role || '').toUpperCase())) return null;
-    return { ...user, role: String(user.role).toUpperCase(), businessScope: String(user.businessScope || 'ALL').toUpperCase(), department: user.department || '', devMode: channel === 'LOCAL', localAuth: true };
+    const result={ ...user, role: String(user.role).toUpperCase(),
+      businessScope: String(user.businessScope || 'ALL').toUpperCase(),
+      department: user.department || '', devMode: channel === 'LOCAL', localAuth: true };
+    Object.defineProperty(result,'__localSessionLifetime',{
+      value:{issued:Number(payload.iat||0),expires:Number(payload.exp||0)},
+      enumerable:false
+    });
+    return result;
   } catch { return null; }
+}
+
+// Main 5177 stays responsive: a near-expiring local cookie gets refreshed by
+// the separate READ-ONLY auth sidecar, not by opening the huge business DB.
+// Disabled/expired accounts are refused by the sidecar; transport outage
+// preserves only the ORIGINAL, already valid cookie until its own expiry.
+async function refreshLocalAuthSessionIfNeeded(req,res,user,channel){
+  if(req.v505PurgeReadOnlyAuth)return user;
+  const life=user?.__localSessionLifetime;
+  if(!life)return user;
+  const now=Date.now(),total=life.expires-life.issued;
+  const threshold=Math.min(SESSION_REFRESH_THRESHOLD_MS,Math.floor(total/4));
+  if(total<=0||life.expires<=now||life.expires-now>threshold)return user;
+  const token=cookieValue(req,LOCAL_AUTH_COOKIE);
+  if(!token)return user;
+  try{
+    const payload=Buffer.from(JSON.stringify({token}),'utf8');
+    const reply=await new Promise((resolve,reject)=>{
+      let settled=false;
+      const finish=(error,value)=>{
+        if(settled)return;
+        settled=true;
+        error?reject(error):resolve(value);
+      };
+      const request=http.request({
+        host:'127.0.0.1',port:AUTH_SIDECAR_PORT,
+        method:'POST',path:'/api/local-auth/renew',
+        headers:{Host:`127.0.0.1:${AUTH_SIDECAR_PORT}`,
+          Accept:'application/json','Content-Type':'application/json',
+          'Content-Length':String(payload.length)}
+      },response=>{
+        const chunks=[];let bytes=0;
+        response.on('data',part=>{
+          bytes+=part.length;
+          if(bytes>8192){request.destroy(new Error('AUTH_RENEW_RESPONSE_TOO_LARGE'));return}
+          chunks.push(part);
+        });
+        response.on('end',()=>finish(null,{status:response.statusCode,
+          headers:response.headers,body:Buffer.concat(chunks).toString('utf8')}));
+      });
+      request.setTimeout(2000,()=>request.destroy(new Error('AUTH_RENEW_TIMEOUT')));
+      request.on('error',error=>finish(error));
+      request.end(payload);
+    });
+    if([401,403,423].includes(Number(reply.status)))return null;
+    if(Number(reply.status)!==200)return user;
+    const parsed=JSON.parse(reply.body||'{}');
+    const rawCookie=Array.isArray(reply.headers['set-cookie'])?
+      reply.headers['set-cookie'][0]:String(reply.headers['set-cookie']||'');
+    if(parsed?.ok!==true||!rawCookie.startsWith(LOCAL_AUTH_COOKIE+'='))return user;
+    // A renewal may also reflect changed roles/business scope in the live
+    // read-only account record; never keep stale elevated privileges.
+    const refreshed={...parsed.user,role:String(parsed.user?.role||'').toUpperCase(),
+      businessScope:String(parsed.user?.businessScope||'ALL').toUpperCase(),
+      department:parsed.user?.department||'',devMode:channel==='LOCAL',localAuth:true};
+    if(!['VIEWER','OPERATOR','ADMIN'].includes(refreshed.role))return null;
+    res.setHeader('Set-Cookie',rawCookie);
+    return refreshed;
+  }catch{return user}
 }
 
 function readSession(req, channel, cloudflareEmail) {

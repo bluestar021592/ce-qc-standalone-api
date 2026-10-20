@@ -11,11 +11,14 @@ import { recipientGroupOf } from './recipientGroup.js';
 import { normalizeV485TrackRows, archiveV485TrackQueryResponse } from './v485StrictTrackEvidence.js';
 import { persistentSelectedDatePodTruth } from './selectedDatePersistentTruth.js';
 import { classifyShipmentStatus, shipmentStatusTime } from './shipmentStatusTruth.js';
+import { explicitWhppTms60PodTime,explicitWhppConfirm85PodTime } from './whppPodTimeEvidence.js';
+import { shouldRunSelectedDateEvidence, whppStatusEvidenceHasGaps, hasDirectTmsShipmentStatus, classifyWhppTmsError } from './v788WhppStatusCoverage.js';
 import { extractV498SavedShopeePodEvidence } from './v498SavedShopeePodEvidence.js';
 
 export const V645_SELECTED_DATE_TIMING_REPAIR_ID='2026-10-05-v645-selected-date-pod-track-repair-v1';
 export const V737_STATUS_FIRST_TIMING_REPAIR_REVISION='2026-10-07-v737-status-first-timing-repair-v1';
 export const V740_CONFIRM_FIRST_TIMING_REPAIR_REVISION='2026-10-07-v740-confirm-first-timing-repair-v1';
+export const V788_WHPP_FULL_SOURCE_STATUS_REVISION='2026-10-14-v788-whpp-all-source-tms-status-v1';
 const TYPES=new Set(['TBKH','WHPP','SHOPEECN','SHOPEEVN']);
 const states=new Map();
 const queue=new Map();
@@ -35,6 +38,48 @@ function reportAgeDays(date){
   const stamp=Date.parse(d+'T00:00:00+07:00');if(!Number.isFinite(stamp))return 0;
   return Math.floor((Date.now()-stamp)/86400000);
 }
+export function canDurablyStopHistoricalRepair({
+  billsCount=0,timedCount=0,completed=0,failed=0,trackBillsCount=0,
+  persistedEvents=0,ageDays=0,apiFailureBills=0
+}={}){
+  // Auth/transport failures are not proof that historical records have no
+  // tracking evidence. Never write an irreversible old-date stop on API error.
+  return billsCount>0&&timedCount===0&&completed===0
+    &&failed>=trackBillsCount&&persistedEvents===0
+    &&ageDays>HISTORICAL_AUTO_REPAIR_MAX_AGE_DAYS&&apiFailureBills===0;
+}
+
+const lastTimingDiagnosticKey=(type,date)=>'selected_date_timing_diag:'+typeKey(type)+':'+dateKey(date);
+// Persist only aggregate counters. Never store waybills, raw API payloads,
+// credentials or raw error messages in diagnostic checkpoints.
+function saveWhppTimingDiagnostic(type,date,result={}){
+  if(typeKey(type)!=='WHPP')return false;
+  const n=key=>Math.max(0,Math.floor(Number(result[key])||0));
+  const failures={};
+  for(const key of ['AUTH','TIMEOUT','RATE_LIMIT','NETWORK','OTHER']){
+    if(Object.hasOwn(result.statusFailureTypes||{},key))
+      failures[key]=Math.max(0,Math.floor(Number(result.statusFailureTypes[key])||0));
+  }
+  const value={
+    version:'V788_WHPP_TIMING_DIAGNOSTICS_V1',
+    reportDate:dateKey(date),
+    status:String(result.status||'').slice(0,50),
+    statusSourceMembers:n('statusSourceMembers'),statusQueried:n('statusQueried'),
+    statusFailed:n('statusFailed'),statusApiRows:n('statusApiRows'),
+    statusMatchedRows:n('statusMatchedRows'),statusStatuslessRows:n('statusStatuslessRows'),
+    statusPersistedRows:n('statusPersistedRows'),
+    statusEmptySuccessBatches:n('statusEmptySuccessBatches'),
+    statusFailureBatches:n('statusFailureBatches'),
+    statusFailureTypes:failures,updatedAt:now()
+  };
+  try{
+    getDb().prepare(`INSERT INTO app_state(key,valueJson,updatedAt) VALUES(?,?,?)
+      ON CONFLICT(key) DO UPDATE SET valueJson=excluded.valueJson,updatedAt=excluded.updatedAt`)
+      .run(lastTimingDiagnosticKey(type,date),JSON.stringify(value),value.updatedAt);
+    return true;
+  }catch{return false}
+}
+
 function readDurableStop(type,date){
   try{
     const row=getDb().prepare('SELECT valueJson,updatedAt FROM app_state WHERE key=?').get(durableStopKey(type,date));
@@ -56,6 +101,9 @@ function writeDurableStop(type,date,snapshotId,total,message,stats={}){
     confirm85:Number(stats.confirm85||0),confirm85WithTime:Number(stats.confirm85WithTime||0),confirm85WithoutTime:Number(stats.confirm85WithoutTime||0),
     statusQueried:Number(stats.statusQueried||0),statusFailed:Number(stats.statusFailed||0),statusPersistedRows:Number(stats.statusPersistedRows||0),
     status60:Number(stats.status60||0),status60WithTime:Number(stats.status60WithTime||0),status60WithoutTime:Number(stats.status60WithoutTime||0),
+    statusSourceMembers:Number(stats.statusSourceMembers||0),statusApiRows:Number(stats.statusApiRows||0),
+    statusMatchedRows:Number(stats.statusMatchedRows||0),statusStatuslessRows:Number(stats.statusStatuslessRows||0),statusEmptySuccessBatches:Number(stats.statusEmptySuccessBatches||0),
+    statusFailureBatches:Number(stats.statusFailureBatches||0),statusFailureTypes:stats.statusFailureTypes||{},
     repairRevision:String(stats.repairRevision||''),exhaustionSource:String(stats.exhaustionSource||'POST_QUERY_EXHAUSTED'),
     message:message||'历史轨迹证据缺失，自动补查已停止。',completedAt:now(),updatedAt:now()
   };
@@ -79,7 +127,14 @@ function stateFor(type,date,snapshotId=''){
 function patch(type,date,snapshotId='',value={}){
   const typeN=typeKey(type),dateN=dateKey(date),snap=snapshotKey(snapshotId),key=keyOf(typeN,dateN,snap);
   const next={...stateFor(typeN,dateN,snap),...value,businessType:typeN,reportDate:dateN,snapshotId:snap,id:V645_SELECTED_DATE_TIMING_REPAIR_ID,updatedAt:now()};
-  states.set(key,next);return next;
+  states.set(key,next);
+  // Save the last known status wave and FAILED state, not just the final
+  // result. If a process stops after a partial API response, the next
+  // readonly audit must still see the counts already observed.
+  if(typeN==='WHPP'&&Number(next.statusSourceMembers||0)>0
+    &&['SHIPMENT_STATUS_QUERY','FAILED','DONE'].includes(String(value.phase||'')))
+    saveWhppTimingDiagnostic(typeN,dateN,next);
+  return next;
 }
 function unique(values=[]){return [...new Set(values.map(v=>String(v||'').trim().toUpperCase()).filter(Boolean))].sort();}
 
@@ -145,6 +200,20 @@ export function selectedDatePodBills(type,date,snapshotId=''){
   if(t==='TBKH')return tbkhPodBills(d,snapshotId);
   return shopeePodBills(t,d);
 }
+// WHPP terminal-status verification is not restricted to already-POD
+// members. The independent source also contains RETURNED and unresolved
+// labels; query shipmentStatus for the entire exact-day source membership,
+// while restricting the more expensive signing-time trajectory search to POD.
+export function selectedDateShipmentStatusBills(type,date,snapshotId='',dbOverride=null){
+  const t=typeKey(type),d=dateKey(date);
+  if(!TYPES.has(t)||!d)return[];
+  if(t!=='WHPP')return selectedDatePodBills(t,d,snapshotId);
+  const db=dbOverride||getDb();
+  const truth=loadWhppCanonicalTruth(d,'',db);
+  if(!truth?.total||!Array.isArray(truth.rows)||truth.rows.length!==truth.total)return[];
+  return unique(truth.rows.map(row=>billOf(row)));
+}
+
 function groupRows(rows=[],fallbackBills=[]){
   const map=new Map();
   const normalizedRows=normalizeV485TrackRows(rows,{fallbackBills});
@@ -165,10 +234,34 @@ function eventFingerprint(row={}){
   const raw=JSON.stringify(normalized);
   return time+'|'+code+'|'+raw;
 }
-function persistConfirmRows(type,date,rows=[]){
-  const owner=storageType(type),db=getDb(),stamp=now(),latest=new Map();
+// Shared provenance-preserving upsert: never replace a previously
+// attested POD timestamp with unrelated API refresh information.
+function prepareVerifiedWhppPodLock(db){
+  return db.prepare(`INSERT INTO business_pod_locks
+    (businessType,shipmentCode,podTime,source,createdAt,updatedAt)
+    VALUES('WHPP',?,?,?,?,?)
+    ON CONFLICT(businessType,shipmentCode) DO UPDATE SET
+      podTime=CASE WHEN LOWER(TRIM(COALESCE(business_pod_locks.source,''))) IN
+        ('whpp_strict_track_event','whpp_saved_scan_pod_time',
+         'whpp_saved_final_pod_time','whpp_shipment_status_60_explicit_pod_time',
+         'whpp_confirm_85_explicit_pod_time')
+        AND TRIM(COALESCE(business_pod_locks.podTime,''))<>'' THEN business_pod_locks.podTime
+        ELSE excluded.podTime END,
+      source=CASE WHEN LOWER(TRIM(COALESCE(business_pod_locks.source,''))) IN
+        ('whpp_strict_track_event','whpp_saved_scan_pod_time',
+         'whpp_saved_final_pod_time','whpp_shipment_status_60_explicit_pod_time',
+         'whpp_confirm_85_explicit_pod_time')
+        AND TRIM(COALESCE(business_pod_locks.podTime,''))<>'' THEN business_pod_locks.source
+        ELSE excluded.source END,
+      updatedAt=excluded.updatedAt`);
+}
+
+export function persistConfirmRows(type,date,rows=[],dbOverride=null,requestedBills=[]){
+  const owner=storageType(type),db=dbOverride||getDb(),stamp=now(),latest=new Map();
+  const requested=new Set(unique(requestedBills));
   for(const raw of rows||[]){
-    const code=billOf(raw);if(!code)continue;
+    const code=billOf(raw);
+    if(!code||(requested.size>0&&!requested.has(code)))continue;
     latest.set(code,{...raw,shipmentCode:code,reportDate:date});
   }
   if(!latest.size)return 0;
@@ -179,6 +272,7 @@ function persistConfirmRows(type,date,rows=[]){
     isPod=CASE WHEN excluded.isPod=1 THEN 1 ELSE business_scan_results.isPod END,
     orderStatus=CASE WHEN excluded.orderStatus<>'' THEN excluded.orderStatus ELSE business_scan_results.orderStatus END,
     rawJson=excluded.rawJson,updatedAt=excluded.updatedAt`);
+  const lockPod=owner==='WHPP'?prepareVerifiedWhppPodLock(db):null;
   let saved=0;
   db.exec('BEGIN IMMEDIATE');
   try{
@@ -186,6 +280,10 @@ function persistConfirmRows(type,date,rows=[]){
       const orderStatus=String(row.orderStatus??'').trim();
       const isPod=orderStatus==='85'?1:0;
       ins.run(owner,code,date,isPod,orderStatus,JSON.stringify(row),stamp,stamp);
+      if(lockPod){
+        const podTime=explicitWhppConfirm85PodTime(row,date);
+        if(podTime)lockPod.run(code,podTime,'whpp_confirm_85_explicit_pod_time',stamp,stamp);
+      }
       saved++;
     }
     db.exec('COMMIT');
@@ -197,21 +295,33 @@ function confirmTimingEvidence(row={}){
   return extractV498SavedShopeePodEvidence({shipmentCode:code,orderStatus:String(row.orderStatus??''),rawJson:JSON.stringify(row)},'business_scan_results');
 }
 
-function persistShipmentStatusRows(type,date,rows=[]){
-  const owner=storageType(type),db=getDb(),stamp=now(),latest=new Map();
+export function persistShipmentStatusRows(type,date,rows=[],dbOverride=null,requestedBills=[]){
+  const owner=storageType(type),db=dbOverride||getDb(),stamp=now(),latest=new Map();
+  const requested=new Set(unique(requestedBills));
   for(const raw of rows||[]){
-    const code=billOf(raw);if(!code)continue;
+    const code=billOf(raw);
+    // Drop TMS overfetch, unexpected business members and orphan payloads.
+    // Never create locks for bills absent from this exact request batch.
+    if(!code||(requested.size>0&&!requested.has(code)))continue;
+    // Missing shipmentStatus is not TMS evidence; never replace a previous
+    // valid saved status with a statusless or event-only response.
+    if(owner==='WHPP'&&!hasDirectTmsShipmentStatus(raw))continue;
     latest.set(code,{...raw,shipmentCode:code,reportDate:date});
   }
   if(!latest.size)return 0;
   const del=db.prepare('DELETE FROM business_shipment_tracks WHERE businessType=? AND reportDate=? AND shipmentCode=?');
   const ins=db.prepare('INSERT INTO business_shipment_tracks(businessType,shipmentCode,reportDate,shipmentStatus,statusText,apiStatus,rawJson,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?)');
+  const lockPod=owner==='WHPP'?prepareVerifiedWhppPodLock(db):null;
   let saved=0;
   db.exec('BEGIN IMMEDIATE');
   try{
     for(const [code,row] of latest){
       del.run(owner,date,code);
       ins.run(owner,code,date,String(row.shipmentStatus??''),String(row.statusText||row.shipmentStatusDesc||''),String(row.apiStatus||'success'),JSON.stringify(row),stamp,stamp);
+      if(lockPod){
+        const podTime=explicitWhppTms60PodTime(row,date);
+        if(podTime)lockPod.run(code,podTime,'whpp_shipment_status_60_explicit_pod_time',stamp,stamp);
+      }
       saved++;
     }
     db.exec('COMMIT');
@@ -268,11 +378,20 @@ async function queryTimingEvidenceRows(client,codes=[]){
 }
 
 async function runOne(type,date,snapshotId=''){
+  const repairRevision=type==='WHPP'
+    ?V788_WHPP_FULL_SOURCE_STATUS_REVISION
+    :V740_CONFIRM_FIRST_TIMING_REPAIR_REVISION;
   const bills=selectedDatePodBills(type,date,snapshotId);
+  // Read WHPP's immutable exact-day source once; it includes RETURNED and OPEN,
+  // even on dates with zero POD. Later status queries reuse the same membership.
+  const whppSourceBills=type==='WHPP'?selectedDateShipmentStatusBills(type,date,snapshotId):[];
   patch(type,date,snapshotId,{status:'RUNNING',phase:'TRACK_QUERY',total:bills.length,completed:0,failed:0,queried:0,startedAt:now(),message:`${type} ${date} 签收时效补证：真实POD ${bills.length}票`});
-  if(!bills.length)return patch(type,date,snapshotId,{status:'WAITING_FOR_POD_MEMBERS',phase:'WAITING_FOR_POD_MEMBERS',completedAt:now(),message:`${type} ${date} 当前尚未形成真实POD成员；等待扫描/轨迹处理完成后自动重试。`});
+  // WHPP has a separate exact-day source: returned/returning members need
+  // shipmentStatus verification even if no POD member has formed yet.
+  if(!shouldRunSelectedDateEvidence(bills.length,whppSourceBills.length))return patch(type,date,snapshotId,{status:'WAITING_FOR_POD_MEMBERS',phase:'WAITING_FOR_POD_MEMBERS',completedAt:now(),message:`${type} ${date} 当前尚未形成真实POD成员；等待扫描/轨迹处理完成后自动重试。`});
   const client=new CEClient();
 
+  let apiFailureBills=0;
   const confirmBatches=splitTrackBatches(bills),confirmTimedBills=new Set();
   let confirmQueried=0,confirmFailed=0,confirmPersistedRows=0,confirm85=0,confirm85WithTime=0,confirm85WithoutTime=0;
   for(let offset=0;offset<confirmBatches.length;offset+=4){
@@ -285,28 +404,45 @@ async function runOne(type,date,snapshotId=''){
     for(const outcome of results){
       for(const success of outcome.successes||[]){
         const rows=success.events||[];
-        confirmPersistedRows+=persistConfirmRows(type,date,rows);
+        confirmPersistedRows+=persistConfirmRows(type,date,rows,null,success.batch||[]);
         for(const row of rows){
           const code=billOf(row);if(!code)continue;
           if(String(row.orderStatus??'').trim()!=='85')continue;
           confirm85++;
-          const evidence=confirmTimingEvidence(row);
-          if(evidence?.podDate){confirm85WithTime++;confirmTimedBills.add(code);}
+          const podTime=type==='WHPP'
+            ?explicitWhppConfirm85PodTime(row,date)
+            :confirmTimingEvidence(row)?.podDate;
+          if(podTime){confirm85WithTime++;confirmTimedBills.add(code);}
           else confirm85WithoutTime++;
         }
       }
-      for(const failure of outcome.failures||[])confirmFailed+=(failure.batch||[]).length;
+      for(const failure of outcome.failures||[]){
+        const n=(failure.batch||[]).length;confirmFailed+=n;apiFailureBills+=n;
+      }
     }
     patch(type,date,snapshotId,{
       status:'RUNNING',phase:'CONFIRM_QUERY',confirmQueried,confirmFailed,confirmPersistedRows,confirm85,confirm85WithTime,confirm85WithoutTime,
-      repairRevision:V740_CONFIRM_FIRST_TIMING_REPAIR_REVISION,
+      repairRevision,
       message:`${type} ${date} confirm补证 ${Math.min(offset+4,confirmBatches.length)}/${confirmBatches.length}批：85/POD有时间 ${confirm85WithTime}票，无时间 ${confirm85WithoutTime}票`
     });
   }
 
-  const statusBills=bills.filter(code=>!confirmTimedBills.has(code));
+  // A WHPP POD time from confirm-query does not prove its TMS 60/81
+  // shipment status. Always verify all exact-day WHPP members (including
+  // formerly RETURNED labels), once per requested evidence run.
+  const statusBills=type==='WHPP'
+    ?whppSourceBills
+    :bills.filter(code=>!confirmTimedBills.has(code));
   const statusBatches=splitTrackBatches(statusBills),statusTimedBills=new Set();
+  if(type==='WHPP'&&statusBills.length)patch(type,date,snapshotId,{
+    status:'RUNNING',phase:'SHIPMENT_STATUS_QUERY',statusSourceMembers:statusBills.length,
+    statusQueried:0,statusFailed:0,statusApiRows:0,statusMatchedRows:0,
+    statusStatuslessRows:0,statusPersistedRows:0,statusEmptySuccessBatches:0,
+    statusFailureBatches:0,statusFailureTypes:{}
+  });
   let statusQueried=0,statusFailed=0,statusPersistedRows=0,status60=0,status60WithTime=0,status60WithoutTime=0;
+  let statusApiRows=0,statusMatchedRows=0,statusStatuslessRows=0,statusEmptySuccessBatches=0,statusFailureBatches=0;
+  const statusFailureTypes=new Map();
   for(let offset=0;offset<statusBatches.length;offset+=4){
     const wave=statusBatches.slice(offset,offset+4);
     const results=await Promise.all(wave.map(async batch=>{
@@ -317,7 +453,13 @@ async function runOne(type,date,snapshotId=''){
     for(const outcome of results){
       for(const success of outcome.successes||[]){
         const successBatch=success.batch||[],rows=success.events||[];
-        statusPersistedRows+=persistShipmentStatusRows(type,date,rows);
+        statusApiRows+=rows.length;
+        if(!rows.length)statusEmptySuccessBatches++;
+        const expected=new Set(successBatch.map(code=>String(code||'').trim().toUpperCase()));
+        const matched=rows.filter(row=>expected.has(billOf(row)));
+        statusMatchedRows+=new Set(matched.map(billOf)).size;
+        if(type==='WHPP')statusStatuslessRows+=matched.filter(row=>!hasDirectTmsShipmentStatus(row)).length;
+        statusPersistedRows+=persistShipmentStatusRows(type,date,rows,null,successBatch);
         const grouped=rawRowsByBill(rows);
         for(const codeRaw of successBatch){
           const code=String(codeRaw||'').trim().toUpperCase(),row=(grouped.get(code)||[]).at(-1)||null;
@@ -325,17 +467,41 @@ async function runOne(type,date,snapshotId=''){
           const truth=classifyShipmentStatus(row);
           if(!truth.pod)continue;
           status60++;
-          if(shipmentStatusTime(row)){status60WithTime++;statusTimedBills.add(code);}
+          // WHPP only: generic lastUpdateDate/updateTime is never a signed
+          // timestamp. Continue the event query unless strict 60 provides an
+          // explicit POD/delivery completion date that was saved above.
+          const verifiedTime=type==='WHPP'
+            ?explicitWhppTms60PodTime(row,date)
+            :shipmentStatusTime(row);
+          if(verifiedTime){status60WithTime++;statusTimedBills.add(code);}
           else status60WithoutTime++;
         }
       }
-      for(const failure of outcome.failures||[])statusFailed+=(failure.batch||[]).length;
+      for(const failure of outcome.failures||[]){
+        const n=(failure.batch||[]).length;statusFailed+=n;apiFailureBills+=n;
+        statusFailureBatches++;
+        const category=classifyWhppTmsError(failure.error);
+        statusFailureTypes.set(category,(statusFailureTypes.get(category)||0)+1);
+      }
     }
     patch(type,date,snapshotId,{
       status:'RUNNING',phase:'SHIPMENT_STATUS_QUERY',statusQueried,statusFailed,statusPersistedRows,status60,status60WithTime,status60WithoutTime,
-      confirmQueried,confirmFailed,confirmPersistedRows,confirm85,confirm85WithTime,confirm85WithoutTime,repairRevision:V740_CONFIRM_FIRST_TIMING_REPAIR_REVISION,
+      statusSourceMembers:statusBills.length,statusApiRows,statusMatchedRows,statusStatuslessRows,statusEmptySuccessBatches,statusFailureBatches,statusFailureTypes:Object.fromEntries(statusFailureTypes),
+      confirmQueried,confirmFailed,confirmPersistedRows,confirm85,confirm85WithTime,confirm85WithoutTime,repairRevision,
       message:`${type} ${date} shipmentStatus补证 ${Math.min(offset+4,statusBatches.length)}/${statusBatches.length}批：60/POD有时间 ${status60WithTime}票，无时间 ${status60WithoutTime}票`
     });
+    // A failed refresh/401 must not fan out into remaining WHPP TMS
+    // requests. Save a failed checkpoint and let a fresh login retry later.
+    if(type==='WHPP'&&Number(statusFailureTypes.get('AUTH')||0)>0){
+      return patch(type,date,snapshotId,{
+        status:'FAILED',phase:'FAILED',repairRevision,completedAt:now(),
+        statusSourceMembers:statusBills.length,
+        statusQueried,statusFailed,statusApiRows,statusMatchedRows,
+        statusStatuslessRows,statusPersistedRows,statusEmptySuccessBatches,
+        statusFailureBatches,statusFailureTypes:Object.fromEntries(statusFailureTypes),
+        message:`${type} ${date} TMS身份认证失败，已停止本日剩余查询；历史数据未完成补证，请重新登录后重试。`
+      });
+    }
   }
 
   const timedBills=new Set([...confirmTimedBills,...statusTimedBills]);
@@ -359,19 +525,36 @@ async function runOne(type,date,snapshotId=''){
           if(rows.length){persistedEvents+=persistBillEvents(type,date,code,rows);completed+=1}else failed+=1;
         }
       }
-      for(const failure of outcome.failures||[])failed+=(failure.batch||[]).length;
+      for(const failure of outcome.failures||[]){
+        const n=(failure.batch||[]).length;failed+=n;apiFailureBills+=n;
+      }
     }
-    patch(type,date,snapshotId,{status:'RUNNING',phase:'TRACK_QUERY',completed,failed,queried,persistedEvents,confirmQueried,confirmFailed,confirmPersistedRows,confirm85,confirm85WithTime,confirm85WithoutTime,statusQueried,statusFailed,statusPersistedRows,status60,status60WithTime,status60WithoutTime,repairRevision:V740_CONFIRM_FIRST_TIMING_REPAIR_REVISION,message:`${type} ${date} 轨迹补证 ${Math.min(offset+4,totalBatches)}/${totalBatches}批：已有POD时间 ${timedBills.size}，轨迹成功 ${Math.max(0,completed-timedBills.size)}，失败 ${failed}`});
+    patch(type,date,snapshotId,{status:'RUNNING',phase:'TRACK_QUERY',completed,failed,queried,persistedEvents,confirmQueried,confirmFailed,confirmPersistedRows,confirm85,confirm85WithTime,confirm85WithoutTime,statusQueried,statusFailed,statusPersistedRows,status60,status60WithTime,status60WithoutTime,repairRevision,message:`${type} ${date} 轨迹补证 ${Math.min(offset+4,totalBatches)}/${totalBatches}批：已有POD时间 ${timedBills.size}，轨迹成功 ${Math.max(0,completed-timedBills.size)}，失败 ${failed}`});
   }
-  if(bills.length>0&&timedBills.size===0&&completed===0&&failed>=trackBills.length&&persistedEvents===0&&reportAgeDays(date)>HISTORICAL_AUTO_REPAIR_MAX_AGE_DAYS){
+  const statusEvidenceHasGaps=whppStatusEvidenceHasGaps(type,{
+    podMembers:bills.length,sourceMembers:statusBills.length,
+    persistedRows:statusPersistedRows,failedMembers:statusFailed
+  });
+  const statusMissingMembers=type==='WHPP'?Math.max(0,statusBills.length-statusPersistedRows):0;
+  if(!statusEvidenceHasGaps&&canDurablyStopHistoricalRepair({
+    billsCount:bills.length,timedCount:timedBills.size,completed,failed,
+    trackBillsCount:trackBills.length,persistedEvents,
+    ageDays:reportAgeDays(date),apiFailureBills
+  })){
     const durable=writeDurableStop(
       type,date,snapshotId,bills.length,
       `${type} ${date} 已完成一次实时轨迹补证，但仍未取得真实60/70→80轨迹；为避免重复无效查询，后续自动补查已停止。`,
-      {completed,failed,queried,persistedEvents,confirmQueried,confirmFailed,confirmPersistedRows,confirm85,confirm85WithTime,confirm85WithoutTime,statusQueried,statusFailed,statusPersistedRows,status60,status60WithTime,status60WithoutTime,repairRevision:V740_CONFIRM_FIRST_TIMING_REPAIR_REVISION,exhaustionSource:'POST_CONFIRM_STATUS_AND_TRACK_QUERY_EXHAUSTED'}
+      {completed,failed,queried,persistedEvents,confirmQueried,confirmFailed,confirmPersistedRows,confirm85,confirm85WithTime,confirm85WithoutTime,statusQueried,statusFailed,statusPersistedRows,status60,status60WithTime,status60WithoutTime,statusSourceMembers:statusBills.length,statusApiRows,statusMatchedRows,statusStatuslessRows,statusEmptySuccessBatches,statusFailureBatches,statusFailureTypes:Object.fromEntries(statusFailureTypes),repairRevision,exhaustionSource:'POST_CONFIRM_STATUS_AND_TRACK_QUERY_EXHAUSTED'}
     );
     return patch(type,date,snapshotId,durable);
   }
-  return patch(type,date,snapshotId,{status:failed?'COMPLETED_WITH_GAPS':'COMPLETED',phase:'DONE',completed,failed,queried,persistedEvents,confirmQueried,confirmFailed,confirmPersistedRows,confirm85,confirm85WithTime,confirm85WithoutTime,statusQueried,statusFailed,statusPersistedRows,status60,status60WithTime,status60WithoutTime,repairRevision:V740_CONFIRM_FIRST_TIMING_REPAIR_REVISION,completedAt:now(),message:failed?`${type} ${date} 补证完成：confirm85有时间 ${confirm85WithTime}票，shipmentStatus60有时间 ${status60WithTime}票，轨迹仍缺 ${failed}票。`:`${type} ${date} 签收时效补证完成。`});
+  const finalState=patch(type,date,snapshotId,{status:(failed||statusEvidenceHasGaps)?'COMPLETED_WITH_GAPS':'COMPLETED',phase:'DONE',statusEvidenceHasGaps,statusMissingMembers,completed,failed,queried,persistedEvents,apiFailureBills,confirmQueried,confirmFailed,confirmPersistedRows,confirm85,confirm85WithTime,confirm85WithoutTime,statusQueried,statusFailed,statusPersistedRows,status60,status60WithTime,status60WithoutTime,statusSourceMembers:statusBills.length,statusApiRows,statusMatchedRows,statusStatuslessRows,statusEmptySuccessBatches,statusFailureBatches,statusFailureTypes:Object.fromEntries(statusFailureTypes),repairRevision,completedAt:now(),message:(failed||statusEvidenceHasGaps)?(statusEvidenceHasGaps
+    ?`${type} ${date} TMS原始状态证据未覆盖全部来源票：来源 ${statusBills.length}，保存 ${statusPersistedRows}，缺失至少 ${statusMissingMembers}，接口失败 ${statusFailed}。补证仍有缺口，不能视为业务闭环。`
+    :apiFailureBills>0
+    ?`${type} ${date} 部分接口请求失败 ${apiFailureBills}票；不代表历史轨迹不存在，保留重试。`
+    :`${type} ${date} 补证完成：confirm85有时间 ${confirm85WithTime}票，shipmentStatus60有时间 ${status60WithTime}票，轨迹仍缺 ${failed}票。`)
+    :`${type} ${date} 签收时效补证完成。`});
+  return finalState;
 }
 async function pump(){
   if(runningKey||!queue.size)return;
@@ -384,10 +567,14 @@ export function requestSelectedDateTimingRepair(businessType='',reportDate='',sn
   if(!TYPES.has(type)||!date)return stateFor(type,date,snap);
   let current=stateFor(type,date,snap),status=String(current.status||'').toUpperCase();
   if(status==='HISTORICAL_EVIDENCE_UNAVAILABLE'){
-    // V740 adds live confirm-query before shipmentStatus/event fallback. Older
-    // durable stops are reopened exactly once because confirm-query is the same
-    // source that originally established many historical POD memberships.
-    if(String(current.repairRevision||'')===V740_CONFIRM_FIRST_TIMING_REPAIR_REVISION&&Number(current.confirmQueried||0)>0)return current;
+    // WHPP V788 adds an exact-source 60/80/81 query for every saved member,
+    // including the 56 historically returned-label candidates. Reopen a V740
+    // durable stop only ONCE under this new revision. A V788 exhausted stop
+    // never loops; other businesses preserve their original V740 policy.
+    const revision=String(current.repairRevision||'');
+    if(type==='WHPP'&&revision===V788_WHPP_FULL_SOURCE_STATUS_REVISION)return current;
+    if(type!=='WHPP'&&revision===V740_CONFIRM_FIRST_TIMING_REPAIR_REVISION
+      &&Number(current.confirmQueried||0)>0)return current;
     clearDurableStop(type,date);
     states.delete(keyOf(type,date,snap));
     current=baseState(type,date,snap);

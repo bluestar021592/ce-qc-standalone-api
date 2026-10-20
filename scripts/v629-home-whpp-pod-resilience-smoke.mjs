@@ -17,7 +17,7 @@ assert.match(home,/safeReturnSummaryForBatch\(latest,type\)/,'home must use resi
 
 assert.match(js,/summary\?\.reportDate===reportDate/,'business timing read must be null-safe');
 assert.match(js,/setText\('kpiReturned',fmt\(m\.returned\|\|0\)\)/,'business return card first paint must use compact backend return truth');
-assert.match(js,/function renderKpiDetail\(kind\)/,'KPI detail drilldown must remain installed');
+assert.match(js,/function renderKpiDetail\(kind,requestedPage=0,shouldScroll=true\)/,'KPI detail drilldown must remain installed with bounded paging');
 
 assert.match(server,/import \{ loadWhppState, saveWhppDailyImport \} from '\.\/src\/whppStore\.js'/,'WHPP state/import integration missing');
 assert.match(server,/requestedType === 'WHPP'[\s\S]*loadWhppState\(\)[\s\S]*loadWhppCanonicalTruth\([\s\S]*buildWhppDashboard/,'WHPP business board must use canonical merged truth');

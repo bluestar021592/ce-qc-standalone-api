@@ -15,7 +15,7 @@ assert.match(helper,/LEFT JOIN business_final_rows/,'formal Shopee POD truth mus
 assert.match(helper,/LEFT JOIN shipment_current_state/,'formal Shopee POD truth must include current state');
 assert.match(helper,/LEFT JOIN business_scan_results/,'formal Shopee POD truth must include scan results');
 assert.match(helper,/LEFT JOIN business_pod_locks/,'formal Shopee POD truth must include POD locks');
-assert.match(helper,/loadWhppCanonicalTruth\(date,String\(batch\.snapshotId\|\|''\),db\)/,'WHPP selected-date POD truth must reuse formal canonical truth on the same DB');
+assert.match(helper,/loadWhppCanonicalTruth\(date,String\(batch\?\.snapshotId\|\|''\),db\)/,'WHPP selected-date POD truth must reuse formal canonical truth, including independently imported WHPP-only dates');
 assert.match(canonical,/dbOverride\|\|getDb\(\)/,'WHPP canonical truth must support caller DB sharing');
 assert.match(repair,/persistentSelectedDatePodTruth\(getDb\(\),'WHPP',date\)/,'WHPP timing must use persisted canonical truth first');
 assert.match(repair,/persistentSelectedDatePodTruth\(getDb\(\),type,date\)/,'Shopee timing must use persisted canonical truth first');

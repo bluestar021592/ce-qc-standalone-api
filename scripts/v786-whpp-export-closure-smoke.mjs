@@ -20,6 +20,11 @@ try{
   `);
   const day='2026-07-02', snap='SNAP-v786';
   const bills=Array.from({length:156},(_,i)=>'CE020726'+String(i+1).padStart(5,'0'));
+  // V788: WHPP-only day union is sourced from an actual independent
+  // business_daily_parse_rows membership, not from a fake unified batch.
+  db.exec("CREATE TABLE business_daily_parse_rows(businessType TEXT,reportDate TEXT,shipmentCode TEXT)");
+  const putIndependent=db.prepare("INSERT INTO business_daily_parse_rows VALUES('WHPP',?,?)");
+  for(const code of bills)putIndependent.run(day,code);
   const raw=bills.map(shipmentCode=>({
     shipmentCode,regionCode:'PP',reportDate:day,
     isPod:0,truthEvidence:{scan:true,final:true,pod:false,returned:false},currentState:'PENDING'
@@ -95,11 +100,12 @@ try{
   const listBody=between(loader,'export function listLightweightCompletedUnifiedSnapshots(', 'function loadLightweightExportRows(')
     .replace('export function','function');
   const getList=new Function('EXPORT_BUSINESS_TYPES','validateDateRange','listLatestValidRangeBatches',
-    'loadLightweightExportRows',listBody+'\nreturn listLightweightCompletedUnifiedSnapshots;')(
+    'loadLightweightExportRows','getDb',listBody+'\nreturn listLightweightCompletedUnifiedSnapshots;')(
     ['CE','CEAF','TBKH','ALI1688','SHOPEECN','SHOPEEVN','WHPP'],
     ()=>({from:day,to:day}),
-    ()=>[{reportDate:day,snapshotId:snap,createdAt:''}],
-    (snapshot,date,type)=>type==='WHPP'?source(snapshot,date,type):[]);
+    ()=>[{reportDate:day,snapshotId:snap,createdAt:'',unifiedCompleted:true}],
+    (snapshot,date,type)=>type==='WHPP'?source(snapshot,date,type):[],
+    ()=>db);
   const accepted=getList(day,day,['WHPP']);
   assert.equal(accepted[0].payload.finalRows.length,156,
     'WHPP-only formal report must accept WHPP as a business and include all 156');

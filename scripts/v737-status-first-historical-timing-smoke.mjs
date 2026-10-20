@@ -6,7 +6,7 @@ const statusTruth=fs.readFileSync('src/shipmentStatusTruth.js','utf8');
 const home=fs.readFileSync('src/homeQualitySummary.js','utf8');
 
 assert.match(repair,/client\.shipmentTrack\(codes\)/,'historical timing repair must retain shipmentStatus fallback after confirm-query');
-assert.match(repair,/persistShipmentStatusRows\(type,date,rows\)/,'shipmentStatus results must be persisted for later timing reads');
+assert.match(repair,/persistShipmentStatusRows\(type,date,rows,null,successBatch\)/,'shipmentStatus results must be saved only for members of the exact requested batch');
 assert.match(repair,/status60WithTime/,'status=60 with timestamp count missing');
 assert.match(repair,/status60WithoutTime/,'status=60 without timestamp count missing');
 assert.match(repair,/const trackBills=bills\.filter\(code=>!timedBills\.has\(code\)\)/,'track events should only be queried for bills still missing confirm/status POD time');

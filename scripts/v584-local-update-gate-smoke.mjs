@@ -21,6 +21,42 @@ assert.doesNotMatch(gate,/TASKS\.splice\([^\n]*v587-production-browser-retry/,'V
 assert.match(gate,/cloud Edge smoke is NON-BLOCKING diagnostic only/,'V621 browser-sensitive candidates must keep Edge as non-blocking diagnostics');
 assert.match(gate,/changed-file detection unavailable; real browser gate stays enabled \(fail-safe\)/,'diff detection failure must never silently skip browser validation');
 assert.match(launcher,/CE_QC_INSTALLED_COMMIT/,'managed launcher must tell the candidate gate which exact installed commit it is replacing');
+assert.match(launcher,/function Write-V788ManagedInstallReceipt/,
+  'managed updater must record SHA only after exact installation');
+assert.match(launcher,/function Test-V788ManagedInstallReceipt/,
+  'on subsequent boot, already-installed V788 must be able to recover its release receipt');
+assert.match(launcher,/\$recoverResult=@\(Test-RemoteCandidate \$remote \$current\)/,
+  'missing receipt for already-current main must rerun bounded candidate gate');
+const alreadyCurrent=launcher.slice(launcher.indexOf('if ($current -eq $remote)'));
+assert.ok(alreadyCurrent.indexOf('Test-V788ManagedInstallReceipt $current') <
+  alreadyCurrent.indexOf('Write-V788ManagedInstallReceipt $current $remote'),
+  'already-current branch cannot mint receipts without first checking existing proof');
+assert.ok(alreadyCurrent.indexOf('Test-RemoteCandidate $remote $current') <
+  alreadyCurrent.indexOf('Write-V788ManagedInstallReceipt $current $remote'),
+  'already-current branch must execute real go-live tests BEFORE minting proof');
+assert.match(launcher,/\$recoverResult\.Count -eq 1 -and \$recoverResult\[0\] -eq \$true/,
+  'failed / polluted revalidation cannot be accepted');
+assert.match(launcher,/schemaVersion -is \[int\]/,
+  'PowerShell receipt must require a numeric schemaVersion as Node does');
+assert.match(launcher,/candidateGatePassed -is \[bool\]/,
+  'PowerShell receipt must require a boolean candidateGatePassed as Node does');
+assert.match(launcher,/mode -ceq 'INSTALLED'/,
+  'PowerShell receipt mode comparison must match backend case-sensitive check');
+assert.match(launcher,/info.Length -gt 8192/,
+  'oversized receipt must be rejected before parsing');
+assert.match(launcher,/FileAttributes\]::ReparsePoint/,
+  'PowerShell receipt must reject filesystem redirection just like backend');
+assert.equal((launcher.match(/^function Invoke-Exe\(/gm)||[]).length,1,
+  'launcher must contain exactly one executable startup/receipt definition: Invoke-Exe');
+assert.equal((launcher.match(/^function Invoke-SafeAutoUpdate\b/gm)||[]).length,1,
+  'duplicate launcher startup flow must be rejected');
+assert.equal((launcher.match(/^function Test-V788ManagedInstallReceipt\(/gm)||[]).length,1,
+  'duplicate V788 receipt validator must be rejected');
+assert.doesNotMatch(launcher,/^\}\s+-and\s*$/m,
+  'truncated receipt code appended after launcher must be rejected');
+assert.ok(launcher.indexOf('Write-V788ManagedInstallReceipt $installed $remote')
+  >launcher.indexOf('$installed = Install-VerifiedCommitLocally $current $remote'),
+  'managed install receipt must never precede installation');
 const browserRetry=fs.readFileSync(new URL('./v587-production-browser-retry.mjs',import.meta.url),'utf8');
 assert.match(browserRetry,/v581-production-shell-browser-smoke\.mjs/,'retry wrapper must execute the real production Edge smoke');
 assert.match(browserRetry,/non-transient browser assertion failed/,'real assertion failures must never be retried into a false pass');

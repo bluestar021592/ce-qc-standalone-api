@@ -15,7 +15,8 @@ assert.match(repair,/if\(status==='HISTORICAL_EVIDENCE_UNAVAILABLE'\)\{/,'durabl
 assert.match(repair,/V740_CONFIRM_FIRST_TIMING_REPAIR_REVISION/,'confirm-first timing repair revision missing');
 assert.match(repair,/statusQueried/,'historical repair must record shipmentStatus query count');
 assert.match(repair,/clearDurableStop\(type,date\)/,'legacy zero-query historical stops must be cleared for one real retry');
-assert.match(repair,/timedBills\.size===0&&completed===0&&failed>=trackBills\.length&&persistedEvents===0&&reportAgeDays\(date\)>HISTORICAL_AUTO_REPAIR_MAX_AGE_DAYS/,'durable historical exhaustion must be decided only after confirm+status+track repair finishes');
+assert.match(repair,/canDurablyStopHistoricalRepair\(\{/,'durable historical exhaustion must depend on the full confirm+status+track result');
+assert.match(repair,/ageDays>HISTORICAL_AUTO_REPAIR_MAX_AGE_DAYS&&apiFailureBills===0/,'authentication and network failures must never be mistaken for permanently absent history');
 assert.match(repair,/exhaustionSource:'POST_CONFIRM_STATUS_AND_TRACK_QUERY_EXHAUSTED'/,'durable stop must prove confirm, shipmentStatus and track repair were exhausted');
 assert.doesNotMatch(repair,/savedEvents===0[\s\S]*自动补查已停止/,'historical repair must never stop before the first real timing query');
 

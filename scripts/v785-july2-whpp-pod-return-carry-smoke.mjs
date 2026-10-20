@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import {v788IsCurrentSpecialNonDelivery} from '../src/v788SpecialOpenTruth.js';
 import {DatabaseSync} from 'node:sqlite';
 import {publishManualRefreshTruth} from '../src/manualRefreshPublication.js';
 const ui=fs.readFileSync(new URL('../public/v625-shell.js',import.meta.url),'utf8');
@@ -42,9 +43,9 @@ try{
   const start=server.indexOf('function workspaceRows(');
   const end=server.indexOf('function persistReconciliationDiagnostics(',start);
   assert.ok(start>0&&end>start);
-  const maker=new Function('billOfWorkspace','workspacePendingNonContinuous','workspaceStoreArrived','workspaceOcDays',
+  const maker=new Function('billOfWorkspace','workspacePendingNonContinuous','workspaceStoreArrived','workspaceOcDays','v788IsCurrentSpecialNonDelivery',
     server.slice(start,end)+'\nreturn workspaceRows;');
-  const workspace=maker(row=>String(row.shipmentCode||''),()=>false,()=>false,()=>0);
+  const workspace=maker(row=>String(row.shipmentCode||''),()=>false,()=>false,()=>0,v788IsCurrentSpecialNonDelivery);
   const rows=workspace({businessType:'WHPP',reportDate:d,finalRows:[
     {shipmentCode:'X60',shipmentStatus:'60'},
     {shipmentCode:'X81',shipmentStatus:'81'},
