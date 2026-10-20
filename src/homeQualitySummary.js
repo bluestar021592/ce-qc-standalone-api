@@ -866,11 +866,11 @@ export function buildHomeReturnVerification({reportDate='',snapshotId=''}={}){
       if(bills.size!==expected||sourceRows.length!==expected)
         throw Error('RETURN_SOURCE_MEMBERS_UNVERIFIED');
       if(type!=='WHPP'&&expected>0){
-        const finalCount=Number(getDb().prepare(\`SELECT COUNT(DISTINCT UPPER(TRIM(f.shipmentCode))) count
+        const finalCount=Number(getDb().prepare(`SELECT COUNT(DISTINCT UPPER(TRIM(f.shipmentCode))) count
           FROM business_final_rows f JOIN unified_import_rows u
             ON u.shipmentCode=f.shipmentCode AND u.reportDate=f.reportDate
           WHERE f.businessType='SHOPEE' AND f.reportDate=?
-            AND u.snapshotId=? AND u.businessType=?\`).get(batch.reportDate,batch.snapshotId,type)?.count||0);
+            AND u.snapshotId=? AND u.businessType=?`).get(batch.reportDate,batch.snapshotId,type)?.count||0);
         if(finalCount!==expected)throw Error('RETURN_FINAL_MEMBERS_UNVERIFIED');
       }
       const summary=returnSummaryForBatch(batch,type);
