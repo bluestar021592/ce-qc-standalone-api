@@ -13,7 +13,7 @@ for(const id of ['v788KpiDetailPrevious','v788KpiDetailNext'])assert.ok(html.inc
 assert.match(js,/byId\('v788KpiDetailNext'\)\?\.addEventListener/);
 assert.match(js,/byId\('v788KpiDetailPrevious'\)\?\.addEventListener/);
 const browserAsset=html.match(/v625-shell\.js\?v=20261019-v788-1&patch=(\d+)/);
-assert.ok(browserAsset&&Number(browserAsset[1])>=792,'KPI detail browser JS must use the latest V788 patch revision');
+assert.ok(browserAsset&&Number(browserAsset[1])>=793,'KPI detail browser JS must use the latest V788 patch revision');
 assert.match(js,/setText\('v625TrackMeta','运单 '\+code\+' · 查询完成/);
 assert.match(js,/setText\('v625TrackMeta','运单 '\+code\+' · 查询失败/);
 assert.match(js,/byId\('v625TrackDate'\)\.value=currentParams\(\)\.get\('reportDate'\)\|\|today\(\)/);

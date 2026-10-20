@@ -19,7 +19,7 @@ assert.match(shell,/json\(returnsUrl,30000\)/);
 assert.match(shell,/viewSequence!==v788HomeViewSequence/,'out-of-order workers never overwrite new date');
 assert.match(shell,/progressUnknown\?'历史处理证据待核验'/,'unknown 0\/0 cannot be reported as new work');
 assert.match(shell,/resumeBtn\.disabled=allComplete\|\|historyVerifying\|\|progressUnknown/);
-assert.match(html,/v625-shell\.js\?v=20261019-v788-1&patch=792/);
+assert.match(html,/v625-shell\.js\?v=20261019-v788-1&patch=793/);
 
 const from=shell.indexOf('function v788RenderVerifiedHomeReturns(');
 const end=shell.indexOf('let v788HomeViewSequence=',from);

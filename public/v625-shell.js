@@ -2346,6 +2346,18 @@ function v788TrackingReadOnlyReview(data={},bill='',orderedEvents=[]){
   return{result,localState:localState||'待核验',lastTime:lastTime||'无轨迹时间',
     hasTerminal:pod||returned,conflict,openLedger,remoteNote};
 }
+// V788: keep the most recent evidence immediately visible. Multi-month
+// histories remain accessible in one native expand control, not discarded.
+function v788RenderBoundedTrackTimeline(events=[],render=()=>'',maxVisible=8){
+  const rows=Array.isArray(events)?events:[];
+  const count=Math.max(1,Math.min(15,Number(maxVisible)||8));
+  const latest=rows.slice(0,count).map(render).join('');
+  const older=rows.slice(count);
+  if(!older.length)return latest;
+  return latest+'<details class="v788-track-history" style="margin-top:10px"><summary style="cursor:pointer;padding:10px 8px;font-weight:600">展开其余 '
+    +older.length+' 条历史轨迹（已按时间从近到远排列）</summary>'
+    +older.map(render).join('')+'</details>';
+}
 async function queryTrack(){
   const code=byId('v625TrackCode').value.trim();if(!code){setText('v625TrackMeta','请输入运单号');return}
   const wanted=code.toUpperCase(),source=currentParams().get('source')||'';
@@ -2394,7 +2406,7 @@ async function queryTrack(){
       else if(strongTerminalPod&&/API_PENDING_RETRY|PENDING_RETRY|待重试/.test(upperState))continue;
       else if(state||terminal)addStatus(row,'本地账本：'+(state||terminal),'本地账本存在当前状态记录。','qc_tracking_ledger');
     }
-    const eventHtml=events.map(e=>'<div class="v625-timeline-item"><b>'+esc(first(e,['eventTime','time','updateTime','createdAt'])||'—')+'</b><p>'+esc(eventDesc(e))+'</p><small>'+esc(e.evidenceSource||'CE实时轨迹')+'</small></div>').join('');
+    const eventHtml=v788RenderBoundedTrackTimeline(events,e=>'<div class="v625-timeline-item"><b>'+esc(first(e,['eventTime','time','updateTime','createdAt'])||'—')+'</b><p>'+esc(eventDesc(e))+'</p><small>'+esc(e.evidenceSource||'CE实时轨迹')+'</small></div>');
     const statusHtml=statusEvidence.map(e=>'<div class="v625-timeline-item"><b>'+esc(e.time||'无可用时间')+'</b><p><strong>'+esc(e.title)+'</strong> · '+esc(e.description)+'</p><small>'+esc(e.source)+'</small></div>').join('');
     const root=byId('v625TrackTimeline');
     const review=v788TrackingReadOnlyReview(r,wanted,events);
@@ -2405,7 +2417,7 @@ async function queryTrack(){
       +'<small>仅展示只读证据；CYCLE_COUNT（盘点）不等于POD或已退回，页面查询不会改写账本。</small></div>';
     if(events.length||statusEvidence.length){
       root.innerHTML=reviewHtml
-        +(events.length?'<div class="v625-empty-state" style="padding:6px 0">轨迹记录（最新在前）</div>'+eventHtml:'')
+        +(events.length?'<div class="v625-empty-state" style="padding:6px 0">轨迹记录（最新在前；先显示最近8条）</div>'+eventHtml:'')
         +(statusEvidence.length?('<div class="v625-empty-state" style="padding:10px 0 6px">状态证据（不等同于轨迹时间）</div>'+statusHtml):'');
     }else{
       root.innerHTML='<div class="v625-empty-state">'+(source==='timing-backfill'?'该运单当前没有可显示的历史轨迹或时间证据；系统会继续等待后续日报出现最终派件时间后自动回补。':'当前没有查到本地或接口轨迹/状态证据。')+'</div>';
