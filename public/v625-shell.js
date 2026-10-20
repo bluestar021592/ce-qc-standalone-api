@@ -877,9 +877,9 @@ function renderLiveProgress(bundle={}){
     :(scanTotal+trackTotal)>0?((scanDone+trackDone)+' / '+(scanTotal+trackTotal)):(completeFamilies+'/3 业务完成');
   const reconciledCount=whpp.evidenceGap?progressCount+' · WHPP已确认终态 '+whpp.evidenceGap.terminalCount+'/'+whpp.evidenceGap.total:progressCount;
   setText('v626ProcessCount',reconciledCount);setText('v626ImportProgressCount',reconciledCount);
-  const scanStage=progressUnknown?'待核验':allComplete?'完成':historyVerifying?'历史核验中':(/轨迹|track/i.test(activePhase)?'完成':allRunning?'处理中':completeFamilies?('已完成 '+completeFamilies+'/3业务'):'等待');
-  const trackStage=progressUnknown?'待核验':allComplete?'完成':historyVerifying?'历史核验中':(/轨迹|track/i.test(activePhase)?'处理中':allRunning?'等待扫描完成':completeFamilies?('已完成 '+completeFamilies+'/3业务'):'等待');
-  const doneStage=progressUnknown?'待核验':allComplete?'完成':historyVerifying?'历史核验中':allRunning?'处理中':completeFamilies?('已完成 '+completeFamilies+'/3业务'):'等待';
+  const scanStage=allComplete?'完成':progressUnknown?'待核验':historyVerifying?'历史核验中':(/轨迹|track/i.test(activePhase)?'完成':allRunning?'处理中':completeFamilies?('已完成 '+completeFamilies+'/3业务'):'等待');
+  const trackStage=allComplete?'完成':progressUnknown?'待核验':historyVerifying?'历史核验中':(/轨迹|track/i.test(activePhase)?'处理中':allRunning?'等待扫描完成':completeFamilies?('已完成 '+completeFamilies+'/3业务'):'等待');
+  const doneStage=allComplete?'完成':progressUnknown?'待核验':historyVerifying?'历史核验中':allRunning?'处理中':completeFamilies?('已完成 '+completeFamilies+'/3业务'):'等待';
   setText('v626StageScan',scanStage);setText('v626StageTrack',trackStage);setText('v626StageDone',doneStage);
   setText('v626ImportScan',scanStage);setText('v626ImportTrack',trackStage);setText('v626ImportDone',doneStage);
   const badge=byId('v626ProcessState');if(badge){badge.textContent=completeFamilies>=3?'已完成':(progressUnknown||historyVerifying)?'待核验':allRunning?'处理中':'待处理';badge.className='v625-badge '+(completeFamilies>=3?'success':allRunning?'warning':'warning')}
