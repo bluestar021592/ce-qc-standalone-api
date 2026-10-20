@@ -845,6 +845,10 @@ function renderLiveProgress(bundle={}){
   const allRunning=Boolean(ccsl.running||shopee.running||whpp.active||v752LaunchingFamily);
   const completeFamilies=Object.values(familyLabels).filter(label=>label==='完成').length;
   const allComplete=completeFamilies===3;
+  const sourceKnown=v788HomeSourceProof?.reportDate===String(bundle.reportDate||'').slice(0,10)
+    &&Number(v788HomeSourceProof?.total||0)>0;
+  const progressUnknown=Boolean(sourceKnown&&!allComplete&&!allRunning&&completeFamilies===0
+    &&scanTotal===0&&trackTotal===0&&whppBatches===0);
   const historyVerifying=[familyLabels.ccsl,familyLabels.shopee].some(label=>String(label).includes('历史证据核验中'));
   const scanPct=allComplete?100:progressPercent(scanDone,scanTotal),trackPct=allComplete?100:progressPercent(trackDone,trackTotal);
   const whppPct=allComplete?100:progressPercent(whppBatch,whppBatches);
@@ -854,6 +858,7 @@ function renderLiveProgress(bundle={}){
   const whppVerifying=String(familyLabels.whpp||'').includes('核验中');
   const phase=allComplete
     ?'全部处理完成'+(whpp.evidenceGap?' · WHPP '+whpp.evidenceGap.missing+'票状态待跟进':'')
+    :progressUnknown?'历史日报已有来源成员，扫描/轨迹完成证据暂不可核验；请勿重新上传或重复扫描'
     :activePhase||(historyVerifying?'CCSL/SHOPEE历史证据核验中；无需重新上传或扫描，可正常切换看板':whpp.evidenceGap?'已完成'+completeFamilies+'/3业务 · WHPP '+whpp.evidenceGap.missing+'票状态待核验（无需重新上传）':whppVerifying?'WHPP完成状态核验中，请勿重复扫描':completeFamilies===2&&familyLabels.whpp!=='完成'?'已完成 2/3 业务 · WHPP待处理，请点击“继续未完成处理”':completeFamilies?('已完成 '+completeFamilies+'/3 业务，等待下一业务处理'):'等待开始处理');
   // V785: "WHPP 0 tickets auto-skipped" belongs to the task engine's old
   // unified sub-count; it cannot describe a separately verified 156-member
@@ -868,17 +873,17 @@ function renderLiveProgress(bundle={}){
       (whppPendingCustomer?'，未POD/退回终态待查 '+fmt(whppPendingCustomer)+'票':'')
     :'';
   setText('v626ProcessText',phase+whppStatusNote);setText('v626ImportProgressText',phase+whppStatusNote);
-  const progressCount=historyVerifying?'历史核验中（当前已确认 '+completeFamilies+'/3 业务）'
+  const progressCount=progressUnknown?'历史处理证据待核验':historyVerifying?'历史核验中（当前已确认 '+completeFamilies+'/3 业务）'
     :(scanTotal+trackTotal)>0?((scanDone+trackDone)+' / '+(scanTotal+trackTotal)):(completeFamilies+'/3 业务完成');
   const reconciledCount=whpp.evidenceGap?progressCount+' · WHPP已确认终态 '+whpp.evidenceGap.terminalCount+'/'+whpp.evidenceGap.total:progressCount;
   setText('v626ProcessCount',reconciledCount);setText('v626ImportProgressCount',reconciledCount);
-  const scanStage=allComplete?'完成':historyVerifying?'历史核验中':(/轨迹|track/i.test(activePhase)?'完成':allRunning?'处理中':completeFamilies?('已完成 '+completeFamilies+'/3业务'):'等待');
-  const trackStage=allComplete?'完成':historyVerifying?'历史核验中':(/轨迹|track/i.test(activePhase)?'处理中':allRunning?'等待扫描完成':completeFamilies?('已完成 '+completeFamilies+'/3业务'):'等待');
-  const doneStage=allComplete?'完成':historyVerifying?'历史核验中':allRunning?'处理中':completeFamilies?('已完成 '+completeFamilies+'/3业务'):'等待';
+  const scanStage=progressUnknown?'待核验':allComplete?'完成':historyVerifying?'历史核验中':(/轨迹|track/i.test(activePhase)?'完成':allRunning?'处理中':completeFamilies?('已完成 '+completeFamilies+'/3业务'):'等待');
+  const trackStage=progressUnknown?'待核验':allComplete?'完成':historyVerifying?'历史核验中':(/轨迹|track/i.test(activePhase)?'处理中':allRunning?'等待扫描完成':completeFamilies?('已完成 '+completeFamilies+'/3业务'):'等待');
+  const doneStage=progressUnknown?'待核验':allComplete?'完成':historyVerifying?'历史核验中':allRunning?'处理中':completeFamilies?('已完成 '+completeFamilies+'/3业务'):'等待';
   setText('v626StageScan',scanStage);setText('v626StageTrack',trackStage);setText('v626StageDone',doneStage);
   setText('v626ImportScan',scanStage);setText('v626ImportTrack',trackStage);setText('v626ImportDone',doneStage);
-  const badge=byId('v626ProcessState');if(badge){badge.textContent=completeFamilies>=3?'已完成':historyVerifying?'核验中':allRunning?'处理中':'待处理';badge.className='v625-badge '+(completeFamilies>=3?'success':allRunning?'warning':'warning')}
-  const resumeBtn=byId('v625RunResume');if(resumeBtn){resumeBtn.disabled=allComplete||historyVerifying;resumeBtn.hidden=allComplete||historyVerifying;resumeBtn.style.setProperty('display',allComplete||historyVerifying?'none':'inline-flex','important')}
+  const badge=byId('v626ProcessState');if(badge){badge.textContent=completeFamilies>=3?'已完成':(progressUnknown||historyVerifying)?'待核验':allRunning?'处理中':'待处理';badge.className='v625-badge '+(completeFamilies>=3?'success':allRunning?'warning':'warning')}
+  const resumeBtn=byId('v625RunResume');if(resumeBtn){resumeBtn.disabled=allComplete||historyVerifying||progressUnknown;resumeBtn.hidden=allComplete||historyVerifying||progressUnknown;resumeBtn.style.setProperty('display',allComplete||historyVerifying||progressUnknown?'none':'inline-flex','important')}
   const progressLogs=[
     ['CCSL',ccsl,ccsl.generatedAt||new Date().toISOString(),ccsl.phase||ccsl.lastMessage],
     ['SHOPEE',shopee,shopee.generatedAt||new Date().toISOString(),shopee.phase||shopee.lastMessage],
@@ -1048,7 +1053,30 @@ async function scanWhppPending(){
     }
   }
 }
+// V788: independent exact-date returns cannot be held hostage by slow
+// historical timing. An unverified count remains explicitly unknown.
+function v788RenderVerifiedHomeReturns(payload,reportDate,snapshotId){
+  if(page!=='home'||String(selectedReportDate()||reportDate)!==reportDate)return false;
+  if(!payload||payload.ok!==true||payload.selectionMatched!==true
+    ||String(payload.reportDate)!==reportDate||String(payload.snapshotId)!==snapshotId)return false;
+  for(const type of ['WHPP','SHOPEECN','SHOPEEVN']){
+    const result=payload.returns?.[type];
+    const verified=result?.verified===true&&Number.isFinite(result?.count)
+      &&Number.isFinite(result?.rate)&&Number(result?.total)>=Number(result.count)
+      &&Number(result.count)>=0&&Number(result.rate)>=0&&Number(result.rate)<=100;
+    setText('v626Return'+type,verified?fmt(result.count):'待核验');
+    setText('v626ReturnRate'+type,verified?pct(result.rate):'待核验');
+    if(verified){
+      setText('v626Timing'+type+'Return',fmt(result.count));
+      setText('v626Timing'+type+'ReturnRate',pct(result.rate));
+    }
+  }
+  return true;
+}
+let v788HomeViewSequence=0;
+let v788HomeSourceProof=null;
 async function loadHome(options={}){
+  const viewSequence=++v788HomeViewSequence;
   const requestedDate=selectedReportDate();
   const summaryUrl='/api/home-quality-summary?fast=1'+(requestedDate?'&reportDate='+encodeURIComponent(requestedDate):'');
   const summaryQuickUrl=summaryUrl+'&quick=1';
@@ -1063,20 +1091,34 @@ async function loadHome(options={}){
     :new Promise(resolve=>setTimeout(resolve,1200))
       .then(()=>json('/api/unified-history?limit=7',7000).catch(()=>null));
   const summary=await summaryPromise;
+  if(viewSequence!==v788HomeViewSequence||page!=='home')return;
   // V766: never hold the menu while 30 days of signing and return SQL runs.
   // The first response holds only verified source classification counts.
   // The completed full result is applied only if the exact original
   // report-date and snapshot are still selected.
   if(summary?.quickOnly&&summary.selectionMatched&&summary.snapshotId){
     const proofDate=String(summary.reportDate||''),proofSnapshot=String(summary.snapshotId||'');
+    // Independent short read does not depend on HOME_FULL's 30-day timing.
+    const returnsUrl='/api/home-return-summary?reportDate='+encodeURIComponent(proofDate)
+      +'&snapshotId='+encodeURIComponent(proofSnapshot);
+    setTimeout(()=>{
+      if(viewSequence!==v788HomeViewSequence||page!=='home'
+        ||String(selectedReportDate()||proofDate)!==proofDate)return;
+      void json(returnsUrl,30000).then(payload=>{
+        if(viewSequence===v788HomeViewSequence)
+          v788RenderVerifiedHomeReturns(payload,proofDate,proofSnapshot);
+      }).catch(()=>{
+        if(viewSequence===v788HomeViewSequence&&page==='home')
+          setText('v625HomeStatus','七业务源票可用；退回率只读核验暂未完成，不能以横杠或0%作为业务结论。');
+      });
+    },250);
     const url='/api/home-quality-summary?fast=1&reportDate='+encodeURIComponent(proofDate)+
       '&snapshotId='+encodeURIComponent(proofSnapshot);
     setTimeout(()=>{
-      if(page!=='home'||String(selectedReportDate()||proofDate)!==proofDate)return;
+      if(viewSequence!==v788HomeViewSequence||page!=='home'||String(selectedReportDate()||proofDate)!==proofDate)return;
       void json(url,70000).then(full=>{
-        if(!full||String(full.reportDate||'')!==proofDate
+        if(!full||viewSequence!==v788HomeViewSequence||String(full.reportDate||'')!==proofDate
           ||String(full.snapshotId||'')!==proofSnapshot
-          ||String(v626LatestImport?.snapshotId||'')!==proofSnapshot
           ||String(selectedReportDate()||proofDate)!==proofDate)return;
         void loadHome({summaryOverride:full,skipHistory:true,skipAux:true});
       }).catch(()=>{
@@ -1118,6 +1160,8 @@ async function loadHome(options={}){
   const types=['CE','CEAF','TBKH','ALI1688','WHPP','SHOPEECN','SHOPEEVN'];
   const sevenBusinessTotal=types.reduce((sum,type)=>sum+Number(counts[type]||0),0);
   const grand=Number(classification.total||sevenBusinessTotal||0);
+  v788HomeSourceProof={reportDate:String(summary?.reportDate||requestedDate||'').slice(0,10),
+    snapshotId:String(summary?.snapshotId||''),total:grand};
   setText('v632GrandTotal',fmt(grand));
   setText('v632GrandTotalCheck',fmt(sevenBusinessTotal));
   const totalCard=q('[data-card="TOTAL"]');

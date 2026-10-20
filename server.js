@@ -733,6 +733,29 @@ function v766QuickHomeSummary({reportDate='',snapshotId=''}={}){
     returns:{},timing:{},timingTrend:{},timingEvidenceRepair:{active:false,types:{}}
   };
 }
+// V788 independent, exact-date read-only returned count/rate projection;
+// signing time worker may still run separately. Fail-closed when unverified.
+app.get('/api/home-return-summary',async(req,res)=>{
+  try{
+    const reportDate=String(req.query.reportDate||'').slice(0,10);
+    const snapshotId=String(req.query.snapshotId||'');
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(reportDate)||!snapshotId)
+      return res.status(400).json({ok:false,code:'HOME_RETURN_EXACT_SCOPE_REQUIRED'});
+    const pinned=fastDashboardBatch(snapshotId,reportDate);
+    if(!pinned||String(pinned.snapshotId)!==snapshotId||String(pinned.reportDate)!==reportDate)
+      return res.status(404).json({ok:false,code:'HOME_RETURN_SNAPSHOT_MISSING'});
+    const read=await v766ReadJob('HOME_RETURNS',{reportDate,snapshotId});
+    if(read.result?.reportDate!==reportDate||read.result?.snapshotId!==snapshotId
+      ||read.result?.selectionMatched!==true)throw Error('HOME_RETURN_WORKER_SCOPE_MISMATCH');
+    res.setHeader('Cache-Control','no-store');
+    res.setHeader('X-CE-QC-Read-Cache',read.cache);
+    return res.json(read.result);
+  }catch(error){
+    console.warn('[CE-QC][HOME_RETURN_VERIFICATION]',String(error?.message||error));
+    return res.status(503).json({ok:false,code:'HOME_RETURN_VERIFICATION_UNAVAILABLE',
+      error:'退回率只读核验暂不可用，不显示未核实的0票或百分比。'});
+  }
+});
 app.get('/api/home-quality-summary', async (req, res) => {
   try {
     const reportDate=String(req.query.reportDate||'');
