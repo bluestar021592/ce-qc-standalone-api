@@ -2312,6 +2312,40 @@ async function runTask(mode,explicitReportDate='',explicitImportData=null){
 }
 function note(id,msg,tone=''){const el=byId(id);if(!el)return;el.textContent=msg;el.className='v625-inline-note'+(tone?' '+tone:'')}
 
+// V788: a manually viewed tracking timeline is READ-ONLY evidence, not an
+// authorization to close a historical OPEN ledger. CYCLE_COUNT is a stock
+// count, never a POD/RETURNED terminal. Preserve TMS shipmentStatus semantics.
+function v788TrackingReadOnlyReview(data={},bill='',orderedEvents=[]){
+  const wanted=String(bill||'').trim().toUpperCase();
+  const matches=row=>{
+    const code=String(row?.shipmentCode||row?.waybill||row?.orderNo||row?.trackingNo||'').trim().toUpperCase();
+    return Boolean(wanted&&code===wanted);
+  };
+  const scans=(data.scanRows||[]).filter(matches);
+  const shipments=(data.shipmentRows||[]).filter(matches);
+  const ledgers=(data.ledger||[]).filter(matches);
+  const statusCodes=new Set(shipments.map(r=>String(r.shipmentStatus??'').trim()));
+  const terminalReasons=new Set(ledgers.map(r=>String(r.terminalReason||'').trim().toUpperCase()).filter(Boolean));
+  const pod=statusCodes.has('60')||scans.some(r=>String(r.orderStatus??'').trim()==='85')||terminalReasons.has('POD');
+  const returned=statusCodes.has('81')||terminalReasons.has('RETURNED');
+  const returning=statusCodes.has('80');
+  const conflict=(pod&&returned)||(pod&&returning)||(returned&&returning);
+  const openLedger=ledgers.some(r=>String(r.trackingStatus||'').toUpperCase()==='OPEN');
+  const localState=String(ledgers.find(r=>r.currentState)?.currentState||'').trim().toUpperCase();
+  let result='尚未发现可核实的POD或已退回终态；需要继续核验';
+  if(conflict)result='存在相互冲突的终态/退回中证据，必须逐票复核';
+  else if(pod)result=openLedger?'发现POD终态证据，但本地账本仍OPEN，等待终态对账'
+    :'发现POD终态证据；须确认与原始日报成员一致';
+  else if(returned)result=openLedger?'发现已退回终态证据，但本地账本仍OPEN，等待终态对账'
+    :'发现已退回终态证据；须确认退回交接记录';
+  else if(returning)result='退回处理中（shipmentStatus=80），尚未完成退回';
+  const last=orderedEvents[0]||null;
+  const lastTime=last?String(last.eventTime||last.time||last.updateTime||last.createdAt||'').trim():'';
+  const remoteNote=data.remoteSkipped||data.remoteError
+    ?' · 本次实时查询未得到完整响应，不能仅凭旧本地记录结案':'';
+  return{result,localState:localState||'待核验',lastTime:lastTime||'无轨迹时间',
+    hasTerminal:pod||returned,conflict,openLedger,remoteNote};
+}
 async function queryTrack(){
   const code=byId('v625TrackCode').value.trim();if(!code){setText('v625TrackMeta','请输入运单号');return}
   const wanted=code.toUpperCase(),source=currentParams().get('source')||'';
@@ -2320,7 +2354,12 @@ async function queryTrack(){
     const r=await post('/api/track-query',{businessType:byId('v625TrackBusiness').value,shipmentCodes:[code],reportDate:byId('v625TrackDate').value||today()},60000);
     const rowBill=row=>String(row?.shipmentCode||row?.waybill||row?.orderNo||row?.trackingNo||'').trim().toUpperCase();
     const belongs=row=>!rowBill(row)||rowBill(row)===wanted;
-    const events=(r.trackEvents||[]).filter(belongs);
+    // Newly observed events belong at the TOP; previously a multi-month
+    // timeline pushed the latest delivery evidence to the very bottom.
+    const events=(r.trackEvents||[]).filter(belongs).sort((a,b)=>{
+      const key=x=>String(first(x,['eventTime','time','updateTime','createdAt'])||'').replace('T',' ');
+      return key(b).localeCompare(key(a));
+    });
     const eventDesc=e=>{let raw={};try{raw=typeof e.rawJson==='string'?JSON.parse(e.rawJson):e.rawJson||{}}catch{}return first(e,['trackingEventDescZh','trackingEventDesc','eventName','statusName','description','content','remark'])||first(raw,['trackingEventDescZh','trackingEventDesc','statusText','statusName','eventName','remark','message'])||'已保存轨迹证据'};
     const statusEvidence=[],statusSeen=new Set();
     const evidenceTime=row=>first(row,['updateTime','lastUpdateDate','scanTime','statusTime','modifyTime','eventTime','lastEventTime','podDate','terminalAt'])||'';
@@ -2358,8 +2397,16 @@ async function queryTrack(){
     const eventHtml=events.map(e=>'<div class="v625-timeline-item"><b>'+esc(first(e,['eventTime','time','updateTime','createdAt'])||'—')+'</b><p>'+esc(eventDesc(e))+'</p><small>'+esc(e.evidenceSource||'CE实时轨迹')+'</small></div>').join('');
     const statusHtml=statusEvidence.map(e=>'<div class="v625-timeline-item"><b>'+esc(e.time||'无可用时间')+'</b><p><strong>'+esc(e.title)+'</strong> · '+esc(e.description)+'</p><small>'+esc(e.source)+'</small></div>').join('');
     const root=byId('v625TrackTimeline');
+    const review=v788TrackingReadOnlyReview(r,wanted,events);
+    const reviewHtml='<div class="v625-empty-state" style="text-align:left;padding:12px 14px;margin-bottom:10px">'
+      +'<strong>'+esc(review.result)+'</strong>'
+      +'<p style="margin:6px 0 0">账本状态：'+esc(review.localState)
+      +' · 最近可见轨迹时间：'+esc(review.lastTime)+esc(review.remoteNote)+'</p>'
+      +'<small>仅展示只读证据；CYCLE_COUNT（盘点）不等于POD或已退回，页面查询不会改写账本。</small></div>';
     if(events.length||statusEvidence.length){
-      root.innerHTML=(events.length?eventHtml:'')+(statusEvidence.length?('<div class="v625-empty-state" style="padding:10px 0 6px">状态证据（不等同于轨迹时间）</div>'+statusHtml):'');
+      root.innerHTML=reviewHtml
+        +(events.length?'<div class="v625-empty-state" style="padding:6px 0">轨迹记录（最新在前）</div>'+eventHtml:'')
+        +(statusEvidence.length?('<div class="v625-empty-state" style="padding:10px 0 6px">状态证据（不等同于轨迹时间）</div>'+statusHtml):'');
     }else{
       root.innerHTML='<div class="v625-empty-state">'+(source==='timing-backfill'?'该运单当前没有可显示的历史轨迹或时间证据；系统会继续等待后续日报出现最终派件时间后自动回补。':'当前没有查到本地或接口轨迹/状态证据。')+'</div>';
     }

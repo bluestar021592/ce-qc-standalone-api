@@ -139,6 +139,7 @@ const TASKS=[
   ['node',['scripts/v788-kpi-detail-paging-smoke.mjs']],
   ['node',['scripts/v788-return-rate-abnormal-action-smoke.mjs']],
   ['node',['scripts/v788-open-pod-special-state-smoke.mjs']],
+  ['node',['scripts/v788-tracking-latest-evidence-smoke.mjs']],
   ['node',['scripts/v788-home-return-hydration-smoke.mjs']],
   ['node',['scripts/v788-whpp-real-readonly-audit-smoke.mjs']],
   ['node',['scripts/v788-real-acceptance-verdict-smoke.mjs']],
