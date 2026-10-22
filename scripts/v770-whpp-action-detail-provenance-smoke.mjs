@@ -137,5 +137,22 @@ db.prepare("INSERT INTO business_shipment_tracks VALUES(?,?,?,?,?,?,?,?)")
 assert.equal(run(cycle).detail.reviewDisposition,'','return in progress must not appear as cycle count');
 db.prepare("DELETE FROM business_shipment_tracks WHERE shipmentCode=?").run(cycle);
 
+// Latest tracked cycle count (codes 30/32) is a current QC review even if
+// the unified current-state cache is unavailable; newer nodes remove it.
+const fromTrack='CE04072600021';
+db.prepare("INSERT INTO business_daily_parse_rows VALUES(?,?,?,?,?,?,?,?,?)")
+  .run(6,'WHPP',date,fromTrack,'WHPP source',21,21,'',date);
+db.prepare("INSERT INTO business_track_events VALUES(?,?,?,?,?,?)")
+  .run(1,'WHPP',date,fromTrack,'2026-07-04T08:00:00','30','{"description":"盘点"}');
+assert.equal(run(fromTrack).detail.reviewDisposition,'CYCLE_COUNT_REVIEW','latest 30 means warehouse cycle-count review');
+db.prepare("INSERT INTO business_final_rows(businessType,reportDate,shipmentCode,isPod,primaryCategory,apiStatus,carryStatus,updatedAt,rawJson) VALUES(?,?,?,?,?,?,?,?,?)")
+  .run('WHPP',date,fromTrack,0,'CYCLE_COUNT','SUCCESS','OPEN',date,'{}');
+db.prepare("INSERT INTO business_track_events VALUES(?,?,?,?,?,?)")
+  .run(2,'WHPP',date,fromTrack,'2026-07-04T10:00:00','99','{"description":"工单"}');
+assert.equal(run(fromTrack).detail.reviewDisposition,'','newer code 99 supersedes older cycle count and final category');
+db.prepare("INSERT INTO business_track_events VALUES(?,?,?,?,?,?)")
+  .run(3,'WHPP',date,fromTrack,'2026-07-04T11:00:00','32','{"description":"再次盘点"}');
+assert.equal(run(fromTrack).detail.reviewDisposition,'CYCLE_COUNT_REVIEW','latest 32 restores cycle-count review');
+
 db.close();
 console.log('[V770] WHPP independent daily source vs unified CE, true source/unverified saved final, exact date/snapshot, archived member, original CE QC logo PASS');
