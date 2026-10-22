@@ -32,8 +32,27 @@ function audit(db) {
       SUM(CASE WHEN t.shipmentStatus='60' THEN 1 ELSE 0 END) AS persistedTms60,
       SUM(CASE WHEN t.shipmentStatus='80' THEN 1 ELSE 0 END) AS persistedTms80,
       SUM(CASE WHEN t.shipmentStatus='81' THEN 1 ELSE 0 END) AS persistedTms81,
+      SUM(CASE WHEN UPPER(COALESCE(c.state,''))='POD'
+        AND TRIM(COALESCE(t.shipmentStatus,''))='60' THEN 1 ELSE 0 END) AS exactPodTmsMatches,
+      SUM(CASE WHEN UPPER(COALESCE(c.state,'')) IN ('RETURNED','RETURN_COMPLETED')
+        AND TRIM(COALESCE(t.shipmentStatus,''))='81' THEN 1 ELSE 0 END) AS exactReturnedTmsMatches,
+      SUM(CASE WHEN UPPER(COALESCE(c.state,''))='POD'
+        AND TRIM(COALESCE(t.shipmentStatus,'')) IN ('80','81') THEN 1
+        WHEN UPPER(COALESCE(c.state,'')) IN ('RETURNED','RETURN_COMPLETED')
+        AND TRIM(COALESCE(t.shipmentStatus,'')) IN ('60','80') THEN 1
+        ELSE 0 END) AS terminalStateTmsConflicts,
+      SUM(CASE WHEN UPPER(COALESCE(c.state,'')) IN ('RETURNED','RETURN_COMPLETED')
+        AND TRIM(COALESCE(t.shipmentStatus,''))='80' THEN 1 ELSE 0 END) AS returnInProgressMislabeled,
       SUM(CASE WHEN p.shipmentCode IS NOT NULL AND UPPER(COALESCE(c.state,''))='POD'
-        AND COALESCE(p.podTime,'')<>'' THEN 1 ELSE 0 END) AS podTimeLockCandidates
+        AND COALESCE(p.podTime,'')<>'' THEN 1 ELSE 0 END) AS podTimeLockCandidates,
+      SUM(CASE WHEN p.shipmentCode IS NOT NULL AND UPPER(COALESCE(c.state,''))='POD'
+        AND p.podTime GLOB '????-??-??*' AND julianday(p.podTime) IS NOT NULL
+        AND substr(p.podTime,1,10)>=m.reportDate
+        THEN 1 ELSE 0 END) AS podTimeFormatDateCandidates,
+      SUM(CASE WHEN p.shipmentCode IS NOT NULL AND UPPER(COALESCE(c.state,''))='POD'
+        AND COALESCE(p.podTime,'')<>'' AND
+        (julianday(p.podTime) IS NULL OR substr(p.podTime,1,10)<m.reportDate)
+        THEN 1 ELSE 0 END) AS invalidPodTimeCandidates
     FROM members m
     LEFT JOIN shipment_current_state c
       ON UPPER(TRIM(c.shipmentCode))=m.code AND c.businessType='WHPP' AND c.reportDate=m.reportDate
@@ -46,11 +65,14 @@ function audit(db) {
   `;
   const rows=db.prepare(sql).all();
   const fields=['sourceMembers','currentMatched','podLabels','returnedLabels',
-    'openLedgerWithTerminalLabels','persistedTms60','persistedTms80','persistedTms81','podTimeLockCandidates'];
+    'openLedgerWithTerminalLabels','persistedTms60','persistedTms80','persistedTms81',
+    'exactPodTmsMatches','exactReturnedTmsMatches','terminalStateTmsConflicts',
+    'returnInProgressMislabeled','podTimeLockCandidates','podTimeFormatDateCandidates',
+    'invalidPodTimeCandidates'];
   const totals=Object.fromEntries(fields.map(k=>[k,rows.reduce((n,row)=>n+Number(row[k]||0),0)]));
   return {ok:true,readOnly:true,source:'D_DRIVE_ISOLATION_COPY',
     dates:rows.map(row=>Object.fromEntries(['date',...fields].map(k=>[k,row[k]]))),totals,
-    note:'POD时间锁仅为原始候选数量，尚未验证时间格式、凭据来源与Excel签收时效，不是可信POD时间'};
+    note:'时间格式及日期核验仅筛查候选值，未证明凭据来源或实际签收，仍不是可信POD时间；TMS60/81匹配仅证明保存记录一致，不等于重新调用TMS实时确认'};
 }
 if(!file){
   console.log('BLOCKED：未指定隔离副本数据库；未连接正式系统。');
@@ -75,7 +97,12 @@ if(!file){
          'POD标签'+row.podLabels,'退回标签'+row.returnedLabels,
          '旧OPEN终态'+row.openLedgerWithTerminalLabels,'TMS60='+row.persistedTms60,
          'TMS80='+row.persistedTms80,'TMS81='+row.persistedTms81,
-         'POD时间锁候选'+row.podTimeLockCandidates].join(' | '));
+         '逐票POD匹配'+row.exactPodTmsMatches,'逐票退回匹配'+row.exactReturnedTmsMatches,
+         '终态矛盾'+row.terminalStateTmsConflicts,
+         '80误判已退回'+row.returnInProgressMislabeled,
+         'POD时间锁候选'+row.podTimeLockCandidates,
+         '日期格式候选'+row.podTimeFormatDateCandidates,
+         '无效时间候选'+row.invalidPodTimeCandidates].join(' | '));
       console.log('合计 '+JSON.stringify(result.totals));
       console.log(result.note);
     }
