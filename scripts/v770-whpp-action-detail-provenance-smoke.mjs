@@ -106,5 +106,29 @@ db.prepare("INSERT INTO business_final_rows(businessType,reportDate,shipmentCode
 assert.equal(run('CE04072600019').detail.terminalOutcome,'','unclosed cancellation label must stay unverified');
 assert.match(page,/d\.terminalOutcome==='ORDER_CANCELLED'\?'订单取消（已闭环）'/,'detail header must show the saved cancelled disposition');
 
+// V788 isolated review: a warehouse cycle count is neither verified POD nor
+// a failed delivery; an exact terminal state must supersede the review label.
+const cycle='CE04072600020';
+db.prepare("INSERT INTO business_daily_parse_rows VALUES(?,?,?,?,?,?,?,?,?)")
+  .run(5,'WHPP',date,cycle,'WHPP source',20,20,'',date);
+db.prepare("INSERT INTO shipment_current_state VALUES(?,?,?,?,?,?,?,?)")
+  .run(cycle,'WHPP',date,snap,'CYCLE_COUNT','SUCCESS',date,date);
+const cycleDetail=run(cycle);
+assert.equal(cycleDetail.ok,true);
+assert.equal(cycleDetail.detail.reviewDisposition,'CYCLE_COUNT_REVIEW');
+assert.equal(cycleDetail.detail.terminalOutcome,'','a cycle count does not prove POD/return/cancellation');
+assert.match(cycleDetail.detail.notice,/盘点待核实/);
+assert.doesNotMatch(cycleDetail.detail.notice,/派送未完结已确认/);
+db.prepare("UPDATE shipment_current_state SET state='POD' WHERE shipmentCode=?").run(cycle);
+const cyclePod=run(cycle);
+assert.equal(cyclePod.detail.reviewDisposition,'','a verified terminal state supersedes cycle count');
+db.prepare("UPDATE shipment_current_state SET state='CYCLE_COUNT' WHERE shipmentCode=?").run(cycle);
+db.prepare("INSERT INTO business_shipment_tracks VALUES(?,?,?,?,?,?,?,?)")
+  .run('WHPP',date,cycle,'81','已退回','SUCCESS',date,'{}');
+assert.equal(run(cycle).detail.reviewDisposition,'','shipment status 81 is a return, not cycle-count review');
+db.prepare("DELETE FROM business_shipment_tracks WHERE shipmentCode=?").run(cycle);
+db.prepare("UPDATE shipment_current_state SET reportDate='2026-07-05' WHERE shipmentCode=?").run(cycle);
+assert.equal(run(cycle).detail.reviewDisposition,'','cross-date current cycle-count cannot classify the selected historical date');
+
 db.close();
 console.log('[V770] WHPP independent daily source vs unified CE, true source/unverified saved final, exact date/snapshot, archived member, original CE QC logo PASS');
