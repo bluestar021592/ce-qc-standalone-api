@@ -21,8 +21,29 @@ function audit(db) {
       SELECT DISTINCT reportDate,UPPER(TRIM(shipmentCode)) code
       FROM business_daily_parse_rows
       WHERE businessType='WHPP' AND TRIM(COALESCE(shipmentCode,''))<>''
+    ), current_once AS (
+      SELECT reportDate,UPPER(TRIM(shipmentCode)) code,COUNT(*) records,MIN(state) state
+      FROM shipment_current_state WHERE businessType='WHPP'
+      GROUP BY reportDate,UPPER(TRIM(shipmentCode))
+    ), ledger_once AS (
+      SELECT UPPER(TRIM(shipmentCode)) code,COUNT(*) records,MIN(trackingStatus) trackingStatus
+      FROM qc_tracking_ledger WHERE businessType='WHPP'
+      GROUP BY UPPER(TRIM(shipmentCode))
+    ), tms_once AS (
+      SELECT reportDate,UPPER(TRIM(shipmentCode)) code,COUNT(*) records,
+        MIN(shipmentStatus) shipmentStatus
+      FROM business_shipment_tracks WHERE businessType='WHPP'
+      GROUP BY reportDate,UPPER(TRIM(shipmentCode))
+    ), pod_lock_once AS (
+      SELECT UPPER(TRIM(shipmentCode)) code,COUNT(*) records,
+        MIN(podTime) podTime
+      FROM business_pod_locks WHERE businessType='WHPP'
+      GROUP BY UPPER(TRIM(shipmentCode))
     )
     SELECT m.reportDate AS date,COUNT(*) AS sourceMembers,
+      SUM(CASE WHEN COALESCE(c.records,0)>1 OR COALESCE(l.records,0)>1
+        OR COALESCE(t.records,0)>1 OR COALESCE(p.records,0)>1
+        THEN 1 ELSE 0 END) AS ambiguousEvidenceMembers,
       SUM(CASE WHEN c.shipmentCode IS NOT NULL THEN 1 ELSE 0 END) AS currentMatched,
       SUM(CASE WHEN UPPER(COALESCE(c.state,''))='POD' THEN 1 ELSE 0 END) AS podLabels,
       SUM(CASE WHEN UPPER(COALESCE(c.state,'')) IN ('RETURNED','RETURN_COMPLETED') THEN 1 ELSE 0 END) AS returnedLabels,
@@ -54,17 +75,14 @@ function audit(db) {
         (julianday(p.podTime) IS NULL OR substr(p.podTime,1,10)<m.reportDate)
         THEN 1 ELSE 0 END) AS invalidPodTimeCandidates
     FROM members m
-    LEFT JOIN shipment_current_state c
-      ON UPPER(TRIM(c.shipmentCode))=m.code AND c.businessType='WHPP' AND c.reportDate=m.reportDate
-    LEFT JOIN qc_tracking_ledger l ON UPPER(TRIM(l.shipmentCode))=m.code AND l.businessType='WHPP'
-    LEFT JOIN business_shipment_tracks t
-      ON UPPER(TRIM(t.shipmentCode))=m.code AND t.businessType='WHPP' AND t.reportDate=m.reportDate
-    LEFT JOIN business_pod_locks p
-      ON UPPER(TRIM(p.shipmentCode))=m.code AND p.businessType='WHPP'
+    LEFT JOIN current_once c ON c.code=m.code AND c.reportDate=m.reportDate AND c.records=1
+    LEFT JOIN ledger_once l ON l.code=m.code AND l.records=1
+    LEFT JOIN tms_once t ON t.code=m.code AND t.reportDate=m.reportDate AND t.records=1
+    LEFT JOIN pod_lock_once p ON p.code=m.code AND p.records=1
     GROUP BY m.reportDate ORDER BY m.reportDate
   `;
   const rows=db.prepare(sql).all();
-  const fields=['sourceMembers','currentMatched','podLabels','returnedLabels',
+  const fields=['sourceMembers','ambiguousEvidenceMembers','currentMatched','podLabels','returnedLabels',
     'openLedgerWithTerminalLabels','persistedTms60','persistedTms80','persistedTms81',
     'exactPodTmsMatches','exactReturnedTmsMatches','terminalStateTmsConflicts',
     'returnInProgressMislabeled','podTimeLockCandidates','podTimeFormatDateCandidates',
@@ -95,6 +113,7 @@ if(!file){
       for(const row of result.dates) console.log(
         [row.date,'来源'+row.sourceMembers,'当前匹配'+row.currentMatched,
          'POD标签'+row.podLabels,'退回标签'+row.returnedLabels,
+         '证据键冲突'+row.ambiguousEvidenceMembers,
          '旧OPEN终态'+row.openLedgerWithTerminalLabels,'TMS60='+row.persistedTms60,
          'TMS80='+row.persistedTms80,'TMS81='+row.persistedTms81,
          '逐票POD匹配'+row.exactPodTmsMatches,'逐票退回匹配'+row.exactReturnedTmsMatches,
