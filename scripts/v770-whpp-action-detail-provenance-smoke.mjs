@@ -142,15 +142,15 @@ db.prepare("DELETE FROM business_shipment_tracks WHERE shipmentCode=?").run(cycl
 const fromTrack='CE04072600021';
 db.prepare("INSERT INTO business_daily_parse_rows VALUES(?,?,?,?,?,?,?,?,?)")
   .run(6,'WHPP',date,fromTrack,'WHPP source',21,21,'',date);
-db.prepare("INSERT INTO business_track_events VALUES(?,?,?,?,?,?)")
+db.prepare("INSERT INTO business_track_events VALUES(?,?,?,?,?,?,?)")
   .run(1,'WHPP',date,fromTrack,'2026-07-04T08:00:00','30','{"description":"盘点"}');
 assert.equal(run(fromTrack).detail.reviewDisposition,'CYCLE_COUNT_REVIEW','latest 30 means warehouse cycle-count review');
 db.prepare("INSERT INTO business_final_rows(businessType,reportDate,shipmentCode,isPod,primaryCategory,apiStatus,carryStatus,updatedAt,rawJson) VALUES(?,?,?,?,?,?,?,?,?)")
   .run('WHPP',date,fromTrack,0,'CYCLE_COUNT','SUCCESS','OPEN',date,'{}');
-db.prepare("INSERT INTO business_track_events VALUES(?,?,?,?,?,?)")
+db.prepare("INSERT INTO business_track_events VALUES(?,?,?,?,?,?,?)")
   .run(2,'WHPP',date,fromTrack,'2026-07-04T10:00:00','99','{"description":"工单"}');
 assert.equal(run(fromTrack).detail.reviewDisposition,'','newer code 99 supersedes older cycle count and final category');
-db.prepare("INSERT INTO business_track_events VALUES(?,?,?,?,?,?)")
+db.prepare("INSERT INTO business_track_events VALUES(?,?,?,?,?,?,?)")
   .run(3,'WHPP',date,fromTrack,'2026-07-04T11:00:00','32','{"description":"再次盘点"}');
 assert.equal(run(fromTrack).detail.reviewDisposition,'CYCLE_COUNT_REVIEW','latest 32 restores cycle-count review');
 
