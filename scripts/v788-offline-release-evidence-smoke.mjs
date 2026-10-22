@@ -34,8 +34,10 @@ assert.equal(first.summary.whppMembers,346);
 assert.equal(first.summary.podLabels,290);
 assert.equal(first.summary.trustedPodTimes,0);
 assert.equal(first.summary.excelExpectedSourceMembers,7092);
-for(const id of ['WHPP_STRICT_TERMINAL','WHPP_LEDGER_CLOSURE','WHPP_POD_TIME'])
+for(const id of ['WHPP_STRICT_TERMINAL','WHPP_LEDGER_CLOSURE'])
  assert.equal(check(first,id),'BLOCK',id);
+for(const id of ['WHPP_PER_WAYBILL_TERMINAL_EVIDENCE','WHPP_POD_TIME'])
+ assert.equal(check(first,id),'REVIEW',id);
 for(const id of ['REAL_EXCEL_READBACK','REAL_UI_EXPORT'])
  assert.equal(check(first,id),'REVIEW',id);
 assert.equal(first.authorizedToClear,false);
