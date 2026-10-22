@@ -13,7 +13,10 @@ if errorlevel 1 (
   pause
   exit /b 10
 )
-echo [V788] 只读查看既有验收记录，不启动后台或进行任何删除。
+echo [V788] 先只读核对D盘隔离数据库中的WHPP来源、终态及OPEN账本。
+node "scripts\v788-local-whpp-readonly-probe.mjs"
+echo.
+echo [V788] 再查看已有验收报告和真实Excel/签收时间等未核验条件。
 node "scripts\v788-offline-release-review.mjs" "D:\CE_QC_V788_验收副本\V788_只读验收结果.json"
 echo.
 echo [V788] 当前工具仅用于查看阻断原因，不能作为清空、更新或正式发布许可。
