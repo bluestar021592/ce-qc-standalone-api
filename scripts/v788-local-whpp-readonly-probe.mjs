@@ -44,7 +44,7 @@ function audit(db) {
       SUM(CASE WHEN COALESCE(c.records,0)>1 OR COALESCE(l.records,0)>1
         OR COALESCE(t.records,0)>1 OR COALESCE(p.records,0)>1
         THEN 1 ELSE 0 END) AS ambiguousEvidenceMembers,
-      SUM(CASE WHEN c.shipmentCode IS NOT NULL THEN 1 ELSE 0 END) AS currentMatched,
+      SUM(CASE WHEN c.code IS NOT NULL THEN 1 ELSE 0 END) AS currentMatched,
       SUM(CASE WHEN UPPER(COALESCE(c.state,''))='POD' THEN 1 ELSE 0 END) AS podLabels,
       SUM(CASE WHEN UPPER(COALESCE(c.state,'')) IN ('RETURNED','RETURN_COMPLETED') THEN 1 ELSE 0 END) AS returnedLabels,
       SUM(CASE WHEN UPPER(COALESCE(l.trackingStatus,''))='OPEN'
@@ -64,13 +64,13 @@ function audit(db) {
         ELSE 0 END) AS terminalStateTmsConflicts,
       SUM(CASE WHEN UPPER(COALESCE(c.state,'')) IN ('RETURNED','RETURN_COMPLETED')
         AND TRIM(COALESCE(t.shipmentStatus,''))='80' THEN 1 ELSE 0 END) AS returnInProgressMislabeled,
-      SUM(CASE WHEN p.shipmentCode IS NOT NULL AND UPPER(COALESCE(c.state,''))='POD'
+      SUM(CASE WHEN p.code IS NOT NULL AND UPPER(COALESCE(c.state,''))='POD'
         AND COALESCE(p.podTime,'')<>'' THEN 1 ELSE 0 END) AS podTimeLockCandidates,
-      SUM(CASE WHEN p.shipmentCode IS NOT NULL AND UPPER(COALESCE(c.state,''))='POD'
+      SUM(CASE WHEN p.code IS NOT NULL AND UPPER(COALESCE(c.state,''))='POD'
         AND p.podTime GLOB '????-??-??*' AND julianday(p.podTime) IS NOT NULL
         AND substr(p.podTime,1,10)>=m.reportDate
         THEN 1 ELSE 0 END) AS podTimeFormatDateCandidates,
-      SUM(CASE WHEN p.shipmentCode IS NOT NULL AND UPPER(COALESCE(c.state,''))='POD'
+      SUM(CASE WHEN p.code IS NOT NULL AND UPPER(COALESCE(c.state,''))='POD'
         AND COALESCE(p.podTime,'')<>'' AND
         (julianday(p.podTime) IS NULL OR substr(p.podTime,1,10)<m.reportDate)
         THEN 1 ELSE 0 END) AS invalidPodTimeCandidates
