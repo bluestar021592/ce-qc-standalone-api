@@ -131,15 +131,15 @@ export function qcDetailRead(db,{reportDate='',shipmentCode='',businessType='',s
   const sameDateCurrent=String(current?.reportDate||'').slice(0,10)===date;
   const currentCode=sameDateCurrent?String(current?.state||'').trim().toUpperCase():'';
   const finalCategory=String(finalRow?.primaryCategory||'').trim().toUpperCase();
-  const shipmentCode=String(track?.shipmentStatus||track?.sourceStatus||'').trim();
+  const shipmentStatusCode=String(track?.shipmentStatus||track?.sourceStatus||'').trim();
   const latestEventCode=String(events[0]?.eventCode||'').trim();
   const hasTerminalProof=whppCancelledFinal
     || ['POD','RETURNED','RETURN_COMPLETED'].includes(currentCode)
-    || ['60','81'].includes(shipmentCode)
+    || ['60','81'].includes(shipmentStatusCode)
     || ['80','86'].includes(latestEventCode)
     || Number(scan?.isPod||0)===1 || Number(finalRow?.isPod||0)===1;
   const cycleCountReview=sourceVerified&&!classificationConflict&&!hasTerminalProof
-    && shipmentCode!=='80' && latestEventCode!=='84'
+    && shipmentStatusCode!=='80' && latestEventCode!=='84'
     && (currentCode==='CYCLE_COUNT'||(!currentCode&&['CYCLE_COUNT','盘点'].includes(finalCategory)));
   const reviewDisposition=cycleCountReview?'CYCLE_COUNT_REVIEW':'';
   const evidence={source:sourceVerified,scan:!!scan,final:!!finalRow,shipmentTrack:!!track,
