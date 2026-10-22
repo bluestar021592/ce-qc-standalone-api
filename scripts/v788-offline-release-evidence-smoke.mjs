@@ -9,16 +9,16 @@ const input={
     byDate:[{date:'2026-07-01',sourceMembers:190,withCurrent:190},
       {date:'2026-07-02',sourceMembers:156,withCurrent:156}],
     totals:{sourceMembers:346,withCurrent:346,normalizedPOD:290,normalizedReturned:56,
-      strictPOD:0,strictReturned:0,labelOnlyTerminal:346,otherUnverified:0,
+      strictPOD:0,strictReturned:0,returning80:0,labelOnlyTerminal:346,otherUnverified:0,
       contradiction:0,savedTmsCurrentConflict:0,ledgerOpenWithNormalizedTerminal:346,
       ledgerTerminalWithNonterminal:0,ledgerTerminalContradictingTms:0,
       trustedPodLockOnPOD:0,trustedPodLockOnNonPOD:0}
   },sevenBusinessSource:{available:true,byDate:[
-      {reconciled:true,latestValidUnifiedBatchPresent:true,completedValidUnifiedBatch:true,
+      {date:'2026-07-01',reconciled:true,latestValidUnifiedBatchPresent:true,completedValidUnifiedBatch:true,
         blockedByUnfinishedValidBatch:false,duplicateBusinessRows:0,crossBusinessDuplicates:0,
         whppOverlapWithSix:0,sixBusinessRows:6231,whppIndependentSourceMembers:190,
         sevenBusinessDistinctUnion:6421},
-      {reconciled:true,latestValidUnifiedBatchPresent:true,completedValidUnifiedBatch:true,
+      {date:'2026-07-02',reconciled:true,latestValidUnifiedBatchPresent:true,completedValidUnifiedBatch:true,
         blockedByUnfinishedValidBatch:false,duplicateBusinessRows:0,crossBusinessDuplicates:0,
         whppOverlapWithSix:0,sixBusinessRows:515,whppIndependentSourceMembers:156,
         sevenBusinessDistinctUnion:671}
@@ -74,6 +74,16 @@ assert.equal(check(review(tampered,{nowMs}),'WHPP_POD_TIME'),'BLOCK');
 tampered.audit.whpp.totals.trustedPodLockOnPOD=290;
 tampered.audit.sevenBusinessSource.byDate[0].crossBusinessDuplicates=1;
 assert.equal(check(review(tampered,{nowMs}),'SEVEN_BUSINESS_SOURCE'),'BLOCK');
+const noDateDuplicates=JSON.parse(JSON.stringify(input));
+noDateDuplicates.audit.sevenBusinessSource.byDate[1].date='2026-07-01';
+assert.equal(check(review(noDateDuplicates,{nowMs}),'SEVEN_BUSINESS_SOURCE'),'BLOCK','duplicate source dates cannot be counted twice');
+const noExtraTerminals=JSON.parse(JSON.stringify(input));
+noExtraTerminals.audit.whpp.totals.strictPOD=310;
+assert.equal(check(review(noExtraTerminals,{nowMs}),'WHPP_STRICT_TERMINAL'),'BLOCK','strict terminal count above source members must fail closed');
+const crossDateMismatch=JSON.parse(JSON.stringify(input));
+crossDateMismatch.audit.sevenBusinessSource.byDate[0].whppIndependentSourceMembers=189;
+crossDateMismatch.audit.sevenBusinessSource.byDate[0].sevenBusinessDistinctUnion=6420;
+assert.equal(check(review(crossDateMismatch,{nowMs}),'SEVEN_BUSINESS_SOURCE'),'BLOCK','per-date WHPP source membership cannot drift while seven-business sum balances');
 const main=fs.readFileSync(new URL('../src/v788OfflineEvidenceGate.js',import.meta.url),'utf8');
 assert.doesNotMatch(main,/writeFile|unlink|rmSync|\bDELETE\b|\bUPDATE\b|fetch\(/);
 console.log('[V788 OFFLINE EVIDENCE] source 346, POD-time 0/290, ledger OPEN346 and absent Excel/UI block; stale/spoofed report fails closed; all evidence still needs manual approval PASS');
