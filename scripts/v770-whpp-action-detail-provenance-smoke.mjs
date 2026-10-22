@@ -129,6 +129,13 @@ assert.equal(run(cycle).detail.reviewDisposition,'','shipment status 81 is a ret
 db.prepare("DELETE FROM business_shipment_tracks WHERE shipmentCode=?").run(cycle);
 db.prepare("UPDATE shipment_current_state SET reportDate='2026-07-05' WHERE shipmentCode=?").run(cycle);
 assert.equal(run(cycle).detail.reviewDisposition,'','cross-date current cycle-count cannot classify the selected historical date');
+db.prepare("UPDATE shipment_current_state SET state='PENDING',reportDate=? WHERE shipmentCode=?").run(date,cycle);
+assert.equal(run(cycle).detail.reviewDisposition,'','newer same-date Pending supersedes stale cycle review');
+db.prepare("UPDATE shipment_current_state SET state='CYCLE_COUNT' WHERE shipmentCode=?").run(cycle);
+db.prepare("INSERT INTO business_shipment_tracks VALUES(?,?,?,?,?,?,?,?)")
+  .run('WHPP',date,cycle,'80','退回中','SUCCESS',date,'{}');
+assert.equal(run(cycle).detail.reviewDisposition,'','return in progress must not appear as cycle count');
+db.prepare("DELETE FROM business_shipment_tracks WHERE shipmentCode=?").run(cycle);
 
 db.close();
 console.log('[V770] WHPP independent daily source vs unified CE, true source/unverified saved final, exact date/snapshot, archived member, original CE QC logo PASS');
