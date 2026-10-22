@@ -38,3 +38,8 @@ jobs:
           node --check src/qcActionDetailRead.js
           node --check scripts/v770-whpp-action-detail-provenance-smoke.mjs
           node scripts/v770-whpp-action-detail-provenance-smoke.mjs
+      - name: V788 fail-closed offline release evidence gate
+        run: |
+          node --check src/v788OfflineEvidenceGate.js
+          node --check scripts/v788-offline-release-review.mjs
+          node scripts/v788-offline-release-evidence-smoke.mjs
