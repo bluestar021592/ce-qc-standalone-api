@@ -33,3 +33,8 @@ jobs:
       - name: Run locked scan and trajectory status tests
         run: |
           node --test test/trajectory-facts.test.js test/trajectory-facts-analyzer-integration.test.js test/v30-scan-track-code-separation.test.js test/v30-general-track-codes.test.js test/v11-terminal-isolation-return.test.js test/shopee-latest-track-classification.test.js test/v32-current-status-display.test.js
+      - name: V788 exact-date cycle-count detail regression
+        run: |
+          node --check src/qcActionDetailRead.js
+          node --check scripts/v770-whpp-action-detail-provenance-smoke.mjs
+          node scripts/v770-whpp-action-detail-provenance-smoke.mjs
