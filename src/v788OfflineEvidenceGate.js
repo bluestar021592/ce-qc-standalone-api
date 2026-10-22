@@ -42,14 +42,34 @@ export function evaluateV788EvidenceReport(report, options={}) {
   add('WHPP_STRICT_TERMINAL',validTerminalConservation&&labelOnly===0&&unverified===0
     &&strictPod>=normalizedPod&&strictReturned>=normalizedReturned&&noConflict,
     !total,'旧状态标签不能替代逐票TMS 60/81或严格等效证据；退回中80不能算已退回');
+  // Aggregate 290 POD + 56 returns may belong to DIFFERENT bills than saved TMS
+  // 60/81. Never accept equal totals as proof of exact per-bill status ownership.
+  const perBill=report?.whppPerBillIndependentEvidence;
+  const verifiedPerBill=perBill?.readOnly===true
+    &&perBill?.matchedBySourceDateAndBusiness===true
+    &&perBill?.independentlyCheckedAgainstSavedTms===true
+    &&perBill?.memberCount===total?.sourceMembers
+    &&perBill?.podBillMatches===normalizedPod
+    &&perBill?.returnedBillMatches===normalizedReturned
+    &&perBill?.terminalConflictBills===0
+    &&perBill?.wrongDateStatusMatches===0
+    &&perBill?.returningCountedAsReturned===0;
+  add('WHPP_PER_WAYBILL_TERMINAL_EVIDENCE',verifiedPerBill,!perBill,
+    '同一来源日期+业务+运单号必须逐票匹配TMS60/POD与81/已退回，不得用总量相等代替逐票证据');
   const ledger=count(total?.ledgerOpenWithNormalizedTerminal);
   add('WHPP_LEDGER_CLOSURE',ledger===0&&total?.ledgerTerminalWithNonterminal===0
     &&total?.ledgerTerminalContradictingTms===0,
     ledger===null,'已核实POD或已退回必须与历史跟踪账本闭环一致');
   const trusted=count(total?.trustedPodLockOnPOD);
+  const timing=report?.whppPerBillTimingEvidence;
   add('WHPP_POD_TIME',normalizedPod!==null&&trusted!==null&&trusted>=normalizedPod
-    &&total?.trustedPodLockOnNonPOD===0,
-    !total,'只统计有来源、有效日期和可信凭据的逐票POD时间；不允许补造签收天数');
+    &&total?.trustedPodLockOnNonPOD===0
+    &&timing?.readOnly===true&&timing?.sourceDateBound===true
+    &&timing?.canonicalPodBillCount===normalizedPod
+    &&timing?.trustedTimestampMatchedBills===normalizedPod
+    &&timing?.missingOrInvalidTimestamps===0
+    &&timing?.evidenceProvenanceChecked===true,
+    !timing,'可信POD时间须逐票匹配当前POD成员、来源日期和允许的原始时间字段；仅有时间锁总数不代表可信');
   const uniqueSourceDates=new Set(sourceDates.map(d=>String(d?.date||'')));
   const whppByDate=new Map(dates.map(d=>[d?.date,d?.sourceMembers]));
   const sevenOk=sourceDates.length>0&&uniqueSourceDates.size===sourceDates.length
