@@ -39,6 +39,12 @@ try{
     db.prepare('INSERT INTO business_shipment_tracks VALUES(?,?,?,?)').run(bill,'WHPP','2026-07-02',tms);
   }
   db.prepare('INSERT INTO business_pod_locks VALUES(?,?,?)').run('CE0004','WHPP','not-a-date');
+  // SQL must not multiply one canonical bill when TMS has case-variant duplicates.
+  db.prepare('INSERT INTO business_daily_parse_rows VALUES(?,?,?)').run('WHPP','2026-07-03','CE0005');
+  db.prepare('INSERT INTO shipment_current_state VALUES(?,?,?,?)').run('CE0005','WHPP','2026-07-03','POD');
+  db.prepare('INSERT INTO qc_tracking_ledger VALUES(?,?,?)').run('CE0005','WHPP','OPEN');
+  db.prepare('INSERT INTO business_shipment_tracks VALUES(?,?,?,?)').run('CE0005','WHPP','2026-07-03','60');
+  db.prepare('INSERT INTO business_shipment_tracks VALUES(?,?,?,?)').run('ce0005','WHPP','2026-07-03','60');
   db.close();
   const before=fs.statSync(database);
   const run=spawnSync(process.execPath,['scripts/v788-local-whpp-readonly-probe.mjs',database],
@@ -53,8 +59,11 @@ try{
   assert.match(run.stdout,/终态矛盾2 \| 80误判已退回1/);
   assert.match(run.stdout,/日期格式候选0 \| 无效时间候选1/);
   assert.match(run.stdout,/POD时间锁候选1/);
+  assert.match(run.stdout,/2026-07-03 \\| 来源1 \\| 当前匹配1 \\| POD标签1/);
+  assert.match(run.stdout,/证据键冲突1 \\| 旧OPEN终态1 \\| TMS60=0/);
+  assert.match(run.stdout,/逐票POD匹配0 \\| 逐票退回匹配0/);
   assert.match(run.stdout,/不是可信POD时间/);
-  assert.doesNotMatch(run.stdout,/CE0001|CE0002|CE0003|CE0004|VN0001/,'no private waybill output');
+  assert.doesNotMatch(run.stdout,/CE0001|CE0002|CE0003|CE0004|CE0005|VN0001/,'no private waybill output');
   const after=fs.statSync(database);
   assert.equal(after.size,before.size,'database size unchanged');
   assert.equal(after.mtimeMs,before.mtimeMs,'database bytes must not be modified');
