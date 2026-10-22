@@ -138,9 +138,12 @@ export function qcDetailRead(db,{reportDate='',shipmentCode='',businessType='',s
     || ['60','81'].includes(shipmentStatusCode)
     || ['80','86'].includes(latestEventCode)
     || Number(scan?.isPod||0)===1 || Number(finalRow?.isPod||0)===1;
+  const newestTrackedCycle=['30','32'].includes(latestEventCode);
+  const trackedOtherCurrent=Boolean(latestEventCode)&&!newestTrackedCycle;
   const cycleCountReview=sourceVerified&&!classificationConflict&&!hasTerminalProof
     && shipmentStatusCode!=='80' && latestEventCode!=='84'
-    && (currentCode==='CYCLE_COUNT'||(!currentCode&&['CYCLE_COUNT','盘点'].includes(finalCategory)));
+    && (newestTrackedCycle||(!trackedOtherCurrent
+      &&(currentCode==='CYCLE_COUNT'||(!currentCode&&['CYCLE_COUNT','盘点'].includes(finalCategory))));
   const reviewDisposition=cycleCountReview?'CYCLE_COUNT_REVIEW':'';
   const evidence={source:sourceVerified,scan:!!scan,final:!!finalRow,shipmentTrack:!!track,
     trackEvents:events.length,whppDailyRows:daily.length,currentState:!!current};
