@@ -56,6 +56,18 @@ input.audit.whpp.totals.strictReturned=56;
 input.audit.whpp.totals.labelOnlyTerminal=0;
 input.audit.whpp.totals.ledgerOpenWithNormalizedTerminal=0;
 input.audit.whpp.totals.trustedPodLockOnPOD=290;
+// Matching terminal and time COUNTS alone are not proof of the same 346 WHPP bills.
+const aggregateOnly=one();
+assert.equal(check(aggregateOnly,'WHPP_PER_WAYBILL_TERMINAL_EVIDENCE'),'REVIEW');
+assert.equal(check(aggregateOnly,'WHPP_POD_TIME'),'REVIEW');
+assert.equal(aggregateOnly.evidenceReadyForManualReview,false);
+input.whppPerBillIndependentEvidence={readOnly:true,matchedBySourceDateAndBusiness:true,
+  independentlyCheckedAgainstSavedTms:true,memberCount:346,podBillMatches:290,
+  returnedBillMatches:56,terminalConflictBills:0,wrongDateStatusMatches:0,
+  returningCountedAsReturned:0};
+input.whppPerBillTimingEvidence={readOnly:true,sourceDateBound:true,
+  canonicalPodBillCount:290,trustedTimestampMatchedBills:290,
+  missingOrInvalidTimestamps:0,evidenceProvenanceChecked:true};
 input.realExcelReadback={readOnly:true,rawExcelRead:true,sourceMemberCount:7092,
   matchedDistinctWaybills:7092,missingWaybills:0,unexpectedWaybills:0,
   businessAndDateMatched:true,exportRowsMatched:true};
@@ -84,6 +96,22 @@ const crossDateMismatch=JSON.parse(JSON.stringify(input));
 crossDateMismatch.audit.sevenBusinessSource.byDate[0].whppIndependentSourceMembers=189;
 crossDateMismatch.audit.sevenBusinessSource.byDate[0].sevenBusinessDistinctUnion=6420;
 assert.equal(check(review(crossDateMismatch,{nowMs}),'SEVEN_BUSINESS_SOURCE'),'BLOCK','per-date WHPP source membership cannot drift while seven-business sum balances');
+const falsePositiveTerminal=JSON.parse(JSON.stringify(input));
+falsePositiveTerminal.whppPerBillIndependentEvidence.podBillMatches=289;
+assert.equal(check(review(falsePositiveTerminal,{nowMs}),'WHPP_PER_WAYBILL_TERMINAL_EVIDENCE'),'BLOCK',
+  'same terminal totals but different actual bills must not clear release gate');
+const falsePositiveTime=JSON.parse(JSON.stringify(input));
+falsePositiveTime.whppPerBillTimingEvidence.trustedTimestampMatchedBills=289;
+assert.equal(check(review(falsePositiveTime,{nowMs}),'WHPP_POD_TIME'),'BLOCK',
+  'same total signed-time locks do not prove matching 290 canonical POD members');
+const wrongDateTms=JSON.parse(JSON.stringify(input));
+wrongDateTms.whppPerBillIndependentEvidence.wrongDateStatusMatches=1;
+assert.equal(check(review(wrongDateTms,{nowMs}),'WHPP_PER_WAYBILL_TERMINAL_EVIDENCE'),'BLOCK',
+  'terminal proof from a different source date must not prove old daily membership');
+const returnInProgress=JSON.parse(JSON.stringify(input));
+returnInProgress.whppPerBillIndependentEvidence.returningCountedAsReturned=1;
+assert.equal(check(review(returnInProgress,{nowMs}),'WHPP_PER_WAYBILL_TERMINAL_EVIDENCE'),'BLOCK',
+  'shipmentStatus 80 returning is not shipmentStatus 81 returned');
 const main=fs.readFileSync(new URL('../src/v788OfflineEvidenceGate.js',import.meta.url),'utf8');
 assert.doesNotMatch(main,/writeFile|unlink|rmSync|\bDELETE\b|\bUPDATE\b|fetch\(/);
 console.log('[V788 OFFLINE EVIDENCE] source 346, POD-time 0/290, ledger OPEN346 and absent Excel/UI block; stale/spoofed report fails closed; all evidence still needs manual approval PASS');
