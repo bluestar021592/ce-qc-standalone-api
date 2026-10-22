@@ -43,3 +43,4 @@ jobs:
           node --check src/v788OfflineEvidenceGate.js
           node --check scripts/v788-offline-release-review.mjs
           node scripts/v788-offline-release-evidence-smoke.mjs
+          node scripts/v788-offline-release-viewer-smoke.mjs
