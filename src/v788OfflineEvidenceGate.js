@@ -21,9 +21,11 @@ export function evaluateV788EvidenceReport(report, options={}) {
   const cp=audit?.active72;
   add('ACTIVE_CP_72',cp?.count===72&&cp?.uniqueCount===72&&!audit?.active72?.duplicateCount,
     !cp,'72个有效CP编码须去重且保持72个');
-  const validDateRows=dates.length>0&&dates.every(d=>/^20\d{2}-\d{2}-\d{2}$/.test(d.date)
-    &&isCount(d.sourceMembers)&&isCount(d.withCurrent)
-    &&d.sourceMembers===d.withCurrent);
+  const uniqueWhppDates=new Set(dates.map(d=>String(d?.date||'')));
+  const validDateRows=dates.length>0&&uniqueWhppDates.size===dates.length
+    &&dates.every(d=>/^20\d{2}-\d{2}-\d{2}$/.test(d.date)
+      &&isCount(d.sourceMembers)&&isCount(d.withCurrent)
+      &&d.sourceMembers===d.withCurrent);
   const memberSum=sum(dates,'sourceMembers'), hasTotals=isCount(total?.sourceMembers);
   add('WHPP_SOURCE_MEMBERS',validDateRows&&hasTotals&&total.sourceMembers===memberSum
     &&total.withCurrent===memberSum, !dates.length||!hasTotals,
@@ -32,8 +34,12 @@ export function evaluateV788EvidenceReport(report, options={}) {
   const strictPod=count(total?.strictPOD),strictReturned=count(total?.strictReturned);
   const labelOnly=count(total?.labelOnlyTerminal),unverified=count(total?.otherUnverified);
   const noConflict=total?.contradiction===0&&total?.savedTmsCurrentConflict===0;
-  add('WHPP_STRICT_TERMINAL',normalizedPod!==null&&normalizedReturned!==null
-    &&strictPod!==null&&strictReturned!==null&&labelOnly===0&&unverified===0
+  const validTerminalConservation=hasTotals&&normalizedPod!==null
+    &&normalizedReturned!==null&&strictPod!==null&&strictReturned!==null
+    &&count(total?.returning80)!==null
+    &&normalizedPod+normalizedReturned<=total.sourceMembers
+    &&strictPod+strictReturned+total.returning80<=total.sourceMembers;
+  add('WHPP_STRICT_TERMINAL',validTerminalConservation&&labelOnly===0&&unverified===0
     &&strictPod>=normalizedPod&&strictReturned>=normalizedReturned&&noConflict,
     !total,'旧状态标签不能替代逐票TMS 60/81或严格等效证据；退回中80不能算已退回');
   const ledger=count(total?.ledgerOpenWithNormalizedTerminal);
@@ -44,12 +50,17 @@ export function evaluateV788EvidenceReport(report, options={}) {
   add('WHPP_POD_TIME',normalizedPod!==null&&trusted!==null&&trusted>=normalizedPod
     &&total?.trustedPodLockOnNonPOD===0,
     !total,'只统计有来源、有效日期和可信凭据的逐票POD时间；不允许补造签收天数');
-  const sevenOk=sourceDates.length>0&&audit?.sevenBusinessSource?.available===true
+  const uniqueSourceDates=new Set(sourceDates.map(d=>String(d?.date||'')));
+  const whppByDate=new Map(dates.map(d=>[d?.date,d?.sourceMembers]));
+  const sevenOk=sourceDates.length>0&&uniqueSourceDates.size===sourceDates.length
+    &&audit?.sevenBusinessSource?.available===true
     &&sourceDates.every(d=>d.reconciled===true&&d.latestValidUnifiedBatchPresent===true
       &&d.completedValidUnifiedBatch===true&&!d.blockedByUnfinishedValidBatch
       &&d.duplicateBusinessRows===0&&d.crossBusinessDuplicates===0
       &&d.whppOverlapWithSix===0&&isCount(d.sixBusinessRows)
       &&isCount(d.whppIndependentSourceMembers)
+      &&isCount(d.sevenBusinessDistinctUnion)
+      &&whppByDate.get(d.date)===d.whppIndependentSourceMembers
       &&d.sevenBusinessDistinctUnion===d.sixBusinessRows+d.whppIndependentSourceMembers);
   add('SEVEN_BUSINESS_SOURCE',sevenOk,!sourceDates.length,
     '七业务日报快照来源去重守恒；不能用缺失批次或旧完成批次代替最新有效来源');
