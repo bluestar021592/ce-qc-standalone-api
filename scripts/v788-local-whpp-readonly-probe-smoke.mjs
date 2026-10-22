@@ -30,6 +30,15 @@ try{
     db.prepare('INSERT INTO business_shipment_tracks VALUES(?,?,?,?)').run(bill,'WHPP','2026-07-01',term);
   }
   db.prepare('INSERT INTO business_pod_locks VALUES(?,?,?)').run('CE0001','WHPP','2026-07-03T09:00:00+07:00');
+  // July 2 counterexamples: shipmentStatus 80 is still RETURNING, not RETURNED;
+  // a broken-time lock is not a valid signing timestamp even with a POD label.
+  for(const [bill,state,tms] of [['CE0003','RETURNED','80'],['CE0004','POD','81']]){
+    db.prepare('INSERT INTO business_daily_parse_rows VALUES(?,?,?)').run('WHPP','2026-07-02',bill);
+    db.prepare('INSERT INTO shipment_current_state VALUES(?,?,?,?)').run(bill,'WHPP','2026-07-02',state);
+    db.prepare('INSERT INTO qc_tracking_ledger VALUES(?,?,?)').run(bill,'WHPP','OPEN');
+    db.prepare('INSERT INTO business_shipment_tracks VALUES(?,?,?,?)').run(bill,'WHPP','2026-07-02',tms);
+  }
+  db.prepare('INSERT INTO business_pod_locks VALUES(?,?,?)').run('CE0004','WHPP','not-a-date');
   db.close();
   const before=fs.statSync(database);
   const run=spawnSync(process.execPath,['scripts/v788-local-whpp-readonly-probe.mjs',database],
@@ -38,9 +47,14 @@ try{
   assert.match(run.stdout,/来源2 \| 当前匹配2 \| POD标签1 \| 退回标签1/);
   assert.match(run.stdout,/旧OPEN终态2/);
   assert.match(run.stdout,/TMS60=1 \| TMS80=0 \| TMS81=1/);
+  assert.match(run.stdout,/逐票POD匹配1 \| 逐票退回匹配1 \| 终态矛盾0/);
+  assert.match(run.stdout,/日期格式候选1 \| 无效时间候选0/);
+  assert.match(run.stdout,/2026-07-02 \| 来源2 \| 当前匹配2 \| POD标签1 \| 退回标签1/);
+  assert.match(run.stdout,/终态矛盾2 \| 80误判已退回1/);
+  assert.match(run.stdout,/日期格式候选0 \| 无效时间候选1/);
   assert.match(run.stdout,/POD时间锁候选1/);
   assert.match(run.stdout,/不是可信POD时间/);
-  assert.doesNotMatch(run.stdout,/CE0001|CE0002|VN0001/,'no private waybill output');
+  assert.doesNotMatch(run.stdout,/CE0001|CE0002|CE0003|CE0004|VN0001/,'no private waybill output');
   const after=fs.statSync(database);
   assert.equal(after.size,before.size,'database size unchanged');
   assert.equal(after.mtimeMs,before.mtimeMs,'database bytes must not be modified');
@@ -49,5 +63,5 @@ try{
   assert.equal(missing.status,10);
   assert.match(missing.stdout,/BLOCKED/);
   assert.equal(fs.existsSync(path.join(dir,'not-found.db')),false,'must not create missing DB');
-  console.log('[V788 WHPP ISOLATED SQLITE] exact WHPP source 2 (duplicate excluded), POD1 RETURN1 OPEN2 TMS60/81, no waybill output, no DB writes PASS');
+  console.log('[V788 WHPP ISOLATED SQLITE] duplicate source excluded; exact POD/RETURN statuses, RETURNING80 conflict and invalid time are visible, no waybill output/no DB writes PASS');
 }finally{fs.rmSync(dir,{recursive:true,force:true})}
