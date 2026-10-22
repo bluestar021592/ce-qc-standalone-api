@@ -44,3 +44,5 @@ jobs:
           node --check scripts/v788-offline-release-review.mjs
           node scripts/v788-offline-release-evidence-smoke.mjs
           node scripts/v788-offline-release-viewer-smoke.mjs
+          node --check scripts/v788-local-whpp-readonly-probe.mjs
+          node scripts/v788-local-whpp-readonly-probe-smoke.mjs
