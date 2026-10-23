@@ -810,7 +810,7 @@ function renderLiveProgress(bundle={}){
     setText('v626ImportProgressText',emptyText);
     setText('v626ProcessCount','等待日报');
     setText('v626ImportProgressCount','等待日报');
-    const resumeBtn=byId('v626ResumeTask');
+    const resumeBtn=byId('v625RunResume');
     if(resumeBtn)resumeBtn.style.setProperty('display','none','important');
     return;
   }
