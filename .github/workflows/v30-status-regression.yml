@@ -57,3 +57,4 @@ jobs:
           node scripts/v788-whpp-track-timing-readonly-smoke.mjs
           node --check public/v625-shell.js
           node scripts/v788-empty-selected-date-ui-smoke.mjs
+          node scripts/v789-whpp-postfinish-refresh-smoke.mjs
