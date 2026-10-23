@@ -53,3 +53,5 @@ jobs:
           node scripts/v788-whpp-live-tms-readonly-smoke.mjs
           node --check src/v788WhppPodTimingProvenance.js
           node scripts/v788-whpp-pod-time-provenance-smoke.mjs
+          node --check src/v788WhppTrackTimingReadonly.js
+          node scripts/v788-whpp-track-timing-readonly-smoke.mjs
