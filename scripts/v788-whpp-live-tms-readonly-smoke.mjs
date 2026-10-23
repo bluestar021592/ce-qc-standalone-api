@@ -30,6 +30,15 @@ assert.equal(full.dates['2026-07-02'].matchedReturned,32);
 assert.equal(full.summary.queriedBills,346);
 assert.equal(full.summary.completedBatches,14);
 assert.equal(full.summary.terminalMatches,346);
+assert.equal(full.dates['2026-07-01'].ledgerOpenExactPOD,166);
+assert.equal(full.dates['2026-07-01'].ledgerOpenExactReturned,24);
+assert.equal(full.dates['2026-07-02'].ledgerOpenExactPOD,124);
+assert.equal(full.dates['2026-07-02'].ledgerOpenExactReturned,32);
+assert.equal(full.dates['2026-07-01'].podTimeMissing,166);
+assert.equal(full.dates['2026-07-02'].podTimeMissing,124);
+assert.equal(full.dates['2026-07-01'].podTimeExplicitCandidates,0);
+assert.equal(full.dates['2026-07-02'].podTimeExplicitCandidates,0);
+
 assert.equal(full.dates['2026-07-01'].openLedgerTerminal,190);
 assert.equal(full.dates['2026-07-02'].openLedgerTerminal,156);
 assert.equal(full.readyToClearAndReimport,false,'verified terminal never authorizes purge');
