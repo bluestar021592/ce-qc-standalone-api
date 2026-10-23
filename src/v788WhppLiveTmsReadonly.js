@@ -1,3 +1,4 @@
+import {reviewV788WhppPodTimestamp} from './v788WhppPodTimingProvenance.js';
 // V788 stage 1: fresh TMS shipmentStatus evidence for exact WHPP historical members.
 // Pure runner: injected query is read-only; no DB writes, refresh, tracking sync, or purge.
 export const V788_WHPP_LIVE_TERMINAL_AUDIT_ID='V788_WHPP_LIVE_TMS_346_READONLY_V1';
@@ -9,7 +10,9 @@ const blankStats=()=>({sourceMembers:0,podLabels:0,returnedLabels:0,
   tmsPOD60:0,tmsReturning80:0,tmsReturned81:0,tmsOther:0,
   matchedPOD:0,matchedReturned:0,returnedLabelStillReturning:0,
   terminalConflict:0,missingTms:0,duplicateTms:0,
-  ambiguousLocalStatus:0,openLedgerTerminal:0});
+  ambiguousLocalStatus:0,openLedgerTerminal:0,
+  ledgerOpenExactPOD:0,ledgerOpenExactReturned:0,
+  podTimeExplicitCandidates:0,podTimeMissing:0,podTimeReviewRequired:0});
 const makeResult=(dates,code)=>({
   id:V788_WHPP_LIVE_TERMINAL_AUDIT_ID,readOnly:true,productionModified:false,
   readyToPublish:false,authorizedToClear:false,readyToClearAndReimport:false,
@@ -88,8 +91,13 @@ export async function auditV788WhppLiveTms({members=[],query,batchSize=25}={}){
       else{s.tmsOther++;continue;}
       if(status==='60'&&row.state==='POD'){
         s.matchedPOD++;summaries.terminalMatches++;
+        if(row.ledger==='OPEN')s.ledgerOpenExactPOD++;
+        const timing=reviewV788WhppPodTimestamp(raw,row.date);
+        if(timing.candidate)s.podTimeExplicitCandidates++;
+        else {s.podTimeReviewRequired++;if(timing.category==='POD_TIME_MISSING')s.podTimeMissing++;}
       }else if(status==='81'&&['RETURNED','RETURN_COMPLETED'].includes(row.state)){
         s.matchedReturned++;summaries.terminalMatches++;
+        if(row.ledger==='OPEN')s.ledgerOpenExactReturned++;
       }else if(status==='80'&&['RETURNED','RETURN_COMPLETED'].includes(row.state)){
         s.returnedLabelStillReturning++;s.terminalConflict++;summaries.terminalConflicts++;
       }else if((status==='60'&&['RETURNED','RETURN_COMPLETED'].includes(row.state))
@@ -102,6 +110,9 @@ export async function auditV788WhppLiveTms({members=[],query,batchSize=25}={}){
     s.matchedPOD===s.podLabels&&s.matchedReturned===s.returnedLabels
     &&s.sourceMembers===s.podLabels+s.returnedLabels
     &&s.missingTms===0&&s.duplicateTms===0&&s.terminalConflict===0);
+  // Counts are for human-led reconciliation planning ONLY: evidence is not
+  // persisted per bill, cannot be used for automatic ledger repair.
+  // Time candidates are not trusted signing-day evidence until independently checked.
   // Terminal evidence can be complete while signing-time and Excel are not.
   return {...makeResult(dates,exact?'TERMINAL_EVIDENCE_REVIEW_READY':'TERMINAL_EVIDENCE_INCOMPLETE'),
     terminalEvidenceReviewReady:exact,summary:summaries};
