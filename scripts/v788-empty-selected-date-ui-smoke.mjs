@@ -1,0 +1,18 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+const shell=fs.readFileSync('public/v625-shell.js','utf8');
+const html=fs.readFileSync('public/v625-shell.html','utf8');
+assert.match(shell,/const v788EmptySelectedDates=new Set\(\)/);
+assert.match(shell,/summary\?\.selectionMatched===false\s*&&\s*!summary\?\.snapshotId\s*&&Number\(summary\?\.classification\?\.total\|\|0\)===0/,'only explicit no-import source evidence may mark empty date');
+assert.match(shell,/v788EmptySelectedDates\.add\(requestedDate\)/);
+assert.match(shell,/v788EmptySelectedDates\.delete\(requestedDate\)/,'new import must restore normal verification');
+assert.match(shell,/if\(emptyDate&&v788EmptySelectedDates\.has\(emptyDate\)\)/);
+assert.match(shell,/const emptyText='所选日期尚未上传日报；上传后再核验扫描、轨迹与POD'/);
+assert.match(shell,/if\(date&&v788EmptySelectedDates\.has\(date\)\)/,'short-circuit backend progress requests only on explicitly empty date');
+assert.match(shell,/if\(v788EmptySelectedDates\.has\(selectedReportDate\(\)\)\)/);
+assert.match(shell,/v785OpenSourceVerified=false;\s*v785OpenExpectedCount=0;\s*v785OpenTotal=0;\s*v785OpenEarliestDate='';/,'empty source must NOT claim verified zero');
+assert.match(shell,/isUnimported\?'所选日期暂无日报；导入后再核验未完成POD。'/);
+assert.match(shell,/const resumeBtn=byId\('v625RunResume'\)/);
+assert.match(html,/id="v625RunResume"/,'resume button exists');
+assert.doesNotMatch(shell,/v788EmptySelectedDates\.add\(date\)/,'a zero-count dashboard response alone must never mark unknown dates empty');
+console.log('[V788 EMPTY DATE] 0-ticket selected date shows waiting for import; 0/0 POD does not falsely pass or raise error; valid imports restore normal evidence checks PASS');

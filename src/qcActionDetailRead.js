@@ -125,6 +125,27 @@ export function qcDetailRead(db,{reportDate='',shipmentCode='',businessType='',s
   const whppCancelledFinal=business==='WHPP'
     && String(finalRow?.primaryCategory||'').trim()==='订单取消'
     && ['CLOSED','CLOSED_CANCELLED'].includes(String(finalRow?.carryStatus||whppFinal?.carry状态||'').trim().toUpperCase());
+  // V788: A cycle-count is a review category, never a POD/return outcome.
+  // Use same-day evidence only: a later current-state row cannot recategorize
+  // an older daily member. More authoritative terminal facts always win.
+  const sameDateCurrent=String(current?.reportDate||'').slice(0,10)===date;
+  const currentCode=sameDateCurrent?String(current?.state||'').trim().toUpperCase():'';
+  const finalCategory=String(finalRow?.primaryCategory||'').trim().toUpperCase();
+  const shipmentStatusCode=String(track?.shipmentStatus||track?.sourceStatus||'').trim();
+  const latestEventCode=String(events[0]?.eventCode||'').trim();
+  const hasTerminalProof=whppCancelledFinal
+    || ['POD','RETURNED','RETURN_COMPLETED'].includes(currentCode)
+    || ['60','81'].includes(shipmentStatusCode)
+    || ['80','86'].includes(latestEventCode)
+    || Number(scan?.isPod||0)===1 || Number(finalRow?.isPod||0)===1;
+  const newestTrackedCycle=['30','32'].includes(latestEventCode);
+  const trackedOtherCurrent=Boolean(latestEventCode)&&!newestTrackedCycle;
+  const savedCycleStatus=currentCode==='CYCLE_COUNT'
+    ||(!currentCode&&['CYCLE_COUNT','盘点'].includes(finalCategory));
+  const cycleCountReview=sourceVerified&&!classificationConflict&&!hasTerminalProof
+    && shipmentStatusCode!=='80' && latestEventCode!=='84'
+    && (newestTrackedCycle||(!trackedOtherCurrent&&savedCycleStatus));
+  const reviewDisposition=cycleCountReview?'CYCLE_COUNT_REVIEW':'';
   const evidence={source:sourceVerified,scan:!!scan,final:!!finalRow,shipmentTrack:!!track,
     trackEvents:events.length,whppDailyRows:daily.length,currentState:!!current};
   const notice=classificationConflict?
@@ -133,11 +154,13 @@ export function qcDetailRead(db,{reportDate='',shipmentCode='',businessType='',s
     '找到该日期的WHPP处理记录，但尚未核实其日报来源成员；不能据此认定已POD或处理完成。':
     whppCancelledFinal?
     '此日WHPP已保存订单取消及CLOSED闭环证据；该单不是POD，也不应因缺少轨迹进入普通未处理异常。可继续核对原始取消依据。':
+    cycleCountReview?
+    '盘点待核实：该票当前记录为盘点，不等于已签收、已退回，也不能直接认定为派送未完结；请结合最新有效轨迹和实物盘点继续核对。':
     hasProcessingEvidence?
     '找到该业务日期的日报来源与处理证据，请以最后有效轨迹和可信终态为准。':
     '已确认日报来源，但缺少已保存的扫描、轨迹或最终判断；没有轨迹不代表未POD。';
   return{ok:true,detail:{shipmentCode:bill,businessType:business,reportDate:date,
     snapshotId:batch.snapshotId,source,scan,finalRow,track,events,daily,
     current:current?{...current,note:current.reportDate===date?'当前状态记录':'跨日期最新状态，仅供参考，不作为本日报终态证明'}:null,
-    evidence,notice,hasProcessingEvidence,terminalOutcome:whppCancelledFinal?'ORDER_CANCELLED':''}};
+    evidence,notice,hasProcessingEvidence,reviewDisposition,terminalOutcome:whppCancelledFinal?'ORDER_CANCELLED':''}};
 }

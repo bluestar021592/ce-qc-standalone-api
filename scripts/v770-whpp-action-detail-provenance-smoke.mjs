@@ -6,6 +6,10 @@ import {qcDetailRead} from '../src/qcActionDetailRead.js';
 const page=fs.readFileSync(new URL('../public/qc-action-detail.html',import.meta.url),'utf8');
 assert.match(page,/ce-express-logo-main\.png/,'details use the existing CE QC app logo');
 assert.match(page,/\.qcd-top\{background:#104779/,'details use the same blue-white identity');
+assert.match(page,/scanOrderStatus:d\.scan\?\.orderStatus/,'scan orderStatus has independent display');
+assert.match(page,/tmsShipmentStatus:d\.track\?\.shipmentStatus/,'TMS shipmentStatus cannot be hidden by a scan row');
+assert.match(page,/shipmentStatus 60=POD、80=退回中、81=已退回/,'shipment-status and event-code numbering documented separately');
+
 assert.match(page,/d\.source\.classificationConflict\?'跨业务分类冲突':d\.evidence\.source\?'日报成员已核实':'仅保存处理记录'/,'source/conflict label reflects actual evidence');
 const db=new DatabaseSync(':memory:');
 db.exec(`
@@ -105,6 +109,54 @@ db.prepare("INSERT INTO business_final_rows(businessType,reportDate,shipmentCode
   .run('WHPP',date,'CE04072600019',0,'订单取消','SUCCESS','OPEN',date,'{}');
 assert.equal(run('CE04072600019').detail.terminalOutcome,'','unclosed cancellation label must stay unverified');
 assert.match(page,/d\.terminalOutcome==='ORDER_CANCELLED'\?'订单取消（已闭环）'/,'detail header must show the saved cancelled disposition');
+
+// V788 isolated review: a warehouse cycle count is neither verified POD nor
+// a failed delivery; an exact terminal state must supersede the review label.
+const cycle='CE04072600020';
+db.prepare("INSERT INTO business_daily_parse_rows VALUES(?,?,?,?,?,?,?,?,?)")
+  .run(5,'WHPP',date,cycle,'WHPP source',20,20,'',date);
+db.prepare("INSERT INTO shipment_current_state VALUES(?,?,?,?,?,?,?,?)")
+  .run(cycle,'WHPP',date,snap,'CYCLE_COUNT','SUCCESS',date,date);
+const cycleDetail=run(cycle);
+assert.equal(cycleDetail.ok,true);
+assert.equal(cycleDetail.detail.reviewDisposition,'CYCLE_COUNT_REVIEW');
+assert.equal(cycleDetail.detail.terminalOutcome,'','a cycle count does not prove POD/return/cancellation');
+assert.match(cycleDetail.detail.notice,/盘点待核实/);
+assert.doesNotMatch(cycleDetail.detail.notice,/派送未完结已确认/);
+db.prepare("UPDATE shipment_current_state SET state='POD' WHERE shipmentCode=?").run(cycle);
+const cyclePod=run(cycle);
+assert.equal(cyclePod.detail.reviewDisposition,'','a verified terminal state supersedes cycle count');
+db.prepare("UPDATE shipment_current_state SET state='CYCLE_COUNT' WHERE shipmentCode=?").run(cycle);
+db.prepare("INSERT INTO business_shipment_tracks VALUES(?,?,?,?,?,?,?,?)")
+  .run('WHPP',date,cycle,'81','已退回','SUCCESS',date,'{}');
+assert.equal(run(cycle).detail.reviewDisposition,'','shipment status 81 is a return, not cycle-count review');
+db.prepare("DELETE FROM business_shipment_tracks WHERE shipmentCode=?").run(cycle);
+db.prepare("UPDATE shipment_current_state SET reportDate='2026-07-05' WHERE shipmentCode=?").run(cycle);
+assert.equal(run(cycle).detail.reviewDisposition,'','cross-date current cycle-count cannot classify the selected historical date');
+db.prepare("UPDATE shipment_current_state SET state='PENDING',reportDate=? WHERE shipmentCode=?").run(date,cycle);
+assert.equal(run(cycle).detail.reviewDisposition,'','newer same-date Pending supersedes stale cycle review');
+db.prepare("UPDATE shipment_current_state SET state='CYCLE_COUNT' WHERE shipmentCode=?").run(cycle);
+db.prepare("INSERT INTO business_shipment_tracks VALUES(?,?,?,?,?,?,?,?)")
+  .run('WHPP',date,cycle,'80','退回中','SUCCESS',date,'{}');
+assert.equal(run(cycle).detail.reviewDisposition,'','return in progress must not appear as cycle count');
+db.prepare("DELETE FROM business_shipment_tracks WHERE shipmentCode=?").run(cycle);
+
+// Latest tracked cycle count (codes 30/32) is a current QC review even if
+// the unified current-state cache is unavailable; newer nodes remove it.
+const fromTrack='CE04072600021';
+db.prepare("INSERT INTO business_daily_parse_rows VALUES(?,?,?,?,?,?,?,?,?)")
+  .run(6,'WHPP',date,fromTrack,'WHPP source',21,21,'',date);
+db.prepare("INSERT INTO business_track_events VALUES(?,?,?,?,?,?,?)")
+  .run(1,'WHPP',date,fromTrack,'2026-07-04T08:00:00','30','{"description":"盘点"}');
+assert.equal(run(fromTrack).detail.reviewDisposition,'CYCLE_COUNT_REVIEW','latest 30 means warehouse cycle-count review');
+db.prepare("INSERT INTO business_final_rows(businessType,reportDate,shipmentCode,isPod,primaryCategory,apiStatus,carryStatus,updatedAt,rawJson) VALUES(?,?,?,?,?,?,?,?,?)")
+  .run('WHPP',date,fromTrack,0,'CYCLE_COUNT','SUCCESS','OPEN',date,'{}');
+db.prepare("INSERT INTO business_track_events VALUES(?,?,?,?,?,?,?)")
+  .run(2,'WHPP',date,fromTrack,'2026-07-04T10:00:00','99','{"description":"工单"}');
+assert.equal(run(fromTrack).detail.reviewDisposition,'','newer code 99 supersedes older cycle count and final category');
+db.prepare("INSERT INTO business_track_events VALUES(?,?,?,?,?,?,?)")
+  .run(3,'WHPP',date,fromTrack,'2026-07-04T11:00:00','32','{"description":"再次盘点"}');
+assert.equal(run(fromTrack).detail.reviewDisposition,'CYCLE_COUNT_REVIEW','latest 32 restores cycle-count review');
 
 db.close();
 console.log('[V770] WHPP independent daily source vs unified CE, true source/unverified saved final, exact date/snapshot, archived member, original CE QC logo PASS');
