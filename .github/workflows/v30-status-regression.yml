@@ -46,3 +46,8 @@ jobs:
           node scripts/v788-offline-release-viewer-smoke.mjs
           node --check scripts/v788-local-whpp-readonly-probe.mjs
           node scripts/v788-local-whpp-readonly-probe-smoke.mjs
+      - name: V788 fresh TMS 346 bill status read-only regression
+        run: |
+          node --check src/v788WhppLiveTmsReadonly.js
+          node --check scripts/v788-whpp-live-tms-readonly.mjs
+          node scripts/v788-whpp-live-tms-readonly-smoke.mjs
