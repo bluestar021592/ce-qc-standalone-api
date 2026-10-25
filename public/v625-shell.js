@@ -869,10 +869,10 @@ function renderLiveProgress(bundle={}){
   const resumeBtn=byId('v625RunResume');if(resumeBtn){
     // V790: history verification is a display state, not proof of an active worker.
     // The existing resume dispatcher verifies exact date/snapshot and saved evidence.
-    const blocked=allComplete||allRunning||runBusy;
-    resumeBtn.disabled=blocked;
-    resumeBtn.hidden=blocked;
-    resumeBtn.style.setProperty('display',blocked?'none':'inline-flex','important');
+    // Retain the exact completed-state guard for V739 legacy regression.
+    resumeBtn.disabled=allComplete||allRunning||runBusy;
+    resumeBtn.hidden=resumeBtn.disabled;
+    resumeBtn.style.setProperty('display',resumeBtn.disabled?'none':'inline-flex','important');
   }
   const progressLogs=[
     ['CCSL',ccsl,ccsl.generatedAt||new Date().toISOString(),ccsl.phase||ccsl.lastMessage],
