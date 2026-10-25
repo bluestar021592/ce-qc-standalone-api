@@ -500,7 +500,7 @@ function v759PinnedWhppProof(date=''){
   const snapshotId=String(v626LatestImport?.snapshotId||'');
   return snapshotId?v759WhppCompletionProofs.get(day+'|'+snapshotId)||null:null;
 }
-async function v759VerifyWhppCompletionOnce(date=''){
+async function v759VerifyWhppCompletionOnce(date='',{force=false}={}){
   const day=String(date||'').slice(0,10);
   const snapshotId=String(v626LatestImport?.snapshotId||'');
   if(!/^\d{4}-\d{2}-\d{2}$/.test(day)||!snapshotId
@@ -511,7 +511,7 @@ async function v759VerifyWhppCompletionOnce(date=''){
   const key=day+'|'+snapshotId;
   if(v759WhppProofRequests.has(key))return v759WhppProofRequests.get(key);
   // Bounded once per date/snapshot in 30 seconds; never rescan CE remotely.
-  if(Date.now()<Number(v763WhppEvidenceNextRead.get(key)||0))return false;
+  if(!force&&Date.now()<Number(v763WhppEvidenceNextRead.get(key)||0))return false;
   v763WhppEvidenceNextRead.set(key,Date.now()+30000);
   const promise=(async()=>{
     try{
@@ -2076,7 +2076,8 @@ async function waitWhppTerminal(reportDate,timeoutMs=1800000){
     // Keep the global 1.4s progress poll as the single UI owner. A temporary
     // progress-read timeout never aborts the detached WHPP background task.
     if(!runtime.active&&runtime.outcome){
-      if(runtime.outcome==='FAILED')throw new Error(runtime.error||'WHPP处理失败');
+      if(runtime.outcome!=='COMPLETED')
+        throw new Error(runtime.error||('WHPP后台未完成：'+runtime.outcome));
       return r;
     }
     await new Promise(resolve=>setTimeout(resolve,1200));
@@ -2128,7 +2129,12 @@ async function safeWhppRun(mode,reportDate){
     (runMode==='start'?'首次启动扫描':'从现有记录继续处理'));
   try{
     const r=await post('/api/whpp/run/'+(runMode==='resume'?'resume':'start'),{reportDate:day},0);
-    if(r.runtime?.active||r.active)await waitWhppTerminal(day);
+    const terminal=(r.runtime?.active||r.active)?await waitWhppTerminal(day):r;
+    // A completed WHPP run must bypass the stale 30s negative-proof throttle once.
+    // This is an exact date/snapshot read-only check, not an automatic completion.
+    if(terminal?.runtime?.outcome==='COMPLETED'||terminal?.completed===true){
+      await v759VerifyWhppCompletionOnce(day,{force:true});
+    }
     return r;
   }catch(error){
     const code=String(error.payload?.code||'');

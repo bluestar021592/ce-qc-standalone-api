@@ -43,5 +43,5 @@ assert.ok(htmlFold.indexOf('EVENT-8')>htmlFold.indexOf('</summary>'),'earlier ev
 assert.ok(htmlFold.includes('展开其余 10 条历史轨迹'));
 assert.equal((htmlFold.match(/EVENT-/g)||[]).length,18,'all original evidence retained');
 assert.ok(!fold(evidence.slice(0,5),e=>'<div>'+e.marker+'</div>').includes('<details>'),'short lists are not hidden');
-assert.match(html,/v625-shell\.js\?v=20261019-v788-1&patch=793/);
+assert.match(html,/v625-shell\.js\?v=20261019-v788-1&patch=794/);
 console.log('[V788 TRACKING LATEST] PASS last event first; CYCLE_COUNT open; 60/80/81 exact bill states; conflicts and remote errors retained; no ledger writes');
