@@ -871,7 +871,7 @@ function renderLiveProgress(bundle={}){
     // The existing resume dispatcher verifies exact date/snapshot and saved evidence.
     // Retain the exact completed-state guard for V739 legacy regression.
     resumeBtn.disabled=allComplete||allRunning||runBusy;
-    resumeBtn.hidden=resumeBtn.disabled;
+    resumeBtn.hidden=allComplete||allRunning||runBusy;
     resumeBtn.style.setProperty('display',resumeBtn.disabled?'none':'inline-flex','important');
   }
   const progressLogs=[
