@@ -7,7 +7,7 @@ assert.match(ui,/byId\('v625RunResume'\)\?\.addEventListener\('click',\(\)=>runT
 const anchor=ui.indexOf("const resumeBtn=byId('v625RunResume');if(resumeBtn){",ui.indexOf("const historyVerifying="));
 assert.ok(anchor>=0,'button visibility block');
 const snippet=ui.slice(anchor,anchor+580);
-assert.match(snippet,/allComplete\|\|allRunning\|\|runBusy/,'hide only when complete or actively running');
+assert.match(snippet,/resumeBtn\.disabled=allComplete\|\|allRunning\|\|runBusy/,'hide only when complete or actively running');
 assert.doesNotMatch(snippet,/disabled=allComplete\|\|historyVerifying/,'history verification may be stalled without active workers');
 assert.match(ui,/const proof=await v761FamilyRecoveryProof\(reportDate\)/,'guarded family proof preserved');
 assert.match(ui,/await safeWhppRun\('resume',reportDate\)/,'WHPP exact membership guarded resume preserved');
