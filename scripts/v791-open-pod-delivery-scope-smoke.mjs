@@ -9,6 +9,16 @@ assert.equal(deliveryFollowupDisposition({currentState:'PENDING_SCAN'}).reason,'
 assert.equal(deliveryFollowupDisposition({currentState:'PENDING_SCAN'}).include,true,
   'missing scan must not be silently marked POD or returned');
 assert.equal(deliveryFollowupDisposition({currentState:'OC'}).include,true);
+const proof={terminalEvidenceVerified:true,terminalEvidenceBusinessMatched:true,terminalEvidenceWaybillMatched:true};
+assert.equal(deliveryFollowupDisposition({...proof,shipmentStatus:'60',currentState:'PENDING_SCAN'}).reason,'VERIFIED_POD');
+assert.equal(deliveryFollowupDisposition({...proof,shipmentStatus:'81'}).reason,'VERIFIED_RETURNED');
+assert.equal(deliveryFollowupDisposition({...proof,shipmentStatus:'80'}).reason,'RETURN_WORKFLOW');
+assert.equal(deliveryFollowupDisposition({shipmentStatus:'60',currentState:'PENDING_SCAN'}).include,true,
+  'unverified status never closes a shipment');
+assert.equal(deliveryFollowupDisposition({...proof,shipmentStatus:'',eventCode:'60'}).include,true,
+  'eventCode 60 must not masquerade as shipmentStatus 60');
+assert.equal(deliveryFollowupDisposition({...proof,orderStatus:'60'}).include,true,
+  'orderStatus must not masquerade as shipmentStatus');
 const server=fs.readFileSync(new URL('../server.js',import.meta.url),'utf8');
 assert.match(server,/deliveryFollowupDisposition\(\{\.\.\.state,currentState:savedState\}\)/);
 assert.match(server,/if\(!disposition\.include\)continue/);
