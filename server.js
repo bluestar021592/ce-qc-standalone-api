@@ -1850,7 +1850,7 @@ app.get('/api/tracking-workspace', async (req, res) => {
   const priority = row => row.queryStatus === '待重试' ? 0 : row.isActionable ? 1 : 2;
   allRows.sort((a, b) => priority(a) - priority(b) || String(a.businessType).localeCompare(String(b.businessType)) || String(a.shipmentCode).localeCompare(String(b.shipmentCode)));
   const rows = scope === 'all' ? allRows : scope === 'pod' ? allRows.filter(row => row.isClosed)
-    : scope==='open' ? allRows.filter(row=>!row.isClosed) : allRows.filter(row => row.isActionable);
+    : scope==='open' ? allRows.filter(row=>!row.isClosed&&deliveryFollowupDisposition(row).include) : allRows.filter(row => row.isActionable);
   const qualityBuckets={
     shopArrived:allRows.filter(row=>row.shopArrivedCurrent),
     pendingGap:allRows.filter(row=>row.pendingNonContinuous),
