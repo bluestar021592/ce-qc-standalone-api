@@ -866,7 +866,14 @@ function renderLiveProgress(bundle={}){
   setText('v626StageScan',scanStage);setText('v626StageTrack',trackStage);setText('v626StageDone',doneStage);
   setText('v626ImportScan',scanStage);setText('v626ImportTrack',trackStage);setText('v626ImportDone',doneStage);
   const badge=byId('v626ProcessState');if(badge){badge.textContent=completeFamilies>=3?'已完成':historyVerifying?'核验中':allRunning?'处理中':'待处理';badge.className='v625-badge '+(completeFamilies>=3?'success':allRunning?'warning':'warning')}
-  const resumeBtn=byId('v625RunResume');if(resumeBtn){resumeBtn.disabled=allComplete||historyVerifying;resumeBtn.hidden=allComplete||historyVerifying;resumeBtn.style.setProperty('display',allComplete||historyVerifying?'none':'inline-flex','important')}
+  const resumeBtn=byId('v625RunResume');if(resumeBtn){
+    // V790: history verification is a display state, not proof of an active worker.
+    // The existing resume dispatcher verifies exact date/snapshot and saved evidence.
+    // Retain the exact completed-state guard for V739 legacy regression.
+    resumeBtn.disabled=allComplete||allRunning||runBusy;
+    resumeBtn.hidden=allComplete||allRunning||runBusy;
+    resumeBtn.style.setProperty('display',resumeBtn.disabled?'none':'inline-flex','important');
+  }
   const progressLogs=[
     ['CCSL',ccsl,ccsl.generatedAt||new Date().toISOString(),ccsl.phase||ccsl.lastMessage],
     ['SHOPEE',shopee,shopee.generatedAt||new Date().toISOString(),shopee.phase||shopee.lastMessage],
