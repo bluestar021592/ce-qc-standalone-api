@@ -1,3 +1,4 @@
+import { deliveryFollowupDisposition } from './src/openPodDeliveryScope.js';
 import 'dotenv/config';
 import express from 'express';
 import multer from 'multer';
@@ -1828,11 +1829,16 @@ app.get('/api/tracking-workspace', async (req, res) => {
         if(!bill||dailySet.has(type+'|'+bill))continue;
         let state={};
         try{state=JSON.parse(String(row.stateJson||'{}'))||{}}catch{}
+        const savedState=String(row.currentState||state.currentState||state.scanNormalizedState||'未完结');
+        const disposition=deliveryFollowupDisposition({...state,currentState:savedState});
+        // Courier diversion ends delivery follow-up; it does NOT create POD.
+        // Keep original evidence/ledger untouched and do not synthesize terminal states.
+        if(!disposition.include)continue;
         historicalCarryRows.push({
           shipmentCode:bill,businessType:type,reportDate:row.sourceReportDate,
           sourceReportDate:row.sourceReportDate,historicalCarry:true,isClosed:false,isActionable:true,
-          currentState:String(row.currentState||state.currentState||state.scanNormalizedState||'未完结'),
-          category:String(state.primaryCategory||state.currentMainCategory||'历史未完结'),
+          currentState:disposition.reason==='SCAN_EVIDENCE_MISSING'?'扫描证据待核实':savedState,
+          category:disposition.reason==='SCAN_EVIDENCE_MISSING'?'扫描证据待核实':String(state.primaryCategory||state.currentMainCategory||'历史未完结'),
           lastEventTime:String(row.lastEventTime||row.lastCheckedAt||''),
           lastCheckedAt:String(row.lastCheckedAt||''),queryStatus:String(row.apiStatus||'需更新'),
           pendingNonContinuous:false,oc2Plus:false,shopArrivedCurrent:false
