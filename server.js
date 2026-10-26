@@ -2841,9 +2841,9 @@ function workspaceRows(state = {}, businessType = 'CCSL') {
     const batch = queryStatus.get(shipmentCode) || {};
     // TMS terminal facts: 60=POD, 81=returned; 80 remains RETURNING.
     // 85 is historical POD evidence. Prefer the saved shipment terminal code.
-    const terminalCode=String(row.shipmentStatus ?? scan.shipmentStatus ?? row.orderStatus ?? scan.orderStatus ?? '').trim();
+    const terminalCode=String(row.shipmentStatus ?? scan.shipmentStatus ?? '').trim();
     const isPod = row.是否POD === '是' || Number(row.isPod||0)===1
-      || Number(scan.isPod||0)===1 || terminalCode==='60' || terminalCode==='85'
+      || Number(scan.isPod||0)===1 || terminalCode==='60'
       || String(scan.skipTrackReason||'')==='MANUAL_TERMINAL_POD';
     const returnText = `${row.退回状态 || ''} ${row.primaryCategory || ''}`.trim().toUpperCase();
     const explicitReturn = row.truthEvidence?.returned===true || terminalCode==='81'
@@ -2861,7 +2861,7 @@ function workspaceRows(state = {}, businessType = 'CCSL') {
     const category = row.primaryCategory || row.主分类 || row.异常分类 || '';
     const normalizedSpecial=String(specialState||'').trim().toUpperCase().replace(/^(?:CEL|CE):/,'');
     const specialClosed=['SELF_PICKUP','CECN_RETENTION','CEZT_RETENTION','CCSL580_RETENTION',
-      'CECN','CEZT','CCSL580'].includes(normalizedSpecial);
+      'CECN','CEZT','CCSL580','CCSLCN_DIVERSION','CCSLZT_DIVERSION','CCSL580_DIVERSION'].includes(normalizedSpecial);
     const normalFinal = category === '正常分流节点' || row.matchedRule === 'NORMAL_FINAL_HUB';
     // WHPP terminal cancellation must follow its saved analysis and close
     // status, never a bare scan orderStatus=10 or an unverified text hint.
