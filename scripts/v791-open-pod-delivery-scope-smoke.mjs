@@ -22,5 +22,6 @@ assert.equal(deliveryFollowupDisposition({...proof,orderStatus:'60'}).include,tr
 const server=fs.readFileSync(new URL('../server.js',import.meta.url),'utf8');
 assert.match(server,/deliveryFollowupDisposition\(\{\.\.\.state,currentState:savedState\}\)/);
 assert.match(server,/if\(!disposition\.include\)continue/);
+assert.match(server,/scope==='open' \? allRows\.filter\(row=>!row\.isClosed&&deliveryFollowupDisposition\(row\)\.include\)/);
 assert.match(server,/SELECT o\.shipmentCode,o\.businessType,o\.sourceReportDate/);
 console.log('[V791] explicit courier handoffs excluded; missing scan remains unverified, never invented POD PASS');
