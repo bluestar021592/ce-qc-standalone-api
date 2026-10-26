@@ -23,5 +23,11 @@ const server=fs.readFileSync(new URL('../server.js',import.meta.url),'utf8');
 assert.match(server,/deliveryFollowupDisposition\(\{\.\.\.state,currentState:savedState\}\)/);
 assert.match(server,/if\(!disposition\.include\)continue/);
 assert.match(server,/scope==='open' \? allRows\.filter\(row=>!row\.isClosed&&deliveryFollowupDisposition\(row\)\.include\)/);
+assert.match(server,/const terminalCode=String\(row\.shipmentStatus \?\? scan\.shipmentStatus \?\? ''\)\.trim\(\)/,
+  'workspace must never mix orderStatus into shipmentStatus');
+assert.doesNotMatch(server,/terminalCode==='85'/,
+  'unverified code 85 must never be accepted as a shipment terminal');
+assert.match(server,/CCSLCN_DIVERSION','CCSLZT_DIVERSION','CCSL580_DIVERSION/,
+  'daily workspace must close courier diversions');
 assert.match(server,/SELECT o\.shipmentCode,o\.businessType,o\.sourceReportDate/);
 console.log('[V791] explicit courier handoffs excluded; missing scan remains unverified, never invented POD PASS');
