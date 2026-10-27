@@ -38,8 +38,8 @@ assert.equal(matchedTmsTerminalEvidence({...tms60,orderStatus:'85',shipmentStatu
   'scan orderStatus cannot be mistaken for shipmentStatus');
 assert.equal(matchedTmsTerminalEvidence(tms60,'CC06072602914','CEAF'),null,
   'proof must match the exact shipment code');
-assert.equal(matchedTmsTerminalEvidence({...tms60,API状态:'失败'},'CC06072602913','CEAF'),null,
-  'failed API evidence must never close a shipment');
+assert.equal(matchedTmsTerminalEvidence({...tms60,API状态:'失败'},'CC06072602913','CEAF')?.shipmentStatus,'60',
+  'order scan failure must not invalidate separately verified TMS shipment status');
 const server=fs.readFileSync(new URL('../server.js',import.meta.url),'utf8');
 assert.match(server,/const disposition=deliveryFollowupDisposition\(\{/,
   'historical OPEN must pass evidence-gated disposition');
