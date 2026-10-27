@@ -1831,7 +1831,22 @@ app.get('/api/tracking-workspace', async (req, res) => {
         let state={};
         try{state=JSON.parse(String(row.stateJson||'{}'))||{}}catch{}
         const savedState=String(row.currentState||state.currentState||state.scanNormalizedState||'未完结');
-        const disposition=deliveryFollowupDisposition({...state,currentState:savedState});
+        // Only an explicitly verified, same-business and same-waybill TMS
+        // shipment status may override a stale OPEN carryover record.
+        // The snapshot's original state and database remain untouched.
+        const proof=state.terminalEvidence&&typeof state.terminalEvidence==='object'
+          ?state.terminalEvidence:{};
+        const proofBill=String(proof.shipmentCode||'').trim().toUpperCase();
+        const proofType=String(proof.businessType||'').trim().toUpperCase();
+        const proofMatches=proof.source==='TMS_SHIPMENT_STATUS'
+          &&proof.verified===true&&proofBill===bill&&proofType===type;
+        const disposition=deliveryFollowupDisposition({
+          ...state,currentState:savedState,
+          shipmentStatus:proofMatches?String(proof.shipmentStatus||''):'',
+          terminalEvidenceVerified:proofMatches,
+          terminalEvidenceWaybillMatched:proofMatches,
+          terminalEvidenceBusinessMatched:proofMatches
+        });
         // Courier diversion ends delivery follow-up; it does NOT create POD.
         // Keep original evidence/ledger untouched and do not synthesize terminal states.
         if(!disposition.include)continue;
