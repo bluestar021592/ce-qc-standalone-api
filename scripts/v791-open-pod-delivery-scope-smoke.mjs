@@ -30,6 +30,11 @@ assert.doesNotMatch(server,/terminalCode==='85'/,
 assert.match(server,/CCSLCN_DIVERSION','CCSLZT_DIVERSION','CCSL580_DIVERSION/,
   'daily workspace must close courier diversions');
 assert.match(server,/SELECT o\.shipmentCode,o\.businessType,o\.sourceReportDate/);
+assert.match(server,/proof\.source==='TMS_SHIPMENT_STATUS'/,'only typed shipment TMS proof is accepted');
+assert.match(server,/proof\.verified===true&&proofBill===bill&&proofType===type/,
+  'persisted terminal evidence must match source business and waybill');
+assert.match(server,/shipmentStatus:proofMatches\?String\(proof\.shipmentStatus\|\|''\):''/,
+  'stale status must not be treated as a verified TMS terminal');
 assert.match(server,/UPPER\(TRIM\(q\.businessType\)\)=UPPER\(TRIM\(o\.businessType\)\)/,
   'historical ledger lookup must match business and waybill');
 console.log('[V791] explicit courier handoffs excluded; missing scan remains unverified, never invented POD PASS');
