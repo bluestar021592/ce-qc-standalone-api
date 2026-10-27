@@ -87,6 +87,20 @@ function firstStrictStartDate(value = []) {
 export function classifyV246Terminal({ closeReason = '', state = '', stateJson = {} } = {}) {
   const payload = safeJson(stateJson, {});
   const stateName = text(state || payload.currentState || payload.scanNormalizedState || payload.state || payload.primaryCategory || payload.主分类).toUpperCase();
+  // An exact, pipeline-verified TMS shipment status outranks legacy order
+  // scan/event-code hints. In particular status 80 is *not* returned or POD.
+  const typed=payload.terminalEvidence||{};
+  const code=text(typed.shipmentStatus);
+  const matches=typed.source==='TMS_SHIPMENT_STATUS'&&typed.verified===true
+    &&text(typed.shipmentCode).toUpperCase()===text(payload.shipmentCode||payload.运单号).toUpperCase()
+    &&text(typed.businessType).toUpperCase()===text(payload.businessType).toUpperCase()
+    &&['60','80','81'].includes(code);
+  if(matches){
+    const pod=code==='60',returned=code==='81';
+    return {terminal:pod||returned,pod,returned,cancelled:false,
+      reason:pod?'POD':returned?'RETURNED':'',
+      ignoredLegacyCloseReason:text(closeReason)};
+  }
   const orderStatus = text(payload.orderStatus);
   const latestCode = latestCodeOf(payload);
   const evidence = [stateName,payload.退回状态,payload.primaryCategory,payload.currentMainCategory,payload.主分类,payload.异常分类,payload.latestEventDesc,payload.最后节点,payload.QC判断]
