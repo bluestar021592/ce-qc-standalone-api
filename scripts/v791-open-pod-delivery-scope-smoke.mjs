@@ -30,4 +30,6 @@ assert.doesNotMatch(server,/terminalCode==='85'/,
 assert.match(server,/CCSLCN_DIVERSION','CCSLZT_DIVERSION','CCSL580_DIVERSION/,
   'daily workspace must close courier diversions');
 assert.match(server,/SELECT o\.shipmentCode,o\.businessType,o\.sourceReportDate/);
+assert.match(server,/UPPER\(TRIM\(q\.businessType\)\)=UPPER\(TRIM\(o\.businessType\)\)/,
+  'historical ledger lookup must match business and waybill');
 console.log('[V791] explicit courier handoffs excluded; missing scan remains unverified, never invented POD PASS');
