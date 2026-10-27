@@ -1,4 +1,4 @@
-import { deliveryFollowupDisposition } from './src/openPodDeliveryScope.js';
+import { deliveryFollowupDisposition, savedTerminalProof } from './src/openPodDeliveryScope.js';
 import 'dotenv/config';
 import express from 'express';
 import multer from 'multer';
@@ -1836,8 +1836,7 @@ app.get('/api/tracking-workspace', async (req, res) => {
         // Only an explicitly verified, same-business and same-waybill TMS
         // shipment status may override a stale OPEN carryover record.
         // The snapshot's original state and database remain untouched.
-        const proof=state.terminalEvidence&&typeof state.terminalEvidence==='object'
-          ?state.terminalEvidence:{};
+        const proof=savedTerminalProof(state,bill,type)||{};
         const proofBill=String(proof.shipmentCode||'').trim().toUpperCase();
         const proofType=String(proof.businessType||'').trim().toUpperCase();
         const proofMatches=proof.source==='TMS_SHIPMENT_STATUS'
