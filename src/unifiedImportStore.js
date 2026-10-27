@@ -114,7 +114,7 @@ export function getUnifiedProcessingQueue(batchId) {
 
 // Only TMS shipment-status results produced by this run can reconcile a stale
 // OPEN ledger. Order scan status/eventCode are different namespaces.
-function matchedTmsTerminalEvidence(scan={},bill='',businessType=''){
+export function matchedTmsTerminalEvidence(scan={},bill='',businessType=''){
   const code=String(scan.shipmentStatus??'').trim();
   const expected={'60':'SHIPMENT_STATUS_60_POD','80':'SHIPMENT_STATUS_80_RETURN_IN_PROGRESS',
     '81':'SHIPMENT_STATUS_81_RETURN_COMPLETED'}[code];
@@ -124,7 +124,7 @@ function matchedTmsTerminalEvidence(scan={},bill='',businessType=''){
   return {source:'TMS_SHIPMENT_STATUS',verified:true,shipmentStatus:code,
     shipmentCode:bill,businessType};
 }
-function carryBusinessMatches(source='',actual=''){
+export function carryBusinessMatches(source='',actual=''){
   const a=String(actual||'').toUpperCase(),s=String(source||'').toUpperCase();
   return s===a||(s==='CCSL'&&['CE','CEAF','TBKH','ALI1688'].includes(a))
     ||(s==='SHOPEE'&&['SHOPEECN','SHOPEEVN'].includes(a));
