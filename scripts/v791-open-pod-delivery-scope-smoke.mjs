@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {deliveryFollowupDisposition,savedTerminalProof} from '../src/openPodDeliveryScope.js';
 import {matchedTmsTerminalEvidence,carryBusinessMatches} from '../src/unifiedImportStore.js';
+import {classifyV246Terminal} from '../src/v246TrackingLedgerCore.js';
 for(const v of ['CCSLCN_DIVERSION','CCSLZT_DIVERSION','CCSL580_RETENTION','CCSL580_DIVERSION','CECN_RETENTION','CEZT_RETENTION']){
   assert.deepEqual(deliveryFollowupDisposition({specialState:v}).include,false,v);
   assert.equal(deliveryFollowupDisposition({currentState:v}).reason,'DELIVERY_HANDOFF');
@@ -48,6 +49,16 @@ assert.equal(savedTerminalProof(legacy,'CC06072602914','CEAF'),null);
 assert.equal(savedTerminalProof({...legacy,businessType:'SHOPEE'},'CC06072602913','CEAF'),null);
 assert.equal(savedTerminalProof({...legacy,shipmentStatus:'80',shipmentStatusSource:'SHIPMENT_STATUS_80_RETURN_IN_PROGRESS'},
   'CC06072602913','CEAF')?.shipmentStatus,'80');
+const signed={shipmentCode:'CC06072602913',businessType:'CEAF',orderStatus:'85',
+  是否POD:'是',terminalEvidence:{source:'TMS_SHIPMENT_STATUS',verified:true,
+    shipmentCode:'CC06072602913',businessType:'CEAF',shipmentStatus:'80'}};
+const activeReturn=classifyV246Terminal({state:'RETURN_IN_PROGRESS',stateJson:signed});
+assert.equal(activeReturn.terminal,false,'verified TMS 80 overrides stale legacy POD/85');
+assert.equal(activeReturn.pod,false);
+assert.equal(classifyV246Terminal({state:'PENDING_SCAN',stateJson:{
+  ...signed,terminalEvidence:{...signed.terminalEvidence,shipmentStatus:'60'}}}).reason,'POD');
+assert.equal(classifyV246Terminal({state:'PENDING_SCAN',stateJson:{
+  ...signed,terminalEvidence:{...signed.terminalEvidence,shipmentStatus:'81'}}}).reason,'RETURNED');
 const server=fs.readFileSync(new URL('../server.js',import.meta.url),'utf8');
 assert.match(server,/const disposition=deliveryFollowupDisposition\(\{/,
   'historical OPEN must pass evidence-gated disposition');
