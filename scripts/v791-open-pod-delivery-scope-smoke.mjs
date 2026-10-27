@@ -52,7 +52,9 @@ const server=fs.readFileSync(new URL('../server.js',import.meta.url),'utf8');
 assert.match(server,/const disposition=deliveryFollowupDisposition\(\{/,
   'historical OPEN must pass evidence-gated disposition');
 assert.match(server,/if\(!disposition\.include\)continue/);
-assert.match(server,/scope==='open' \? allRows\.filter\(row=>!row\.isClosed&&deliveryFollowupDisposition\(row\)\.include\)/);
+assert.match(server,/const effectiveOpenRows=allRows\.filter\(row=>!row\.isClosed&&deliveryFollowupDisposition\(row\)\.include\)/);
+assert.match(server,/openRowCount:effectiveOpenRows\.length/,
+  'open delivery count must equal filtered open members');
 assert.match(server,/const terminalCode=String\(row\.shipmentStatus \?\? scan\.shipmentStatus \?\? ''\)\.trim\(\)/,
   'workspace must never mix orderStatus into shipmentStatus');
 assert.doesNotMatch(server,/terminalCode==='85'/,
