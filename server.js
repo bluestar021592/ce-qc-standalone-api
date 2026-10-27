@@ -1818,7 +1818,8 @@ app.get('/api/tracking-workspace', async (req, res) => {
       const oldCarry=getDb().prepare(`SELECT o.shipmentCode,o.businessType,o.sourceReportDate,
           o.stateJson,o.apiStatus,q.currentState,q.lastEventTime,q.lastCheckedAt
         FROM carryover_open_items o
-        LEFT JOIN qc_tracking_ledger q ON q.shipmentCode=o.shipmentCode
+        LEFT JOIN qc_tracking_ledger q ON UPPER(TRIM(q.shipmentCode))=UPPER(TRIM(o.shipmentCode))
+          AND UPPER(TRIM(q.businessType))=UPPER(TRIM(o.businessType))
         WHERE o.status='OPEN' AND o.sourceReportDate<? AND
           (q.shipmentCode IS NULL OR (q.trackingStatus='OPEN' AND
             UPPER(COALESCE(q.terminalReason,'')) NOT IN ('POD','RETURNED','ORDER_CANCELLED')))
