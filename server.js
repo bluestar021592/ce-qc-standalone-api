@@ -1497,7 +1497,8 @@ async function executeRunRequest(req, res, options = {}) {
     result.state.historySummary = appendHistorySummary(result.state.historySummary || [], metricSnapshot);
     await saveState(result.state);
     const snapshot = createDashboardSnapshot(result.state, { reportDate, runId: run.runId });
-    updateCarryoverResults({ snapshotId: snapshot.snapshotId, reportDate, rows: result.state.finalRows || [] });
+    updateCarryoverResults({ snapshotId: snapshot.snapshotId, reportDate,
+      rows: result.state.finalRows || [], scanResults: result.state.scanResults || [] });
     await appendRuntimeLog(`处理快照已保存：${snapshot.snapshotId}`);
     launchDashboardCacheWorker({ reportDate, reason: 'CCSL_RUN_COMPLETED' });
     res.json({ ok: true, summary: result.summary, run: { runId: run.runId, reportDate, recovered: outcome.recovered }, snapshotId: snapshot.snapshotId, state: summarizeState(await loadState()) });
@@ -1633,7 +1634,8 @@ async function executeShopeeRunRequest(req, res, options = {}) {
     saveBusinessState(result.state, SHOPEE);
     const snapshot = saveBusinessSnapshot(SHOPEE, result.state, buildShopeeDashboard(result.state));
     result.state.snapshotId = snapshot.snapshotId;
-    updateCarryoverResults({ snapshotId: snapshot.snapshotId, reportDate, rows: result.state.finalRows || [] });
+    updateCarryoverResults({ snapshotId: snapshot.snapshotId, reportDate,
+      rows: result.state.finalRows || [], scanResults: result.state.scanResults || [] });
     const ccslState = await loadState();
     const ccslSnapshot = getMatchingSnapshot(ccslState);
     completeUnifiedSnapshot({ reportDate, ccslSnapshot, shopeeSnapshot: snapshot });
