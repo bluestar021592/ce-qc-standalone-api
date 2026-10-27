@@ -1866,8 +1866,9 @@ app.get('/api/tracking-workspace', async (req, res) => {
   const allRows=[...dailyRows,...historicalCarryRows];
   const priority = row => row.queryStatus === '待重试' ? 0 : row.isActionable ? 1 : 2;
   allRows.sort((a, b) => priority(a) - priority(b) || String(a.businessType).localeCompare(String(b.businessType)) || String(a.shipmentCode).localeCompare(String(b.shipmentCode)));
+  const effectiveOpenRows=allRows.filter(row=>!row.isClosed&&deliveryFollowupDisposition(row).include);
   const rows = scope === 'all' ? allRows : scope === 'pod' ? allRows.filter(row => row.isClosed)
-    : scope==='open' ? allRows.filter(row=>!row.isClosed&&deliveryFollowupDisposition(row).include) : allRows.filter(row => row.isActionable);
+    : scope==='open' ? effectiveOpenRows : allRows.filter(row => row.isActionable);
   const qualityBuckets={
     shopArrived:allRows.filter(row=>row.shopArrivedCurrent),
     pendingGap:allRows.filter(row=>row.pendingNonContinuous),
@@ -1885,7 +1886,7 @@ app.get('/api/tracking-workspace', async (req, res) => {
   const qualityRows=Object.fromEntries(Object.entries(qualityBuckets).map(([key,list])=>[key,list.slice(0,1000)]));
   const summary = {
     dailyNew: Number(unified?.summary?.validUniqueWaybills || unified?.summary?.totalUnique || 0),
-    historicalCarry: Number(unified?.carryover?.historicalOpen || 0),
+    historicalCarry: scope==='open'?historicalCarryRows.length:Number(unified?.carryover?.historicalOpen || 0),
     scanCompleted: allRows.filter(row => row.scanStatus && row.scanStatus !== '待扫描').length,
     podSkipped: allRows.filter(row => row.scanStatus === 'POD').length,
     returnSkipped: allRows.filter(row => row.scanStatus === 'RETURN').length,
@@ -1967,7 +1968,7 @@ app.get('/api/tracking-workspace', async (req, res) => {
     }
   }
   const payload={ok:true,reportDate,batchId:unified?.batchId||'',snapshotId,scope,
-    allRowCount: allRows.length,openRowCount:allRows.filter(row=>!row.isClosed).length,
+    allRowCount: allRows.length,openRowCount:effectiveOpenRows.length,
     returnedCompletedCount:allRows.filter(row=>row.isReturned===true).length,
     displayedRows:Math.min(rows.length,5000),truncated:rows.length>5000,
     summary,qualitySignals,qualityRows,qcCoverage,openSourceCoverage,rows: rows.slice(0, 5000)};
