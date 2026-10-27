@@ -138,6 +138,7 @@ export function updateCarryoverResults({ snapshotId, reportDate, rows = [], scan
   const current = db.prepare(`UPDATE shipment_current_state SET state=?,apiStatus=?,reportDate=?,snapshotId=?,lastEventTime=?,stateJson=?,updatedAt=? WHERE shipmentCode=? AND businessType=?`);
   const now = nowIso();
   let ledgerSync = null;
+  const acceptedRows=[];
   db.exec('BEGIN IMMEDIATE');
   try {
     for (const row of rows) {
@@ -152,7 +153,7 @@ export function updateCarryoverResults({ snapshotId, reportDate, rows = [], scan
       const pod=truth==='60'||(!truth&&(row.是否POD==='是'||String(row.orderStatus||'')==='85'));
       const returned=truth==='81'||(!truth&&row.退回状态==='已退回');
       const returnInProgress=truth==='80'||(!pod&&!returned
-        &&String(row.currentState||row.退回状态||'').trim().toUpperCase()==='RETURN_IN_PROGRESS');
+        &&/^(?:RETURN_IN_PROGRESS|退回处理中|正在退回)$/.test(String(row.currentState||row.退回状态||'').trim().toUpperCase()));
       const specialState=String(row.specialState||row.primaryCategory||row.主分类||'').trim().toUpperCase();
       const specialClosed=['SELF_PICKUP','CECN_RETENTION','CEZT_RETENTION','CCSL580_RETENTION',
         'CCSLCN_DIVERSION','CCSLZT_DIVERSION','CCSL580_DIVERSION'].includes(specialState)
@@ -171,8 +172,9 @@ export function updateCarryoverResults({ snapshotId, reportDate, rows = [], scan
       const json=JSON.stringify(enriched);
       update.run(status,apiStatus,reason,reportDate,snapshotId,json,now,bill,businessType);
       current.run(currentState,apiStatus,reportDate,snapshotId,row.latestEventTime||row.最后节点时间||'',json,now,bill,businessType);
+      acceptedRows.push(enriched);
     }
-    ledgerSync = syncCarryRowsToV246Ledger(rows.map(row=>{const bill=String(row.shipmentCode||row.运单号||'').trim().toUpperCase();const businessType=String(currentBusiness.get(bill)?.businessType||'').toUpperCase();return {...row,shipmentCode:bill,businessType};}), {
+    ledgerSync = syncCarryRowsToV246Ledger(acceptedRows, {
       db,
       reason: `UPDATE_CARRYOVER_RESULTS:${snapshotId || reportDate || 'UNKNOWN'}`,
       manageTransaction: false,
