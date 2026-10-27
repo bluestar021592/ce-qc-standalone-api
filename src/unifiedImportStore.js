@@ -153,7 +153,8 @@ export function updateCarryoverResults({ snapshotId, reportDate, rows = [], scan
       const pod=truth==='60'||(!truth&&(row.是否POD==='是'||String(row.orderStatus||'')==='85'));
       const returned=truth==='81'||(!truth&&row.退回状态==='已退回');
       const returnInProgress=truth==='80'||(!pod&&!returned
-        &&/^(?:RETURN_IN_PROGRESS|退回处理中|正在退回)$/.test(String(row.currentState||row.退回状态||'').trim().toUpperCase()));
+        &&[row.currentState,row.退回状态,row.scanNormalizedState].some(value=>
+          /^(?:RETURN_IN_PROGRESS|退回处理中|正在退回)$/.test(String(value||'').trim().toUpperCase())));
       const specialState=String(row.specialState||row.primaryCategory||row.主分类||'').trim().toUpperCase();
       const specialClosed=['SELF_PICKUP','CECN_RETENTION','CEZT_RETENTION','CCSL580_RETENTION',
         'CCSLCN_DIVERSION','CCSLZT_DIVERSION','CCSL580_DIVERSION'].includes(specialState)
