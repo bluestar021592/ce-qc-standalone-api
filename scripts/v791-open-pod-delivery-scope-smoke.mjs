@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import {deliveryFollowupDisposition} from '../src/openPodDeliveryScope.js';
+import {deliveryFollowupDisposition,savedTerminalProof} from '../src/openPodDeliveryScope.js';
 import {matchedTmsTerminalEvidence,carryBusinessMatches} from '../src/unifiedImportStore.js';
 for(const v of ['CCSLCN_DIVERSION','CCSLZT_DIVERSION','CCSL580_RETENTION','CCSL580_DIVERSION','CECN_RETENTION','CEZT_RETENTION']){
   assert.deepEqual(deliveryFollowupDisposition({specialState:v}).include,false,v);
@@ -40,6 +40,14 @@ assert.equal(matchedTmsTerminalEvidence(tms60,'CC06072602914','CEAF'),null,
   'proof must match the exact shipment code');
 assert.equal(matchedTmsTerminalEvidence({...tms60,API状态:'失败'},'CC06072602913','CEAF')?.shipmentStatus,'60',
   'order scan failure must not invalidate separately verified TMS shipment status');
+const legacy={shipmentCode:'CC06072602913',businessType:'CCSL',shipmentStatus:'60',
+  shipmentStatusSource:'SHIPMENT_STATUS_60_POD'};
+assert.equal(savedTerminalProof(legacy,'CC06072602913','CEAF')?.shipmentStatus,'60');
+assert.equal(savedTerminalProof({...legacy,shipmentStatusSource:''},'CC06072602913','CEAF'),null);
+assert.equal(savedTerminalProof(legacy,'CC06072602914','CEAF'),null);
+assert.equal(savedTerminalProof({...legacy,businessType:'SHOPEE'},'CC06072602913','CEAF'),null);
+assert.equal(savedTerminalProof({...legacy,shipmentStatus:'80',shipmentStatusSource:'SHIPMENT_STATUS_80_RETURN_IN_PROGRESS'},
+  'CC06072602913','CEAF')?.shipmentStatus,'80');
 const server=fs.readFileSync(new URL('../server.js',import.meta.url),'utf8');
 assert.match(server,/const disposition=deliveryFollowupDisposition\(\{/,
   'historical OPEN must pass evidence-gated disposition');
@@ -59,7 +67,8 @@ assert.match(importer,/const returned=truth==='81'\|\|\(!truth&&row\.退回状�
 assert.match(server,/scanResults: result\.state\.scanResults \|\| \[\]/,
   'verified TMS scan results must reach the historical carryover writer');
 assert.match(server,/SELECT o\.shipmentCode,o\.businessType,o\.sourceReportDate/);
-assert.match(server,/proof\.source==='TMS_SHIPMENT_STATUS'/,'only typed shipment TMS proof is accepted');
+assert.match(server,/const proof=savedTerminalProof\(state,bill,type\)\|\|\{\}/,
+  'historical OPEN must read guarded, typed saved TMS facts');
 assert.match(server,/proof\.verified===true&&proofBill===bill&&proofType===type/,
   'persisted terminal evidence must match source business and waybill');
 assert.match(server,/shipmentStatus:proofMatches\?String\(proof\.shipmentStatus\|\|''\):''/,
