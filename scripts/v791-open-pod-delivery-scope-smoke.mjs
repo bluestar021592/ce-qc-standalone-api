@@ -20,7 +20,8 @@ assert.equal(deliveryFollowupDisposition({...proof,shipmentStatus:'',eventCode:'
 assert.equal(deliveryFollowupDisposition({...proof,orderStatus:'60'}).include,true,
   'orderStatus must not masquerade as shipmentStatus');
 const server=fs.readFileSync(new URL('../server.js',import.meta.url),'utf8');
-assert.match(server,/deliveryFollowupDisposition\(\{\.\.\.state,currentState:savedState\}\)/);
+assert.match(server,/const disposition=deliveryFollowupDisposition\(\{/,
+  'historical OPEN must pass evidence-gated disposition');
 assert.match(server,/if\(!disposition\.include\)continue/);
 assert.match(server,/scope==='open' \? allRows\.filter\(row=>!row\.isClosed&&deliveryFollowupDisposition\(row\)\.include\)/);
 assert.match(server,/const terminalCode=String\(row\.shipmentStatus \?\? scan\.shipmentStatus \?\? ''\)\.trim\(\)/,
