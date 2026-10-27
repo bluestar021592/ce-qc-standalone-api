@@ -120,7 +120,8 @@ export function matchedTmsTerminalEvidence(scan={},bill='',businessType=''){
     '81':'SHIPMENT_STATUS_81_RETURN_COMPLETED'}[code];
   const scanBill=String(scan.shipmentCode||scan.运单号||'').trim().toUpperCase();
   if(!expected||scan.shipmentStatusSource!==expected||scanBill!==bill||!businessType)return null;
-  if(/失败|refresh_failed|待重试|failed/i.test(String(scan.API状态||scan.查询状态||'')))return null;
+  // The order-scan and TMS shipment-status endpoints can succeed independently.
+  // A failed order scan must not invalidate the proven shipment-status marker.
   return {source:'TMS_SHIPMENT_STATUS',verified:true,shipmentStatus:code,
     shipmentCode:bill,businessType};
 }
