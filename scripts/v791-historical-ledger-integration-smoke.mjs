@@ -49,6 +49,19 @@ try{
   assert.equal(ledger.get(ids[1]).currentState,'RETURN_IN_PROGRESS');
   assert.deepEqual([carry.get(ids[2]).status,carry.get(ids[2]).closeReason],['CLOSED','RETURNED']);
   assert.deepEqual([ledger.get(ids[2]).trackingStatus,ledger.get(ids[2]).terminalReason],['TERMINAL','RETURNED']);
+  // TMS may confirm return-in-progress without a trustworthy event timestamp.
+  // The existing track time must never be erased by such a refresh.
+  db.prepare("UPDATE shipment_current_state SET lastEventTime=? WHERE shipmentCode=?")
+    .run('2026-07-12 08:00:00',ids[1]);
+  const noTime=planHistoricalTmsReconcile([candidate[1]],[
+    {shipmentCode:ids[1],shipmentStatus:'80'}],now);
+  const preserved=updateCarryoverResults({snapshotId:'SNAP-JUL12',reportDate:'2026-07-12',
+    rows:noTime.updates,scanResults:noTime.scanResults,
+    guardOpenAtOrBefore:'2026-07-12'});
+  assert.equal(preserved.ledgerSync.processed,1);
+  assert.equal(db.prepare('SELECT lastEventTime FROM shipment_current_state WHERE shipmentCode=?')
+    .get(ids[1]).lastEventTime,'2026-07-12 08:00:00',
+    'missing TMS event time must not erase previous verified track timestamp');
   // Simulate a newer July-13 import while a July-12 TMS request was in flight.
   db.prepare("UPDATE carryover_open_items SET lastReportDate='2026-07-13',status='OPEN',closeReason='' WHERE shipmentCode=?").run(ids[1]);
   db.prepare("UPDATE shipment_current_state SET reportDate='2026-07-13',state='PENDING_SCAN' WHERE shipmentCode=?").run(ids[1]);
