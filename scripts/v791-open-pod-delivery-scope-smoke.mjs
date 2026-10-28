@@ -41,13 +41,15 @@ assert.equal(deliveryFollowupDisposition({...proof,orderStatus:'60'}).include,tr
 assert.equal(carryBusinessMatches('CCSL','CEAF'),true);
 assert.equal(carryBusinessMatches('SHOPEE','SHOPEEVN'),true);
 assert.equal(carryBusinessMatches('CE','CEAF'),false);
-const tms60={shipmentCode:'CC06072602913',shipmentStatus:'60',
+const tms60={shipmentCode:'CC06072602913',businessType:'CCSL',shipmentStatus:'60',
   shipmentStatusSource:'SHIPMENT_STATUS_60_POD',API状态:'成功'};
 const tms80={...tms60,shipmentStatus:'80',
   shipmentStatusSource:'SHIPMENT_STATUS_80_RETURN_IN_PROGRESS'};
 const tms81={...tms60,shipmentStatus:'81',
   shipmentStatusSource:'SHIPMENT_STATUS_81_RETURN_COMPLETED'};
 assert.equal(matchedTmsTerminalEvidence(tms60,'CC06072602913','CEAF')?.shipmentStatus,'60');
+assert.equal(matchedTmsTerminalEvidence({...tms60,businessType:'SHOPEE'},'CC06072602913','CEAF'),null,
+  'foreign family TMS evidence cannot close a CEAF bill');
 assert.equal(matchedTmsTerminalEvidence(tms80,'CC06072602913','CEAF')?.shipmentStatus,'80');
 assert.equal(matchedTmsTerminalEvidence(tms81,'CC06072602913','CEAF')?.shipmentStatus,'81');
 assert.equal(matchedTmsTerminalEvidence({...tms60,shipmentStatusSource:''},'CC06072602913','CEAF'),null,
