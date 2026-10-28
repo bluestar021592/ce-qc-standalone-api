@@ -41,6 +41,13 @@ assert.equal(conflict.matched,0);
 assert.equal(conflict.conflicts.length,1);
 const server=fs.readFileSync(new URL('../server.js',import.meta.url),'utf8');
 assert.match(server,/\/api\/v791\/historical-ceaf-tms-reconcile/);
+assert.match(server,/\/api\/v791\/historical-ceaf-tms-context/,
+  'selected-date recovery requires its own snapshot');
+assert.match(server,/V791_SELECTED_DATE_SNAPSHOT_SUPERSEDED/,
+  'a newer valid same-day snapshot blocks stale historical updates');
+assert.match(server,/guardOpenAtOrBefore:reportDate/,
+  'TMS writer must atomically reject concurrent newer dates');
+
 assert.match(server,/WHERE o\.status='OPEN' AND o\.businessType='CEAF'/);
 assert.match(server,/o\.sourceReportDate<=\? AND o\.lastReportDate<=\?/,
   'historical repair must not rewrite newer-day ledger state');
@@ -51,6 +58,11 @@ assert.match(server,/await client\.shipmentTrack\(candidates\.map\(row=>row\.shi
 assert.match(server,/rows:plan\.updates,scanResults:plan\.scanResults/);
 const ui=fs.readFileSync(new URL('../public/v625-shell.js',import.meta.url),'utf8');
 assert.match(ui,/async function v791RefreshHistoricalCeaf\(reportDate,snapshotId\)/);
+assert.match(ui,/\/api\/v791\/historical-ceaf-tms-context\?reportDate=/,
+  'historic UI must resolve same-date snapshot rather than latest import');
+assert.match(ui,/v791RefreshHistoricalCeaf\(reportDate,String\(context\.snapshotId\)\)/,
+  'historic CEAF write must use selected report date context');
+
 assert.match(ui,/ceaf=await v791RefreshHistoricalCeaf\(reportDate,String\(latest\.snapshotId\)\)/);
 assert.match(ui,/v791CeafRefreshBusy=true/);
 assert.match(ui,/v791CeafRefreshBusy=false/);
