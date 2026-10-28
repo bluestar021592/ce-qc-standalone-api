@@ -1,0 +1,14 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+const ui=fs.readFileSync(new URL('../public/v625-shell.js',import.meta.url),'utf8');
+const html=fs.readFileSync(new URL('../public/v625-shell.html',import.meta.url),'utf8');
+assert.match(html,/id="v625RunResume"/,'recovery button must exist');
+assert.match(ui,/byId\('v625RunResume'\)\?\.addEventListener\('click',\(\)=>runTask\('resume'\)\)/,'resume must call existing guarded dispatcher');
+const anchor=ui.indexOf("const resumeBtn=byId('v625RunResume');if(resumeBtn){",ui.indexOf("const historyVerifying="));
+assert.ok(anchor>=0,'button visibility block');
+const snippet=ui.slice(anchor,anchor+580);
+assert.match(snippet,/resumeBtn\.disabled=allComplete\|\|allRunning\|\|runBusy/,'hide only when complete or actively running');
+assert.doesNotMatch(snippet,/disabled=allComplete\|\|historyVerifying/,'history verification may be stalled without active workers');
+assert.match(ui,/const proof=await v761FamilyRecoveryProof\(reportDate\)/,'guarded family proof preserved');
+assert.match(ui,/await safeWhppRun\('resume',reportDate\)/,'WHPP exact membership guarded resume preserved');
+console.log('[V790] idle historical verification retains visible guarded resume; active and completed remain blocked PASS');

@@ -33,7 +33,28 @@ jobs:
       - name: Run locked scan and trajectory status tests
         run: |
           node --test test/trajectory-facts.test.js test/trajectory-facts-analyzer-integration.test.js test/v30-scan-track-code-separation.test.js test/v30-general-track-codes.test.js test/v11-terminal-isolation-return.test.js test/shopee-latest-track-classification.test.js test/v32-current-status-display.test.js
-      - name: V789 WHPP postfinish exact evidence refresh
+      - name: V788 exact-date cycle-count detail regression
         run: |
+          node --check src/qcActionDetailRead.js
+          node --check scripts/v770-whpp-action-detail-provenance-smoke.mjs
+          node scripts/v770-whpp-action-detail-provenance-smoke.mjs
+      - name: V788 fail-closed offline release evidence gate
+        run: |
+          node --check src/v788OfflineEvidenceGate.js
+          node --check scripts/v788-offline-release-review.mjs
+          node scripts/v788-offline-release-evidence-smoke.mjs
+          node scripts/v788-offline-release-viewer-smoke.mjs
+          node --check scripts/v788-local-whpp-readonly-probe.mjs
+          node scripts/v788-local-whpp-readonly-probe-smoke.mjs
+      - name: V788 fresh TMS 346 bill status read-only regression
+        run: |
+          node --check src/v788WhppLiveTmsReadonly.js
+          node --check scripts/v788-whpp-live-tms-readonly.mjs
+          node scripts/v788-whpp-live-tms-readonly-smoke.mjs
+          node --check src/v788WhppPodTimingProvenance.js
+          node scripts/v788-whpp-pod-time-provenance-smoke.mjs
+          node --check src/v788WhppTrackTimingReadonly.js
+          node scripts/v788-whpp-track-timing-readonly-smoke.mjs
           node --check public/v625-shell.js
+          node scripts/v788-empty-selected-date-ui-smoke.mjs
           node scripts/v789-whpp-postfinish-refresh-smoke.mjs

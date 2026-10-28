@@ -323,6 +323,9 @@ async function loadSession(){
 }
 
 let v626LatestImport=null;
+// V788: only an explicit empty-date home-summary result can suppress stale
+// progress warnings. Never infer absence from zero visible cards alone.
+const v788EmptySelectedDates=new Set();
 let settingsUsers=[];
 // V762: the exact saved run-lock and 1:1 scan/final ledgers are the durable
 // CCSL/SHOPEE completion owners, even if the 7-second light progress request
@@ -826,6 +829,26 @@ async function fetchLiveProgress(reportDate=''){
   return{ccsl,shopee,whpp,reportDate:date};
 }
 function renderLiveProgress(bundle={}){
+  // An explicitly unimported date has no business processing to verify.
+  // Do not show stale "WHPP terminal verification in progress" or "0/3 failed".
+  const emptyDate=String(bundle.reportDate||'').slice(0,10);
+  if(emptyDate&&v788EmptySelectedDates.has(emptyDate)){
+    for(const id of ['v626CcslProgress','v626ShopeeProgress','v626WhppProgress',
+      'v626ImportCcsl','v626ImportShopee','v626ImportWhpp',
+      'v626StageScan','v626StageTrack','v626StageDone',
+      'v626ImportScan','v626ImportTrack','v626ImportDone'])setText(id,'等待日报');
+    for(const id of ['v626ProcessBar','v626ImportBar']){
+      const el=byId(id);if(el)el.style.width='0%';
+    }
+    const emptyText='所选日期尚未上传日报；上传后再核验扫描、轨迹与POD';
+    setText('v626ProcessText',emptyText);
+    setText('v626ImportProgressText',emptyText);
+    setText('v626ProcessCount','等待日报');
+    setText('v626ImportProgressCount','等待日报');
+    const resumeBtn=byId('v625RunResume');
+    if(resumeBtn)resumeBtn.style.setProperty('display','none','important');
+    return;
+  }
   const {ccsl={},shopee={},whpp={}}=bundle;
   const familyLabels={
     ccsl:familyProgressLabel(ccsl),
@@ -883,7 +906,13 @@ function renderLiveProgress(bundle={}){
   setText('v626StageScan',scanStage);setText('v626StageTrack',trackStage);setText('v626StageDone',doneStage);
   setText('v626ImportScan',scanStage);setText('v626ImportTrack',trackStage);setText('v626ImportDone',doneStage);
   const badge=byId('v626ProcessState');if(badge){badge.textContent=completeFamilies>=3?'已完成':(progressUnknown||historyVerifying)?'待核验':allRunning?'处理中':'待处理';badge.className='v625-badge '+(completeFamilies>=3?'success':allRunning?'warning':'warning')}
-  const resumeBtn=byId('v625RunResume');if(resumeBtn){resumeBtn.disabled=allComplete||historyVerifying||progressUnknown;resumeBtn.hidden=allComplete||historyVerifying||progressUnknown;resumeBtn.style.setProperty('display',allComplete||historyVerifying||progressUnknown?'none':'inline-flex','important')}
+  const resumeBtn=byId('v625RunResume');if(resumeBtn){
+    // V790: historical verification is a display state, not an active worker.
+    // Existing dispatcher checks exact date, snapshot and saved evidence.
+    resumeBtn.disabled=allComplete||allRunning||runBusy;
+    resumeBtn.hidden=allComplete||allRunning||runBusy;
+    resumeBtn.style.setProperty('display',resumeBtn.disabled?'none':'inline-flex','important');
+  }
   const progressLogs=[
     ['CCSL',ccsl,ccsl.generatedAt||new Date().toISOString(),ccsl.phase||ccsl.lastMessage],
     ['SHOPEE',shopee,shopee.generatedAt||new Date().toISOString(),shopee.phase||shopee.lastMessage],
@@ -905,7 +934,13 @@ function renderLiveProgress(bundle={}){
   for(const log of whpp.log||[])appendLiveLog(log.message||'',log.at||new Date().toISOString());
 }
 async function refreshLiveProgress(){
-  const bundle=await fetchLiveProgress(selectedReportDate()||v626LatestImport?.reportDate||'');
+  const date=selectedReportDate()||v626LatestImport?.reportDate||'';
+  if(date&&v788EmptySelectedDates.has(date)){
+    const empty={reportDate:date};
+    renderLiveProgress(empty);
+    return empty;
+  }
+  const bundle=await fetchLiveProgress(date);
   renderLiveProgress(bundle);return bundle;
 }
 function startProgressPolling(){
@@ -927,7 +962,13 @@ function renderOpenPodRows(){
   const targets=[['v626OpenPodRows',5],['v626ImportOpenRows',6]];
   for(const [id,cols] of targets){
     const tbody=byId(id);if(!tbody)continue;tbody.replaceChildren();
-    if(!v785OpenSourceVerified){tbody.innerHTML='<tr><td colspan="'+cols+'">未完成POD来源尚未核验，不能按0票判定；请核对已保存的当日成员。</td></tr>';continue}
+    if(!v785OpenSourceVerified){
+      const isUnimported=v788EmptySelectedDates.has(selectedReportDate());
+      tbody.innerHTML='<tr><td colspan="'+cols+'">'+
+        (isUnimported?'所选日期暂无日报；导入后再核验未完成POD。'
+          :'未完成POD来源尚未核验，不能按0票判定；请核对已保存的当日成员。')+'</td></tr>';
+      continue;
+    }
     if(!rows.length){tbody.innerHTML='<tr><td colspan="'+cols+'">已核对 '+fmt(v785OpenExpectedCount)+' 票来源成员，当前没有需要继续查询的未完结运单。</td></tr>';continue}
     for(const row of rows.slice(0,300)){
       const tr=document.createElement('tr');
@@ -952,6 +993,17 @@ function renderOpenPodRows(){
   }
 }
 async function loadOpenPod(){
+  if(v788EmptySelectedDates.has(selectedReportDate())){
+    // Keep source-unverified status; neutral placeholder, not a falsely verified 0.
+    v785OpenSourceVerified=false;
+    v785OpenExpectedCount=0;
+    v785OpenTotal=0;
+    v785OpenEarliestDate='';
+    v626OpenRows=[];
+    renderOpenPodRows();
+    note('v626RefreshPodMessage','所选日期暂无已导入日报；待上传后进行来源核验。');
+    return null;
+  }
   try{
     const latest=v626LatestImport||await latestImportContext();
     const params=new URLSearchParams({scope:'open'});
@@ -1091,6 +1143,20 @@ async function loadHome(options={}){
     :new Promise(resolve=>setTimeout(resolve,1200))
       .then(()=>json('/api/unified-history?limit=7',7000).catch(()=>null));
   const summary=await summaryPromise;
+  // V788: explicit absent-day response only. A visible 0 is not a purge proof.
+  if(requestedDate&&summary?.selectionMatched===false
+    &&!summary?.snapshotId&&Number(summary?.classification?.total||0)===0){
+    v788EmptySelectedDates.add(requestedDate);
+    // Replace the prior fetch's red 0/0 source warning after empty-day proof.
+    v785OpenSourceVerified=false;
+    v626OpenRows=[];
+    renderOpenPodRows();
+    note('v626RefreshPodMessage','所选日期尚未导入日报；暂无待核验的来源成员。');
+    void refreshLiveProgress();
+  }else if(requestedDate&&summary&&(summary?.snapshotId
+    ||Number(summary?.classification?.total||0)>0)){
+    v788EmptySelectedDates.delete(requestedDate);
+  }
   if(viewSequence!==v788HomeViewSequence||page!=='home')return;
   // V766: never hold the menu while 30 days of signing and return SQL runs.
   // The first response holds only verified source classification counts.
