@@ -47,6 +47,11 @@ assert.match(server,/V791_SELECTED_DATE_SNAPSHOT_SUPERSEDED/,
   'a newer valid same-day snapshot blocks stale historical updates');
 assert.match(server,/guardOpenAtOrBefore:reportDate/,
   'TMS writer must atomically reject concurrent newer dates');
+assert.match(server,/V791_SELECTED_DATE_CHANGED_DURING_TMS/,
+  'new valid same-day snapshot during TMS fetch must block application');
+assert.match(server,/guardOpenAtOrBefore:reportDate,expectedCarryVersions/,
+  'live recovery must pass member version tokens into atomic writer');
+
 
 assert.match(server,/WHERE o\.status='OPEN' AND o\.businessType='CEAF'/);
 assert.match(server,/o\.sourceReportDate<=\? AND o\.lastReportDate<=\?/,
