@@ -143,7 +143,7 @@ export function updateCarryoverResults({ snapshotId, reportDate, rows = [], scan
     WHERE shipmentCode=? AND businessType=? AND status='OPEN' AND lastReportDate<=?`);
   const update = db.prepare(`UPDATE carryover_open_items SET status=?,apiStatus=?,closeReason=?,lastReportDate=?,lastSnapshotId=?,stateJson=?,updatedAt=? WHERE shipmentCode=? AND businessType=?`);
   const current = db.prepare(`UPDATE shipment_current_state SET state=?,apiStatus=?,reportDate=?,snapshotId=?,lastEventTime=?,stateJson=?,updatedAt=? WHERE shipmentCode=? AND businessType=?`);
-  const guardedCurrent=db.prepare(`UPDATE shipment_current_state SET state=?,apiStatus=?,reportDate=?,snapshotId=?,lastEventTime=?,stateJson=?,updatedAt=?
+  const guardedCurrent=db.prepare(`UPDATE shipment_current_state SET state=?,apiStatus=?,reportDate=?,snapshotId=?,lastEventTime=COALESCE(NULLIF(?,''),lastEventTime),stateJson=?,updatedAt=?
     WHERE shipmentCode=? AND businessType=? AND reportDate<=?`);
   const now = nowIso();
   let ledgerSync = null;
