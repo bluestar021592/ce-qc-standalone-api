@@ -44,10 +44,10 @@ let browser;
 try{
   browser=await chromium.launch({headless:true});
   for(const item of [
-    {route:'/',key:'home',file:'home-1536x1024.png'},
-    {route:'/whpp',key:'whpp',file:'whpp-1536x1024.png'}
+    {route:'/',key:'home',file:'home-1536x1024.png',width:1536,height:1024},
+    {route:'/whpp',key:'whpp',file:'whpp-1672x941.png',width:1672,height:941}
   ]){
-    const page=await browser.newPage({viewport:{width:1536,height:1024},deviceScaleFactor:1,
+    const page=await browser.newPage({viewport:{width:item.width,height:item.height},deviceScaleFactor:1,
       locale:'zh-CN'});
     await page.goto(origin+item.route+'?auth=v625',{waitUntil:'domcontentloaded'});
     await page.waitForFunction(()=>document.body.classList.contains('v792-reference'),
@@ -71,6 +71,7 @@ try{
         bottomRow:box('.v792-home-bottom-row'),
         analysis:box('#v792WhppAnalysis'),tables:box('#v792WhppTables'),
         kpis:visible('#v625Business .v625-kpi-row>article:not([hidden])'),
+        kpiIcons:visible('#v625Business .v625-kpi-row>article .v792-kpi-symbol'),
         sidebar:box('.v625-sidebar'),pagebar:box('.v625-pagebar'),
         overflow:document.documentElement.scrollWidth>document.documentElement.clientWidth+2};
     },item.key);
@@ -83,6 +84,7 @@ try{
       assert.ok(data.analysis?.width>600,'WHPP signing and returns analysis must render');
       assert.ok(data.tables?.width>600,'WHPP anomaly and return tables must render');
       assert.equal(data.kpis,8,'WHPP 8 reference KPI tiles must be visible');
+      assert.equal(data.kpiIcons,8,'WHPP 8 KPI icons must be visible in the browser');
     }
     assert.ok(!data.overflow,'horizontal clipping/overflow at screenshot width');
     await page.screenshot({path:path.join(out,item.file),fullPage:true});
