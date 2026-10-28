@@ -23,6 +23,14 @@ export function deliveryFollowupDisposition(row={}) {
   if(verified&&shipmentStatus==='80')
     return {include:false,reason:'RETURN_WORKFLOW',handoff:''};
   const handoff=normalized.find(v=>DELIVERY_HANDOFFS.has(v));
+  // A historical category/specialState can outlive a later active Pending,
+  // OC or scan-review state. Without matching, timestamped handoff evidence,
+  // contradictory fields must stay visible for review rather than silently
+  // disappearing from the unfinished-delivery queue.
+  const active=String(row.currentState||row.scanNormalizedState||'').trim().toUpperCase();
+  const generic=new Set(['','OPEN','OTHER','UNKNOWN','未完结','待核验']);
+  if(handoff&&active&&!generic.has(active)&&!DELIVERY_HANDOFFS.has(active))
+    return {include:true,reason:'STATE_EVIDENCE_CONFLICT',handoff:''};
   if(handoff)return {include:false,reason:'DELIVERY_HANDOFF',handoff};
   const scanMissing=normalized.includes('PENDING_SCAN');
   return {include:true,reason:scanMissing?'SCAN_EVIDENCE_MISSING':'NOT_YET_CLOSED',handoff:''};
