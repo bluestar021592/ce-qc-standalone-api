@@ -14,6 +14,8 @@ const plan=planHistoricalTmsReconcile(selected,[
   tms('CEAFRETURN1','80'),tms('CEAFRETURN2','81'),
   {shipmentCode:'CEAFMISSING1',orderStatus:'85'}], '2026-10-28T03:00:00Z');
 assert.equal(plan.matched,3);
+assert.equal(planHistoricalTmsReconcile([candidate('CTIME')],[{shipmentCode:'CTIME',shipmentStatus:'60',creationDate:'2026-07-02'}]).updates[0]['POD时间'],undefined,
+  'order creation date is not evidence of POD time');
 assert.equal(plan.closedPod,1);
 assert.equal(plan.returned,1);
 assert.equal(plan.returnInProgress,1);
@@ -39,7 +41,8 @@ assert.equal(conflict.matched,0);
 assert.equal(conflict.conflicts.length,1);
 const server=fs.readFileSync(new URL('../server.js',import.meta.url),'utf8');
 assert.match(server,/\/api\/v791\/historical-ceaf-tms-reconcile/);
-assert.match(server,/WHERE status='OPEN' AND businessType='CEAF'/);
+assert.match(server,/WHERE o\.status='OPEN' AND o\.businessType='CEAF'/);
+assert.match(server,/UPPER\(TRIM\(q\.businessType\)\)=UPPER\(TRIM\(o\.businessType\)\)/);
 assert.match(server,/status='VALID' LIMIT 1/);
 assert.match(server,/const apply=req\.body\?\.apply===true/);
 assert.match(server,/await client\.shipmentTrack\(candidates\.map\(row=>row\.shipmentCode\)\)/);
