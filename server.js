@@ -2047,6 +2047,7 @@ app.post('/api/v791/historical-ceaf-tms-reconcile', async (req,res) => {
 app.get('/api/v792/whpp/trend', (req,res)=>{
   const toDate=String(req.query?.toDate||'').slice(0,10);
   if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(toDate)
+    ||!Number.isFinite(new Date(toDate+'T00:00:00.000Z').getTime())
     ||new Date(toDate+'T00:00:00.000Z').toISOString().slice(0,10)!==toDate)
     return res.status(400).json({ok:false,code:'V792_DATE_REQUIRED'});
   const db=getDb(),points=[];
