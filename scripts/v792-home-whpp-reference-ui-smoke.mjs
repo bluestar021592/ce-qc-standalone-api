@@ -25,6 +25,13 @@ assert.match(js,/technical\.append\(heading,quality,accounting,integrity\)/,
 assert.match(js,/v792ApplyReferenceLayout\(\);\s*bind\(\);/);
 assert.match(js,/if\(business==='WHPP'\)v792RenderWhppDetails/);
 assert.match(js,/function v792WhppStatusDonut\(m=\{\}\)/);
+assert.match(js,/showDays\(timing\?\.attempt1\?\.avgDays\)/,
+  'WHPP first-attempt timing must bind verified aggregate');
+assert.match(js,/showDays\(timing\?\.attempt2\?\.avgDays\)/,
+  'WHPP second-attempt timing must bind verified aggregate');
+assert.match(js,/showDays\(timing\?\.attempt3\?\.avgDays\)/,
+  'WHPP third-attempt timing must bind verified aggregate');
+
 assert.match(js,/v792LoadWhppTrend\(reportDate\)/);
 assert.match(js,/buildSegments\('total'\)\+buildSegments\('pod'\)\+buildSegments\('returned'\)/,
   'WHPP source, POD and returned must render from saved trend values');
