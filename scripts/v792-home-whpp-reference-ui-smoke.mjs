@@ -20,6 +20,8 @@ assert.match(js,/const stillSelected=\(\)=>Boolean\(business\)&&business===targe
   'detail lane must run for actual WHPP and other business route keys');
 assert.match(js,/overview\.after\(top\);top\.append\(process,status,quick,logs\)/);
 assert.match(js,/bottom\.append\(timing,open\)/);
+assert.match(js,/technical\.append\(heading,quality,accounting,integrity\)/,
+  'WHPP source and quality controls remain accessible below reference charts');
 assert.match(js,/v792ApplyReferenceLayout\(\);\s*bind\(\);/);
 assert.match(js,/if\(business==='WHPP'\)v792RenderWhppDetails/);
 assert.match(js,/function v792WhppStatusDonut\(m=\{\}\)/);
