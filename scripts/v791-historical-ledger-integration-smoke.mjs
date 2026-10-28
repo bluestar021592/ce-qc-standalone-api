@@ -2,9 +2,14 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 const root=fs.mkdtempSync(path.join(os.tmpdir(),'ce-qc-v791-ledger-'));
 process.env.DATA_DIR=root;
 process.env.DB_FILE=path.join(root,'isolated-test.db');
+// Explicitly initialize the isolated file before getDb; this prevents the
+// repository's legacy-database fallback from copying any real/user SQLite data.
+const blank=new DatabaseSync(process.env.DB_FILE);
+blank.close();
 let closeDb;
 try{
   const dbModule=await import('../src/db.js');
