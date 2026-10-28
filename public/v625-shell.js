@@ -1068,7 +1068,8 @@ async function refreshOpenPodNow(){
     const retryCount=Number(job.failed||0);
     note('v626RefreshPodMessage',reportDate+' 复核完成：来源 '+fmt(v785OpenExpectedCount)+
       '票；派送续查 '+fmt(v785OpenTotal)+'票；'+(ceaf?'CEAF新核实POD '+fmt(ceaf.pod)+'票、退回 '+fmt(ceaf.returned)+'票；':'')+
-      '轨迹刷新 '+fmt(job.refreshed||0)+'票，待重试 '+fmt(retryCount)+'票。',
+      '轨迹刷新 '+fmt(job.refreshed||0)+'票，待重试 '+fmt(retryCount)+'票。'+
+      (ceafIssue?'CEAF补查仍待核验：'+ceafIssue:'') ,
       retryCount||ceafIssue?'warning':'success');
   }catch(error){
     // If the older V246 job fails after a successful CEAF reconciliation,
