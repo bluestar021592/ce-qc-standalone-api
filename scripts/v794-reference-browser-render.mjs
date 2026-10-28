@@ -69,6 +69,7 @@ try{
         topRow:box('.v792-home-main-row'),topChildren:visible('.v792-home-main-row>.v625-panel'),
         homeCards:visible('.v625-home-business-panel .v625-business-card:not(.v632-total-card)'),
         bottomRow:box('.v792-home-bottom-row'),
+        management:box('#v792HomeManagement'),optionalTrend:box('.v792-optional-trend'),
         analysis:box('#v792WhppAnalysis'),tables:box('#v792WhppTables'),
         kpis:visible('#v625Business .v625-kpi-row>article:not([hidden])'),
         kpiIcons:visible('#v625Business .v625-kpi-row>article .v792-kpi-symbol'),
@@ -79,6 +80,11 @@ try{
       assert.equal(data.topChildren,4,'home top row must contain progress/status/quick/log');
       assert.ok(data.topRow?.width>600,'home top row must be rendered');
       assert.ok(data.bottomRow?.width>600,'home signing/open POD row must exist');
+      assert.ok(data.management?.top>data.bottomRow.bottom-3
+        &&data.management?.top<data.optionalTrend?.top,
+        'home data management must follow signing and precede optional trend');
+      assert.ok(data.management.top<1024,
+        'home data-management entry must begin within the 1536x1024 reference screen');
       assert.equal(data.homeCards,7,'home must render 7 business tiles');
     } else {
       assert.ok(data.analysis?.width>600,'WHPP signing and returns analysis must render');
