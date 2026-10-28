@@ -62,6 +62,22 @@ try{
   assert.equal(db.prepare('SELECT lastEventTime FROM shipment_current_state WHERE shipmentCode=?')
     .get(ids[1]).lastEventTime,'2026-07-12 08:00:00',
     'missing TMS event time must not erase previous verified track timestamp');
+  // A same-day new snapshot is also a race: reportDate alone cannot guard it.
+  const staleVersion=db.prepare('SELECT lastSnapshotId,updatedAt FROM carryover_open_items WHERE shipmentCode=?')
+    .get(ids[1]);
+  db.prepare("UPDATE carryover_open_items SET lastSnapshotId='SNAP-JUL12-NEW',updatedAt=? WHERE shipmentCode=?")
+    .run('2026-10-28T00:01:00.000Z',ids[1]);
+  const sameDayPlan=planHistoricalTmsReconcile([candidate[1]],[
+    {shipmentCode:ids[1],shipmentStatus:'60'}],now);
+  const refusedSameDay=updateCarryoverResults({snapshotId:'SNAP-JUL12',reportDate:'2026-07-12',
+    rows:sameDayPlan.updates,scanResults:sameDayPlan.scanResults,
+    guardOpenAtOrBefore:'2026-07-12',
+    expectedCarryVersions:{[ids[1]]:staleVersion}});
+  assert.equal(refusedSameDay.ledgerSync.processed,0,
+    'stale selected-day TMS completion cannot overwrite newer same-day snapshot member');
+  assert.equal(carry.get(ids[1]).status,'OPEN');
+  assert.equal(db.prepare('SELECT lastSnapshotId FROM carryover_open_items WHERE shipmentCode=?')
+    .get(ids[1]).lastSnapshotId,'SNAP-JUL12-NEW');
   // Simulate a newer July-13 import while a July-12 TMS request was in flight.
   db.prepare("UPDATE carryover_open_items SET lastReportDate='2026-07-13',status='OPEN',closeReason='' WHERE shipmentCode=?").run(ids[1]);
   db.prepare("UPDATE shipment_current_state SET reportDate='2026-07-13',state='PENDING_SCAN' WHERE shipmentCode=?").run(ids[1]);
