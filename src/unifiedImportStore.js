@@ -220,7 +220,13 @@ export function updateCarryoverResults({ snapshotId, reportDate, rows = [], scan
   invalidateCarryLedgerReadCaches();
   const summary = carryoverSummary(reportDate);
   console.log(`[CE-QC][CARRY_LEDGER_SYNC] reportDate=${reportDate} processed=${Number(ledgerSync?.processed || 0)} terminal=${Number(ledgerSync?.terminal || 0)} open=${Number(ledgerSync?.open || 0)} reopened=${Number(ledgerSync?.reopened || 0)} changed=${Number(ledgerSync?.changed || 0)}`);
-  return { ...summary, ledgerSync };
+  const appliedStats={
+    processed:acceptedRows.length,
+    pod:acceptedRows.filter(row=>row.terminalEvidence?.shipmentStatus==='60').length,
+    returned:acceptedRows.filter(row=>row.terminalEvidence?.shipmentStatus==='81').length,
+    returnInProgress:acceptedRows.filter(row=>row.terminalEvidence?.shipmentStatus==='80').length
+  };
+  return { ...summary, ledgerSync, appliedStats };
 }
 
 export function carryoverSummary(reportDate) {
