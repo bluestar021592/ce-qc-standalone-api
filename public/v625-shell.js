@@ -2097,8 +2097,15 @@ async function v761ContinueFamily(type,disposition,date){
 async function v761DiagnoseFamilyRecovery(){
   const view=byId('v761FamilyRecoveryResult'),button=byId('v761FamilyRecoveryDiagnostic');
   if(!view)return;
-  const date=String(v626LatestImport?.reportDate||'').slice(0,10);
+  const shown=String(byId('v626ImportProgressDate')?.textContent||'').slice(0,10);
+  const date=String(v626LatestImport?.reportDate||
+    (/^\\d{4}-\\d{2}-\\d{2}$/.test(shown)?shown:'')||
+    selectedReportDate()||'').slice(0,10);
   view.hidden=false;
+  if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(date)){
+    view.textContent='未能确认日报日期。该页面读取超时不代表未导入，请先打开对应日期的历史记录再只读诊断。';
+    return;
+  }
   if(button){button.disabled=true;button.textContent='正在诊断…'}
   try{
     const proof=await v761FamilyRecoveryProof(date);
