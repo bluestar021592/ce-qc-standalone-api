@@ -2996,9 +2996,10 @@ function workspaceRows(state = {}, businessType = 'CCSL') {
     // TMS terminal facts: 60=POD, 81=returned; 80 remains RETURNING.
     // 85 is historical POD evidence. Prefer the saved shipment terminal code.
     const terminalCode=String(row.shipmentStatus ?? scan.shipmentStatus ?? '').trim();
-    const isPod = row.是否POD === '是' || Number(row.isPod||0)===1
-      || Number(scan.isPod||0)===1 || terminalCode==='60'
-      || String(scan.skipTrackReason||'')==='MANUAL_TERMINAL_POD';
+    const isPod = terminalCode==='60' || (terminalCode!=='80'&&terminalCode!=='81'
+      &&(row.是否POD === '是' || Number(row.isPod||0)===1
+        || Number(scan.isPod||0)===1
+        || String(scan.skipTrackReason||'')==='MANUAL_TERMINAL_POD'));
     const returnText = `${row.退回状态 || ''} ${row.primaryCategory || ''}`.trim().toUpperCase();
     const explicitReturn = row.truthEvidence?.returned===true || terminalCode==='81'
       || String(scan.skipTrackReason||'')==='MANUAL_TERMINAL_RETURNED';
