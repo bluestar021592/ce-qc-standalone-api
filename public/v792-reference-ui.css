@@ -158,3 +158,9 @@ body.v792-reference[data-business="WHPP"] .v792-whpp-chart-svg text{font-size:11
 body.v792-reference[data-business="WHPP"] .v792-whpp-chart-svg .v792-grid-line{stroke:#e8eef5;stroke-width:1}
 body.v792-reference[data-business="WHPP"] .v792-whpp-chart-svg .v792-total-line{stroke:#147ef5;stroke-width:2.6;fill:none}
 body.v792-reference[data-business="WHPP"] .v792-whpp-chart-svg .v792-pod-line{stroke:#11b782;stroke-width:2.6;fill:none}
+
+body.v792-reference[data-business="WHPP"] .v792-whpp-technical{padding:9px 13px}
+body.v792-reference[data-business="WHPP"] .v792-whpp-technical>summary{font-size:12px;font-weight:700;color:#35628d;cursor:pointer;padding:5px}
+body.v792-reference[data-business="WHPP"] .v792-whpp-technical .v748-quality-signals{margin:12px 0 6px}
+body.v792-reference[data-business="WHPP"] .v792-whpp-technical .v631-accounting-bar{margin:6px 0}
+body.v792-reference[data-business="WHPP"] .v792-whpp-technical .v637-integrity-bar{margin:6px 0}
