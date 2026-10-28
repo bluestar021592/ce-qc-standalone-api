@@ -2003,8 +2003,9 @@ app.post('/api/v791/historical-ceaf-tms-reconcile', async (req,res) => {
     LEFT JOIN qc_tracking_ledger q ON UPPER(TRIM(q.shipmentCode))=UPPER(TRIM(o.shipmentCode))
       AND UPPER(TRIM(q.businessType))=UPPER(TRIM(o.businessType))
     WHERE o.status='OPEN' AND o.businessType='CEAF'
-      AND o.sourceReportDate<=? AND UPPER(TRIM(o.shipmentCode))>?
-    ORDER BY UPPER(TRIM(o.shipmentCode)) LIMIT ?`).all(reportDate,after,limit);
+      AND o.sourceReportDate<=? AND o.lastReportDate<=?
+      AND UPPER(TRIM(o.shipmentCode))>?
+    ORDER BY UPPER(TRIM(o.shipmentCode)) LIMIT ?`).all(reportDate,reportDate,after,limit);
   if(!candidates.length)return res.json({ok:true,reportDate,snapshotId,preview:req.body?.apply!==true,
     checked:0,matched:0,closedPod:0,returned:0,returnInProgress:0,nextCursor:'',complete:true});
   const auth=summarizeToken(await loadToken());
