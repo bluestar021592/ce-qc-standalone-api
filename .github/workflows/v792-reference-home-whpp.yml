@@ -26,3 +26,4 @@ jobs:
       - run: node scripts/v719-valid-html-shell-smoke.mjs
       - run: node scripts/v628-dashboard-date-kpi-drilldown-smoke.mjs
       - run: node scripts/v791-historical-ledger-integration-smoke.mjs
+      - run: node scripts/v584-local-candidate-gate.mjs
