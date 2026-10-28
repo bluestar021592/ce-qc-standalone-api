@@ -1042,7 +1042,9 @@ async function refreshOpenPodNow(){
   let ceaf=null,ceafIssue='';
   try{
     if(!v785OpenSourceVerified)await loadOpenPod();
-    if(!v785OpenSourceVerified)throw new Error('未完成来源尚未核验，不能启动批量轨迹处理。');
+    const allSourceVerified=v785OpenSourceVerified;
+    // CEAF typed TMS status can be independently validated against its exact
+    // imported snapshot even when WHPP historical finals are still missing.
     if(String(latest.snapshotId||'')){
       try{
         ceaf=await v791RefreshHistoricalCeaf(reportDate,String(latest.snapshotId));
@@ -1053,6 +1055,12 @@ async function refreshOpenPodNow(){
         ceafIssue=String(error.message||error);
         appendLiveLog('CEAF真实TMS补查未完成：'+ceafIssue);
       }
+    }
+    if(!allSourceVerified){
+      note('v626RefreshPodMessage','CEAF独立TMS核验'+(ceaf?'已处理 '+fmt(ceaf.checked)+'票，POD '+fmt(ceaf.pod)+'票；':'尚未完成；')+
+        '七业务日报来源尚未完整核验，已暂停其他业务批量轨迹刷新。'+(ceafIssue?'CEAF异常：'+ceafIssue:''),
+        'warning');
+      return;
     }
     note('v626RefreshPodMessage',ceafIssue
       ?'CEAF补查尚有未核验项；继续执行其他业务轨迹补查。'
