@@ -1838,29 +1838,77 @@ async function refreshImportCanonicalClassification(reportDate=''){
   }
 }
 async function loadImport(){
-  try{
-    const [latest,history]=await Promise.all([json('/api/import/unified-latest',7000),json('/api/unified-history?limit=15',7000)]);
-    const latestImport=latest.import||v626LatestImport||null;
-    const exactHistory=(history.rows||[]).find(r=>String(r.reportDate||'').slice(0,10)===String(latestImport?.reportDate||'').slice(0,10))||null;
-    v626LatestImport=latestImport?{...latestImport,...(exactHistory?{snapshotStatus:exactHistory.snapshotStatus||exactHistory.status||latestImport.snapshotStatus||'IMPORTED',createdAt:exactHistory.createdAt||latestImport.createdAt}:{} )}:v626LatestImport;
-    if(v626LatestImport){
-      rememberV755ImportCounts(v626LatestImport,'UNIFIED_LATEST_LOAD');
-      renderImport(v626LatestImport);
-      note('v625ImportMessage','已读取最近一次综合日报。','success');
-    }
-    const tbody=byId('v625ImportHistory');if(tbody){tbody.replaceChildren();
-      for(const r of history.rows||[]){
-        const tr=document.createElement('tr');
-        const values=[dateTime(r.createdAt),r.sourceName||'综合日报',r.reportDate||'—',r.dateDetectionSource||'系统自动识别',r.summary?.validUniqueWaybills??r.summary?.totalUnique??'—',r.snapshotStatus||r.status||'IMPORTED'];
-        for(const value of values){const td=document.createElement('td');td.textContent=value;tr.appendChild(td)}tbody.appendChild(tr)
+  // V795: the latest summary and import history are independent READ-ONLY
+  // evidence sources. A timeout in one must not erase or hide the other.
+  const [latestRead,historyRead]=await Promise.allSettled([
+    json('/api/import/unified-latest',7000),
+    json('/api/unified-history?limit=15',7000)
+  ]);
+  const latestOk=latestRead.status==='fulfilled'&&latestRead.value?.ok===true;
+  const historyOk=historyRead.status==='fulfilled'&&historyRead.value?.ok===true;
+  const latest=latestOk?latestRead.value:{};
+  const history=historyOk?historyRead.value:{rows:[]};
+  const latestImport=latest.import||v626LatestImport||null;
+  const exactHistory=(history.rows||[]).find(r=>String(r.reportDate||'').slice(0,10)===String(latestImport?.reportDate||'').slice(0,10))||null;
+  v626LatestImport=latestImport?{...latestImport,...(exactHistory?{
+    snapshotStatus:exactHistory.snapshotStatus||exactHistory.status||latestImport.snapshotStatus||'IMPORTED',
+    createdAt:exactHistory.createdAt||latestImport.createdAt
+  }:{})}:v626LatestImport;
+  if(v626LatestImport){
+    rememberV755ImportCounts(v626LatestImport,'UNIFIED_LATEST_LOAD');
+    renderImport(v626LatestImport);
+  }
+  // Do not replace an existing history table with "no imports" when the
+  // history API timed out; keep the last verified on-screen evidence.
+  const tbody=byId('v625ImportHistory');
+  if(tbody&&historyOk){
+    tbody.replaceChildren();
+    for(const r of history.rows||[]){
+      const tr=document.createElement('tr');
+      const values=[dateTime(r.createdAt),r.sourceName||'综合日报',
+        r.reportDate||'—',r.dateDetectionSource||'系统自动识别',
+        r.summary?.validUniqueWaybills??r.summary?.totalUnique??'—',
+        r.snapshotStatus||r.status||'IMPORTED'];
+      for(const value of values){
+        const td=document.createElement('td');td.textContent=value;tr.appendChild(td);
       }
-      if(!(history.rows||[]).length)tbody.innerHTML='<tr><td colspan="6">暂无导入记录</td></tr>';
+      tbody.appendChild(tr);
     }
-    await refreshImportCanonicalClassification(v626LatestImport?.reportDate||'');
-    void v759VerifyWhppCompletionOnce(v626LatestImport?.reportDate||'');
-    void refreshLiveProgress();
-    void loadOpenPod();
-  }catch(error){note('v625ImportMessage','读取导入状态失败：'+error.message,'error')}
+    if(!(history.rows||[]).length)tbody.innerHTML='<tr><td colspan="6">历史接口未发现导入记录（仅代表此次查询结果）</td></tr>';
+  }
+  if(!v626LatestImport){
+    const fromHistory=(history.rows||[])[0]||null;
+    if(fromHistory&&historyOk){
+      const date=String(fromHistory.reportDate||'').slice(0,10);
+      setText('v625ImportState','有历史日报·状态待核验');
+      if(date){
+        setText('v625ImportDateMeta',date+' · 历史记录');
+        setText('v626DetectedReportDate',date);
+        setText('v626ImportProgressDate',date);
+      }
+      note('v625ImportMessage','已找到历史日报记录，但最近导入详情尚未读取成功。不能认定未导入，也不能据此启动重复上传。','warning');
+    }else{
+      setText('v625ImportState',latestOk&&historyOk?'无已确认的日报':'读取超时·历史状态待核验');
+      note('v625ImportMessage',latestOk&&historyOk
+        ?'这两个只读来源均未提供可确认的日报；请核对首页和具体日期，勿直接清空数据。'
+        :'历史日报查询超时或失败，不能认定业务数据丢失。请使用下方只读诊断核对7月12日。','warning');
+    }
+  }else if(!latestOk||!historyOk){
+    note('v625ImportMessage','已有日报信息已保留；'+
+      (!latestOk?'最近日报读取超时；':'')+
+      (!historyOk?'历史列表读取超时；':'')+
+      '进度与终态继续以同日期的只读来源证据为准。','warning');
+  }else{
+    note('v625ImportMessage','已读取最近一次综合日报及历史记录。','success');
+  }
+  // Import status can time out independently from business progress. Continue
+  // read-only probes without chaining them behind the failed API.
+  if(v626LatestImport?.reportDate&&v626LatestImport?.snapshotId){
+    void refreshImportCanonicalClassification(v626LatestImport.reportDate).catch(()=>{});
+    void v759VerifyWhppCompletionOnce(v626LatestImport.reportDate).catch(()=>{});
+  }
+  void refreshLiveProgress().catch(()=>{});
+  if(v626LatestImport?.reportDate)void loadOpenPod().catch(()=>{});
 }
 function dateSourceText(data={}){
   const source=String(data.dateDetectionSource||data.reportDateSource||'').trim();
