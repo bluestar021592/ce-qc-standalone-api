@@ -14,6 +14,10 @@ assert.match(html,/id="v792WhppReturnedRows"/);
 assert.match(css,/grid-template-columns:repeat\(7,minmax\(0,1fr\)\)/);
 assert.match(css,/grid-template-columns:repeat\(8,minmax\(0,1fr\)\)/);
 assert.match(js,/function v792ApplyReferenceLayout\(\)/);
+assert.doesNotMatch(js,/page[!=]==='business'/,
+  'business pages have route keys ce/ceaf/tbkh/ali1688/whpp/shopeecn/shopeevn, never business');
+assert.match(js,/const stillSelected=\(\)=>Boolean\(business\)&&business===targetBusiness/,
+  'detail lane must run for actual WHPP and other business route keys');
 assert.match(js,/overview\.after\(top\);top\.append\(process,status,quick,logs\)/);
 assert.match(js,/bottom\.append\(timing,open\)/);
 assert.match(js,/v792ApplyReferenceLayout\(\);\s*bind\(\);/);
