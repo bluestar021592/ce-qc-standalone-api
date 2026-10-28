@@ -49,6 +49,27 @@ try{
   assert.equal(ledger.get(ids[1]).currentState,'RETURN_IN_PROGRESS');
   assert.deepEqual([carry.get(ids[2]).status,carry.get(ids[2]).closeReason],['CLOSED','RETURNED']);
   assert.deepEqual([ledger.get(ids[2]).trackingStatus,ledger.get(ids[2]).terminalReason],['TERMINAL','RETURNED']);
+  // Simulate a newer July-13 import while a July-12 TMS request was in flight.
+  db.prepare("UPDATE carryover_open_items SET lastReportDate='2026-07-13',status='OPEN',closeReason='' WHERE shipmentCode=?").run(ids[1]);
+  db.prepare("UPDATE shipment_current_state SET reportDate='2026-07-13',state='PENDING_SCAN' WHERE shipmentCode=?").run(ids[1]);
+  const newerPlan=planHistoricalTmsReconcile([candidate[1]],[
+    {shipmentCode:ids[1],shipmentStatus:'60'}],now);
+  const prevented=updateCarryoverResults({snapshotId:'SNAP-JUL12',reportDate:'2026-07-12',
+    rows:newerPlan.updates,scanResults:newerPlan.scanResults,
+    guardOpenAtOrBefore:'2026-07-12'});
+  assert.equal(prevented.ledgerSync.processed,0,
+    'slow historical TMS completion cannot overwrite a newer imported report');
+  assert.equal(db.prepare('SELECT lastReportDate FROM carryover_open_items WHERE shipmentCode=?').get(ids[1]).lastReportDate,'2026-07-13');
+  assert.equal(db.prepare('SELECT reportDate FROM shipment_current_state WHERE shipmentCode=?').get(ids[1]).reportDate,'2026-07-13');
+  // A real POD already closed must not be reopened by a later stale 80 result.
+  const staleReturn=planHistoricalTmsReconcile([candidate[0]],[
+    {shipmentCode:ids[0],shipmentStatus:'80'}],now);
+  const blocked=updateCarryoverResults({snapshotId:'SNAP-JUL12',reportDate:'2026-07-12',
+    rows:staleReturn.updates,scanResults:staleReturn.scanResults,
+    guardOpenAtOrBefore:'2026-07-12'});
+  assert.equal(blocked.ledgerSync.processed,0,
+    'already-closed POD cannot be reopened by a stale historical TMS request');
+  assert.equal(carry.get(ids[0]).closeReason,'POD');
   // A second read of completed records remains stable and does not claim an unverified POD.
   console.log('[V791] isolated SQLite: CEAF TMS POD/return-in-progress/returned persistence PASS');
 }finally{
