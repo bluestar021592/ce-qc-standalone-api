@@ -1039,16 +1039,24 @@ async function refreshOpenPodNow(){
   for(const id of ['v626RefreshOpenPod','v626ImportRefreshOpen']){
     const btn=byId(id);if(btn)btn.disabled=true;
   }
-  let ceaf=null;
+  let ceaf=null,ceafIssue='';
   try{
     if(!v785OpenSourceVerified)await loadOpenPod();
     if(!v785OpenSourceVerified)throw new Error('未完成来源尚未核验，不能启动批量轨迹处理。');
     if(String(latest.snapshotId||'')){
-      ceaf=await v791RefreshHistoricalCeaf(reportDate,String(latest.snapshotId));
-      appendLiveLog('CEAF历史TMS复核：'+fmt(ceaf.checked)+'票，POD '+fmt(ceaf.pod)+
-        '票，已退回 '+fmt(ceaf.returned)+'票，退回中 '+fmt(ceaf.returning)+'票。');
+      try{
+        ceaf=await v791RefreshHistoricalCeaf(reportDate,String(latest.snapshotId));
+        appendLiveLog('CEAF历史TMS复核：'+fmt(ceaf.checked)+'票，POD '+fmt(ceaf.pod)+
+          '票，已退回 '+fmt(ceaf.returned)+'票，退回中 '+fmt(ceaf.returning)+'票。');
+      }catch(error){
+        if(/日期或快照|SOURCE_SNAPSHOT_MISMATCH/.test(String(error.message||'')))throw error;
+        ceafIssue=String(error.message||error);
+        appendLiveLog('CEAF真实TMS补查未完成：'+ceafIssue);
+      }
     }
-    note('v626RefreshPodMessage','CEAF真实终态已核对，继续执行各业务轨迹补查…');
+    note('v626RefreshPodMessage',ceafIssue
+      ?'CEAF补查尚有未核验项；继续执行其他业务轨迹补查。'
+      :'CEAF真实终态已核对，继续执行各业务轨迹补查…');
     const fromDate=v785OpenEarliestDate&&v785OpenEarliestDate<reportDate?v785OpenEarliestDate:reportDate;
     const r=await post('/api/v246/tracking/reconcile',{businessType:'ALL',fromDate,toDate:reportDate},30000);
     const job=await pollTrackingJob(r.job?.jobId||'');
@@ -1061,7 +1069,7 @@ async function refreshOpenPodNow(){
     note('v626RefreshPodMessage',reportDate+' 复核完成：来源 '+fmt(v785OpenExpectedCount)+
       '票；派送续查 '+fmt(v785OpenTotal)+'票；'+(ceaf?'CEAF新核实POD '+fmt(ceaf.pod)+'票、退回 '+fmt(ceaf.returned)+'票；':'')+
       '轨迹刷新 '+fmt(job.refreshed||0)+'票，待重试 '+fmt(retryCount)+'票。',
-      retryCount?'warning':'success');
+      retryCount||ceafIssue?'warning':'success');
   }catch(error){
     // If the older V246 job fails after a successful CEAF reconciliation,
     // report the partial result truthfully and re-read source evidence.
