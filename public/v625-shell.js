@@ -1877,6 +1877,11 @@ async function loadImport(){
     if(!(history.rows||[]).length)tbody.innerHTML='<tr><td colspan="6">历史接口未发现导入记录（仅代表此次查询结果）</td></tr>';
   }
   if(!v626LatestImport){
+    // Without an exact imported snapshot 0/0 means 'not read', NOT zero work.
+    for(const id of ['v626ImportProgressCount','v626ProcessCount',
+      'v626ImportCcsl','v626ImportShopee','v626ImportWhpp',
+      'v626CcslProgress','v626ShopeeProgress','v626WhppProgress'])setText(id,'待核验');
+    setText('v626ImportProgressText','历史处理状态暂未读取成功，0/0不代表没有包裹或已经完成。');
     const fromHistory=(history.rows||[])[0]||null;
     if(fromHistory&&historyOk){
       const date=String(fromHistory.reportDate||'').slice(0,10);
@@ -1907,8 +1912,10 @@ async function loadImport(){
     void refreshImportCanonicalClassification(v626LatestImport.reportDate).catch(()=>{});
     void v759VerifyWhppCompletionOnce(v626LatestImport.reportDate).catch(()=>{});
   }
-  void refreshLiveProgress().catch(()=>{});
-  if(v626LatestImport?.reportDate)void loadOpenPod().catch(()=>{});
+  if(v626LatestImport?.reportDate){
+    void refreshLiveProgress().catch(()=>{});
+    void loadOpenPod().catch(()=>{});
+  }
 }
 function dateSourceText(data={}){
   const source=String(data.dateDetectionSource||data.reportDateSource||'').trim();
