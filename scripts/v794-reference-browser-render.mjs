@@ -86,6 +86,10 @@ try{
     }
     assert.ok(!data.overflow,'horizontal clipping/overflow at screenshot width');
     await page.screenshot({path:path.join(out,item.file),fullPage:true});
+    // Lossy in-memory preview for human inspection of the actual browser render.
+    // Empty fixture: these bytes contain no operational or personal data.
+    const preview=await page.screenshot({type:'jpeg',quality:65,fullPage:false});
+    console.log('V794_VISUAL_PREVIEW_'+item.key.toUpperCase()+'_BASE64:'+preview.toString('base64'));
     console.log('[V794] '+item.key+' screenshot/geometry PASS: '+JSON.stringify(data));
     await page.close();
   }
