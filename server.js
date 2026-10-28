@@ -2041,37 +2041,41 @@ app.post('/api/v791/historical-ceaf-tms-reconcile', async (req,res) => {
     evidenceBasis:'EXACT_CEAF_WAYBILL_TMS_SHIPMENT_STATUS_60_80_81'});
 });
 
-// V792: WHPP 7-day chart uses only saved daily waybill evidence.
-// A missing/incomplete final ledger is null, NEVER a false zero POD.
+// V792: use the SAME canonical member and saved-terminal truth as the WHPP
+// dashboard (unified import members, independent WHPP daily, recovered snapshot).
+// Never claim missing final evidence is a verified 0 POD.
 app.get('/api/v792/whpp/trend', (req,res)=>{
   const toDate=String(req.query?.toDate||'').slice(0,10);
-  if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(toDate))
+  if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(toDate)
+    ||new Date(toDate+'T00:00:00.000Z').toISOString().slice(0,10)!==toDate)
     return res.status(400).json({ok:false,code:'V792_DATE_REQUIRED'});
-  const db=getDb();
-  const raw=db.prepare(`SELECT d.reportDate,COUNT(DISTINCT UPPER(TRIM(d.shipmentCode))) AS sourceTotal,
-      COUNT(DISTINCT CASE WHEN f.shipmentCode IS NOT NULL
-        THEN UPPER(TRIM(f.shipmentCode)) END) AS finalized,
-      COUNT(DISTINCT CASE WHEN f.isPod=1 THEN UPPER(TRIM(f.shipmentCode)) END) AS savedPod
-    FROM business_daily_parse_rows d
-    LEFT JOIN business_final_rows f
-      ON f.businessType='WHPP' AND f.reportDate=d.reportDate
-      AND UPPER(TRIM(f.shipmentCode))=UPPER(TRIM(d.shipmentCode))
-    WHERE d.businessType='WHPP' AND d.reportDate BETWEEN date(?,'-6 day') AND ?
-      AND TRIM(COALESCE(d.shipmentCode,''))<>''
-    GROUP BY d.reportDate ORDER BY d.reportDate`).all(toDate,toDate);
-  const byDate=new Map(raw.map(row=>[String(row.reportDate),row]));
-  const points=[];
-  for(let d=6;d>=0;d--){
-    const date=db.prepare("SELECT date(?,'-' || ? || ' day') AS day").get(toDate,d)?.day;
-    const record=byDate.get(date);
-    const count=record?Number(record.sourceTotal||0):null;
-    const final=record?Number(record.finalized||0):0;
-    const pod=count!==null&&final===count?Number(record.savedPod||0):null;
-    points.push({date,total:count,pod,
-      sourceVerified:count!==null,finalVerified:pod!==null});
+  const db=getDb(),points=[];
+  for(let offset=6;offset>=0;offset--){
+    const d=new Date(toDate+'T00:00:00.000Z');
+    d.setUTCDate(d.getUTCDate()-offset);
+    const date=d.toISOString().slice(0,10);
+    const truth=loadWhppCanonicalTruth(date,'',db);
+    const count=Number(truth.total||0);
+    if(!count){
+      points.push({date,total:null,pod:null,returned:null,
+        sourceVerified:false,finalVerified:false,evidenceCoverage:0});
+      continue;
+    }
+    const covered=truth.rows.filter(row=>row.finalRowAvailable===true).length;
+    const verifiedPod=Number(truth.evidence?.podRows||0);
+    const verifiedReturned=Number(truth.evidence?.returnedRows||0);
+    // A nonempty verified subset is useful but flagged as partial; no
+    // detected evidence at all is null rather than a fabricated zero.
+    const hasEvidence=covered>0;
+    points.push({date,total:count,pod:hasEvidence?verifiedPod:null,
+      returned:hasEvidence?verifiedReturned:null,sourceVerified:true,
+      finalVerified:covered===count,
+      evidenceCoverage:covered,
+      snapshotRecovered:Number(truth.evidence?.snapshotRecoveredFinalRows||0)>0});
   }
   res.setHeader('Cache-Control','no-store');
-  res.json({ok:true,toDate,businessType:'WHPP',basis:'SAVED_WHPP_DAILY_MEMBERS_AND_MATCHED_FINAL_ROWS',
+  res.json({ok:true,toDate,businessType:'WHPP',
+    basis:'WHPP_CANONICAL_SOURCE_MEMBERS_AND_SAVED_TERMINAL_EVIDENCE',
     points,partial:points.some(point=>!point.sourceVerified||!point.finalVerified)});
 });
 
