@@ -2967,6 +2967,9 @@ function v792ApplyReferenceLayout(){
     const optional=document.createElement('details');optional.className='v792-optional-trend v625-panel';
     const caption=document.createElement('summary');caption.textContent='近7天总票数趋势（已保存来源）';
     optional.append(caption,trend);bottom.after(optional);
+    // The screenshot places data management immediately beneath the
+    // signing/open POD row. Keep the optional trend below management.
+    if(management)bottom.after(management);
     live.remove();three.remove();
     // The seventh business card is the screenshot's last tile; grand total
     // remains in the underlying verified summary, not a duplicated eighth tile.
