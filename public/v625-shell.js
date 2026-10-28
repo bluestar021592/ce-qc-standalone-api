@@ -2931,6 +2931,8 @@ function bind(){
 function v792ApplyReferenceLayout(){
   if(page==='home'){
     document.body.classList.add('v792-reference');
+    if(byId('v625BoardJump'))byId('v625BoardJump').value='/?auth=v625';
+    setText('v625PageSub','自动识别日报日期 · 实时整合七业务质控数据');
     const home=byId('v625Home');
     const overview=home?.querySelector('.v625-home-business-panel');
     const live=home?.querySelector('.v626-live-grid');
@@ -2958,6 +2960,8 @@ function v792ApplyReferenceLayout(){
   }
   if(business==='WHPP'){
     document.body.classList.add('v792-reference');
+    if(byId('v625BoardJump'))byId('v625BoardJump').value='/whpp?auth=v625';
+    setText('v625PageSub','按真实所选日期与运单号核验 WHPP POD、退回和签收时效');
     const a=byId('v792WhppAnalysis'),b=byId('v792WhppTables');
     if(a)a.hidden=false;if(b)b.hidden=false;
     // Keep all source-integrity and trajectory quality controls available,
