@@ -85,6 +85,8 @@ assert.match(server,/if\(!disposition\.include\)continue/);
 assert.match(server,/const effectiveOpenRows=allRows\.filter\(row=>!row\.isClosed&&deliveryFollowupDisposition\(row\)\.include\)/);
 assert.match(server,/openRowCount:effectiveOpenRows\.length/,
   'open delivery count must equal filtered open members');
+assert.match(server,/const isPod = terminalCode==='60' \|\| \(terminalCode!=='80'&&terminalCode!=='81'/,
+  'workspace must never call a verified returning/returned shipment POD using legacy 85/isPod flag');
 assert.match(server,/const terminalCode=String\(row\.shipmentStatus \?\? scan\.shipmentStatus \?\? ''\)\.trim\(\)/,
   'workspace must never mix orderStatus into shipmentStatus');
 assert.doesNotMatch(server,/terminalCode==='85'/,
