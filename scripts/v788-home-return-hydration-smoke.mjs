@@ -18,7 +18,8 @@ assert.match(server,/HOME_RETURN_SNAPSHOT_MISSING/,'wrong-day source cannot be t
 assert.match(shell,/json\(returnsUrl,30000\)/);
 assert.match(shell,/viewSequence!==v788HomeViewSequence/,'out-of-order workers never overwrite new date');
 assert.match(shell,/progressUnknown\?'历史处理证据待核验'/,'unknown 0\/0 cannot be reported as new work');
-assert.match(shell,/resumeBtn\.disabled=allComplete\|\|historyVerifying\|\|progressUnknown/);
+assert.match(shell,/resumeBtn\.disabled=allComplete\|\|allRunning\|\|runBusy/,'only completed or active work hides guarded resume');
+assert.doesNotMatch(shell,/resumeBtn\.disabled=allComplete\|\|historyVerifying/,'stalled history verification must not permanently block recovery');
 assert.match(html,/v625-shell\.js\?v=20261019-v788-1&patch=794/);
 
 const from=shell.indexOf('function v788RenderVerifiedHomeReturns(');
