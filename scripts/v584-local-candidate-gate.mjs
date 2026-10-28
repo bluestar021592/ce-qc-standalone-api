@@ -44,6 +44,7 @@ const TASKS=[
   ['node',['scripts/v780-complete-72-current-stores-smoke.mjs']],
   ['node',['scripts/v783-seven-business-source-reconciliation-smoke.mjs']],
   ['node',['scripts/v791-open-pod-delivery-scope-smoke.mjs']],
+  ['node',['scripts/v791-historical-tms-reconcile-smoke.mjs']],
   ['node',['scripts/v782-retired-store-node-smoke.mjs']],
   ['node',['--test','test/trajectory-facts-analyzer-integration.test.js']],
   ['node',['--check','bootstrap.js']],
