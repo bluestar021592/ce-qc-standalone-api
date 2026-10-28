@@ -33,6 +33,12 @@ assert.match(js,/if\(point\[key\]===null\|\|point\[key\]===undefined\)/,
 assert.match(js,/if\(byId\('v625BoardJump'\)\)byId\('v625BoardJump'\)\.value='\/whpp\?auth=v625'/,
   'WHPP header must select active board');
 assert.match(server,/app\.get\('\/api\/v792\/whpp\/trend'/);
+assert.match(server,/returnReason:String\(row\.returnReason \|\| row\.退回原因 \|\| row\.退件原因/,
+  'workspace exposes explicit WHPP return reason only');
+assert.match(js,/businessType=WHPP&reportDate='\+encodeURIComponent\(row\.reportDate\|\|v628BusinessReportDate\|\|''\)/,
+  'WHPP return details must link to the selected report date');
+assert.match(js,/row\.latestTime\|\|row\.lastEventTime\|\|row\.lastCheckedAt/,
+  'WHPP return rows show actual latest track time');
 assert.match(server,/loadWhppCanonicalTruth\(date,'',db\)/,
   'WHPP trend must use canonical unified/independent/snapshot members');
 assert.match(server,/const covered=truth\.rows\.filter\(row=>row\.finalRowAvailable===true\)\.length/);
