@@ -47,6 +47,7 @@ const TASKS=[
   ['node',['scripts/v791-historical-tms-reconcile-smoke.mjs']],
   ['node',['scripts/v791-historical-ledger-integration-smoke.mjs']],
   ['node',['scripts/v792-home-whpp-reference-ui-smoke.mjs']],
+  ['node',['scripts/v792-whpp-canonical-trend-integration-smoke.mjs']],
   ['node',['--check','public/v625-shell.js']],
   ['node',['--check','server.js']],
   ['node',['scripts/v782-retired-store-node-smoke.mjs']],
