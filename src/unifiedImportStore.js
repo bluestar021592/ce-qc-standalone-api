@@ -136,7 +136,7 @@ export function updateCarryoverResults({ snapshotId, reportDate, rows = [], scan
   const db = getDb();
   const scans=new Map(scanResults.map(row=>[String(row.shipmentCode||row.运单号||'').trim().toUpperCase(),row]));
   const currentBusiness=db.prepare('SELECT businessType FROM carryover_open_items WHERE shipmentCode=?');
-  const currentReportDate=db.prepare('SELECT reportDate FROM shipment_current_state WHERE shipmentCode=? AND businessType=?');
+  const currentReportDate=db.prepare('SELECT reportDate,state FROM shipment_current_state WHERE shipmentCode=? AND businessType=?');
   // Guarded recovery writes are conditional within the same SQLite transaction,
   // so a new daily import cannot be overwritten after a slow remote TMS read.
   const guardedUpdate=db.prepare(`UPDATE carryover_open_items SET status=?,apiStatus=?,closeReason=?,lastReportDate=?,lastSnapshotId=?,stateJson=?,updatedAt=?
@@ -156,8 +156,16 @@ export function updateCarryoverResults({ snapshotId, reportDate, rows = [], scan
       const businessType=String(currentBusiness.get(bill)?.businessType||'').trim().toUpperCase();
       if(!businessType||!carryBusinessMatches(row.businessType,businessType))continue;
       if(guardOpenAtOrBefore){
-        const currentDate=String(currentReportDate.get(bill,businessType)?.reportDate||'');
+        const persisted=currentReportDate.get(bill,businessType)||{};
+        const currentDate=String(persisted.reportDate||'');
         if(currentDate&&currentDate>guardOpenAtOrBefore)continue;
+        // Protect an already verified shipment terminal even if the older
+        // carryover row is accidentally still OPEN. Never downgrade POD to
+        // returning/returned, nor returned to a stale POD.
+        const existing=String(persisted.state||'').trim().toUpperCase();
+        const proposed=String(row.shipmentStatus||row.terminalEvidence?.shipmentStatus||'').trim();
+        if(['POD','SIGNED','DELIVERED'].includes(existing)&&proposed!=='60')continue;
+        if(['RETURNED','RETURN_COMPLETED'].includes(existing)&&proposed!=='81')continue;
       }
       const proof=matchedTmsTerminalEvidence(scans.get(bill)||{},bill,businessType);
       const truth=proof?.shipmentStatus||'';
