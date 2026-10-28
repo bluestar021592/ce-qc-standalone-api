@@ -55,14 +55,14 @@ export function saveUnifiedImport(parsed, sourceName, options = {}) {
   return { batchId, snapshotId, reportDate: parsed.reportDate, dateDetectionSource: parsed.dateDetectionSource, dateCandidates: parsed.dateCandidates, dateConflict: parsed.dateConflict, dateWasManuallyCorrected: parsed.dateWasManuallyCorrected, containerFormat: parsed.containerFormat, fileHash: parsed.fileHash, classificationCounts: parsed.classificationCounts, sourceReconciliation: parsed.sourceReconciliation, regionCounts: parsed.regionCounts, summary: parsed.summary, sheetDiagnostics: parsed.sheetDiagnostics, warnings: parsed.warnings, carryover, duplicateFile: false, sameDateOverwrite: Boolean(previousValid), replacedSameFile: exactSameFile, replacedBatchId: previousValid?.batchId || '' };
 }
 
-export function getLatestUnifiedImport() {
+export function getLatestUnifiedImport({ includeCarryover = true } = {}) {
   const row = getDb().prepare(`SELECT b.*,s.status snapshotStatus,s.createdAt snapshotCreatedAt
     FROM unified_import_batches b
     LEFT JOIN unified_snapshots s ON s.snapshotId=b.snapshotId
     WHERE b.status='VALID'
     ORDER BY b.reportDate DESC,b.createdAt DESC,b.rowid DESC LIMIT 1`).get();
   return row ? {
-    ...hydrateBatch(row, false),
+    ...hydrateBatch(row, false, { includeCarryover }),
     snapshotStatus: row.snapshotStatus || 'IMPORTED',
     createdAt: row.snapshotCreatedAt || row.createdAt
   } : null;
