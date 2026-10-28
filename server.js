@@ -2064,14 +2064,18 @@ app.post('/api/v791/historical-ceaf-tms-reconcile', async (req,res) => {
     for(const day of dirty)try{markDashboardCacheDirty(day,'V791_CEAF_TMS_HISTORY_RECONCILED')}catch{}
   }
   res.setHeader('Cache-Control','no-store');
+  const applied=persistence?.appliedStats||{processed:0,pod:0,returned:0,returnInProgress:0};
+  const skippedAfterCheck=apply?Math.max(0,plan.matched-applied.processed):0;
   res.json({ok:true,reportDate,snapshotId,preview:!apply,
-    checked:plan.checked,matched:plan.matched,closedPod:plan.closedPod,
-    returned:plan.returned,returnInProgress:plan.returnInProgress,
+    checked:plan.checked,matched:apply?applied.processed:plan.matched,
+    closedPod:apply?applied.pod:plan.closedPod,
+    returned:apply?applied.returned:plan.returned,
+    returnInProgress:apply?applied.returnInProgress:plan.returnInProgress,
     unverified:plan.unverified.length,conflicts:plan.conflicts.length,
-    conflictSamples:plan.conflicts.slice(0,10),
+    skippedAfterCheck,conflictSamples:plan.conflicts.slice(0,10),
     nextCursor:String(candidates.at(-1)?.shipmentCode||'').toUpperCase(),
     complete:candidates.length<limit,
-    changed:apply?Number(persistence?.ledgerSync?.processed||0):0,
+    changed:apply?applied.processed:0,
     evidenceBasis:'EXACT_CEAF_WAYBILL_TMS_SHIPMENT_STATUS_60_80_81'});
 });
 
