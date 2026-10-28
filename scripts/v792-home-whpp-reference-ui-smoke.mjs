@@ -19,17 +19,24 @@ assert.doesNotMatch(js,/page[!=]==='business'/,
 assert.match(js,/const stillSelected=\(\)=>Boolean\(business\)&&business===targetBusiness/,
   'detail lane must run for actual WHPP and other business route keys');
 assert.match(js,/overview\.after\(top\);top\.append\(process,status,quick,logs\)/);
+assert.match(js,/if\(integrity&&management\)management\.append\(integrity\)/,
+  'source integrity remains visible in data-management without expanding overview');
+assert.match(js,/className='v792-kpi-symbol'/,
+  'WHPP iconography is rendered by real board code, not a screenshot image');
+assert.match(js,/Number\(bucket\?\.podCount\|\|0\)>0/,
+  'a zero-sample WHPP signing-time metric must display missing rather than 0.0d');
+
 assert.match(js,/bottom\.append\(timing,open\)/);
 assert.match(js,/technical\.append\(heading,quality,accounting,integrity\)/,
   'WHPP source and quality controls remain accessible below reference charts');
 assert.match(js,/v792ApplyReferenceLayout\(\);\s*bind\(\);/);
 assert.match(js,/if\(business==='WHPP'\)v792RenderWhppDetails/);
 assert.match(js,/function v792WhppStatusDonut\(m=\{\}\)/);
-assert.match(js,/showDays\(timing\?\.attempt1\?\.avgDays\)/,
+assert.match(js,/showDays\(verifiedDays\(timing\?\.attempt1\)\)/,
   'WHPP first-attempt timing must bind verified aggregate');
-assert.match(js,/showDays\(timing\?\.attempt2\?\.avgDays\)/,
+assert.match(js,/showDays\(verifiedDays\(timing\?\.attempt2\)\)/,
   'WHPP second-attempt timing must bind verified aggregate');
-assert.match(js,/showDays\(timing\?\.attempt3\?\.avgDays\)/,
+assert.match(js,/showDays\(verifiedDays\(timing\?\.attempt3\)\)/,
   'WHPP third-attempt timing must bind verified aggregate');
 
 assert.match(js,/v792LoadWhppTrend\(reportDate\)/);
