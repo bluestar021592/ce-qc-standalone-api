@@ -25,7 +25,10 @@ assert.match(source,/if\(tbody&&historyOk\)/,
   'never overwrite visible history when the history endpoint failed');
 assert.match(source,/有历史日报·状态待核验/);
 assert.match(source,/读取超时·历史状态待核验/);
-assert.match(source,/void refreshLiveProgress\(\)\.catch\(\(\)=>\{\}\)/);
+assert.match(source,/if\(v626LatestImport\?\.reportDate\)\{/,
+  'without an exact date/snapshot do not repaint a fake 0/0 family progress');
+assert.match(source,/历史处理状态暂未读取成功，0\/0不代表没有包裹/,
+  'missing import metadata must produce a neutral unverifed progress label');
 
 const stored={reportDate:'2026-07-12',snapshotId:'SNAP-V795-EXACT',
   classificationCounts:{WHPP:103},snapshotStatus:'IMPORTED'};
@@ -79,8 +82,9 @@ assert.ok(!result.calls.includes('renderImport'),
   'history-only result cannot masquerade as a verified latest import');
 result=await scenario({latest:new Error('latest timeout'),historyResponse:new Error('history timeout')});
 assert.equal(result.status.v625ImportState,'读取超时·历史状态待核验');
-assert.ok(result.calls.includes('progress'),
-  'refresh independent progress even if import metadata requests timed out');
+assert.equal(result.status.v626ImportProgressCount,'待核验');
+assert.ok(!result.calls.includes('progress'),
+  'without a verified import date, do not ask undated progress and render false 0/0');
 result=await scenario({latest:success,historyResponse:savedHistory});
 assert.equal(result.status.v625ImportState,'已导入');
 assert.equal(result.latest.snapshotStatus,'IMPORTED');
