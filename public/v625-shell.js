@@ -1748,6 +1748,7 @@ async function loadBusiness(options={}){
     if(byId('kpiUnprocessedCard')){byId('kpiUnprocessedCard').hidden=true;setText('kpiUnprocessed',fmt(0))}
     renderDonut({total:m.total,delivery:m.delivery||0,pod:m.pod||0,pending:m.pending||0,unresolved:m.unresolved||0});
     if(business==='WHPP'){v792SetWhppMetrics(m);v792WhppStatusDonut(m)}
+    if(business==='WHPP')void v792LoadWhppTrend(reportDate);
 
     // Fast summary/timing updates are useful, but never gate the board's first paint.
     void summaryPromise.then(summary=>{
@@ -2959,6 +2960,10 @@ function v792ApplyReferenceLayout(){
     document.body.classList.add('v792-reference');
     const a=byId('v792WhppAnalysis'),b=byId('v792WhppTables');
     if(a)a.hidden=false;if(b)b.hidden=false;
+    const range=byId('v625BusinessTrendRange');
+    if(range)range.innerHTML='<option value="7">近7天</option>';
+    const trendHeader=byId('v625BusinessTrend')?.closest('.v625-panel')?.querySelector('.v625-section-head h2');
+    if(trendHeader)trendHeader.textContent='业务趋势（近7天）';
     const panel=qa('#v625Business>section.v625-panel').find(node=>
       node.querySelector('.v625-section-head h2')?.textContent?.trim()==='最新异常明细');
     if(panel)panel.classList.add('v792-whpp-original-exceptions');
@@ -3005,6 +3010,68 @@ function v792WhppStatusDonut(m={}){
   legend.innerHTML=portions.map(([name,value,color])=>
     '<div><i style="background:'+color+'"></i><span>'+esc(name)+' '+fmt(value)+
     ' ('+pct(value/total*100)+')</span></div>').join('');
+}
+function v792RenderWhppTrend(points=[]){
+  if(business!=='WHPP')return;
+  const root=byId('v625BusinessTrend');if(!root)return;
+  const rows=(points||[]).slice(-7);
+  const max=Math.max(1,...rows.map(p=>Number(p.total||0)),...rows.map(p=>Number(p.pod||0)));
+  if(!rows.some(p=>p.total!==null)){
+    root.innerHTML='<div class="v792-data-unknown">近7日没有可核验的WHPP原始日报，不绘制示例曲线。</div>';return;
+  }
+  const width=700,height=186,x0=38,right=16,top=18,bottom=34;
+  const x=i=>x0+i*(width-x0-right)/Math.max(1,rows.length-1);
+  const y=n=>height-bottom-(Number(n)/max)*(height-top-bottom);
+  const buildSegments=key=>{
+    const paths=[];let current=[];
+    rows.forEach((point,i)=>{
+      if(point[key]===null||point[key]===undefined){
+        if(current.length)paths.push(current);
+        current=[];return;
+      }
+      current.push([x(i),y(point[key]),point[key]]);
+    });
+    if(current.length)paths.push(current);
+    return paths.map(points=>'<path d="'+points.map((p,i)=>(i?'L':'M')+
+      p[0].toFixed(1)+','+p[1].toFixed(1)).join(' ')+'" class="v792-'+key+'-line"/>').join('');
+  };
+  let svg='<svg class="v792-whpp-chart-svg" viewBox="0 0 '+width+' '+height+
+    '" preserveAspectRatio="none" role="img" aria-label="WHPP已保存日报近7日总票数与经来源核验的POD数量">';
+  for(let i=0;i<=4;i++){
+    const value=max*i/4, yy=y(value);
+    svg+='<line class="v792-grid-line" x1="'+x0+'" y1="'+yy+
+      '" x2="'+(width-right)+'" y2="'+yy+'"/><text x="1" y="'+(yy+4)+'">'+
+      fmt(Math.round(value))+'</text>';
+  }
+  svg+=buildSegments('total')+buildSegments('pod');
+  rows.forEach((point,i)=>{
+    const xx=x(i);svg+='<text x="'+xx+'" y="'+(height-9)+
+      '" text-anchor="middle">'+esc(String(point.date||'').slice(5))+'</text>';
+    for(const key of ['total','pod']){
+      if(point[key]===null||point[key]===undefined)continue;
+      svg+='<circle cx="'+xx+'" cy="'+y(point[key])+'" r="3.4" fill="'+
+        (key==='total'?'#147ef5':'#11b782')+'"><title>'+
+        esc(point.date+' · '+(key==='total'?'源票':'已核验POD')+' '+fmt(point[key]))+
+        '</title></circle>';
+    }
+  });
+  root.innerHTML='<div class="v792-whpp-chart-legend"><span><i style="background:#147ef5"></i>日报源票</span>'+
+    '<span><i style="background:#11b782"></i>已保存且成员齐全的POD</span></div>'+
+    '<p class="v792-whpp-chart-note">缺少日报或最终处理记录的日期不填0、不绘制虚线趋势。</p>'+svg+'</svg>';
+}
+async function v792LoadWhppTrend(date=''){
+  if(business!=='WHPP'||!date)return;
+  const root=byId('v625BusinessTrend');if(root)root.textContent='正在核对近7日WHPP来源票数和最终记录…';
+  try{
+    const response=await json('/api/v792/whpp/trend?toDate='+encodeURIComponent(date),12000);
+    if(page!=='business'||business!=='WHPP'||v628BusinessReportDate!==date)return;
+    if(!response?.ok||response.toDate!==date||response.businessType!=='WHPP')
+      throw new Error('趋势来源与当前业务日期不一致');
+    v792RenderWhppTrend(response.points||[]);
+  }catch(error){
+    if(page==='business'&&business==='WHPP'&&v628BusinessReportDate===date&&root)
+      root.innerHTML='<div class="v792-data-unknown">近7日趋势尚未取得可信来源：'+esc(error.message)+'</div>';
+  }
 }
 function v792RenderWhppDetails(rows=[],truncated=false){
   if(business!=='WHPP')return;
