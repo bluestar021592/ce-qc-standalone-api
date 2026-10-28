@@ -53,4 +53,7 @@ assert.match(ui,/ceaf=await v791RefreshHistoricalCeaf\(reportDate,String\(latest
 assert.match(ui,/v791CeafRefreshBusy=true/);
 assert.match(ui,/v791CeafRefreshBusy=false/);
 assert.match(ui,/await loadOpenPod\(\)/);
+assert.match(ui,/const allSourceVerified=v785OpenSourceVerified/);
+assert.match(ui,/if\(!allSourceVerified\)\{/,
+  'CEAF recovery remains independent but other business refresh still requires full source coverage');
 console.log('[V791] historical CEAF TMS preview, exact scope and safe 60/80/81 backfill PASS');
