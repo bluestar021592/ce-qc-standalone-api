@@ -27,9 +27,13 @@ assert.match(js,/if\(business==='WHPP'\)v792RenderWhppDetails/);
 assert.match(js,/function v792WhppStatusDonut\(m=\{\}\)/);
 assert.match(js,/v792LoadWhppTrend\(reportDate\)/);
 assert.match(server,/app\.get\('\/api\/v792\/whpp\/trend'/);
-assert.match(server,/WHERE d\.businessType='WHPP'/);
-assert.match(server,/f\.businessType='WHPP' AND f\.reportDate=d\.reportDate/);
-assert.match(server,/pod=count!==null&&final===count\?Number\(record\.savedPod\|\|0\):null/);
+assert.match(server,/loadWhppCanonicalTruth\(date,'',db\)/,
+  'WHPP trend must use canonical unified/independent/snapshot members');
+assert.match(server,/const covered=truth\.rows\.filter\(row=>row\.finalRowAvailable===true\)\.length/);
+assert.match(server,/pod:hasEvidence\?verifiedPod:null/,
+  'missing POD evidence is null, never fabricated as zero');
+assert.match(server,/finalVerified:covered===count/);
+assert.match(server,/returned:hasEvidence\?verifiedReturned:null/);
 assert.doesNotMatch(js,/CC06072602913.*(?:166|190)/,
   'reference screenshot and CEAF regression sample must not create fake metrics');
 console.log('[V792] reference home/WHPP structure and verified seven-day chart bindings PASS');
