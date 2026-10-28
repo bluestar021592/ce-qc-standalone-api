@@ -1,4 +1,5 @@
 import { deliveryFollowupDisposition, savedTerminalProof } from './src/openPodDeliveryScope.js';
+import { planHistoricalTmsReconcile } from './src/v791HistoricalTmsReconcile.js';
 import 'dotenv/config';
 import express from 'express';
 import multer from 'multer';
@@ -1980,6 +1981,59 @@ app.get('/api/tracking-workspace', async (req, res) => {
   res.setHeader('Cache-Control','no-store');
   res.setHeader('X-CE-QC-Workspace-Cache','MISS');
   res.json(payload);
+});
+
+// V791: bounded operator-triggered recovery for CEAF historical OPEN items.
+// Default is PREVIEW. No writes occur unless apply:true and the selected
+// reportDate/snapshotId match an existing valid import batch.
+app.post('/api/v791/historical-ceaf-tms-reconcile', async (req,res) => {
+  const reportDate=String(req.body?.reportDate||'').trim();
+  const snapshotId=String(req.body?.snapshotId||'').trim();
+  if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(reportDate)||!snapshotId)
+    return res.status(400).json({ok:false,code:'V791_EXACT_DATE_SNAPSHOT_REQUIRED'});
+  const db=getDb();
+  const exact=db.prepare(`SELECT snapshotId FROM unified_import_batches
+    WHERE snapshotId=? AND reportDate=? AND status='VALID' LIMIT 1`).get(snapshotId,reportDate);
+  if(!exact)return res.status(409).json({ok:false,code:'V791_SOURCE_SNAPSHOT_MISMATCH'});
+  const limit=Math.min(50,Math.max(1,Number(req.body?.limit||50)|0));
+  const after=String(req.body?.after||'').trim().toUpperCase();
+  const candidates=db.prepare(`SELECT shipmentCode,businessType,stateJson,closeReason,sourceReportDate
+    FROM carryover_open_items WHERE status='OPEN' AND businessType='CEAF'
+      AND sourceReportDate<=? AND UPPER(TRIM(shipmentCode))>?
+    ORDER BY UPPER(TRIM(shipmentCode)) LIMIT ?`).all(reportDate,after,limit);
+  if(!candidates.length)return res.json({ok:true,reportDate,snapshotId,preview:req.body?.apply!==true,
+    checked:0,matched:0,closedPod:0,returned:0,returnInProgress:0,nextCursor:'',complete:true});
+  const auth=summarizeToken(await loadToken());
+  if(!auth.hasAccessToken)return res.status(409).json({ok:false,code:'CE_AUTH_REQUIRED',
+    error:'真实TMS终态核验需要有效CE登录，未修改数据库。'});
+  let tmsRows=[];
+  try{
+    tmsRows=await client.shipmentTrack(candidates.map(row=>row.shipmentCode));
+  }catch(error){
+    return res.status(502).json({ok:false,code:'V791_TMS_READ_FAILED',
+      error:String(error?.message||error),changed:0});
+  }
+  const plan=planHistoricalTmsReconcile(candidates,tmsRows,new Date().toISOString());
+  const apply=req.body?.apply===true;
+  let persistence=null;
+  if(apply&&plan.updates.length){
+    // Exact-members only: the writer and canonical V246 ledger synchronize
+    // the same validated CEAF bills. Unknown/contradictory TMS rows remain open.
+    persistence=updateCarryoverResults({snapshotId,reportDate,
+      rows:plan.updates,scanResults:plan.scanResults});
+    const dirty=new Set([reportDate,...(persistence.ledgerSync?.affectedDates||[])]);
+    for(const day of dirty)try{markDashboardCacheDirty(day,'V791_CEAF_TMS_HISTORY_RECONCILED')}catch{}
+  }
+  res.setHeader('Cache-Control','no-store');
+  res.json({ok:true,reportDate,snapshotId,preview:!apply,
+    checked:plan.checked,matched:plan.matched,closedPod:plan.closedPod,
+    returned:plan.returned,returnInProgress:plan.returnInProgress,
+    unverified:plan.unverified.length,conflicts:plan.conflicts.length,
+    conflictSamples:plan.conflicts.slice(0,10),
+    nextCursor:String(candidates.at(-1)?.shipmentCode||'').toUpperCase(),
+    complete:candidates.length<limit,
+    changed:apply?Number(persistence?.ledgerSync?.processed||0):0,
+    evidenceBasis:'EXACT_CEAF_WAYBILL_TMS_SHIPMENT_STATUS_60_80_81'});
 });
 
 app.post('/api/test-ce-api', async (req, res) => {
