@@ -165,7 +165,8 @@ export function updateCarryoverResults({ snapshotId, reportDate, rows = [], scan
       const closed=!returnInProgress&&(pod||returned||specialClosed||normal);
       const status=closed?'CLOSED':'OPEN';
       const reason=pod?'POD':returned?'RETURNED':closed&&specialClosed?(specialState||'SELF_PICKUP'):closed&&normal?'NORMAL_FINAL':'';
-      const apiStatus=apiFailed?'API_PENDING_RETRY':'SUCCESS';
+      // A successful independent TMS terminal proof supersedes stale scan-query failure.
+      const apiStatus=proof?'SUCCESS':(apiFailed?'API_PENDING_RETRY':'SUCCESS');
       const currentState=returnInProgress?'RETURN_IN_PROGRESS'
         :closed?reason:String(row.primaryCategory||row.主分类||'OPEN');
       const enriched={...row,businessType,shipmentCode:bill,currentState,
