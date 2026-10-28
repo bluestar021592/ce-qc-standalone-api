@@ -3106,7 +3106,7 @@ function v792RenderWhppDetails(rows=[],truncated=false){
       }
       const td=document.createElement('td'),a=document.createElement('a');
       a.href='/tracking?auth=v625&code='+encodeURIComponent(row.shipmentCode||'')+
-        '&businessType=WHPP';
+        '&businessType=WHPP&reportDate='+encodeURIComponent(row.reportDate||v628BusinessReportDate||'');
       a.textContent='查看';a.style.color='#1275eb';td.append(a);tr.append(td);el.append(tr);
     }
   };
@@ -3114,7 +3114,7 @@ function v792RenderWhppDetails(rows=[],truncated=false){
     row.shipmentCode,row.category||row.queryStatus||'待核验',row.currentState||'—']);
   fill('v792WhppReturnedRows',returned,row=>[
     row.shipmentCode,row.currentState||'RETURN_COMPLETED',
-    row.lastEventTime||row.lastCheckedAt||'—']);
+    row.latestTime||row.lastEventTime||row.lastCheckedAt||'—']);
   const returnedAll=rows.filter(row=>row.isReturned===true
     ||String(row.currentState||'').toUpperCase()==='RETURN_COMPLETED');
   const validReasons=returnedAll.map(row=>String(row.returnReason||row.退回原因||'').trim()).filter(Boolean);
