@@ -288,3 +288,14 @@ body.v792-reference[data-business="WHPP"] .v625-kpi-row .kpi.gray{border-top:1px
    min-height:165px
  }
 }
+
+/* V794 fit all eight quick-entry tiles without clipping on the home screen. */
+@media(min-width:1181px){
+ body.v792-reference[data-page="home"] .v625-home-quick-panel .v625-quick-grid{gap:3px}
+ body.v792-reference[data-page="home"] .v625-home-quick-panel .v625-quick-grid>a{
+   height:47px;min-height:47px;padding:4px 2px;gap:3px;font-size:9px
+ }
+ body.v792-reference[data-page="home"] .v625-home-quick-panel .v625-quick-grid svg{
+   width:17px;height:17px
+ }
+}
