@@ -132,12 +132,19 @@ export function carryBusinessMatches(source='',actual=''){
     ||(s==='SHOPEE'&&['SHOPEECN','SHOPEEVN'].includes(a));
 }
 
-export function updateCarryoverResults({ snapshotId, reportDate, rows = [], scanResults = [] }) {
+export function updateCarryoverResults({ snapshotId, reportDate, rows = [], scanResults = [], guardOpenAtOrBefore = '' }) {
   const db = getDb();
   const scans=new Map(scanResults.map(row=>[String(row.shipmentCode||row.运单号||'').trim().toUpperCase(),row]));
   const currentBusiness=db.prepare('SELECT businessType FROM carryover_open_items WHERE shipmentCode=?');
+  const currentReportDate=db.prepare('SELECT reportDate FROM shipment_current_state WHERE shipmentCode=? AND businessType=?');
+  // Guarded recovery writes are conditional within the same SQLite transaction,
+  // so a new daily import cannot be overwritten after a slow remote TMS read.
+  const guardedUpdate=db.prepare(`UPDATE carryover_open_items SET status=?,apiStatus=?,closeReason=?,lastReportDate=?,lastSnapshotId=?,stateJson=?,updatedAt=?
+    WHERE shipmentCode=? AND businessType=? AND status='OPEN' AND lastReportDate<=?`);
   const update = db.prepare(`UPDATE carryover_open_items SET status=?,apiStatus=?,closeReason=?,lastReportDate=?,lastSnapshotId=?,stateJson=?,updatedAt=? WHERE shipmentCode=? AND businessType=?`);
   const current = db.prepare(`UPDATE shipment_current_state SET state=?,apiStatus=?,reportDate=?,snapshotId=?,lastEventTime=?,stateJson=?,updatedAt=? WHERE shipmentCode=? AND businessType=?`);
+  const guardedCurrent=db.prepare(`UPDATE shipment_current_state SET state=?,apiStatus=?,reportDate=?,snapshotId=?,lastEventTime=?,stateJson=?,updatedAt=?
+    WHERE shipmentCode=? AND businessType=? AND reportDate<=?`);
   const now = nowIso();
   let ledgerSync = null;
   const acceptedRows=[];
@@ -148,6 +155,10 @@ export function updateCarryoverResults({ snapshotId, reportDate, rows = [], scan
       if (!bill) continue;
       const businessType=String(currentBusiness.get(bill)?.businessType||'').trim().toUpperCase();
       if(!businessType||!carryBusinessMatches(row.businessType,businessType))continue;
+      if(guardOpenAtOrBefore){
+        const currentDate=String(currentReportDate.get(bill,businessType)?.reportDate||'');
+        if(currentDate&&currentDate>guardOpenAtOrBefore)continue;
+      }
       const proof=matchedTmsTerminalEvidence(scans.get(bill)||{},bill,businessType);
       const truth=proof?.shipmentStatus||'';
       // Preserve existing explicit scan POD evidence when TMS has no newer
@@ -174,8 +185,14 @@ export function updateCarryoverResults({ snapshotId, reportDate, rows = [], scan
         ...(proof?{shipmentStatus:proof.shipmentStatus,terminalEvidence:proof}:{}),
         ...(returnInProgress?{退回状态:'退回处理中',是否POD:'否'}:{})};
       const json=JSON.stringify(enriched);
-      update.run(status,apiStatus,reason,reportDate,snapshotId,json,now,bill,businessType);
-      current.run(currentState,apiStatus,reportDate,snapshotId,row.latestEventTime||row.最后节点时间||'',json,now,bill,businessType);
+      const updated=guardOpenAtOrBefore
+        ?guardedUpdate.run(status,apiStatus,reason,reportDate,snapshotId,json,now,bill,businessType,guardOpenAtOrBefore)
+        :update.run(status,apiStatus,reason,reportDate,snapshotId,json,now,bill,businessType);
+      if(Number(updated.changes||0)!==1)continue;
+      if(guardOpenAtOrBefore)guardedCurrent.run(currentState,apiStatus,reportDate,snapshotId,
+        row.latestEventTime||row.最后节点时间||'',json,now,bill,businessType,guardOpenAtOrBefore);
+      else current.run(currentState,apiStatus,reportDate,snapshotId,
+        row.latestEventTime||row.最后节点时间||'',json,now,bill,businessType);
       acceptedRows.push(enriched);
     }
     ledgerSync = syncCarryRowsToV246Ledger(acceptedRows, {
