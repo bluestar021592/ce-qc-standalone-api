@@ -13,6 +13,10 @@ const server=fs.readFileSync('server.js','utf8');
 const store=fs.readFileSync('src/unifiedImportStore.js','utf8');
 assert.match(server,/getLatestUnifiedImport\(\{ includeCarryover: req\.query\.compact !== '1' \}\)/);
 assert.match(store,/export function getLatestUnifiedImport\(\{ includeCarryover = true \} = \{\}\)/);
+assert.match(shell,/const shown=String\(byId\('v626ImportProgressDate'\)/,
+  'read-only CCSL/SHOPEE diagnosis can use a verified selected date after latest endpoint timeout');
+assert.match(shell,/未能确认日报日期。该页面读取超时不代表未导入/,
+  'read-only recovery never silently guesses the date on failed metadata');
 assert.match(source,/Promise\.allSettled\(/,
   'one read-only API timeout must not discard a successful independent import read');
 assert.doesNotMatch(source,/Promise\.all\(\[json\('\/api\/import\/unified-latest'/,
