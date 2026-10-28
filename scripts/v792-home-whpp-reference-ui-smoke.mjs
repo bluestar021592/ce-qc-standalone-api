@@ -26,6 +26,12 @@ assert.match(js,/v792ApplyReferenceLayout\(\);\s*bind\(\);/);
 assert.match(js,/if\(business==='WHPP'\)v792RenderWhppDetails/);
 assert.match(js,/function v792WhppStatusDonut\(m=\{\}\)/);
 assert.match(js,/v792LoadWhppTrend\(reportDate\)/);
+assert.match(js,/buildSegments\('total'\)\+buildSegments\('pod'\)\+buildSegments\('returned'\)/,
+  'WHPP source, POD and returned must render from saved trend values');
+assert.match(js,/if\(point\[key\]===null\|\|point\[key\]===undefined\)/,
+  'missing-day evidence must break trend segments, not plot zero');
+assert.match(js,/if\(byId\('v625BoardJump'\)\)byId\('v625BoardJump'\)\.value='\/whpp\?auth=v625'/,
+  'WHPP header must select active board');
 assert.match(server,/app\.get\('\/api\/v792\/whpp\/trend'/);
 assert.match(server,/loadWhppCanonicalTruth\(date,'',db\)/,
   'WHPP trend must use canonical unified/independent/snapshot members');
