@@ -132,10 +132,10 @@ export function carryBusinessMatches(source='',actual=''){
     ||(s==='SHOPEE'&&['SHOPEECN','SHOPEEVN'].includes(a));
 }
 
-export function updateCarryoverResults({ snapshotId, reportDate, rows = [], scanResults = [], guardOpenAtOrBefore = '' }) {
+export function updateCarryoverResults({ snapshotId, reportDate, rows = [], scanResults = [], guardOpenAtOrBefore = '', expectedCarryVersions = null }) {
   const db = getDb();
   const scans=new Map(scanResults.map(row=>[String(row.shipmentCode||row.运单号||'').trim().toUpperCase(),row]));
-  const currentBusiness=db.prepare('SELECT businessType FROM carryover_open_items WHERE shipmentCode=?');
+  const currentBusiness=db.prepare('SELECT businessType,lastSnapshotId,updatedAt FROM carryover_open_items WHERE shipmentCode=?');
   const currentReportDate=db.prepare('SELECT reportDate,state FROM shipment_current_state WHERE shipmentCode=? AND businessType=?');
   // Guarded recovery writes are conditional within the same SQLite transaction,
   // so a new daily import cannot be overwritten after a slow remote TMS read.
@@ -153,8 +153,14 @@ export function updateCarryoverResults({ snapshotId, reportDate, rows = [], scan
     for (const row of rows) {
       const bill = String(row.shipmentCode || row.运单号 || '').trim().toUpperCase();
       if (!bill) continue;
-      const businessType=String(currentBusiness.get(bill)?.businessType||'').trim().toUpperCase();
+      const persistedCarry=currentBusiness.get(bill)||{};
+      const businessType=String(persistedCarry.businessType||'').trim().toUpperCase();
       if(!businessType||!carryBusinessMatches(row.businessType,businessType))continue;
+      if(expectedCarryVersions){
+        const expected=expectedCarryVersions[bill];
+        if(!expected||String(expected.lastSnapshotId||'')!==String(persistedCarry.lastSnapshotId||'')
+          ||String(expected.updatedAt||'')!==String(persistedCarry.updatedAt||''))continue;
+      }
       if(guardOpenAtOrBefore){
         const persisted=currentReportDate.get(bill,businessType)||{};
         const currentDate=String(persisted.reportDate||'');
