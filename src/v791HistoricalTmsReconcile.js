@@ -1,6 +1,6 @@
 // V791: bounded, evidence-only historical TMS terminal reconciliation.
 // This module never calls the API or writes SQLite by itself.
-import { classifyShipmentStatus, shipmentStatusTime } from './shipmentStatusTruth.js';
+import { classifyShipmentStatus } from './shipmentStatusTruth.js';
 
 const code=v=>String(v||'').trim().toUpperCase();
 const text=v=>String(v??'').trim();
@@ -14,7 +14,9 @@ export function planHistoricalTmsReconcile(candidates=[],tmsRows=[],checkedAt=''
     if(!bill)continue;
     const truth=classifyShipmentStatus(row);
     if(!truth.recognized||!TERMINAL.has(truth.code))continue;
-    const time=text(shipmentStatusTime(row));
+    // Never use shipment creationDate as a fabricated POD timestamp.
+    const time=text(row.podTime||row.deliveryTime||row.returnedTime||row.returnTime
+      ||row.statusTime||row.updateTime||row.eventTime);
     const previous=observations.get(bill);
     // Different terminal codes without comparable timestamps are ambiguous.
     if(previous&&previous.status!==truth.code){
