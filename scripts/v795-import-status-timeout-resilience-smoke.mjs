@@ -7,6 +7,12 @@ const a=shell.indexOf('async function loadImport(){');
 const b=shell.indexOf('function dateSourceText(data={})',a);
 assert.ok(a>=0&&b>a,'import handler exists in current public shell');
 const source=shell.slice(a,b);
+assert.match(source,/\/api\/import\/unified-latest\?compact=1/,
+  'latest imported date and member counts must avoid expensive carryover summary');
+const server=fs.readFileSync('server.js','utf8');
+const store=fs.readFileSync('src/unifiedImportStore.js','utf8');
+assert.match(server,/getLatestUnifiedImport\(\{ includeCarryover: req\.query\.compact !== '1' \}\)/);
+assert.match(store,/export function getLatestUnifiedImport\(\{ includeCarryover = true \} = \{\}\)/);
 assert.match(source,/Promise\.allSettled\(/,
   'one read-only API timeout must not discard a successful independent import read');
 assert.doesNotMatch(source,/Promise\.all\(\[json\('\/api\/import\/unified-latest'/,
