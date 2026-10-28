@@ -1045,9 +1045,15 @@ async function refreshOpenPodNow(){
     const allSourceVerified=v785OpenSourceVerified;
     // CEAF typed TMS status can be independently validated against its exact
     // imported snapshot even when WHPP historical finals are still missing.
-    if(String(latest.snapshotId||'')){
+    if(reportDate){
       try{
-        ceaf=await v791RefreshHistoricalCeaf(reportDate,String(latest.snapshotId));
+        // Resolve the report-date snapshot independently of the latest import.
+        // A July-11 selection must never write against July-12's snapshot.
+        const context=await json('/api/v791/historical-ceaf-tms-context?reportDate='+
+          encodeURIComponent(reportDate),12000);
+        if(context?.ok!==true||context.reportDate!==reportDate||!context.snapshotId)
+          throw new Error('所选日期缺少有效日报快照，已停止CEAF写入。');
+        ceaf=await v791RefreshHistoricalCeaf(reportDate,String(context.snapshotId));
         appendLiveLog('CEAF历史TMS复核：'+fmt(ceaf.checked)+'票，POD '+fmt(ceaf.pod)+
           '票，已退回 '+fmt(ceaf.returned)+'票，退回中 '+fmt(ceaf.returning)+'票。');
       }catch(error){
