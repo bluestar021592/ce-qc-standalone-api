@@ -1997,10 +1997,14 @@ app.post('/api/v791/historical-ceaf-tms-reconcile', async (req,res) => {
   if(!exact)return res.status(409).json({ok:false,code:'V791_SOURCE_SNAPSHOT_MISMATCH'});
   const limit=Math.min(50,Math.max(1,Number(req.body?.limit||50)|0));
   const after=String(req.body?.after||'').trim().toUpperCase();
-  const candidates=db.prepare(`SELECT shipmentCode,businessType,stateJson,closeReason,sourceReportDate
-    FROM carryover_open_items WHERE status='OPEN' AND businessType='CEAF'
-      AND sourceReportDate<=? AND UPPER(TRIM(shipmentCode))>?
-    ORDER BY UPPER(TRIM(shipmentCode)) LIMIT ?`).all(reportDate,after,limit);
+  const candidates=db.prepare(`SELECT o.shipmentCode,o.businessType,o.stateJson,o.closeReason,o.sourceReportDate,
+      q.terminalReason
+    FROM carryover_open_items o
+    LEFT JOIN qc_tracking_ledger q ON UPPER(TRIM(q.shipmentCode))=UPPER(TRIM(o.shipmentCode))
+      AND UPPER(TRIM(q.businessType))=UPPER(TRIM(o.businessType))
+    WHERE o.status='OPEN' AND o.businessType='CEAF'
+      AND o.sourceReportDate<=? AND UPPER(TRIM(o.shipmentCode))>?
+    ORDER BY UPPER(TRIM(o.shipmentCode)) LIMIT ?`).all(reportDate,after,limit);
   if(!candidates.length)return res.json({ok:true,reportDate,snapshotId,preview:req.body?.apply!==true,
     checked:0,matched:0,closedPod:0,returned:0,returnInProgress:0,nextCursor:'',complete:true});
   const auth=summarizeToken(await loadToken());
