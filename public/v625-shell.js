@@ -2956,6 +2956,12 @@ function v792ApplyReferenceLayout(){
       ||!process||!open||!status||!quick||!trend)return;
     const top=document.createElement('div');top.className='v792-home-main-row';
     overview.after(top);top.append(process,status,quick,logs);
+    // Preserve the source completeness indicator, but position it with
+    // reference screenshot's data-management area rather than bloating
+    // the above-the-fold seven-business overview.
+    const integrity=byId('v637HomeIntegrityBar');
+    const management=byId('v792HomeManagement');
+    if(integrity&&management)management.append(integrity);
     const bottom=document.createElement('div');bottom.className='v792-home-bottom-row';
     timing.before(bottom);bottom.append(timing,open);
     const optional=document.createElement('details');optional.className='v792-optional-trend v625-panel';
@@ -2967,6 +2973,15 @@ function v792ApplyReferenceLayout(){
   }
   if(business==='WHPP'){
     document.body.classList.add('v792-reference');
+    const icons=['icon-package','icon-route','icon-check','icon-clipboard',
+      'icon-alert','icon-clock','icon-archive','icon-refresh'];
+    for(const [i,tile] of [...(byId('v625Business')?.querySelectorAll('.v625-kpi-row>article')||[])].entries()){
+      if(i>7||tile.querySelector('.v792-kpi-symbol'))continue;
+      const symbol=document.createElement('i');symbol.className='v792-kpi-symbol';
+      symbol.setAttribute('aria-hidden','true');
+      symbol.innerHTML='<svg><use href="/assets/ui-icons-v625.svg#'+icons[i]+'"/></svg>';
+      tile.insertBefore(symbol,tile.firstChild);
+    }
     if(byId('v625BoardJump'))byId('v625BoardJump').value='/whpp?auth=v625';
     setText('v625PageSub','按真实所选日期与运单号核验 WHPP POD、退回和签收时效');
     const a=byId('v792WhppAnalysis'),b=byId('v792WhppTables');
@@ -2994,14 +3009,17 @@ function v792ApplyReferenceLayout(){
 function v792SetWhppMetrics(m={},timing=null){
   if(business!=='WHPP')return;
   const showDays=v=>v===null||v===undefined?'—':Number(v).toFixed(1)+'天';
-  setText('v792WhppOverall',showDays(timing?.overall?.avgDays??m.avgDays??null));
-  setText('v792WhppPP',showDays(timing?.pp?.avgDays));
-  setText('v792WhppPV',showDays(timing?.pv?.avgDays));
-  // Reuse existing source-backed attempt timing buckets. Never derive
-  // first/second/third averages from the aggregate when track evidence lacks.
-  setText('v792WhppFirst',showDays(timing?.attempt1?.avgDays));
-  setText('v792WhppSecond',showDays(timing?.attempt2?.avgDays));
-  setText('v792WhppThird',showDays(timing?.attempt3?.avgDays));
+  const verifiedDays=bucket=>Number(bucket?.podCount||0)>0
+    &&Number.isFinite(Number(bucket?.avgDays))?Number(bucket.avgDays):null;
+  const overall=verifiedDays(timing?.overall);
+  setText('v792WhppOverall',showDays(overall));
+  setText('kpiAvgDays',overall===null?'—':Number(overall).toFixed(1));
+  setText('v792WhppPP',showDays(verifiedDays(timing?.pp)));
+  setText('v792WhppPV',showDays(verifiedDays(timing?.pv)));
+  // Only actual first/second/third attempt samples may produce an average.
+  setText('v792WhppFirst',showDays(verifiedDays(timing?.attempt1)));
+  setText('v792WhppSecond',showDays(verifiedDays(timing?.attempt2)));
+  setText('v792WhppThird',showDays(verifiedDays(timing?.attempt3)));
   setText('v792WhppReturnCount',fmt(m.returned));
   setText('v792WhppReturnRate',m.total>0?pct(m.returned/m.total*100):'—');
   setText('v792WhppTimingSource',timing?.overall?.avgDays!=null
