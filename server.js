@@ -1986,6 +1986,18 @@ app.get('/api/tracking-workspace', async (req, res) => {
 // V791: bounded operator-triggered recovery for CEAF historical OPEN items.
 // Default is PREVIEW. No writes occur unless apply:true and the selected
 // reportDate/snapshotId match an existing valid import batch.
+// Preview-only exact selected-date context; never reuse the latest different
+// report date's snapshot for historical CEAF recovery.
+app.get('/api/v791/historical-ceaf-tms-context', (req,res)=>{
+  const reportDate=String(req.query?.reportDate||'').trim();
+  if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(reportDate))
+    return res.status(400).json({ok:false,code:'V791_REPORT_DATE_REQUIRED'});
+  const batch=getDb().prepare(`SELECT snapshotId,reportDate FROM unified_import_batches
+    WHERE reportDate=? AND status='VALID' ORDER BY createdAt DESC,rowid DESC LIMIT 1`).get(reportDate);
+  res.setHeader('Cache-Control','no-store');
+  if(!batch)return res.status(404).json({ok:false,code:'V791_VALID_SELECTED_DATE_MISSING'});
+  return res.json({ok:true,reportDate,snapshotId:String(batch.snapshotId)});
+});
 app.post('/api/v791/historical-ceaf-tms-reconcile', async (req,res) => {
   const reportDate=String(req.body?.reportDate||'').trim();
   const snapshotId=String(req.body?.snapshotId||'').trim();
@@ -1995,6 +2007,14 @@ app.post('/api/v791/historical-ceaf-tms-reconcile', async (req,res) => {
   const exact=db.prepare(`SELECT snapshotId FROM unified_import_batches
     WHERE snapshotId=? AND reportDate=? AND status='VALID' LIMIT 1`).get(snapshotId,reportDate);
   if(!exact)return res.status(409).json({ok:false,code:'V791_SOURCE_SNAPSHOT_MISMATCH'});
+  const apply=req.body?.apply===true;
+  if(apply){
+    const latestSameDate=db.prepare(`SELECT snapshotId FROM unified_import_batches
+      WHERE reportDate=? AND status='VALID' ORDER BY createdAt DESC,rowid DESC LIMIT 1`).get(reportDate);
+    if(String(latestSameDate?.snapshotId||'')!==snapshotId)
+      return res.status(409).json({ok:false,code:'V791_SELECTED_DATE_SNAPSHOT_SUPERSEDED',
+        error:'该日期已有更新的日报快照，已禁止旧快照写入。'});
+  }
   const limit=Math.min(50,Math.max(1,Number(req.body?.limit||50)|0));
   const after=String(req.body?.after||'').trim().toUpperCase();
   const candidates=db.prepare(`SELECT o.shipmentCode,o.businessType,o.stateJson,o.closeReason,o.sourceReportDate,
@@ -2019,13 +2039,13 @@ app.post('/api/v791/historical-ceaf-tms-reconcile', async (req,res) => {
       error:String(error?.message||error),changed:0});
   }
   const plan=planHistoricalTmsReconcile(candidates,tmsRows,new Date().toISOString());
-  const apply=req.body?.apply===true;
   let persistence=null;
   if(apply&&plan.updates.length){
     // Exact-members only: the writer and canonical V246 ledger synchronize
     // the same validated CEAF bills. Unknown/contradictory TMS rows remain open.
     persistence=updateCarryoverResults({snapshotId,reportDate,
-      rows:plan.updates,scanResults:plan.scanResults});
+      rows:plan.updates,scanResults:plan.scanResults,
+      guardOpenAtOrBefore:reportDate});
     const dirty=new Set([reportDate,...(persistence.ledgerSync?.affectedDates||[])]);
     for(const day of dirty)try{markDashboardCacheDirty(day,'V791_CEAF_TMS_HISTORY_RECONCILED')}catch{}
   }
