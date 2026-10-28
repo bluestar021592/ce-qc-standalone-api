@@ -42,6 +42,8 @@ assert.equal(conflict.conflicts.length,1);
 const server=fs.readFileSync(new URL('../server.js',import.meta.url),'utf8');
 assert.match(server,/\/api\/v791\/historical-ceaf-tms-reconcile/);
 assert.match(server,/WHERE o\.status='OPEN' AND o\.businessType='CEAF'/);
+assert.match(server,/o\.sourceReportDate<=\? AND o\.lastReportDate<=\?/,
+  'historical repair must not rewrite newer-day ledger state');
 assert.match(server,/UPPER\(TRIM\(q\.businessType\)\)=UPPER\(TRIM\(o\.businessType\)\)/);
 assert.match(server,/status='VALID' LIMIT 1/);
 assert.match(server,/const apply=req\.body\?\.apply===true/);
