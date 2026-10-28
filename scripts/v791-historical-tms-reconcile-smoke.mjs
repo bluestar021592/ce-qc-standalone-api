@@ -63,7 +63,8 @@ assert.match(ui,/\/api\/v791\/historical-ceaf-tms-context\?reportDate=/,
 assert.match(ui,/v791RefreshHistoricalCeaf\(reportDate,String\(context\.snapshotId\)\)/,
   'historic CEAF write must use selected report date context');
 
-assert.match(ui,/ceaf=await v791RefreshHistoricalCeaf\(reportDate,String\(latest\.snapshotId\)\)/);
+assert.match(ui,/ceaf=await v791RefreshHistoricalCeaf\(reportDate,String\(context\.snapshotId\)\)/,
+  'CEAF must use selected-date snapshot, never latest different-day import');
 assert.match(ui,/v791CeafRefreshBusy=true/);
 assert.match(ui,/v791CeafRefreshBusy=false/);
 assert.match(ui,/await loadOpenPod\(\)/);
