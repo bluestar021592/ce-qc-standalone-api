@@ -2041,6 +2041,40 @@ app.post('/api/v791/historical-ceaf-tms-reconcile', async (req,res) => {
     evidenceBasis:'EXACT_CEAF_WAYBILL_TMS_SHIPMENT_STATUS_60_80_81'});
 });
 
+// V792: WHPP 7-day chart uses only saved daily waybill evidence.
+// A missing/incomplete final ledger is null, NEVER a false zero POD.
+app.get('/api/v792/whpp/trend', (req,res)=>{
+  const toDate=String(req.query?.toDate||'').slice(0,10);
+  if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(toDate))
+    return res.status(400).json({ok:false,code:'V792_DATE_REQUIRED'});
+  const db=getDb();
+  const raw=db.prepare(`SELECT d.reportDate,COUNT(DISTINCT UPPER(TRIM(d.shipmentCode))) AS sourceTotal,
+      COUNT(DISTINCT CASE WHEN f.shipmentCode IS NOT NULL
+        THEN UPPER(TRIM(f.shipmentCode)) END) AS finalized,
+      COUNT(DISTINCT CASE WHEN f.isPod=1 THEN UPPER(TRIM(f.shipmentCode)) END) AS savedPod
+    FROM business_daily_parse_rows d
+    LEFT JOIN business_final_rows f
+      ON f.businessType='WHPP' AND f.reportDate=d.reportDate
+      AND UPPER(TRIM(f.shipmentCode))=UPPER(TRIM(d.shipmentCode))
+    WHERE d.businessType='WHPP' AND d.reportDate BETWEEN date(?,'-6 day') AND ?
+      AND TRIM(COALESCE(d.shipmentCode,''))<>''
+    GROUP BY d.reportDate ORDER BY d.reportDate`).all(toDate,toDate);
+  const byDate=new Map(raw.map(row=>[String(row.reportDate),row]));
+  const points=[];
+  for(let d=6;d>=0;d--){
+    const date=db.prepare("SELECT date(?,'-' || ? || ' day') AS day").get(toDate,d)?.day;
+    const record=byDate.get(date);
+    const count=record?Number(record.sourceTotal||0):null;
+    const final=record?Number(record.finalized||0):0;
+    const pod=count!==null&&final===count?Number(record.savedPod||0):null;
+    points.push({date,total:count,pod,
+      sourceVerified:count!==null,finalVerified:pod!==null});
+  }
+  res.setHeader('Cache-Control','no-store');
+  res.json({ok:true,toDate,businessType:'WHPP',basis:'SAVED_WHPP_DAILY_MEMBERS_AND_MATCHED_FINAL_ROWS',
+    points,partial:points.some(point=>!point.sourceVerified||!point.finalVerified)});
+});
+
 app.post('/api/test-ce-api', async (req, res) => {
   const requestHeadersDebug = client.headerDebug();
   const headersConfigured = ceHeaderStatus(requestHeadersDebug);
