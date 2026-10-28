@@ -148,3 +148,13 @@ body.v792-reference .v792-data-unknown{color:#8497a9;font-size:12px;padding:17px
  body.v792-reference[data-business="WHPP"] .business-charts{grid-template-columns:1fr}
  body.v792-reference[data-business="WHPP"] .v792-whpp-timing{grid-template-columns:repeat(3,minmax(0,1fr))}
 }
+
+body.v792-reference[data-business="WHPP"] .v792-whpp-original-exceptions{display:none!important}
+body.v792-reference[data-business="WHPP"] .v625-chart svg{width:100%;height:180px}
+body.v792-reference[data-business="WHPP"] .v792-whpp-chart-note{font-size:10px;color:#697e95;margin:0 0 8px}
+body.v792-reference[data-business="WHPP"] .v792-whpp-chart-legend{display:flex;gap:12px;align-items:center;margin-bottom:7px;font-size:11px}
+body.v792-reference[data-business="WHPP"] .v792-whpp-chart-legend i{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px}
+body.v792-reference[data-business="WHPP"] .v792-whpp-chart-svg text{font-size:11px;fill:#7e91a5}
+body.v792-reference[data-business="WHPP"] .v792-whpp-chart-svg .v792-grid-line{stroke:#e8eef5;stroke-width:1}
+body.v792-reference[data-business="WHPP"] .v792-whpp-chart-svg .v792-total-line{stroke:#147ef5;stroke-width:2.6;fill:none}
+body.v792-reference[data-business="WHPP"] .v792-whpp-chart-svg .v792-pod-line{stroke:#11b782;stroke-width:2.6;fill:none}
