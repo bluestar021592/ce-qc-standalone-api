@@ -3030,7 +3030,7 @@ function v792RenderWhppTrend(points=[]){
   if(business!=='WHPP')return;
   const root=byId('v625BusinessTrend');if(!root)return;
   const rows=(points||[]).slice(-7);
-  const max=Math.max(1,...rows.map(p=>Number(p.total||0)),...rows.map(p=>Number(p.pod||0)));
+  const max=Math.max(1,...rows.map(p=>Number(p.total||0)),...rows.map(p=>Number(p.pod||0)),...rows.map(p=>Number(p.returned||0)));
   if(!rows.some(p=>p.total!==null)){
     root.innerHTML='<div class="v792-data-unknown">近7日没有可核验的WHPP原始日报，不绘制示例曲线。</div>';return;
   }
@@ -3058,21 +3058,22 @@ function v792RenderWhppTrend(points=[]){
       '" x2="'+(width-right)+'" y2="'+yy+'"/><text x="1" y="'+(yy+4)+'">'+
       fmt(Math.round(value))+'</text>';
   }
-  svg+=buildSegments('total')+buildSegments('pod');
+  svg+=buildSegments('total')+buildSegments('pod')+buildSegments('returned');
   rows.forEach((point,i)=>{
     const xx=x(i);svg+='<text x="'+xx+'" y="'+(height-9)+
       '" text-anchor="middle">'+esc(String(point.date||'').slice(5))+'</text>';
-    for(const key of ['total','pod']){
+    for(const key of ['total','pod','returned']){
       if(point[key]===null||point[key]===undefined)continue;
       svg+='<circle cx="'+xx+'" cy="'+y(point[key])+'" r="3.4" fill="'+
-        (key==='total'?'#147ef5':'#11b782')+'"><title>'+
-        esc(point.date+' · '+(key==='total'?'源票':'已核验POD')+' '+fmt(point[key]))+
+        (key==='total'?'#147ef5':key==='pod'?'#11b782':'#ef5261')+'"><title>'+
+        esc(point.date+' · '+(key==='total'?'源票':key==='pod'?'已核验POD':'已核验退回')+' '+fmt(point[key]))+
         '</title></circle>';
     }
   });
   root.innerHTML='<div class="v792-whpp-chart-legend"><span><i style="background:#147ef5"></i>日报源票</span>'+
-    '<span><i style="background:#11b782"></i>已保存且成员齐全的POD</span></div>'+
-    '<p class="v792-whpp-chart-note">缺少日报或最终处理记录的日期不填0、不绘制虚线趋势。</p>'+svg+'</svg>';
+    '<span><i style="background:#11b782"></i>已核验POD</span>'+ 
+    '<span><i style="background:#ef5261"></i>已核验退回</span></div>'+
+    '<p class="v792-whpp-chart-note">缺少终态证据的日期显示空缺；部分核实的数量不代表全部终态已完成。</p>'+svg+'</svg>';
 }
 async function v792LoadWhppTrend(date=''){
   if(business!=='WHPP'||!date)return;
