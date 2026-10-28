@@ -7,6 +7,23 @@ for(const v of ['CCSLCN_DIVERSION','CCSLZT_DIVERSION','CCSL580_RETENTION','CCSL5
   assert.deepEqual(deliveryFollowupDisposition({specialState:v}).include,false,v);
   assert.equal(deliveryFollowupDisposition({currentState:v}).reason,'DELIVERY_HANDOFF');
 }
+// A stale historical diversion label cannot silently hide a newer active
+// Pending/OC/scan-review state. Contradictions stay visible, not auto-closed.
+for(const handoff of ['CCSLCN_DIVERSION','CCSLZT_DIVERSION','CCSL580_RETENTION']){
+  for(const active of ['PENDING','OC','PENDING_SCAN','CYCLE_COUNT']){
+    const row=deliveryFollowupDisposition({currentState:active,specialState:handoff});
+    assert.equal(row.include,true,'active '+active+' versus stale '+handoff+' must remain visible');
+    assert.equal(row.reason,'STATE_EVIDENCE_CONFLICT');
+  }
+  assert.equal(deliveryFollowupDisposition({currentState:'OPEN',specialState:handoff}).include,false,
+    'generic OPEN must not override an otherwise uncontradicted handoff');
+  assert.equal(deliveryFollowupDisposition({currentState:handoff,primaryCategory:'PENDING'}).include,false,
+    'active explicit handoff is sufficient for courier follow-up exclusion');
+}
+assert.equal(deliveryFollowupDisposition({currentState:'PENDING',specialState:'CCSL580_RETENTION',
+  terminalEvidenceVerified:true,terminalEvidenceBusinessMatched:true,
+  terminalEvidenceWaybillMatched:true,shipmentStatus:'60'}).reason,'VERIFIED_POD',
+  'same-waybill verified terminal proof outranks contradictory categories');
 assert.equal(deliveryFollowupDisposition({currentState:'PENDING_SCAN'}).reason,'SCAN_EVIDENCE_MISSING');
 assert.equal(deliveryFollowupDisposition({currentState:'PENDING_SCAN'}).include,true,
   'missing scan must not be silently marked POD or returned');
