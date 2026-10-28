@@ -2997,12 +2997,15 @@ function v792SetWhppMetrics(m={},timing=null){
   setText('v792WhppOverall',showDays(timing?.overall?.avgDays??m.avgDays??null));
   setText('v792WhppPP',showDays(timing?.pp?.avgDays));
   setText('v792WhppPV',showDays(timing?.pv?.avgDays));
-  // No guessed first/second/third attempt averages: those need real events.
-  for(const id of ['v792WhppFirst','v792WhppSecond','v792WhppThird'])setText(id,'—');
+  // Reuse existing source-backed attempt timing buckets. Never derive
+  // first/second/third averages from the aggregate when track evidence lacks.
+  setText('v792WhppFirst',showDays(timing?.attempt1?.avgDays));
+  setText('v792WhppSecond',showDays(timing?.attempt2?.avgDays));
+  setText('v792WhppThird',showDays(timing?.attempt3?.avgDays));
   setText('v792WhppReturnCount',fmt(m.returned));
   setText('v792WhppReturnRate',m.total>0?pct(m.returned/m.total*100):'—');
   setText('v792WhppTimingSource',timing?.overall?.avgDays!=null
-    ?'依据真实POD日期与派送起点计算；一/二/三派暂无有效分类证据则显示—。'
+    ?'平均时效依据真实POD/派送日期计算；一/二/三派只使用已核实的派送次数证据。'
     :'签收时效缺少已核实的日期轨迹，当前不推算平均签收天数。');
 }
 function v792WhppStatusDonut(m={}){
