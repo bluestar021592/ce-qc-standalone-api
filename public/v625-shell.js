@@ -1646,6 +1646,8 @@ async function v765LoadBusinessDetailLane({reportDate,snapshotId,m,options,gener
 
     const wr=workspaceR.status==='fulfilled'?workspaceR.value:{rows:[]};
     v628BusinessWorkspaceRows=(wr.rows||[]).filter(businessTypeMatches);
+    if(business==='WHPP')v792RenderWhppDetails(v628BusinessWorkspaceRows,
+      Number(wr.allRowCount||0)>v628BusinessWorkspaceRows.length);
     applyV748QualitySignals(wr);
     const workspaceAllCount=Number(wr.allRowCount||v628BusinessWorkspaceRows.length);
     const workspaceTruncated=workspaceAllCount>v628BusinessWorkspaceRows.length;
@@ -1745,6 +1747,7 @@ async function loadBusiness(options={}){
     if(byId('kpiOtherCard')){byId('kpiOtherCard').hidden=false;setText('kpiOtherNormal',fmt(m.otherNormal||0))}
     if(byId('kpiUnprocessedCard')){byId('kpiUnprocessedCard').hidden=true;setText('kpiUnprocessed',fmt(0))}
     renderDonut({total:m.total,delivery:m.delivery||0,pod:m.pod||0,pending:m.pending||0,unresolved:m.unresolved||0});
+    if(business==='WHPP'){v792SetWhppMetrics(m);v792WhppStatusDonut(m)}
 
     // Fast summary/timing updates are useful, but never gate the board's first paint.
     void summaryPromise.then(summary=>{
@@ -1755,6 +1758,7 @@ async function loadBusiness(options={}){
       else if(evidenceState==='COMPLETED'||summary?.timingEvidenceRepair)stopHistoricalEvidenceRefresh();
       const timing=summary?.reportDate===reportDate?summary?.timing?.[business]:null;
       if(timing?.overall?.avgDays!=null)setText('kpiAvgDays',Number(timing.overall.avgDays).toFixed(2).replace(/\.00$/,''));
+      if(business==='WHPP'&&summary?.reportDate===reportDate)v792SetWhppMetrics(m,timing);
     });
 
     // V765: the business summary is already visible. Run 5,000-row
@@ -2921,7 +2925,134 @@ function bind(){
   byId('v626ClearAllData')?.addEventListener('click',clearAllBusinessData);
   qa('#v626DataTabs [data-data-tab]').forEach(btn=>btn.addEventListener('click',()=>switchDataTab(btn.dataset.dataTab)));
 }
+// V792: match the supplied home + WHPP dashboard references without cloning
+// fake chart numbers or replacing existing live-data IDs and event listeners.
+function v792ApplyReferenceLayout(){
+  if(page==='home'){
+    document.body.classList.add('v792-reference');
+    const home=byId('v625Home');
+    const overview=home?.querySelector('.v625-home-business-panel');
+    const live=home?.querySelector('.v626-live-grid');
+    const three=home?.querySelector('.v625-home-three');
+    const validation=home?.querySelector('.v625-home-validation');
+    const timing=home?.querySelector('.v625-signing-panel');
+    const logs=home?.querySelector('.v626-log-panel');
+    const process=home?.querySelector('.v626-processing-panel');
+    const open=home?.querySelector('.v626-open-pod-panel');
+    const status=home?.querySelector('.v625-home-status-panel');
+    const quick=home?.querySelector('.v625-home-quick-panel');
+    const trend=home?.querySelector('.v625-home-trend-panel');
+    if(!home||!overview||!live||!three||!validation||!timing||!logs
+      ||!process||!open||!status||!quick||!trend)return;
+    const top=document.createElement('div');top.className='v792-home-main-row';
+    overview.after(top);top.append(process,status,quick,logs);
+    const bottom=document.createElement('div');bottom.className='v792-home-bottom-row';
+    timing.before(bottom);bottom.append(timing,open);
+    const optional=document.createElement('details');optional.className='v792-optional-trend v625-panel';
+    const caption=document.createElement('summary');caption.textContent='近7天总票数趋势（已保存来源）';
+    optional.append(caption,trend);bottom.after(optional);
+    live.remove();three.remove();
+    // The seventh business card is the screenshot's last tile; grand total
+    // remains in the underlying verified summary, not a duplicated eighth tile.
+  }
+  if(business==='WHPP'){
+    document.body.classList.add('v792-reference');
+    const a=byId('v792WhppAnalysis'),b=byId('v792WhppTables');
+    if(a)a.hidden=false;if(b)b.hidden=false;
+    const panel=qa('#v625Business>section.v625-panel').find(node=>
+      node.querySelector('.v625-section-head h2')?.textContent?.trim()==='最新异常明细');
+    if(panel)panel.classList.add('v792-whpp-original-exceptions');
+  }
+}
+function v792SetWhppMetrics(m={},timing=null){
+  if(business!=='WHPP')return;
+  const showDays=v=>v===null||v===undefined?'—':Number(v).toFixed(1)+'天';
+  setText('v792WhppOverall',showDays(timing?.overall?.avgDays??m.avgDays??null));
+  setText('v792WhppPP',showDays(timing?.pp?.avgDays));
+  setText('v792WhppPV',showDays(timing?.pv?.avgDays));
+  // No guessed first/second/third attempt averages: those need real events.
+  for(const id of ['v792WhppFirst','v792WhppSecond','v792WhppThird'])setText(id,'—');
+  setText('v792WhppReturnCount',fmt(m.returned));
+  setText('v792WhppReturnRate',m.total>0?pct(m.returned/m.total*100):'—');
+  setText('v792WhppTimingSource',timing?.overall?.avgDays!=null
+    ?'依据真实POD日期与派送起点计算；一/二/三派暂无有效分类证据则显示—。'
+    :'签收时效缺少已核实的日期轨迹，当前不推算平均签收天数。');
+}
+function v792WhppStatusDonut(m={}){
+  if(business!=='WHPP')return;
+  const total=Math.max(0,Number(m.total||0));
+  const pod=Math.max(0,Number(m.pod||0));
+  const returned=Math.max(0,Number(m.returned||0));
+  const donut=byId('v625BusinessDonut'),legend=byId('v625BusinessLegend');
+  if(!donut||!legend)return;
+  if(!total||pod+returned>total){
+    donut.style.background='conic-gradient(#e5ebf2 0% 100%)';
+    legend.textContent=total?'POD与退回票数超过总票数；等待来源核验。':'暂无可核对的WHPP运单统计';
+    return;
+  }
+  const rest=total-pod-returned;
+  // Pending, delivery and abnormal can overlap in historical quick summaries.
+  // Do not invent a breakdown: keep remaining tickets visibly unverified.
+  const portions=[['已签收(POD)',pod,'#19bb81'],['已退回',returned,'#ef5261'],
+    ['其他状态待核验',rest,'#b8c7d8']];
+  let at=0;
+  const gradients=[];
+  for(const [,value,color] of portions){const next=at+value/total*100;
+    if(value>0)gradients.push(color+' '+at+'% '+next+'%');
+    at=next;
+  }
+  donut.style.background='conic-gradient('+gradients.join(',')+')';
+  legend.innerHTML=portions.map(([name,value,color])=>
+    '<div><i style="background:'+color+'"></i><span>'+esc(name)+' '+fmt(value)+
+    ' ('+pct(value/total*100)+')</span></div>').join('');
+}
+function v792RenderWhppDetails(rows=[],truncated=false){
+  if(business!=='WHPP')return;
+  const issues=rows.filter(row=>row.isActionable===true).slice(0,8);
+  const returned=rows.filter(row=>row.isReturned===true
+    ||String(row.currentState||'').toUpperCase()==='RETURN_COMPLETED').slice(0,8);
+  const fill=(id,items,getValues)=>{
+    const el=byId(id);if(!el)return;el.replaceChildren();
+    if(!items.length){el.innerHTML='<tr><td colspan="4">'+
+      (truncated?'当前仅显示已读取明细；完整来源请打开指标逐票查看':'当前已读取范围暂无该类运单')+
+      '</td></tr>';return}
+    for(const row of items){
+      const tr=document.createElement('tr');
+      for(const value of getValues(row)){
+        const td=document.createElement('td');td.textContent=String(value??'—');tr.append(td);
+      }
+      const td=document.createElement('td'),a=document.createElement('a');
+      a.href='/tracking?auth=v625&code='+encodeURIComponent(row.shipmentCode||'')+
+        '&businessType=WHPP';
+      a.textContent='查看';a.style.color='#1275eb';td.append(a);tr.append(td);el.append(tr);
+    }
+  };
+  fill('v792WhppAnomalyRows',issues,row=>[
+    row.shipmentCode,row.category||row.queryStatus||'待核验',row.currentState||'—']);
+  fill('v792WhppReturnedRows',returned,row=>[
+    row.shipmentCode,row.currentState||'RETURN_COMPLETED',
+    row.lastEventTime||row.lastCheckedAt||'—']);
+  const returnedAll=rows.filter(row=>row.isReturned===true
+    ||String(row.currentState||'').toUpperCase()==='RETURN_COMPLETED');
+  const validReasons=returnedAll.map(row=>String(row.returnReason||row.退回原因||'').trim()).filter(Boolean);
+  const root=byId('v792WhppReturnReasons');
+  if(!root)return;
+  if(!validReasons.length){root.textContent='退回原因尚无可信的逐票字段，暂不生成TOP5占比。';return}
+  const groups=new Map();
+  for(const reason of validReasons)groups.set(reason,(groups.get(reason)||0)+1);
+  const top=[...groups].sort((a,b)=>b[1]-a[1]).slice(0,5);
+  root.replaceChildren();
+  const label=document.createElement('div');label.textContent='已核验退回原因（仅'+
+    fmt(validReasons.length)+'票有原因证据'+(truncated?'，当前为截断预览':'')+'）';
+  label.style.marginBottom='8px';root.append(label);
+  for(const [name,count] of top){
+    const div=document.createElement('div');div.style.margin='5px 0';
+    div.textContent=name+'：'+fmt(count)+'票（有原因证据的 '+pct(count/validReasons.length*100)+'）';
+    root.append(div);
+  }
+}
 async function init(){
+  v792ApplyReferenceLayout();
   bind();void loadSession();
   if(page==='home'){
     await loadHome();
