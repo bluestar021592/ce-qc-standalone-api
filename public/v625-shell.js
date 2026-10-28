@@ -636,7 +636,7 @@ function scheduleHistoricalEvidenceRefresh(target='home'){
   if(v640EvidenceRefreshTimer)clearTimeout(v640EvidenceRefreshTimer);
   v640EvidenceRefreshTimer=setTimeout(()=>{
     v640EvidenceRefreshTimer=null;
-    if(target==='business'&&page==='business')void loadBusiness();
+    if(target==='business'&&Boolean(business))void loadBusiness();
     else if(page==='home')void loadHome({skipAux:true});
   },3000);
 }
@@ -1072,7 +1072,7 @@ async function refreshOpenPodNow(){
     if(!verified?.openSourceCoverage?.complete)
       throw new Error('轨迹刷新结束，但来源成员未能全部核对，不能宣布业务闭环。');
     await Promise.all([page==='home'?loadHome({skipAux:true}):Promise.resolve(),
-      page==='business'?loadBusiness({skipQualityRefresh:true}):Promise.resolve()]);
+      Boolean(business)?loadBusiness({skipQualityRefresh:true}):Promise.resolve()]);
     const retryCount=Number(job.failed||0);
     note('v626RefreshPodMessage',reportDate+' 复核完成：来源 '+fmt(v785OpenExpectedCount)+
       '票；派送续查 '+fmt(v785OpenTotal)+'票；'+(ceaf?'CEAF新核实POD '+fmt(ceaf.pod)+'票、退回 '+fmt(ceaf.returned)+'票；':'')+
@@ -1564,7 +1564,7 @@ async function refreshV748BusinessTrackQuality(reportDate=''){
         if(status==='FAILED')throw new Error(job.error||job.message||'精准轨迹补抓失败');
         if(!sameTarget){
           v748QualityRefreshKeys.delete(key);
-          if(page==='business'&&business===requestedBusiness)setTimeout(()=>void refreshV748BusinessTrackQuality(date),800);
+          if(Boolean(business)&&business===requestedBusiness)setTimeout(()=>void refreshV748BusinessTrackQuality(date),800);
           return;
         }
         setText('v748QualityRefreshMeta','轨迹补抓完成 · 成功 '+fmt(job.refreshed||0)+' 票 · 待重试 '+fmt(job.failed||0)+' 票');
@@ -1588,7 +1588,7 @@ async function v765LoadBusinessDetailLane({reportDate,snapshotId,m,options,gener
   // Do not make a large business-details query compete with the first KPI
   // paint. A short deferred task allows layout and user navigation first.
   await new Promise(resolve=>setTimeout(resolve,350));
-  const stillSelected=()=>page==='business'&&business===targetBusiness
+  const stillSelected=()=>Boolean(business)&&business===targetBusiness
     &&generation===v765BoardLoadGeneration
     &&String(v628BusinessReportDate||'')===reportDate;
   if(!stillSelected())return;
@@ -2772,7 +2772,7 @@ async function activateSavedShopCodes(){
     if(btn)btn.disabled=false;
   }
 }
-async function importShop(){const file=byId('v625ShopFile').files?.[0];if(!file)return;const fd=new FormData();fd.append('file',file);try{const r=await request('/api/import-shop-codes',{method:'POST',body:fd},60000);v748QualityRefreshKeys.clear();setText('v625ShopMeta','保存完成 · '+fmt(r.imported?.imported||0)+'码，需激活完整名单后生效');void loadCompleteShopStatus();if(page==='business'&&v628BusinessReportDate)void refreshV748BusinessTrackQuality(v628BusinessReportDate)}catch(e){setText('v625ShopMeta','更新失败：'+e.message)}}
+async function importShop(){const file=byId('v625ShopFile').files?.[0];if(!file)return;const fd=new FormData();fd.append('file',file);try{const r=await request('/api/import-shop-codes',{method:'POST',body:fd},60000);v748QualityRefreshKeys.clear();setText('v625ShopMeta','保存完成 · '+fmt(r.imported?.imported||0)+'码，需激活完整名单后生效');void loadCompleteShopStatus();if(Boolean(business)&&v628BusinessReportDate)void refreshV748BusinessTrackQuality(v628BusinessReportDate)}catch(e){setText('v625ShopMeta','更新失败：'+e.message)}}
 
 async function loadLogs(){
   try{
@@ -3064,12 +3064,12 @@ async function v792LoadWhppTrend(date=''){
   const root=byId('v625BusinessTrend');if(root)root.textContent='正在核对近7日WHPP来源票数和最终记录…';
   try{
     const response=await json('/api/v792/whpp/trend?toDate='+encodeURIComponent(date),12000);
-    if(page!=='business'||business!=='WHPP'||v628BusinessReportDate!==date)return;
+    if(!business||business!=='WHPP'||v628BusinessReportDate!==date)return;
     if(!response?.ok||response.toDate!==date||response.businessType!=='WHPP')
       throw new Error('趋势来源与当前业务日期不一致');
     v792RenderWhppTrend(response.points||[]);
   }catch(error){
-    if(page==='business'&&business==='WHPP'&&v628BusinessReportDate===date&&root)
+    if(Boolean(business)&&business==='WHPP'&&v628BusinessReportDate===date&&root)
       root.innerHTML='<div class="v792-data-unknown">近7日趋势尚未取得可信来源：'+esc(error.message)+'</div>';
   }
 }
