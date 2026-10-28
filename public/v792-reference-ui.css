@@ -242,3 +242,35 @@ body.v792-reference[data-business="WHPP"] .v625-kpi-row .kpi.gray{border-top:1px
  body.v792-reference[data-page="home"] .v625-sidebar,
  body.v792-reference[data-business="WHPP"] .v625-sidebar{position:relative;width:100%;height:auto}
 }
+
+/* V794 second browser review: match reference panel heights at supplied sizes.
+   Long operational text remains scrollable and is not removed. */
+@media(min-width:1181px){
+ body.v792-reference[data-page="home"] .v792-home-main-row>.v625-panel{
+   height:216px;min-height:216px;max-height:216px;overflow:auto
+ }
+ body.v792-reference[data-page="home"] .v625-home-status-panel .v625-status-banner{
+   min-height:44px;padding:5px;gap:4px
+ }
+ body.v792-reference[data-page="home"] .v625-home-status-panel .v625-status-banner p{
+   font-size:9px;line-height:1.35;max-height:29px;overflow:auto;margin-top:2px
+ }
+ body.v792-reference[data-page="home"] .v625-home-status-panel .v625-status-banner b{font-size:10px}
+ body.v792-reference[data-page="home"] .v625-home-status-panel .v625-status-meta{margin-top:4px}
+ body.v792-reference[data-page="home"] .v625-home-status-panel .v625-status-meta>div{padding:2px 0}
+ body.v792-reference[data-page="home"] .v625-home-validation>.v625-panel{min-height:170px}
+ body.v792-reference[data-page="home"] .v792-home-bottom-row>.v625-panel{
+   min-height:233px;max-height:255px;overflow:auto
+ }
+ body.v792-reference[data-page="home"] .v625-signing-panel .v625-mini-trend{min-height:52px}
+ body.v792-reference[data-page="home"] .v625-signing-panel .v625-timing-card{padding:7px}
+ body.v792-reference[data-business="WHPP"] .v625-pagebar{min-height:79px}
+ body.v792-reference[data-business="WHPP"] .v625-kpi-row{margin-bottom:11px}
+ body.v792-reference[data-business="WHPP"] .business-charts>.v625-panel{
+   height:215px;min-height:215px;max-height:215px;overflow:hidden
+ }
+ body.v792-reference[data-business="WHPP"] #v625BusinessTrend{height:156px!important}
+ body.v792-reference[data-business="WHPP"] .v625-donut-wrap{height:156px}
+ body.v792-reference[data-business="WHPP"] .v625-donut{width:130px;height:130px}
+ body.v792-reference[data-business="WHPP"] .v625-donut:after{inset:29px}
+}
