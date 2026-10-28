@@ -274,3 +274,17 @@ body.v792-reference[data-business="WHPP"] .v625-kpi-row .kpi.gray{border-top:1px
  body.v792-reference[data-business="WHPP"] .v625-donut{width:130px;height:130px}
  body.v792-reference[data-business="WHPP"] .v625-donut:after{inset:29px}
 }
+
+/* V794 reference review: data management visible after signing, not after trend. */
+@media(min-width:1181px){
+ body.v792-reference[data-page="home"] .v792-home-bottom-row>.v625-panel{
+   height:226px;min-height:226px;max-height:226px;overflow:auto
+ }
+ body.v792-reference[data-page="home"] .v792-home-management{padding:8px 10px}
+ body.v792-reference[data-page="home"] .v792-management-grid{gap:8px}
+ body.v792-reference[data-page="home"] .v792-management-tile{padding:8px 10px}
+ body.v792-reference[data-page="home"] .v792-management-tile p{margin:4px 0 7px;line-height:1.35}
+ body.v792-reference[data-business="WHPP"] .v792-whpp-table-row>.v625-panel{
+   min-height:165px
+ }
+}
