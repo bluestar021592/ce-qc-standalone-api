@@ -70,6 +70,17 @@ try{
   assert.equal(blocked.ledgerSync.processed,0,
     'already-closed POD cannot be reopened by a stale historical TMS request');
   assert.equal(carry.get(ids[0]).closeReason,'POD');
+  // Corrupted legacy OPEN flags must not allow a new 80 response to downgrade
+  // a current POD already saved for this waybill/business.
+  db.prepare("UPDATE carryover_open_items SET status='OPEN',closeReason='' WHERE shipmentCode=?").run(ids[0]);
+  const locked=updateCarryoverResults({snapshotId:'SNAP-JUL12',reportDate:'2026-07-12',
+    rows:staleReturn.updates,scanResults:staleReturn.scanResults,
+    guardOpenAtOrBefore:'2026-07-12'});
+  assert.equal(locked.ledgerSync.processed,0);
+  assert.equal(db.prepare('SELECT state FROM shipment_current_state WHERE shipmentCode=?').get(ids[0]).state,'POD',
+    'current signed terminal must remain immutable against stale return-in-progress evidence');
+  assert.equal(ledger.get(ids[0]).terminalReason,'POD');
+
   // A second read of completed records remains stable and does not claim an unverified POD.
   console.log('[V791] isolated SQLite: CEAF TMS POD/return-in-progress/returned persistence PASS');
 }finally{
