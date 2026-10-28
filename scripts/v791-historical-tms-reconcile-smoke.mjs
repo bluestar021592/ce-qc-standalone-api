@@ -49,6 +49,12 @@ assert.match(server,/guardOpenAtOrBefore:reportDate/,
   'TMS writer must atomically reject concurrent newer dates');
 assert.match(server,/V791_SELECTED_DATE_CHANGED_DURING_TMS/,
   'new valid same-day snapshot during TMS fetch must block application');
+assert.match(server,/matched:apply\?applied\.processed:plan\.matched/,
+  'actual CEAF writes, not proposed TMS matches, must drive displayed counts');
+assert.match(server,/skippedAfterCheck/,
+  'concurrent ledger changes must be visible as skipped');
+assert.match(ui,/skipped\+=Number\(result\.skippedAfterCheck\|\|0\)/,
+  'CEAF button must disclose skipped concurrent updates');
 assert.match(server,/guardOpenAtOrBefore:reportDate,expectedCarryVersions/,
   'live recovery must pass member version tokens into atomic writer');
 
