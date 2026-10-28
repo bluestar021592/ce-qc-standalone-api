@@ -2099,10 +2099,10 @@ async function v761DiagnoseFamilyRecovery(){
   if(!view)return;
   const shown=String(byId('v626ImportProgressDate')?.textContent||'').slice(0,10);
   const date=String(v626LatestImport?.reportDate||
-    (/^\\d{4}-\\d{2}-\\d{2}$/.test(shown)?shown:'')||
+    (/^\d{4}-\d{2}-\d{2}$/.test(shown)?shown:'')||
     selectedReportDate()||'').slice(0,10);
   view.hidden=false;
-  if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(date)){
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(date)){
     view.textContent='未能确认日报日期。该页面读取超时不代表未导入，请先打开对应日期的历史记录再只读诊断。';
     return;
   }
