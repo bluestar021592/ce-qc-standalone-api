@@ -112,32 +112,73 @@ export function getUnifiedProcessingQueue(batchId) {
   return { batchId, snapshotId: batch.snapshotId, reportDate: batch.reportDate, rows, summary };
 }
 
-export function updateCarryoverResults({ snapshotId, reportDate, rows = [] }) {
+// Only TMS shipment-status results produced by this run can reconcile a stale
+// OPEN ledger. Order scan status/eventCode are different namespaces.
+export function matchedTmsTerminalEvidence(scan={},bill='',businessType=''){
+  const code=String(scan.shipmentStatus??'').trim();
+  const expected={'60':'SHIPMENT_STATUS_60_POD','80':'SHIPMENT_STATUS_80_RETURN_IN_PROGRESS',
+    '81':'SHIPMENT_STATUS_81_RETURN_COMPLETED'}[code];
+  const scanBill=String(scan.shipmentCode||scan.运单号||'').trim().toUpperCase();
+  if(!expected||scan.shipmentStatusSource!==expected||scanBill!==bill||!businessType
+    ||!carryBusinessMatches(scan.businessType,businessType))return null;
+  // The order-scan and TMS shipment-status endpoints can succeed independently.
+  // A failed order scan must not invalidate the proven shipment-status marker.
+  return {source:'TMS_SHIPMENT_STATUS',verified:true,shipmentStatus:code,
+    shipmentCode:bill,businessType};
+}
+export function carryBusinessMatches(source='',actual=''){
+  const a=String(actual||'').toUpperCase(),s=String(source||'').toUpperCase();
+  return s===a||(s==='CCSL'&&['CE','CEAF','TBKH','ALI1688'].includes(a))
+    ||(s==='SHOPEE'&&['SHOPEECN','SHOPEEVN'].includes(a));
+}
+
+export function updateCarryoverResults({ snapshotId, reportDate, rows = [], scanResults = [] }) {
   const db = getDb();
-  const update = db.prepare(`UPDATE carryover_open_items SET status=?,apiStatus=?,closeReason=?,lastReportDate=?,lastSnapshotId=?,stateJson=?,updatedAt=? WHERE shipmentCode=?`);
-  const current = db.prepare(`UPDATE shipment_current_state SET state=?,apiStatus=?,reportDate=?,snapshotId=?,lastEventTime=?,stateJson=?,updatedAt=? WHERE shipmentCode=?`);
+  const scans=new Map(scanResults.map(row=>[String(row.shipmentCode||row.运单号||'').trim().toUpperCase(),row]));
+  const currentBusiness=db.prepare('SELECT businessType FROM carryover_open_items WHERE shipmentCode=?');
+  const update = db.prepare(`UPDATE carryover_open_items SET status=?,apiStatus=?,closeReason=?,lastReportDate=?,lastSnapshotId=?,stateJson=?,updatedAt=? WHERE shipmentCode=? AND businessType=?`);
+  const current = db.prepare(`UPDATE shipment_current_state SET state=?,apiStatus=?,reportDate=?,snapshotId=?,lastEventTime=?,stateJson=?,updatedAt=? WHERE shipmentCode=? AND businessType=?`);
   const now = nowIso();
   let ledgerSync = null;
+  const acceptedRows=[];
   db.exec('BEGIN IMMEDIATE');
   try {
     for (const row of rows) {
       const bill = String(row.shipmentCode || row.运单号 || '').trim().toUpperCase();
       if (!bill) continue;
-      const pod = row.是否POD === '是' || String(row.orderStatus || '') === '85';
-      const returned = row.退回状态 === '已退回' || /退回|RETURN/i.test(String(row.primaryCategory || row.主分类 || ''));
-      const specialState = String(row.specialState || row.primaryCategory || row.主分类 || '').trim().toUpperCase();
-      const specialClosed = ['SELF_PICKUP', 'CECN_RETENTION', 'CEZT_RETENTION', 'CCSL580_RETENTION'].includes(specialState) || row.主分类 === '仓库自提';
-      const normal = row.primaryCategory === '正常分流节点' || row.matchedRule === 'NORMAL_FINAL_HUB';
-      const apiFailed = /失败|retry/i.test(String(row.API状态 || row.查询状态 || ''));
-      const closed = pod || returned || specialClosed || normal;
-      const status = closed ? 'CLOSED' : 'OPEN';
-      const reason = pod ? 'POD' : returned ? 'RETURNED' : specialClosed ? (specialState || 'SELF_PICKUP') : normal ? 'NORMAL_FINAL' : '';
-      const apiStatus = apiFailed ? 'API_PENDING_RETRY' : 'SUCCESS';
-      const json = JSON.stringify(row);
-      update.run(status, apiStatus, reason, reportDate, snapshotId, json, now, bill);
-      current.run(closed ? reason : String(row.primaryCategory || row.主分类 || 'OPEN'), apiStatus, reportDate, snapshotId, row.latestEventTime || row.最后节点时间 || '', json, now, bill);
+      const businessType=String(currentBusiness.get(bill)?.businessType||'').trim().toUpperCase();
+      if(!businessType||!carryBusinessMatches(row.businessType,businessType))continue;
+      const proof=matchedTmsTerminalEvidence(scans.get(bill)||{},bill,businessType);
+      const truth=proof?.shipmentStatus||'';
+      // Preserve existing explicit scan POD evidence when TMS has no newer
+      // recognized result. A real 80 result must never be a completed return.
+      const pod=truth==='60'||(!truth&&(row.是否POD==='是'||String(row.orderStatus||'')==='85'));
+      const returned=truth==='81'||(!truth&&row.退回状态==='已退回');
+      const returnInProgress=truth==='80'||(!pod&&!returned
+        &&[row.currentState,row.退回状态,row.scanNormalizedState].some(value=>
+          /^(?:RETURN_IN_PROGRESS|退回处理中|正在退回)$/.test(String(value||'').trim().toUpperCase())));
+      const specialState=String(row.specialState||row.primaryCategory||row.主分类||'').trim().toUpperCase();
+      const specialClosed=['SELF_PICKUP','CECN_RETENTION','CEZT_RETENTION','CCSL580_RETENTION',
+        'CCSLCN_DIVERSION','CCSLZT_DIVERSION','CCSL580_DIVERSION'].includes(specialState)
+        ||row.主分类==='仓库自提';
+      const normal=row.primaryCategory==='正常分流节点'||row.matchedRule==='NORMAL_FINAL_HUB';
+      const apiFailed=/失败|retry/i.test(String(row.API状态||row.查询状态||''));
+      const closed=!returnInProgress&&(pod||returned||specialClosed||normal);
+      const status=closed?'CLOSED':'OPEN';
+      const reason=pod?'POD':returned?'RETURNED':closed&&specialClosed?(specialState||'SELF_PICKUP'):closed&&normal?'NORMAL_FINAL':'';
+      // A successful independent TMS terminal proof supersedes stale scan-query failure.
+      const apiStatus=proof?'SUCCESS':(apiFailed?'API_PENDING_RETRY':'SUCCESS');
+      const currentState=returnInProgress?'RETURN_IN_PROGRESS'
+        :closed?reason:String(row.primaryCategory||row.主分类||'OPEN');
+      const enriched={...row,businessType,shipmentCode:bill,currentState,
+        ...(proof?{shipmentStatus:proof.shipmentStatus,terminalEvidence:proof}:{}),
+        ...(returnInProgress?{退回状态:'退回处理中',是否POD:'否'}:{})};
+      const json=JSON.stringify(enriched);
+      update.run(status,apiStatus,reason,reportDate,snapshotId,json,now,bill,businessType);
+      current.run(currentState,apiStatus,reportDate,snapshotId,row.latestEventTime||row.最后节点时间||'',json,now,bill,businessType);
+      acceptedRows.push(enriched);
     }
-    ledgerSync = syncCarryRowsToV246Ledger(rows, {
+    ledgerSync = syncCarryRowsToV246Ledger(acceptedRows, {
       db,
       reason: `UPDATE_CARRYOVER_RESULTS:${snapshotId || reportDate || 'UNKNOWN'}`,
       manageTransaction: false,

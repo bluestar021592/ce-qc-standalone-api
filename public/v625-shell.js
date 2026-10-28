@@ -999,30 +999,98 @@ async function pollTrackingJob(jobId){
   }
   throw new Error('未完成POD更新超时');
 }
+// V791: one operator click checks CEAF historical terminal statuses in
+// bounded batches. All writes are made by the server only after exact snapshot
+// and authoritative TMS membership checks. No automatic import or purge.
+let v791CeafRefreshBusy=false;
+async function v791RefreshHistoricalCeaf(reportDate,snapshotId){
+  let after='',checked=0,pod=0,returned=0,returning=0,conflicts=0,unverified=0;
+  let complete=false;
+  for(let batchNo=0;batchNo<120;batchNo++){
+    const result=await post('/api/v791/historical-ceaf-tms-reconcile',
+      {reportDate,snapshotId,after,limit:50,apply:true},60000);
+    if(!result?.ok||result.reportDate!==reportDate||result.snapshotId!==snapshotId)
+      throw new Error('CEAF历史TMS核验返回了其他日期或快照，已停止同步。');
+    checked+=Number(result.checked||0);
+    pod+=Number(result.closedPod||0);
+    returned+=Number(result.returned||0);
+    returning+=Number(result.returnInProgress||0);
+    conflicts+=Number(result.conflicts||0);
+    unverified+=Number(result.unverified||0);
+    complete=result.complete===true;
+    if(result.checked){
+      note('v626RefreshPodMessage','CEAF历史核验 '+fmt(checked)+'票：TMS已POD '+fmt(pod)+
+        '票，已退回 '+fmt(returned)+'票，退回中 '+fmt(returning)+'票，证据待核实 '+fmt(unverified+conflicts)+'票。');
+    }
+    if(complete)break;
+    const next=String(result.nextCursor||'').toUpperCase();
+    if(!next||next<=after)throw new Error('CEAF分页游标异常，已安全停止。');
+    after=next;
+  }
+  if(!complete)throw new Error('CEAF历史核验达到单次6000票安全上限；已保存已验证结果，其余待继续核验。');
+  return {checked,pod,returned,returning,conflicts,unverified};
+}
 async function refreshOpenPodNow(){
-  if(runBusy)return;
-  const latest=v626LatestImport||await latestImportContext();if(!latest?.reportDate){note('v626RefreshPodMessage','请先上传综合日报。','error');return}
+  if(runBusy||v791CeafRefreshBusy)return;
+  const latest=v626LatestImport||await latestImportContext();
+  if(!latest?.reportDate){note('v626RefreshPodMessage','请先上传综合日报。','error');return}
   const reportDate=selectedReportDate()||latest.reportDate;
-  note('v626RefreshPodMessage','正在补查 '+reportDate+' 当日报表未完成POD与签收轨迹…');
+  v791CeafRefreshBusy=true;
+  for(const id of ['v626RefreshOpenPod','v626ImportRefreshOpen']){
+    const btn=byId(id);if(btn)btn.disabled=true;
+  }
+  let ceaf=null,ceafIssue='';
   try{
     if(!v785OpenSourceVerified)await loadOpenPod();
-    if(!v785OpenSourceVerified)throw new Error('未完成来源尚未核验，不能启动批量轨迹处理。');
+    const allSourceVerified=v785OpenSourceVerified;
+    // CEAF typed TMS status can be independently validated against its exact
+    // imported snapshot even when WHPP historical finals are still missing.
+    if(String(latest.snapshotId||'')){
+      try{
+        ceaf=await v791RefreshHistoricalCeaf(reportDate,String(latest.snapshotId));
+        appendLiveLog('CEAF历史TMS复核：'+fmt(ceaf.checked)+'票，POD '+fmt(ceaf.pod)+
+          '票，已退回 '+fmt(ceaf.returned)+'票，退回中 '+fmt(ceaf.returning)+'票。');
+      }catch(error){
+        if(/日期或快照|SOURCE_SNAPSHOT_MISMATCH/.test(String(error.message||'')))throw error;
+        ceafIssue=String(error.message||error);
+        appendLiveLog('CEAF真实TMS补查未完成：'+ceafIssue);
+      }
+    }
+    if(!allSourceVerified){
+      note('v626RefreshPodMessage','CEAF独立TMS核验'+(ceaf?'已处理 '+fmt(ceaf.checked)+'票，POD '+fmt(ceaf.pod)+'票；':'尚未完成；')+
+        '七业务日报来源尚未完整核验，已暂停其他业务批量轨迹刷新。'+(ceafIssue?'CEAF异常：'+ceafIssue:''),
+        'warning');
+      return;
+    }
+    note('v626RefreshPodMessage',ceafIssue
+      ?'CEAF补查尚有未核验项；继续执行其他业务轨迹补查。'
+      :'CEAF真实终态已核对，继续执行各业务轨迹补查…');
     const fromDate=v785OpenEarliestDate&&v785OpenEarliestDate<reportDate?v785OpenEarliestDate:reportDate;
     const r=await post('/api/v246/tracking/reconcile',{businessType:'ALL',fromDate,toDate:reportDate},30000);
     const job=await pollTrackingJob(r.job?.jobId||'');
-    // V786: a completed HTTP task is NOT a completed business publication.
-    // Re-read the dated source and current OPEN queue before announcing success.
     const verified=await loadOpenPod();
     if(!verified?.openSourceCoverage?.complete)
-      throw new Error('接口刷新结束，但未能重新核对全部原始成员和未完结队列，不能宣称业务闭环');
+      throw new Error('轨迹刷新结束，但来源成员未能全部核对，不能宣布业务闭环。');
     await Promise.all([page==='home'?loadHome({skipAux:true}):Promise.resolve(),
       page==='business'?loadBusiness({skipQualityRefresh:true}):Promise.resolve()]);
     const retryCount=Number(job.failed||0);
-    note('v626RefreshPodMessage',reportDate+' 定向补查完成：已复核来源 '+fmt(v785OpenExpectedCount)+
-      '票；当前仍未完结 '+fmt(v785OpenTotal)+'票；成功刷新 '+fmt(job.refreshed||0)+
-      '票，待重试 '+fmt(retryCount)+'票。'+(retryCount?'部分运单仍需继续补查。':'最新状态已保存并重新核对。'),
-      retryCount?'warning':'success');
-  }catch(error){note('v626RefreshPodMessage','更新失败：'+error.message,'error')}
+    note('v626RefreshPodMessage',reportDate+' 复核完成：来源 '+fmt(v785OpenExpectedCount)+
+      '票；派送续查 '+fmt(v785OpenTotal)+'票；'+(ceaf?'CEAF新核实POD '+fmt(ceaf.pod)+'票、退回 '+fmt(ceaf.returned)+'票；':'')+
+      '轨迹刷新 '+fmt(job.refreshed||0)+'票，待重试 '+fmt(retryCount)+'票。'+
+      (ceafIssue?'CEAF补查仍待核验：'+ceafIssue:'') ,
+      retryCount||ceafIssue?'warning':'success');
+  }catch(error){
+    // If the older V246 job fails after a successful CEAF reconciliation,
+    // report the partial result truthfully and re-read source evidence.
+    try{await loadOpenPod()}catch{}
+    note('v626RefreshPodMessage',(ceaf?'CEAF已按真实TMS证据保存；其他业务':'')+
+      '补查未完全通过：'+error.message,'error');
+  }finally{
+    v791CeafRefreshBusy=false;
+    for(const id of ['v626RefreshOpenPod','v626ImportRefreshOpen']){
+      const btn=byId(id);if(btn)btn.disabled=false;
+    }
+  }
 }
 
 async function scanWhppPending(){
