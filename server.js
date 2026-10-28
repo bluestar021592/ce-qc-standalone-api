@@ -2018,7 +2018,7 @@ app.post('/api/v791/historical-ceaf-tms-reconcile', async (req,res) => {
   const limit=Math.min(50,Math.max(1,Number(req.body?.limit||50)|0));
   const after=String(req.body?.after||'').trim().toUpperCase();
   const candidates=db.prepare(`SELECT o.shipmentCode,o.businessType,o.stateJson,o.closeReason,o.sourceReportDate,
-      q.terminalReason
+      o.lastSnapshotId,o.updatedAt,q.terminalReason
     FROM carryover_open_items o
     LEFT JOIN qc_tracking_ledger q ON UPPER(TRIM(q.shipmentCode))=UPPER(TRIM(o.shipmentCode))
       AND UPPER(TRIM(q.businessType))=UPPER(TRIM(o.businessType))
@@ -2039,13 +2039,27 @@ app.post('/api/v791/historical-ceaf-tms-reconcile', async (req,res) => {
       error:String(error?.message||error),changed:0});
   }
   const plan=planHistoricalTmsReconcile(candidates,tmsRows,new Date().toISOString());
+  if(apply){
+    // A same-day re-import can happen while the remote TMS request is pending.
+    const newest=db.prepare(`SELECT snapshotId FROM unified_import_batches
+      WHERE reportDate=? AND status='VALID' ORDER BY createdAt DESC,rowid DESC LIMIT 1`).get(reportDate);
+    if(String(newest?.snapshotId||'')!==snapshotId)
+      return res.status(409).json({ok:false,code:'V791_SELECTED_DATE_CHANGED_DURING_TMS',
+        error:'查询期间所选日期出现新快照，已安全放弃本次历史回写。',changed:0});
+  }
   let persistence=null;
   if(apply&&plan.updates.length){
     // Exact-members only: the writer and canonical V246 ledger synchronize
     // the same validated CEAF bills. Unknown/contradictory TMS rows remain open.
+    const expectedCarryVersions=Object.fromEntries(candidates.map(row=>[
+      String(row.shipmentCode||'').trim().toUpperCase(),{
+        lastSnapshotId:String(row.lastSnapshotId||''),
+        updatedAt:String(row.updatedAt||'')
+      }
+    ]));
     persistence=updateCarryoverResults({snapshotId,reportDate,
       rows:plan.updates,scanResults:plan.scanResults,
-      guardOpenAtOrBefore:reportDate});
+      guardOpenAtOrBefore:reportDate,expectedCarryVersions});
     const dirty=new Set([reportDate,...(persistence.ledgerSync?.affectedDates||[])]);
     for(const day of dirty)try{markDashboardCacheDirty(day,'V791_CEAF_TMS_HISTORY_RECONCILED')}catch{}
   }
