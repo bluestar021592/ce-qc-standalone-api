@@ -2960,6 +2960,17 @@ function v792ApplyReferenceLayout(){
     document.body.classList.add('v792-reference');
     const a=byId('v792WhppAnalysis'),b=byId('v792WhppTables');
     if(a)a.hidden=false;if(b)b.hidden=false;
+    // Keep all source-integrity and trajectory quality controls available,
+    // but don't let operational audit strips displace the screenshot's charts.
+    const board=byId('v625Business'),quality=board?.querySelector('.v748-quality-signals');
+    const accounting=board?.querySelector('.v631-accounting-bar');
+    const integrity=board?.querySelector('.v637-integrity-bar');
+    if(board&&a&&b&&quality&&accounting&&integrity){
+      const technical=document.createElement('details');technical.className='v792-whpp-technical v625-panel';
+      const heading=document.createElement('summary');heading.textContent='来源完整性及轨迹质量核查';
+      technical.append(heading,quality,accounting,integrity);
+      b.after(technical);
+    }
     const range=byId('v625BusinessTrendRange');
     if(range)range.innerHTML='<option value="7">近7天</option>';
     const trendHeader=byId('v625BusinessTrend')?.closest('.v625-panel')?.querySelector('.v625-section-head h2');
