@@ -1841,7 +1841,7 @@ async function loadImport(){
   // V795: the latest summary and import history are independent READ-ONLY
   // evidence sources. A timeout in one must not erase or hide the other.
   const [latestRead,historyRead]=await Promise.allSettled([
-    json('/api/import/unified-latest',7000),
+    json('/api/import/unified-latest?compact=1',9000),
     json('/api/unified-history?limit=15',7000)
   ]);
   const latestOk=latestRead.status==='fulfilled'&&latestRead.value?.ok===true;
