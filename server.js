@@ -1137,7 +1137,8 @@ async function handleResumeRequest(req, res) {
 app.post('/api/import-excel', upload.single('file'), handleDailyReportImport);
 app.post('/api/import/daily-report', upload.single('file'), handleDailyReportImport);
 app.post('/api/import/unified-daily-report', upload.single('file'), handleUnifiedDailyImport);
-app.get('/api/import/unified-latest', (req, res) => res.json({ ok: true, import: getLatestUnifiedImport() }));
+app.get('/api/import/unified-latest', (req, res) => res.json({ ok: true,
+  import: getLatestUnifiedImport({ includeCarryover: req.query.compact !== '1' }) }));
 app.post('/api/shopee/import-excel', upload.single('file'), handleShopeeDailyImport);
 // An explicit ADMIN activation, never automatic on startup or import.
 // The existing 72 rows are snapshotted; older shop rows and track evidence stay
