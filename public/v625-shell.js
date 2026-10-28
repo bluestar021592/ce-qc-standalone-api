@@ -1004,7 +1004,7 @@ async function pollTrackingJob(jobId){
 // and authoritative TMS membership checks. No automatic import or purge.
 let v791CeafRefreshBusy=false;
 async function v791RefreshHistoricalCeaf(reportDate,snapshotId){
-  let after='',checked=0,pod=0,returned=0,returning=0,conflicts=0,unverified=0;
+  let after='',checked=0,pod=0,returned=0,returning=0,conflicts=0,unverified=0,skipped=0;
   let complete=false;
   for(let batchNo=0;batchNo<120;batchNo++){
     const result=await post('/api/v791/historical-ceaf-tms-reconcile',
@@ -1017,10 +1017,11 @@ async function v791RefreshHistoricalCeaf(reportDate,snapshotId){
     returning+=Number(result.returnInProgress||0);
     conflicts+=Number(result.conflicts||0);
     unverified+=Number(result.unverified||0);
+    skipped+=Number(result.skippedAfterCheck||0);
     complete=result.complete===true;
     if(result.checked){
       note('v626RefreshPodMessage','CEAF历史核验 '+fmt(checked)+'票：TMS已POD '+fmt(pod)+
-        '票，已退回 '+fmt(returned)+'票，退回中 '+fmt(returning)+'票，证据待核实 '+fmt(unverified+conflicts)+'票。');
+        '票，已退回 '+fmt(returned)+'票，退回中 '+fmt(returning)+'票，证据待核实 '+fmt(unverified+conflicts)+'票，版本变化未写入 '+fmt(skipped)+'票。');
     }
     if(complete)break;
     const next=String(result.nextCursor||'').toUpperCase();
@@ -1028,7 +1029,7 @@ async function v791RefreshHistoricalCeaf(reportDate,snapshotId){
     after=next;
   }
   if(!complete)throw new Error('CEAF历史核验达到单次6000票安全上限；已保存已验证结果，其余待继续核验。');
-  return {checked,pod,returned,returning,conflicts,unverified};
+  return {checked,pod,returned,returning,conflicts,unverified,skipped};
 }
 async function refreshOpenPodNow(){
   if(runBusy||v791CeafRefreshBusy)return;
