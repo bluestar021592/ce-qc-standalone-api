@@ -39,6 +39,33 @@ const conflict=planHistoricalTmsReconcile([
   {...candidate('X'),closeReason:'POD'}],[tms('X','81')]);
 assert.equal(conflict.matched,0);
 assert.equal(conflict.conflicts.length,1);
+// A space-separated local timestamp must not be ordered lexicographically
+// against a T-separated local timestamp. The earlier event cannot override
+// a newer verified terminal status, regardless of text formatting.
+const mixedLocal=planHistoricalTmsReconcile([candidate('LOCALORDER')],[
+  tms('LOCALORDER','60','2026-07-11 11:00:03'),
+  tms('LOCALORDER','81','2026-07-11T10:00:03')
+]);
+assert.equal(mixedLocal.closedPod,1);
+assert.equal(mixedLocal.returned,0);
+const zoned=planHistoricalTmsReconcile([candidate('ZONEDORDER')],[
+  tms('ZONEDORDER','60','2026-07-11T08:00:00Z'),
+  tms('ZONEDORDER','81','2026-07-11T14:00:00+07:00')
+]);
+assert.equal(zoned.closedPod,1,'UTC offset must be normalized before ordering');
+const ambiguousZone=planHistoricalTmsReconcile([candidate('MIXEDZONE')],[
+  tms('MIXEDZONE','60','2026-07-11 11:00:03'),
+  tms('MIXEDZONE','81','2026-07-11T12:00:03Z')
+]);
+assert.equal(ambiguousZone.matched,0,'local and zoned terminal times cannot be safely compared');
+assert.equal(ambiguousZone.conflicts.length,1);
+const invalidTime=planHistoricalTmsReconcile([candidate('BADTIME')],[
+  tms('BADTIME','60','2026-07-31 11:00:03'),
+  tms('BADTIME','81','2026-07-32T12:00:03')
+]);
+assert.equal(invalidTime.matched,0,'invalid date cannot justify terminal overwrite');
+assert.equal(invalidTime.conflicts.length,1);
+
 const server=fs.readFileSync(new URL('../server.js',import.meta.url),'utf8');
 const ui=fs.readFileSync(new URL('../public/v625-shell.js',import.meta.url),'utf8');
 assert.match(server,/\/api\/v791\/historical-ceaf-tms-reconcile/);
