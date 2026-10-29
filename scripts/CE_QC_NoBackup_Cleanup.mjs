@@ -1,14 +1,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { DatabaseSync } from 'node:sqlite';
-import { getRuntimeConfig, nowIso } from '../src/db.js';
+import { getRuntimeConfig } from '../src/db.js';
 import { compactSqliteStorage, STORAGE_COMPACTION_PATCH } from '../src/storageCompaction.js';
 
 const PATCH_ID='2026-09-26-v588-no-backup-storage-cleanup-v1';
 const DAY_MS=24*60*60*1000;
 const EVIDENCE_RETENTION_DAYS=366;
-const EVIDENCE_RETENTION_MS=EVIDENCE_RETENTION_DAYS*DAY_MS;
 const LOG_RETENTION_MS=45*DAY_MS;
 const TEMP_STALE_MS=0;
 
@@ -108,24 +106,6 @@ function evidenceArchiveCoverage(root){
     has20260701:dates.includes('2026-07-01')
   };
 }
-function tableExists(db,name){
-  return Boolean(db.prepare("SELECT 1 ok FROM sqlite_master WHERE type='table' AND name=? LIMIT 1").get(name)?.ok);
-}
-function retireBackupRecords(dbFile){
-  if(!fs.existsSync(dbFile))return {updated:0};
-  const db=new DatabaseSync(dbFile);
-  try{
-    db.exec('PRAGMA busy_timeout=120000');
-    if(!tableExists(db,'backup_records'))return {updated:0};
-    const info=db.prepare("UPDATE backup_records SET status='DELETED',deletedAt=COALESCE(deletedAt,?),deletedBy=COALESCE(NULLIF(deletedBy,''),'NO_BACKUP_POLICY') WHERE COALESCE(status,'ACTIVE')<>'DELETED'").run(nowIso());
-    return {updated:Number(info?.changes||0)};
-  }catch(error){
-    return {updated:0,error:String(error?.message||error)};
-  }finally{
-    try{db.close();}catch{}
-  }
-}
-
 const cfg=getRuntimeConfig();
 const launcherRoot=process.env.LOCALAPPDATA
   ? path.join(process.env.LOCALAPPDATA,'CE_QC_LAUNCHER')
@@ -146,10 +126,8 @@ const dRoot=process.platform==='win32'&&fs.existsSync('D:\\')?'D:\\':path.parse(
 const drivesBefore={C:driveSnapshot(cRoot),D:driveSnapshot(dRoot)};
 
 const removed=[
-  {kind:'DATA_BACKUPS',...removeChildren(cfg.backupsDir)},
-  {kind:'LEGACY_C_RUNTIME_BACKUPS',...removeChildren(legacyRuntimeBackupRoot)},
-  {kind:'LAUNCHER_BACKUPS',...removeChildren(launcherBackupRoot)},
-  {kind:'IMPORTS',...removeChildren(cfg.importsDir)},
+  // Existing backup files and original import evidence are NOT disposable.
+  // No-backup mode means no new backup, never silent deletion of prior proof.
   {kind:'EXPORTS',...removeChildren(cfg.exportsDir)},
   {kind:'DATA_RUNTIME_TEMP',...removeChildren(dataTempRoot)},
   {kind:'D_CANDIDATE_TEST_TEMP',...removeChildren(dCandidateTempRoot)},
@@ -160,12 +138,9 @@ const removed=[
   {kind:'NODE_MODULE_CACHE',...removeChildren(path.join(cfg.projectRoot||process.cwd(),'node_modules','.cache'))}
 ];
 
-if(!samePath(cfg.dataDir,fallbackDataRoot)){
-  removed.push({kind:'UNUSED_C_FALLBACK_DATA',...removeChildren(fallbackDataRoot)});
-}
-
+// Legacy C fallback may contain originals; preserve until independently audited.
 const retained=[
-  {kind:'EVIDENCE_ARCHIVE_366D',...removeChildren(cfg.evidenceArchiveDir,{olderThanMs:EVIDENCE_RETENTION_MS})},
+  {kind:'EVIDENCE_ARCHIVE_PRESERVED',root:cfg.evidenceArchiveDir,deletedEntries:0,deletedBytes:0,failed:[]},
   {kind:'D_LOGS_45D',...removeChildren(cfg.logsDir,{olderThanMs:LOG_RETENTION_MS})},
   {kind:'C_CRASH_LOGS_45D',...removeChildren(path.join(launcherLogsRoot,'crashes'),{olderThanMs:LOG_RETENTION_MS})},
   {kind:'C_APP_LOGS_45D',...removeChildren(launcherLogsRoot,{
@@ -180,7 +155,7 @@ const tempCleanup=[
 ];
 
 const archiveCoverage=evidenceArchiveCoverage(cfg.evidenceArchiveDir);
-const backupRecordCleanup=retireBackupRecords(cfg.dbFile);
+const backupRecordCleanup={updated:0,preserved:true,reason:'NO_BACKUP_CREATED_OR_DELETED'};
 const compact=compactSqliteStorage(cfg.dbFile,{
   minReclaimBytes:256*1024*1024,
   minReclaimRatio:0.08,
@@ -224,8 +199,8 @@ console.log(JSON.stringify({
   retentionDays:{evidence:EVIDENCE_RETENTION_DAYS,logs:45},
   archiveCoverage,
   rolePolicy:{
-    C:'launcher/code/node_modules/current logs only; legacy CE_QC_RUNTIME backups and other CE-QC temp/old fallback data are disposable',
-    D:'live SQLite/business data + runtime scratch; generated files are cleaned/aged'
+    C:'launcher/code/node_modules/current logs; existing backups and legacy fallback preserved; CE scratch disposable',
+    D:'live SQLite/business data + original imports + permanent evidence archive; only regenerable exports/scratch cleaned'
   },
   removed,
   retained,

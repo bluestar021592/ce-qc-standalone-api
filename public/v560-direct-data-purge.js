@@ -103,7 +103,7 @@
     const dialog=node('directPurgeDialog');if(dialog)dialog.hidden=false;
     const phrase=node('directPurgePhrase');if(phrase)phrase.value='';
     const preview=node('directPurgePreview');
-    if(preview)preview.innerHTML='<div class="purge-warning"><b>72个有效CP门店编码已通过只读预检。</b><br><small>不会新建备份；现有备份会保留。清空仅删除业务表及可再生成业务文件，历史证据归档会清理。用户、权限、72个有效CP配置与审计保留；后台还会在事务中再次核验CP配置。</small></div>';
+    if(preview)preview.innerHTML='<div class="purge-warning"><b>72个有效CP门店编码已通过只读预检。</b><br><small>不会新建备份；现有备份会保留。清空业务表及可再生成导出缓存；原始日报文件和历史证据归档保留，不自动恢复为新业务数据。用户、权限、72个有效CP配置与审计保留；后台还会在事务中再次核验CP配置。</small></div>';
     startClock();
   }
   function closeDirectDataPurge(){
@@ -177,7 +177,7 @@
     updateDirectPurgeButton();
     const button=node('directPurgeExecuteButton');
     if(button?.disabled)return alert('请准确输入“永久清除全部业务数据”，并等待5秒倒计时结束。');
-    if(!global.confirm('最终确认：永久清空全部业务数据及可再生成业务文件。不会新建备份，已有备份会保留；72个CP门店编码、用户、权限、配置和审计也会保留。是否继续？'))return;
+    if(!global.confirm('最终确认：永久清空全部业务数据及可再生成业务文件。不会新建备份，已有备份、原始日报文件及历史证据归档会保留；72个CP门店编码、用户、权限、配置和审计也会保留。是否继续？'))return;
     active=true;stopClock();
     if(button)button.disabled=true;
     const phrase=node('directPurgePhrase');if(phrase)phrase.disabled=true;
@@ -191,7 +191,7 @@
       renderJobStatus(queued,started);
       const result=await waitForDirectPurge(queued,started);
       const deleted=Number(result.deletedRows||0);
-      if(preview)preview.innerHTML=`<div class="purge-success"><b>全部业务数据已直接清空。</b><br>共删除 <b>${deleted.toLocaleString()}</b> 行业务记录。<br><small>本次未新建备份，原有备份已保留；用户、权限、72个CP配置及审计已保留。请先通过原来的系统快捷方式完整关闭并重新打开 APP，重新登录后再上传日报，以便自动轨迹追踪读取新启动标记。</small></div>`;
+      if(preview)preview.innerHTML=`<div class="purge-success"><b>全部业务数据已直接清空。</b><br>共删除 <b>${deleted.toLocaleString()}</b> 行业务记录。<br><small>本次未新建备份，原有备份、原始日报及历史证据归档已保留；用户、权限、72个CP配置及审计已保留。请先通过原来的系统快捷方式完整关闭并重新打开 APP，重新登录后再上传日报，以便自动轨迹追踪读取新启动标记。</small></div>`;
     }catch(error){
       active=false;
       // The request may have reached the worker even if its final response is

@@ -92,7 +92,10 @@ function retireLegacyPurgeArtifacts(){
 }
 async function clearRegenerableFiles(){
   const cfg=getRuntimeConfig();const warnings=[];
-  for(const dir of [cfg.exportsDir,cfg.importsDir,cfg.longJsonExportsDir,cfg.evidenceArchiveDir]){
+  // Preserve original uploads and the V266 evidence archive. Neither an
+  // irreversible business reset nor "no new backup" authorizes evidence loss.
+  // Only derived export files may be regenerated from fresh daily sources.
+  for(const dir of [cfg.exportsDir,cfg.longJsonExportsDir]){
     if(!fs.existsSync(dir))continue;
     for(const entry of fs.readdirSync(dir)){
       try{await fs.promises.rm(path.join(dir,entry),{recursive:true,force:true});}

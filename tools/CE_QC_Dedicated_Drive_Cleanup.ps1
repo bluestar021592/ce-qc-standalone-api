@@ -73,10 +73,7 @@ $BeforeD = if (Test-Path -LiteralPath 'D:\') { Get-DriveFree 'D' } else { [int64
 
 # CE-owned disposable roots on C.
 $ceC = @(
-  # V588: this legacy pre-D-drive runtime backup root is obsolete under the
-  # current no-backup policy. Deep census found it could retain hundreds of GiB.
-  (Join-Path $env:LOCALAPPDATA 'CE_QC_RUNTIME\backups'),
-  (Join-Path $env:LOCALAPPDATA 'CE_QC_LAUNCHER\backups'),
+  # Preserve existing backup roots; no-new-backup does not mean delete old proof.
   (Join-Path $env:LOCALAPPDATA 'CE_QC_LAUNCHER\temp'),
   (Join-Path $env:LOCALAPPDATA 'CE_QC_LAUNCHER\app\logs\crashes')
 )

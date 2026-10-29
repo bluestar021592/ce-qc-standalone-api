@@ -67,6 +67,12 @@ test('V560 direct purge clears business data without creating a backup or purge 
     fs.mkdirSync(preClearDir,{recursive:true});
     fs.writeFileSync(path.join(preClearDir,'old-backup.db'),'legacy');
     const preClearBefore=fs.existsSync(preClearDir)?fs.readdirSync(preClearDir).length:0;
+    const evidenceFile=path.join(cfg.evidenceArchiveDir,'source_uploads','2026-07','original-sha256.xls');
+    const originalImport=path.join(cfg.importsDir,'historical-source-original.xls');
+    fs.mkdirSync(path.dirname(evidenceFile),{recursive:true});
+    fs.mkdirSync(path.dirname(originalImport),{recursive:true});
+    fs.writeFileSync(evidenceFile,'immutable-historical-evidence');
+    fs.writeFileSync(originalImport,'unarchived-original-must-survive');
 
     await assert.rejects(
       ()=>executeDirectDataPurge({phrase:'wrong',user:{email:'admin@example.test',role:'ADMIN'}}),
@@ -81,6 +87,10 @@ test('V560 direct purge clears business data without creating a backup or purge 
     assert.equal(result.sealed,false);
     assert.equal(result.deleteMode,'DIRECT_NO_BACKUP_TRANSACTION_PRESERVE_EXISTING_BACKUPS');
     assert.equal(result.existingBackupsPreserved,true,'direct business-data purge must preserve pre-existing backups');
+    assert.equal(fs.readFileSync(evidenceFile,'utf8'),'immutable-historical-evidence',
+      'business reset must not destroy V266 historical evidence archive');
+    assert.equal(fs.readFileSync(originalImport,'utf8'),'unarchived-original-must-survive',
+      'business reset must not delete original daily files before archival is verified');
 
     const verifyDb=(await import('node:sqlite')).DatabaseSync;
     const check=new verifyDb(cfg.dbFile);
@@ -374,7 +384,7 @@ test('V560 direct recovery console has no backup step and posts only the direct 
   assert.match(html,/直接清空业务数据/);
   assert.match(html,/不创建新备份、不启用安全封锁/);
   assert.doesNotMatch(html,/备份并继续|purgeBackupConfirmed|v505-data-purge-recovery\.js/);
-  assert.match(html,/v560-direct-data-purge\.js\?v=20261017-v788-replay-2/);
+  assert.match(html,/v560-direct-data-purge\.js\?v=20261029-v788-evidence-retain-1/);
   assert.match(js,/\/api\/admin\/data-purge\/direct/);
   assert.match(js,/\/api\/admin\/data-purge\/direct\/preflight/,
     'clear dialog must check 72 active store codes BEFORE the destructive action');
@@ -388,7 +398,11 @@ test('V560 direct recovery console has no backup step and posts only the direct 
     'candidate or old main without post-install proof must not show purge dialog');
   assert.match(fs.readFileSync('server.js','utf8'),/code:'V788_MANAGED_RELEASE_REQUIRED'/,
     'ADMIN API must independently block callers bypassing the protected UI');
-  assert.match(js,/原有备份已保留/,
+  assert.match(js,/历史证据归档已保留/,
+    'clear success must accurately report historical evidence retention');
+  assert.match(html,/原始日报及历史证据归档保留/,
+    'irreversible confirmation must describe preserved originals');
+  assert.match(js,/原有备份.*已保留/,
     'success message must match real non-backup-creating, preserve-existing-backups behavior');
   assert.doesNotMatch(js,/未创建或保留 CE QC 业务备份/,
     'false claim that old backups were deleted must never return');
@@ -471,10 +485,24 @@ test('V788 full reset cleans historical sources but never deletes protected data
     'qc_tracking_ledger','shipment_current_state','unified_import_rows'];
   for(const table of tables)assert.match(store,new RegExp(`['"]${table}['"]`),`missing historical purge table: ${table}`);
   const fileCleanup=purge.slice(purge.indexOf('async function clearRegenerableFiles()'),purge.indexOf('function directResetTransaction('));
-  assert.ok(fileCleanup.includes('for(const dir of [cfg.exportsDir,cfg.importsDir,cfg.longJsonExportsDir,cfg.evidenceArchiveDir])'),
-    'file cleanup must stay limited to regenerable artifact folders');
+  assert.ok(fileCleanup.includes('for(const dir of [cfg.exportsDir,cfg.longJsonExportsDir])'),
+    'file cleanup must be limited to regenerable export caches');
+  assert.ok(!fileCleanup.includes('cfg.importsDir')&&!fileCleanup.includes('cfg.evidenceArchiveDir'),
+    'business reset must not silently delete original imports or immutable V266 evidence');
   assert.ok(!fileCleanup.includes('cfg.tokenDir')&&!fileCleanup.includes('cfg.backupsDir'),
     'file cleanup must not include token or backup folders');
+  const startup=fs.readFileSync('scripts/CE_QC_NoBackup_Cleanup.mjs','utf8');
+  const dedicated=fs.readFileSync('tools/CE_QC_Dedicated_Drive_Cleanup.ps1','utf8');
+  const startupRemoved=startup.slice(startup.indexOf('const removed=['),startup.indexOf('const retained=['));
+  assert.doesNotMatch(startupRemoved,/removeChildren\((?:cfg\.backupsDir|legacyRuntimeBackupRoot|launcherBackupRoot|cfg\.importsDir|fallbackDataRoot)/,
+    'normal startup must not silently delete backups, original imports or legacy business data');
+  assert.doesNotMatch(startup,/retireBackupRecords\(/,
+    'startup must not mark preserved backup records as deleted');
+  assert.doesNotMatch(startup,/removeChildren\(cfg\.evidenceArchiveDir/,
+    'V266 retention policy forbids automatic deletion of historical evidence');
+  const dedicatedRoots=dedicated.slice(dedicated.indexOf('$ceC = @('),dedicated.indexOf('foreach ($p in $ceC)'));
+  assert.doesNotMatch(dedicatedRoots,/CE_QC_RUNTIME\\backups|CE_QC_LAUNCHER\\backups/,
+    'Windows startup cleanup must not delete existing backup directories');
 });
 
 test('post-purge empty bootstrap clears stale browser business state instead of merging pre-clear snapshots',()=>{
