@@ -12,8 +12,6 @@ assert.match(cleanup,/2026-09-26-v588-remove-legacy-c-runtime-backups-v1/);
 assert.doesNotMatch(cleanup,/\$Letter:/,'PowerShell must delimit drive-letter variable before colon');
 assert.match(cleanup,/DeviceID='\$\{Letter\}:'/,'drive query must use ${Letter}: interpolation safely');
 for(const required of [
-  'CE_QC_RUNTIME\\backups',
-  'CE_QC_LAUNCHER\\backups',
   'CE_QC_LAUNCHER\\temp',
   'npm-cache',
   'Microsoft\\Edge\\User Data\\Default\\Cache',
@@ -26,6 +24,9 @@ for(const required of [
   'D:\\CE_QC_RUNTIME_TEMP',
   'D:\\CE_QC_NPM_CACHE'
 ]) assert.ok(cleanup.includes(required), 'missing safe cleanup root: '+required);
+const ceRoots=cleanup.slice(cleanup.indexOf('$ceC = @('),cleanup.indexOf('foreach ($p in $ceC)'));
+assert.doesNotMatch(ceRoots,/CE_QC_RUNTIME\\\\backups|CE_QC_LAUNCHER\\\\backups/,
+  'dedicated cleanup must preserve existing backup directories under no-new-backup policy');
 
 assert.match(cleanup,/Clear-RecycleBin -DriveLetter C/);
 assert.match(cleanup,/Clear-RecycleBin -DriveLetter D/);
@@ -51,4 +52,4 @@ if(os.platform()==='win32'){
   const parsed=spawnSync('powershell.exe',['-NoLogo','-NoProfile','-Command',command],{encoding:'utf8'});
   assert.equal(parsed.status,0,'PowerShell parser rejected dedicated cleanup script: '+(parsed.stdout||'')+(parsed.stderr||''));
 }
-console.log('[V600] dedicated-drive cleanup smoke passed · obsolete CE_QC_RUNTIME backups on C are purged · live D database/user Documents/Downloads stay protected');
+console.log('[V788] dedicated-drive cleanup smoke passed · existing backup roots preserved · disposable CE scratch cleaned · live D database/user Documents/Downloads protected');
