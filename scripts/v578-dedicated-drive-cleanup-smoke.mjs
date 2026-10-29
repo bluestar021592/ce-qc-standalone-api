@@ -25,7 +25,7 @@ for(const required of [
   'D:\\CE_QC_NPM_CACHE'
 ]) assert.ok(cleanup.includes(required), 'missing safe cleanup root: '+required);
 const ceRoots=cleanup.slice(cleanup.indexOf('$ceC = @('),cleanup.indexOf('foreach ($p in $ceC)'));
-assert.doesNotMatch(ceRoots,/CE_QC_RUNTIME\\\\backups|CE_QC_LAUNCHER\\\\backups/,
+assert.doesNotMatch(ceRoots,/CE_QC_RUNTIME\\backups|CE_QC_LAUNCHER\\backups/,
   'dedicated cleanup must preserve existing backup directories under no-new-backup policy');
 
 assert.match(cleanup,/Clear-RecycleBin -DriveLetter C/);
