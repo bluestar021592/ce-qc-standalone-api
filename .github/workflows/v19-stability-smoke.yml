@@ -59,7 +59,26 @@ jobs:
               if ($launcher.HasExited) { break }
             }
             if (-not $firstPid) { throw 'Initial backend did not become ready.' }
-            Write-Host "Initial backend PID=$firstPid"
+            # The HTTP listener can respond before the PowerShell launcher has
+            # finished its own readiness probe and entered the supervisor loop.
+            # Killing it at that instant tests startup failure, not recovery.
+            $supervisedReady = $false
+            foreach ($j in 1..45) {
+              Start-Sleep -Seconds 1
+              $output = Get-Content v19-launcher.out.log -Raw -ErrorAction SilentlyContinue
+              if ($output -match 'BACKEND READY - local web response verified' -and
+                  $output -match 'Automatic backend restart: ENABLED') {
+                $supervisedReady = $true
+                break
+              }
+              if ($launcher.HasExited) { break }
+            }
+            if (-not $supervisedReady) { throw 'Launcher did not enter supervised ready state before crash injection.' }
+            Start-Sleep -Seconds 2
+            $listener = Get-NetTCPConnection -LocalPort 5177 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+            if (-not $listener) { throw 'Backend listener disappeared before crash injection.' }
+            $firstPid = [int]$listener.OwningProcess
+            Write-Host "Supervised backend PID=$firstPid"
 
             Stop-Process -Id $firstPid -Force
 
