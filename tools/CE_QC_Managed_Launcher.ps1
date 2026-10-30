@@ -385,6 +385,29 @@ function Install-VerifiedCommitLocally([string]$ExpectedCurrent, [string]$Verifi
   return $installed
 }
 
+# Allow a manifest change only when its entire non-scripts content is
+# identical at the two immutable commits. A dependency or lockfile change
+# still requires staged installation, so fail closed before changing HEAD.
+function Test-V788ScriptOnlyManifestChange([string]$CurrentCommit,[string]$RemoteCommit) {
+  try {
+    if ($CurrentCommit -notmatch '^[0-9a-f]{40}$' -or $RemoteCommit -notmatch '^[0-9a-f]{40}$') { return $false }
+    $beforeRaw=Get-GitText @('show',"${CurrentCommit}:package.json")
+    $afterRaw=Get-GitText @('show',"${RemoteCommit}:package.json")
+    $before=$beforeRaw | ConvertFrom-Json -ErrorAction Stop
+    $after=$afterRaw | ConvertFrom-Json -ErrorAction Stop
+    if ($null -eq $before -or $null -eq $after -or
+      $before -isnot [pscustomobject] -or $after -isnot [pscustomobject]) { return $false }
+    [void]$before.PSObject.Properties.Remove('scripts')
+    [void]$after.PSObject.Properties.Remove('scripts')
+    $beforeCanonical=ConvertTo-Json -InputObject $before -Depth 70 -Compress
+    $afterCanonical=ConvertTo-Json -InputObject $after -Depth 70 -Compress
+    return [string]::Equals($beforeCanonical,$afterCanonical,[StringComparison]::Ordinal)
+  } catch {
+    Write-ManagedLog '[UPDATE] Cannot prove package.json is scripts-only; keeping the known-good installed version.' Yellow
+    return $false
+  }
+}
+
 function Invoke-SafeAutoUpdate {
   $git = Get-Command git.exe -ErrorAction SilentlyContinue
   $npm = Get-Command npm.cmd -ErrorAction SilentlyContinue
@@ -451,12 +474,19 @@ function Invoke-SafeAutoUpdate {
   }
 
   $dependencyFiles = Get-GitText @('diff','--name-only',$current,$remote,'--','package.json','package-lock.json')
-  # Fail closed: npm ci after changing live HEAD can remove the known-good
-  # node_modules before it fails. Until a staged atomic dependency swap is
-  # available, dependency-changing releases must NOT modify the live checkout.
+  # A script-only package.json edit does not require npm ci. Verify this by
+  # comparing every other JSON field at both immutable commit SHAs. Any
+  # lockfile, dependency, malformed JSON, or unverified change is blocked.
   if (-not [string]::IsNullOrWhiteSpace($dependencyFiles)) {
-    Write-ManagedLog '[UPDATE] Candidate changes package dependencies. Safe staged dependency installation is not available; keeping the existing known-good version and blocking automatic installation.' Yellow
-    return
+    $packagePaths=@($dependencyFiles -split '\r?\n' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    $scriptsOnly=($packagePaths.Count -eq 1 -and $packagePaths[0].Trim() -ceq 'package.json' -and
+      (Test-V788ScriptOnlyManifestChange $current $remote))
+    if (-not $scriptsOnly) {
+      Write-ManagedLog '[UPDATE] Candidate has dependency or unverified manifest changes. Staged dependency installation is not available; keeping known-good HEAD and modules.' Yellow
+      return
+    }
+    Write-ManagedLog '[UPDATE] Verified scripts-only package.json change; installed dependencies are unchanged and npm ci is unnecessary.' DarkCyan
+    $dependencyFiles=''
   }
   Write-ManagedLog "[UPDATE] Installing verified exact commit $($remote.Substring(0,8)) from local Git object store; no second GitHub request is required." Cyan
   $installed = Install-VerifiedCommitLocally $current $remote
