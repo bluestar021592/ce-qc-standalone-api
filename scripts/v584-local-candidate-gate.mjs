@@ -49,6 +49,7 @@ const TASKS=[
   ['node',['scripts/v792-home-whpp-reference-ui-smoke.mjs']],
   ['node',['scripts/v795-import-status-timeout-resilience-smoke.mjs']],
   ['node',['scripts/v796-local-auth-session-diagnostic-smoke.mjs']],
+  ['node',['scripts/v798-whpp-exact-child-membership-smoke.mjs']],
   ['node',['scripts/v792-whpp-canonical-trend-integration-smoke.mjs']],
   ['node',['--check','public/v625-shell.js']],
   ['node',['--check','server.js']],
