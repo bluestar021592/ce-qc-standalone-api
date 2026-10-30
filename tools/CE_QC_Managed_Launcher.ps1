@@ -12,6 +12,58 @@ function Write-ManagedLog([string]$Text, [ConsoleColor]$Color = [ConsoleColor]::
   Write-Host $Text -ForegroundColor $Color
 }
 
+# Exact release SHA record, only after successful managed install.
+function Write-V788ManagedInstallReceipt([string]$InstalledCommit,[string]$RemoteCommit) {
+  if ($InstalledCommit -notmatch '^[0-9a-f]{40}$' -or $InstalledCommit -ne $RemoteCommit) {
+    throw 'V788 receipt requires exact installed and remote SHA match.'
+  }
+  $receiptPath = Join-Path $LauncherLogDir 'v788_managed_install_receipt.json'
+  $tempPath = $receiptPath+'.'+[Guid]::NewGuid().ToString('N')+'.tmp'
+  $payload = @{
+    schemaVersion = 1
+    mode = 'INSTALLED'
+    installedCommit = $InstalledCommit.ToLowerInvariant()
+    remoteCommit = $RemoteCommit.ToLowerInvariant()
+    candidateGatePassed = $true
+    verifiedAt = (Get-Date).ToUniversalTime().ToString('o')
+  } | ConvertTo-Json -Compress
+  try {
+    Set-Content -LiteralPath $tempPath -Value $payload -Encoding UTF8
+    Move-Item -LiteralPath $tempPath -Destination $receiptPath -Force
+    Write-ManagedLog '[UPDATE] Exact managed release SHA recorded.' DarkCyan
+  } catch {
+    Write-ManagedLog '[UPDATE] No release receipt; direct purge stays blocked.' Yellow
+    try { Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue } catch {}
+  }
+}
+
+# The first V788 release may be installed by an older launcher which could
+# not emit a receipt. On NEXT boot, re-run the bounded candidate gate for the
+# already-installed exact SHA; do not permanently block legitimate upgrades.
+function Test-V788ManagedInstallReceipt([string]$ExpectedCommit) {
+  $file=Join-Path $LauncherLogDir 'v788_managed_install_receipt.json'
+  try {
+    if ($ExpectedCommit -notmatch '^[0-9a-f]{40}$') { return $false }
+    if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { return $false }
+    $info=Get-Item -LiteralPath $file -Force
+    if ($info.PSIsContainer -or $info.Length -le 0 -or $info.Length -gt 8192 -or
+      (($info.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) { return $false }
+    $r=Get-Content -LiteralPath $file -Raw -Encoding UTF8 | ConvertFrom-Json
+    # Stay type-compatible with the Node backend; no string/bool coercion.
+    $versionTypeOk=($r.schemaVersion -is [int]) -or ($r.schemaVersion -is [long]) -or
+      ($r.schemaVersion -is [double])
+    $installed=[string]$r.installedCommit
+    $remote=[string]$r.remoteCommit
+    return ($versionTypeOk -and $r.schemaVersion -eq 1 -and
+      ($r.mode -is [string]) -and $r.mode -ceq 'INSTALLED' -and
+      ($r.candidateGatePassed -is [bool]) -and $r.candidateGatePassed -eq $true -and
+      $installed -match '^[0-9a-f]{40}$' -and $remote -match '^[0-9a-f]{40}$' -and
+      $installed -ieq $ExpectedCommit -and $remote -ieq $ExpectedCommit)
+  } catch {
+    return $false
+  }
+}
+
 # Native stdout must never leak into a PowerShell function's return value. Candidate
 # validation is a Boolean contract; output pollution previously made a rejected
 # candidate look truthy and allowed installation to continue.
@@ -367,6 +419,17 @@ function Invoke-SafeAutoUpdate {
   }
   $remote = Get-GitText @('rev-parse','origin/main')
   if ($current -eq $remote) {
+    if (-not (Test-V788ManagedInstallReceipt $current)) {
+      Write-ManagedLog '[UPDATE] Release receipt absent after an older launcher update. Revalidating installed main SHA safely...' DarkCyan
+      # Never mint a receipt just because HEAD equals cached origin/main:
+      # rerun the same bounded detached-worktree go-live candidate tests.
+      $recoverResult=@(Test-RemoteCandidate $remote $current)
+      if ($recoverResult.Count -eq 1 -and $recoverResult[0] -eq $true) {
+        Write-V788ManagedInstallReceipt $current $remote
+      } else {
+        Write-ManagedLog '[UPDATE] Installed main candidate revalidation failed; direct purge remains blocked.' Yellow
+      }
+    }
     Write-ManagedLog "[UPDATE] Already current: $($current.Substring(0,8))." Green
     return
   }
@@ -388,12 +451,20 @@ function Invoke-SafeAutoUpdate {
   }
 
   $dependencyFiles = Get-GitText @('diff','--name-only',$current,$remote,'--','package.json','package-lock.json')
+  # Fail closed: npm ci after changing live HEAD can remove the known-good
+  # node_modules before it fails. Until a staged atomic dependency swap is
+  # available, dependency-changing releases must NOT modify the live checkout.
+  if (-not [string]::IsNullOrWhiteSpace($dependencyFiles)) {
+    Write-ManagedLog '[UPDATE] Candidate changes package dependencies. Safe staged dependency installation is not available; keeping the existing known-good version and blocking automatic installation.' Yellow
+    return
+  }
   Write-ManagedLog "[UPDATE] Installing verified exact commit $($remote.Substring(0,8)) from local Git object store; no second GitHub request is required." Cyan
   $installed = Install-VerifiedCommitLocally $current $remote
   if (-not [string]::IsNullOrWhiteSpace($dependencyFiles)) {
     Write-ManagedLog '[UPDATE] Dependencies changed; refreshing node_modules...' Cyan
     Invoke-Exe $script:NpmExe @('ci','--prefer-offline','--no-audit','--no-fund') | Out-Null
   }
+  Write-V788ManagedInstallReceipt $installed $remote
   Write-ManagedLog "[UPDATE] Installed verified exact version $($installed.Substring(0,8)). Database was not rewritten by updater." Green
 }
 

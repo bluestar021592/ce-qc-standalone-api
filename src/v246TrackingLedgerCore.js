@@ -1,5 +1,6 @@
 import { getDb, nowIso } from './db.js';
 import { v246PositivePodText } from './shopeeAttemptCycleV246.js';
+import { loadWhppTrustedPodTime } from './whppPodTimeEvidence.js';
 
 export const V246_TRACKING_LEDGER_ID = '2026-08-23-v246-qc-tracking-ledger-v2';
 export const V419_STRICT_SIGNING_TRUTH_ID = '2026-09-03-v419-strict-start-signing-truth-v1';
@@ -87,6 +88,31 @@ function firstStrictStartDate(value = []) {
 export function classifyV246Terminal({ closeReason = '', state = '', stateJson = {} } = {}) {
   const payload = safeJson(stateJson, {});
   const stateName = text(state || payload.currentState || payload.scanNormalizedState || payload.state || payload.primaryCategory || payload.主分类).toUpperCase();
+  // shipmentStatus belongs to the TMS shipment-status endpoint. It must not
+  // be confused with scan orderStatus or tracking eventCode (event 80 = POD).
+  const shipmentStatus = text(payload.shipmentStatus || payload.shipmentTrack?.shipmentStatus);
+  // A prior contradictory 60/81 state stays under manual verification
+  // across repeated syncs. Otherwise replacing POD with PENDING_VERIFICATION
+  // would make a second sync incorrectly appear compatible with status 81.
+  if (payload.shipmentStatusConflict === true && ['60','81'].includes(shipmentStatus))
+    return {terminal:false,pod:false,returned:false,cancelled:false,reason:'',
+      stateConflict:true,source:'TMS_TERMINAL_PERSISTED_CONFLICT'};
+  if (shipmentStatus === '80') return {
+    terminal:false,pod:false,returned:false,cancelled:false,reason:'',
+    returnInProgress:true,source:'TMS_80_RETURN_IN_PROGRESS'
+  };
+  if (shipmentStatus === '60' || shipmentStatus === '81') {
+    const conflict=shipmentStatus === '60'
+      ? ['RETURNED','RETURN_COMPLETED','RETURN_IN_PROGRESS','RETURNING'].includes(stateName)
+      : ['POD','RETURN_IN_PROGRESS','RETURNING'].includes(stateName);
+    if (conflict) return {
+      terminal:false,pod:false,returned:false,cancelled:false,reason:'',
+      stateConflict:true,source:'TMS_TERMINAL_STATE_CONFLICT'
+    };
+    const pod=shipmentStatus==='60';
+    return {terminal:true,pod,returned:!pod,cancelled:false,reason:pod?'POD':'RETURNED',
+      source:pod?'TMS_60_POD':'TMS_81_RETURNED'};
+  }
   const orderStatus = text(payload.orderStatus);
   const latestCode = latestCodeOf(payload);
   const evidence = [stateName,payload.退回状态,payload.primaryCategory,payload.currentMainCategory,payload.主分类,payload.异常分类,payload.latestEventDesc,payload.最后节点,payload.QC判断]
@@ -258,13 +284,19 @@ export function reconcileV246TrackingLedger(selection, { db = getDb(), reason = 
       terminalReason=CASE WHEN qc_tracking_ledger.trackingStatus='TERMINAL' AND qc_tracking_ledger.terminalReason<>'' THEN qc_tracking_ledger.terminalReason ELSE excluded.terminalReason END,
       terminalAt=CASE WHEN qc_tracking_ledger.trackingStatus='TERMINAL' AND qc_tracking_ledger.terminalAt<>'' THEN qc_tracking_ledger.terminalAt ELSE excluded.terminalAt END,
       currentState=excluded.currentState,currentCategory=excluded.currentCategory,lastEventTime=excluded.lastEventTime,
-      podDate=CASE WHEN qc_tracking_ledger.podDate<>'' THEN qc_tracking_ledger.podDate ELSE excluded.podDate END,
+      podDate=CASE WHEN excluded.currentState IN ('RETURN_IN_PROGRESS','PENDING_VERIFICATION') OR excluded.terminalReason='RETURNED' THEN ''
+        WHEN instr(excluded.currentStateJson,'"podTimeEvidenceSource":"WHPP_SAVED_POD_LOCK"')>0 THEN excluded.podDate
+        WHEN qc_tracking_ledger.podDate<>'' THEN qc_tracking_ledger.podDate ELSE excluded.podDate END,
       attemptNo=CASE WHEN qc_tracking_ledger.attemptSource LIKE 'V246_STRICT_TRACK%' THEN qc_tracking_ledger.attemptNo ELSE excluded.attemptNo END,
       attemptSource=CASE WHEN qc_tracking_ledger.attemptSource LIKE 'V246_STRICT_TRACK%' THEN qc_tracking_ledger.attemptSource ELSE excluded.attemptSource END,
-      signingDays=CASE WHEN qc_tracking_ledger.attemptSource LIKE 'V246_STRICT_TRACK%' THEN qc_tracking_ledger.signingDays WHEN excluded.signingDays IS NOT NULL THEN excluded.signingDays ELSE qc_tracking_ledger.signingDays END,
+      signingDays=CASE WHEN excluded.currentState IN ('RETURN_IN_PROGRESS','PENDING_VERIFICATION') OR excluded.terminalReason='RETURNED' THEN NULL
+        WHEN qc_tracking_ledger.attemptSource LIKE 'V246_STRICT_TRACK%' THEN qc_tracking_ledger.signingDays
+        WHEN instr(excluded.currentStateJson,'"podTimeEvidenceSource":"WHPP_SAVED_POD_LOCK"')>0 THEN excluded.signingDays
+        WHEN excluded.signingDays IS NOT NULL THEN excluded.signingDays ELSE qc_tracking_ledger.signingDays END,
       evidenceJson=CASE WHEN qc_tracking_ledger.attemptSource LIKE 'V246_STRICT_TRACK%' THEN qc_tracking_ledger.evidenceJson ELSE excluded.evidenceJson END,
       currentStateJson=excluded.currentStateJson,lastCheckedAt=CASE WHEN excluded.lastCheckedAt<>'' THEN excluded.lastCheckedAt ELSE qc_tracking_ledger.lastCheckedAt END,
       lastRepairReason=excluded.lastRepairReason,updatedAt=excluded.updatedAt`);
+  const resetStaleTerminal=db.prepare("UPDATE qc_tracking_ledger SET trackingStatus='OPEN',terminalReason='',terminalAt='',podDate='',signingDays=NULL WHERE shipmentCode=?");
   const auditInsert = db.prepare('INSERT INTO qc_tracking_audit(shipmentCode,businessType,action,reason,beforeJson,afterJson,createdAt) VALUES(?,?,?,?,?,?,?)');
   const now = nowIso();
   let missingLedger = 0, missingCarry = 0, reopened = 0, terminal = 0, open = 0;
@@ -282,38 +314,62 @@ export function reconcileV246TrackingLedger(selection, { db = getDb(), reason = 
       const payload = { ...carryJson, ...currentJson, shipmentCode: bill, 运单号: bill, businessType: type };
       const clsCurrent = classifyV246Terminal({ state: current?.state, stateJson: currentJson });
       const clsCarry = classifyV246Terminal({ closeReason: carry?.closeReason, stateJson: carryJson });
-      const cls = clsCurrent.terminal ? clsCurrent : clsCarry;
+      // Current exact TMS 60/80/81 evidence outranks a stale saved carry
+      // label. In particular a former TERMINAL cannot hide a newer TMS 80.
+      const currentTmsStatus=text(currentJson.shipmentStatus||currentJson.shipmentTrack?.shipmentStatus);
+      const cls=['60','80','81'].includes(currentTmsStatus)||clsCurrent.stateConflict
+        ? clsCurrent : (clsCurrent.terminal?clsCurrent:clsCarry);
+      const forceReset=Boolean(oldLedger&&(
+        ((cls.returnInProgress||cls.stateConflict)&&
+          (text(oldLedger.terminalReason)||text(oldLedger.podDate)||oldLedger.signingDays!=null||oldLedger.trackingStatus==='TERMINAL'))
+        ||(['60','81'].includes(currentTmsStatus)&&oldLedger.trackingStatus==='TERMINAL'
+          &&text(oldLedger.terminalReason)!==cls.reason)
+      ));
+      if(forceReset)resetStaleTerminal.run(bill);
       const firstReportDate = minDate(oldLedger?.firstReportDate, carry?.sourceReportDate, source.firstReportDate) || source.firstReportDate;
       const lastImportedDate = maxDate(oldLedger?.lastImportedDate, source.lastImportedDate, carry?.lastReportDate) || source.lastImportedDate;
       const sourceSnapshotId = text(oldLedger?.sourceSnapshotId || carry?.sourceSnapshotId || source.anySnapshotId || 'V246-RECOVERED');
       const lastSnapshotId = text(current?.snapshotId || carry?.lastSnapshotId || source.anySnapshotId || sourceSnapshotId);
-      const podDate = text(oldLedger?.podDate) || extractPodDate(payload, cls) || '';
+      const verifiedWhppPodTime=(type==='WHPP'&&cls.pod)
+        ?loadWhppTrustedPodTime(db,bill,firstReportDate):'';
+      const podDate=cls.returnInProgress||cls.stateConflict||cls.returned?''
+        :(verifiedWhppPodTime?v246DateKey(verifiedWhppPodTime):'')
+          ||text(oldLedger?.podDate)||extractPodDate(payload,cls)||'';
       const oldStrict = strictAttemptSource(oldLedger?.attemptSource);
       const observedAttempt = directAttempt(payload);
       const attemptNo = oldStrict ? Number(oldLedger?.attemptNo || 0) : observedAttempt;
       const attemptSource = oldStrict ? text(oldLedger?.attemptSource) : (attemptNo ? text(payload.attemptSource || payload.attemptStatus || '现有派次证据') : '');
-      const signingDays = oldStrict ? (oldLedger?.signingDays ?? null) : (podDate ? v246InclusiveDays(firstReportDate,podDate) : null);
-      const stateName = text(current?.state || payload.currentState || payload.scanNormalizedState || payload.primaryCategory || payload.主分类 || 'OPEN');
-      const category = text(payload.primaryCategory || payload.currentMainCategory || payload.主分类 || payload.异常分类 || stateName);
+      const signingDays = cls.returnInProgress||cls.stateConflict||cls.returned?null:
+        oldStrict?(oldLedger?.signingDays??null):(podDate?v246InclusiveDays(firstReportDate,podDate):null);
+      const stateName = cls.returnInProgress?'RETURN_IN_PROGRESS':cls.stateConflict?'PENDING_VERIFICATION':
+        cls.pod?'POD':cls.returned?'RETURNED':cls.cancelled?'ORDER_CANCELLED':
+        text(current?.state || payload.currentState || payload.scanNormalizedState || payload.primaryCategory || payload.主分类 || 'OPEN');
+      const category = cls.returnInProgress?'退回中':cls.stateConflict?'终态矛盾待核验':
+        cls.pod?'POD':cls.returned?'退回':cls.cancelled?'订单取消':
+        text(payload.primaryCategory || payload.currentMainCategory || payload.主分类 || payload.异常分类 || stateName);
       const lastEventTime = text(current?.lastEventTime || payload.latestEventTime || payload.最后节点时间 || '');
       const trackingStatus = cls.terminal ? 'TERMINAL' : 'OPEN';
       const closeReason = cls.reason;
       if (!oldLedger) missingLedger += 1;
       if (!carry) missingCarry += 1;
-      if (!cls.terminal && carry && (text(carry.status).toUpperCase() === 'CLOSED' || text(carry.closeReason))) reopened += 1;
+      if (!cls.terminal && (forceReset || (carry && (text(carry.status).toUpperCase() === 'CLOSED' || text(carry.closeReason))))) reopened += 1;
       if (cls.terminal) terminal += 1; else open += 1;
       const apiStatus = text(current?.apiStatus || carry?.apiStatus || 'PENDING_SCAN');
       const before = compactLedger(oldLedger || carry || {});
-      carryUpsert.run(bill,type,firstReportDate,lastImportedDate,sourceSnapshotId,lastSnapshotId,trackingStatus === 'TERMINAL' ? 'CLOSED' : 'OPEN',apiStatus,closeReason,JSON.stringify(payload),carry?.createdAt || now,now);
+      const ledgerPayload={...payload,currentState:stateName,
+        shipmentStatusConflict:Boolean(cls.stateConflict||payload.shipmentStatusConflict===true),
+        ...(verifiedWhppPodTime?{POD时间:verifiedWhppPodTime,podTime:verifiedWhppPodTime,
+          podTimeEvidenceSource:'WHPP_SAVED_POD_LOCK'}:{})};
+      carryUpsert.run(bill,type,firstReportDate,lastImportedDate,sourceSnapshotId,lastSnapshotId,trackingStatus === 'TERMINAL' ? 'CLOSED' : 'OPEN',apiStatus,closeReason,JSON.stringify(ledgerPayload),carry?.createdAt || now,now);
       ledgerUpsert.run(
         bill,type,firstReportDate,lastImportedDate,sourceSnapshotId,lastSnapshotId,trackingStatus,closeReason,
         cls.terminal ? (text(oldLedger?.terminalAt) || lastEventTime || now) : '',stateName,category,lastEventTime,podDate,attemptNo,attemptSource,signingDays,
         oldStrict ? text(oldLedger?.evidenceJson || '{}') : JSON.stringify({ source:'V246_RECONCILE', reason, sourceFirstReportDate:source.firstReportDate, sourceLastImportedDate:source.lastImportedDate }),
-        JSON.stringify(payload),text(oldLedger?.lastCheckedAt || current?.updatedAt || carry?.updatedAt || ''),reason,oldLedger?.createdAt || carry?.createdAt || now,now
+        JSON.stringify(ledgerPayload),text(oldLedger?.lastCheckedAt || current?.updatedAt || carry?.updatedAt || ''),reason,oldLedger?.createdAt || carry?.createdAt || now,now
       );
-      if (!oldLedger || !carry || (!cls.terminal && carry && (text(carry.status).toUpperCase() === 'CLOSED' || text(carry.closeReason)))) {
+      if (!oldLedger || !carry || forceReset || (!cls.terminal && carry && (text(carry.status).toUpperCase() === 'CLOSED' || text(carry.closeReason)))) {
         const after = compactLedger(ledgerGet.get(bill) || {});
-        const action = !oldLedger ? 'ADD_LEDGER' : !carry ? 'RECOVER_CARRY' : 'REOPEN_NON_TERMINAL';
+        const action = !oldLedger ? 'ADD_LEDGER' : !carry ? 'RECOVER_CARRY' : forceReset ? 'RECONCILE_TMS_TERMINAL_OVERRIDE' : 'REOPEN_NON_TERMINAL';
         auditInsert.run(bill,type,action,reason,JSON.stringify(before),JSON.stringify(after),now);
         if (repairedSamples.length < 20) repairedSamples.push(bill);
       }

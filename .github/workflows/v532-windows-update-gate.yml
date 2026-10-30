@@ -31,5 +31,8 @@ jobs:
           if ($src -notmatch "assert\.doesNotMatch\(stable,/shell-structure-mutation/") { throw "V610 retirement assertion missing from runner worktree" }
       - name: V505 coordinator Windows regression
         run: node --test test/v505-purge-coordinator.test.js
+      - name: V788 real managed-updater receipt recovery on Windows
+        shell: powershell
+        run: ./scripts/v788-managed-receipt-runtime-smoke.ps1
       - name: Exact managed-updater go-live gate on Windows
         run: npm run test:golive

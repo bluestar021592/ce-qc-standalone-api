@@ -5,6 +5,8 @@
   let openedAt=0;
   let active=false;
   let timer=null;
+  let cp72PreflightReady=false;
+  let requiresReconciliation=false;
   const node=id=>document.getElementById(id);
   const escapeText=value=>String(value??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
 
@@ -61,7 +63,7 @@
     const countdown=node('directPurgeCountdown');
     const remain=Math.max(0,5-elapsedSeconds());
     if(countdown)countdown.textContent=remain>0?`请等待 ${remain} 秒`:'已完成安全倒计时，可最终确认清空';
-    if(button)button.disabled=active||remain>0||String(phrase?.value||'')!==PHRASE;
+    if(button)button.disabled=active||requiresReconciliation||!cp72PreflightReady||remain>0||String(phrase?.value||'')!==PHRASE;
   }
   function startClock(){
     clearInterval(timer);
@@ -72,14 +74,36 @@
 
   async function openDirectDataPurge(){
     if(active)return;
+    if(requiresReconciliation)return alert('上一笔直接清空请求的结果需要只读核对，本页面禁止再次提交。请先核对后台业务表与任务状态。');
+    cp72PreflightReady=false;
     const session=await ensureAdminSession();
     if(!session)return;
-    if(!global.confirm('打开直接清空向导？不会创建新备份，也不会启用V505安全封锁。只有最终再次确认后才会删除业务数据。'))return;
+    let preflight;
+    try{
+      preflight=await requestJson('/api/admin/data-purge/direct/preflight',{},10000);
+    }catch(error){
+      if(isAuthExpired(error)){redirectToLogin();return;}
+      alert('72个门店编码的只读预检暂不可用，清空已安全停止。未删除任何数据。');
+      return;
+    }
+    cp72PreflightReady=preflight.cp72Ready===true&&Number(preflight.activeCpCount)===72
+      &&preflight.dataStorageReady===true&&preflight.safeToStartClear===true;
+    if(preflight.alreadyClearedNoFreshBusiness===true)
+      return alert('检测到上一笔清空已提交，当前业务表仍为空。禁止重复清空；请先重新启动APP并按流程上传新的日报。');
+    if(!cp72PreflightReady)
+      return alert('清空已被阻止：72个有效CP门店码不完整、主数据盘不可用或安全预检未通过。没有删除任何数据。');
+    const installed=preflight.version||{};
+    if(installed.installedOnLocalMain!==true||installed.cachedMainMatchesInstalled!==true
+      ||installed.formalUpdateVerified!==true
+      ||installed.installedThroughManagedUpdaterVerified!==true)
+      return alert('清空已被阻止：没有正式托管更新器的安装凭据；候选版、旧版或手工切换main都不能清空。');
+    if(!global.confirm('本机安装提交 '+String(installed.installedCommit||'').slice(0,12)+
+      ' 已与本地 main 记录一致；此检查不代表已联网确认最新版。打开清空向导？已有备份保留，只有最终确认后才删除业务数据。'))return;
     openedAt=Date.now();
     const dialog=node('directPurgeDialog');if(dialog)dialog.hidden=false;
     const phrase=node('directPurgePhrase');if(phrase)phrase.value='';
     const preview=node('directPurgePreview');
-    if(preview)preview.innerHTML='<div class="purge-warning"><b>直接清空模式：不创建备份，不启用安全封锁。</b><br><small>仍使用 ADMIN 权限校验、5秒倒计时、最终确认和单次 SQLite 事务。用户、权限、配置、白名单和审计会保留；CE QC 历史备份和可再生成业务文件会同步清理。</small></div>';
+    if(preview)preview.innerHTML='<div class="purge-warning"><b>72个有效CP门店编码已通过只读预检。</b><br><small>不会新建备份；现有备份会保留。清空业务表及可再生成导出缓存；原始日报文件和历史证据归档保留，不自动恢复为新业务数据。用户、权限、72个有效CP配置与审计保留；后台还会在事务中再次核验CP配置。</small></div>';
     startClock();
   }
   function closeDirectDataPurge(){
@@ -97,8 +121,7 @@
     COMMITTING:'正在提交清空事务',
     COMMITTED:'清空事务已提交',
     RECLAIMING_SPACE:'正在释放数据库磁盘空间',
-    FILE_CLEANUP:'正在清理备份和业务缓存',
-    FILE_CLEANUP:'正在清理临时文件',
+    FILE_CLEANUP:'正在清理可再生成业务文件（已有备份保留）',
     SUCCEEDED:'清空完成',
     FAILED:'清空失败'
   };
@@ -131,10 +154,16 @@
         if(state==='FAILED'){
           const error=new Error(status.error||status.message||'直接清空失败。');
           error.code=String(status.code||'DIRECT_PURGE_FAILED');
+          // Terminal worker failure is authoritative; do not retry a FAILED job
+          // just because the backend uses a non-DIRECT_PURGE error code.
+          error.terminalPurgeJobFailure=true;
           throw error;
         }
       }catch(error){
-        if(String(error?.code||'')==='DIRECT_PURGE_FAILED'||String(error?.code||'').startsWith('DIRECT_PURGE_WORKER'))throw error;
+        if(error?.terminalPurgeJobFailure===true
+          || String(error?.code||'')==='DIRECT_PURGE_FAILED'
+          || String(error?.code||'').startsWith('DIRECT_PURGE_WORKER')
+          || (Number(error?.status||0)>=400&&Number(error?.status||0)<500))throw error;
         failures+=1;
         if(failures>=20)throw error;
       }
@@ -148,7 +177,7 @@
     updateDirectPurgeButton();
     const button=node('directPurgeExecuteButton');
     if(button?.disabled)return alert('请准确输入“永久清除全部业务数据”，并等待5秒倒计时结束。');
-    if(!global.confirm('最终确认：现在将直接永久清空全部业务数据。不会创建新备份。用户、权限、配置、白名单和审计会保留；CE QC 历史备份和可再生成业务文件会同步清理。是否继续？'))return;
+    if(!global.confirm('最终确认：永久清空全部业务数据及可再生成业务文件。不会新建备份，已有备份、原始日报文件及历史证据归档会保留；72个CP门店编码、用户、权限、配置和审计也会保留。是否继续？'))return;
     active=true;stopClock();
     if(button)button.disabled=true;
     const phrase=node('directPurgePhrase');if(phrase)phrase.disabled=true;
@@ -162,14 +191,18 @@
       renderJobStatus(queued,started);
       const result=await waitForDirectPurge(queued,started);
       const deleted=Number(result.deletedRows||0);
-      if(preview)preview.innerHTML=`<div class="purge-success"><b>全部业务数据已直接清空。</b><br>共删除 <b>${deleted.toLocaleString()}</b> 行业务记录。<br><small>未创建或保留 CE QC 业务备份；用户、权限、配置、白名单和审计已保留。现在可以重新上传新的日报数据。</small></div>`;
+      if(preview)preview.innerHTML=`<div class="purge-success"><b>全部业务数据已直接清空。</b><br>共删除 <b>${deleted.toLocaleString()}</b> 行业务记录。<br><small>本次未新建备份，原有备份、原始日报及历史证据归档已保留；用户、权限、72个CP配置及审计已保留。请先通过原来的系统快捷方式完整关闭并重新打开 APP，重新登录后再上传日报，以便自动轨迹追踪读取新启动标记。</small></div>`;
     }catch(error){
       active=false;
+      // The request may have reached the worker even if its final response is
+      // unavailable. Freeze this destructive wizard until an independent read-only
+      // reconciliation; NEVER silently re-enable its submit button.
+      requiresReconciliation=true;
+      cp72PreflightReady=false;
+      if(button)button.disabled=true;
+      if(phrase)phrase.disabled=true;
       if(isAuthExpired(error)){redirectToLogin();return;}
-      if(phrase)phrase.disabled=false;
-      if(preview)preview.innerHTML=`<div class="purge-error"><b>直接清空未完成。</b><br>${escapeText(error.message||error)}<br><small>未显示成功前不要重复点击；把此错误直接发给开发处理即可。</small></div>`;
-      openedAt=Date.now()-5000;
-      startClock();
+      if(preview)preview.innerHTML=`<div class="purge-error"><b>清空结果尚不能确认为成功或未执行，已禁止重复提交。</b><br>${escapeText(error.message||error)}<br><small>先只读核对后台任务状态、业务表及72个门店编码，再决定后续操作。请勿再次清空或上传新日报。</small></div>`;
       return;
     }
     active=false;
@@ -179,7 +212,7 @@
   global.closeDirectDataPurge=closeDirectDataPurge;
   global.executeDirectDataPurge=executeDirectDataPurge;
   global.updateDirectPurgeButton=updateDirectPurgeButton;
-  global.__CE_QC_V560_DIRECT_PURGE__={patchId:PATCH_ID,getStatus:()=>({active,openedAt})};
+  global.__CE_QC_V560_DIRECT_PURGE__={patchId:PATCH_ID,getStatus:()=>({active,openedAt,requiresReconciliation})};
   Promise.resolve().then(()=>ensureAdminSession()).catch(error=>{
     const preview=node('directPurgePreview');
     if(preview)preview.innerHTML=`<div class="purge-error"><b>管理员身份检查失败。</b><br>${escapeText(error?.message||error)}</div>`;

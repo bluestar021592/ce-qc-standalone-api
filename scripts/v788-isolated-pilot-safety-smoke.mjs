@@ -1,0 +1,60 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+const launcher=fs.readFileSync('tools/CE_QC_V788_隔离试用.ps1','utf8');
+const source=fs.readFileSync('scripts/v788-create-isolated-pilot-snapshot.mjs','utf8');
+// This is not a browser demo and not a production installation.
+// Source can only be the exact separate acceptance copy.
+assert.match(launcher,/\[Parameter\(Mandatory=\$true\)\]\[string\]\$ExpectedSha/);
+assert.match(launcher,/\$ExpectedSha -match '\^\[a-fA-F0-9\]\{40\}\$'/);
+assert.match(launcher,/rev-parse','FETCH_HEAD/);
+assert.match(launcher,/Candidate SHA changed/);
+assert.match(launcher,/git worktree add --detach/);
+assert.match(launcher,/git worktree remove --force/);
+assert.match(launcher,/Port=5278/);
+assert.match(launcher,/TcpListener.*127\.0\.0\.1/);
+assert.match(launcher,/\$env:HOST='127\.0\.0\.1'/);
+assert.match(launcher,/\$env:DB_FILE=\$PilotDb/);
+assert.match(launcher,/\$env:DATA_DIR=\$PilotData/);
+assert.match(launcher,/\$env:LOCALAPPDATA=\(Join-Path \$Sandbox 'localapp'\)/);
+assert.match(launcher,/CE_QC_BACKGROUND_MAINTENANCE_ENABLED='0'/);
+assert.match(launcher,/CE_QC_SKIP_STARTUP_POD_REPAIR='1'/);
+assert.match(launcher,/CE_QC_AUTH_SIDECAR_PORT='5280'/);
+assert.match(launcher,/CE_QC_AUTH_SIDECAR_HOST='127.0.0.1'/);
+assert.match(launcher,/CE_QC_EXPORT_SIDECAR_PORT='5281'/);
+assert.match(launcher,/CE_QC_V788_PILOT_ISOLATED='1'/);
+assert.match(launcher,/\$env:CE_QC_LOCAL_SESSION_SECRET=\[Convert\]::ToBase64String\(\$PilotSecretBytes\)/,
+  'isolated main process and sidecar must inherit the same ephemeral auth signing secret');
+assert.match(launcher,/CE_QC_V788_PILOT_ISOLATED','CE_QC_LOCAL_SESSION_SECRET'/,
+  'the pilot must restore any prior session-secret environment on exit');
+assert.match(launcher,/RandomNumberGenerator\]::Create\(\)/,
+  'pilot signing secret must be CSPRNG-derived rather than a shared production secret');
+assert.doesNotMatch(launcher,/Write-Host[^\n]*CE_QC_LOCAL_SESSION_SECRET|Write-Host[^\n]*PilotSecretBytes/i,
+  'never print pilot signing material to console');
+assert.match(launcher,/CE_QC_V788_PILOT_CI_NO_BROWSER/);
+assert.ok(launcher.includes('node scripts/v788-pilot-login-session-smoke.mjs'),
+  'real Windows pilot must verify its 5278 login and 5280 auth binding before PASS');
+const loginProof=fs.readFileSync('scripts/v788-pilot-login-session-smoke.mjs','utf8');
+assert.match(loginProof,/GITHUB_ACTIONS/);
+assert.match(loginProof,/CE_QC_V788_PILOT_ISOLATED/);
+assert.match(loginProof,/CE_QC_V788_试用沙盒/);
+assert.ok(loginProof.includes('api/local-auth-proxy/login'));
+assert.ok(loginProof.includes('api/session'));
+assert.match(loginProof,/DELETE FROM users WHERE username=/);
+
+const authController=fs.readFileSync('src/accessControl.js','utf8');
+const authChild=fs.readFileSync('src/localAuthSidecar.js','utf8');
+assert.match(authController,/CE_QC_V788_PILOT_ISOLATED==='1' \? 'ce_qc_local_auth_v788_pilot' : 'ce_qc_local_auth_v431'/);
+assert.match(authChild,/CE_QC_V788_PILOT_ISOLATED==='1' \? 'ce_qc_local_auth_v788_pilot' : 'ce_qc_local_auth_v431'/);
+
+assert.match(launcher,/node scripts\/v788-create-isolated-pilot-snapshot\.mjs/);
+assert.match(launcher,/if\(\$Sandbox -eq 'D:\\CE_QC_V788_试用沙盒'\)/);
+assert.doesNotMatch(launcher,/\bgit\s+(checkout|reset|pull|switch)\b/i);
+assert.doesNotMatch(launcher,/\\CE CCSL金边数据库\\ce_qc_monitor\.db/i);
+assert.match(source,/new DatabaseSync\(source,\{readOnly:true\}\)/);
+assert.match(source,/src\.exec\('PRAGMA query_only=ON'\)/);
+assert.match(source,/await backup\(src,full\+'\.partial'\)/);
+assert.match(source,/V788_PILOT_OUTPUT_MUST_BE_IN_SANDBOX/);
+assert.match(source,/V788_PILOT_ISOLATED_PATH_REQUIRED/);
+assert.match(source,/V788_PILOT_SOURCE_CHANGED_DURING_COPY/);
+assert.doesNotMatch(source,/new DatabaseSync\(SOURCE\)/);
+console.log('[V788_PILOT_STATIC_GATE] PASS isolated exact-SHA worktree, temporary D sandbox, readOnly DB backup and localhost-only backend');

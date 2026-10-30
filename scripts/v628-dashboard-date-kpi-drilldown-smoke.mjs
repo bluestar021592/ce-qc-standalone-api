@@ -21,7 +21,7 @@ assert.match(js,/p\.set\('reportDate',reportDate\)/,'query button must persist s
 assert.match(js,/p\.delete\('snapshotId'\)/,'changing date must not retain stale snapshot');
 assert.match(js,/const summaryPromise=new Promise\(resolve=>setTimeout\(resolve,900\)\)/,'selected-date timing summary must remain non-blocking and deferred after fast KPI first paint');
 assert.match(js,/new URLSearchParams\(\{scope:'all',businessType:targetBusiness\}\)/,'business KPI drilldown must load only the captured selected business membership rows');
-assert.match(js,/function renderKpiDetail\(kind\)/,'business KPI drilldown renderer missing');
+assert.match(js,/function renderKpiDetail\(kind,requestedPage=0,shouldScroll=true\)/,'business KPI drilldown renderer must preserve drilldown plus bounded paging');
 assert.match(js,/function buildBusinessAccounting\(state=\{\},fallback=\{\}\)/,'delivery drilldown must use exclusive same-state accounting');
 assert.match(js,/rowsByKind\.delivery\.push\(row\)/,'delivery detail must come from the same exclusive accounting bucket');
 

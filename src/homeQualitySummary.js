@@ -848,6 +848,44 @@ export async function buildHomeQualitySummaryWithArchive(options={}){
   ]));
   return{...base,timing:Object.fromEntries(timingEntries),historicalEvidenceRecovery:{state:'COMPLETED',readOnly:true},timingEvidenceRepair:repairSummary};
 }
+// V788: return KPI read-only verification, independently hydrated from
+// time-consuming historical signing-time computation.
+export function buildHomeReturnVerification({reportDate='',snapshotId=''}={}){
+  const batch=selectUnifiedBatch({reportDate,snapshotId});
+  if(!batch)return{ok:true,selectionMatched:false,reportDate:String(reportDate||''),
+    snapshotId:String(snapshotId||''),returns:{}};
+  const canonical=classificationForBatch(batch).counts||{};
+  const returns={};
+  for(const type of ['WHPP','SHOPEECN','SHOPEEVN']){
+    const expected=n(canonical[type],0);
+    try{
+      const sourceRows=type==='WHPP'
+        ?(loadWhppCanonicalTruth(batch.reportDate,batch.snapshotId||'').rows||[])
+        :membershipFinalRows(batch.snapshotId,batch.reportDate,type);
+      const bills=new Set(sourceRows.map(row=>String(row?.shipmentCode||'').trim().toUpperCase()).filter(Boolean));
+      if(bills.size!==expected||sourceRows.length!==expected)
+        throw Error('RETURN_SOURCE_MEMBERS_UNVERIFIED');
+      if(type!=='WHPP'&&expected>0){
+        const finalCount=Number(getDb().prepare(`SELECT COUNT(DISTINCT UPPER(TRIM(f.shipmentCode))) count
+          FROM business_final_rows f JOIN unified_import_rows u
+            ON u.shipmentCode=f.shipmentCode AND u.reportDate=f.reportDate
+          WHERE f.businessType='SHOPEE' AND f.reportDate=?
+            AND u.snapshotId=? AND u.businessType=?`).get(batch.reportDate,batch.snapshotId,type)?.count||0);
+        if(finalCount!==expected)throw Error('RETURN_FINAL_MEMBERS_UNVERIFIED');
+      }
+      const summary=returnSummaryForBatch(batch,type);
+      if(!Number.isFinite(summary.count)||summary.count<0||summary.count>expected
+        ||Number(summary.total)!==expected)throw Error('RETURN_SUMMARY_NOT_RECONCILED');
+      returns[type]={count:summary.count,rate:expected?
+        Number((summary.count*100/expected).toFixed(2)):0,total:expected,verified:true};
+    }catch(error){
+      returns[type]={count:null,rate:null,total:expected,verified:false,
+        reason:String(error?.message||error).slice(0,120)};
+    }
+  }
+  return{ok:true,selectionMatched:true,reportDate:batch.reportDate,
+    snapshotId:batch.snapshotId,returns,source:'EXACT_DATED_READ_ONLY_RETURNS'};
+}
 export function buildHomeQualitySummary(options={}) {
   const latest=selectUnifiedBatch(options);
   const history=listUnifiedImportHistory(30);

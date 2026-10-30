@@ -78,12 +78,14 @@ function latestDailyPodBillsForSource(db,date,businessType,sourceRows=[]){
 export function persistentSelectedDatePodTruth(db,businessType='',reportDate=''){
   const type=String(businessType||'').trim().toUpperCase(),date=dateKey(reportDate);
   if(!date)return{authoritative:false,bills:[],sourceCount:0,resolvedCount:0,source:'REPORT_DATE_MISSING'};
+  // WHPP is imported independently through business_daily_parse_rows.
+  // Never require a unified_import_batches row just to find its POD members.
   const batch=latestValidBatch(db,date);
-  if(!batch)return{authoritative:false,bills:[],sourceCount:0,resolvedCount:0,source:'LATEST_VALID_BATCH_MISSING'};
+  if(!batch&&type!=='WHPP')return{authoritative:false,bills:[],sourceCount:0,resolvedCount:0,source:'LATEST_VALID_BATCH_MISSING'};
 
   try{
     if(type==='WHPP'){
-      const truth=loadWhppCanonicalTruth(date,String(batch.snapshotId||''),db);
+      const truth=loadWhppCanonicalTruth(date,String(batch?.snapshotId||''),db);
       const rows=Array.isArray(truth?.rows)?truth.rows:[];
       const bills=rows
         .filter(row=>row?.truthEvidence?.pod===true||Number(row?.isPod||0)===1||row?.是否POD==='是'||String(row?.currentState||'').toUpperCase()==='POD')

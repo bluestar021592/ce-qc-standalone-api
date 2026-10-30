@@ -25,6 +25,25 @@ export async function createShopeeTemplateWorkbook({ type, periodType, range, sn
   assertTemplate(workbook);
   repairReturnLinks(workbook);
 
+  // A single shipment can appear in separate daily source reports. Never
+  // collapse separate report dates, and never silently lose a cross-business
+  // collision within one source day on the combined workbook.
+  for(const snapshot of snapshots){
+    const sourceRows=normalizeRows(snapshot.payload?.finalRows);
+    const owners=new Map();
+    for(const row of sourceRows){
+      const code=bill(row),owner=String(row.businessType||'').trim().toUpperCase();
+      if(!code||!owner||(type!=='ALL'&&owner!==type))continue;
+      const previous=owners.get(code);
+      if(previous&&previous!==owner)throw new Error(
+        '七业务导出冲突：'+snapshot.reportDate+' 的运单 '+code+
+        ' 同时归属于 '+previous+' 与 '+owner+'，请先修正业务归类后再导出');
+      if(previous===owner)throw new Error(
+        '报表来源重复：'+snapshot.reportDate+' 的 '+owner+' 运单 '+code+
+        ' 在同一业务快照出现多次，请先核对重复来源');
+      owners.set(code,owner);
+    }
+  }
   const datedRows = snapshots.map(snapshot => ({
     date: snapshot.reportDate,
     rows: uniqueRows(normalizeRows(snapshot.payload?.finalRows)
@@ -197,16 +216,24 @@ function appendPvOpenDetailPrepared(workbook, name, range, prepared, bucketKey) 
 function clearDataRows(sheet, startRow) {
   for (let rowNumber = startRow; rowNumber <= sheet.rowCount; rowNumber += 1) {
     const row = sheet.getRow(rowNumber);
-    for (let column = 1; column <= 15; column += 1) row.getCell(column).value = null;
+    for (let column = 1; column <= DETAIL_HEADERS.length; column += 1) row.getCell(column).value = null;
   }
 }
 
 function detailValues(row) {
+  const outcomeEvidence=String(row.terminalEvidenceStatus||'').toUpperCase();
+  const projected=['STRICT_TMS','NORMALIZED_LABEL_ONLY','CONFLICT','NONTERMINAL_80'].includes(outcomeEvidence);
+  // Do not print an obsolete raw Y/R status from the source row after the
+  // current terminal projection has already corrected its POD/return result.
+  const statusMark=projected
+    ?(isPod(row)?'Y':isReturned(row)?'R':
+      outcomeEvidence==='CONFLICT'?'待核验':outcomeEvidence==='NONTERMINAL_80'?'80':'')
+    :(row.statusCode||row.状态标识||(isReturned(row)?'R':isPod(row)?'Y':''));
   return [
     row.reportDate||'',
     bill(row),
     row.orderTime||row.下单时间||'',
-    row.statusCode||row.状态标识||(isReturned(row)?'R':isPod(row)?'Y':''),
+    statusMark,
     row.statusDesc||row.状态说明||row.currentState||row.primaryCategory||'',
     row.recipientProvince||row.收件省份||'',
     regionLabel(row),
@@ -294,7 +321,19 @@ function setMergedFormula(sheet, row, column, target, display) { sheet.getCell(r
 function setMergedValue(sheet,row,column,value){sheet.getCell(row,column).value=value;sheet.getCell(row,column+1).value=value;}
 function hyperlink(target, display) { const text = typeof display === 'string' ? `"${display.replaceAll('"', '""')}"` : Number(display || 0); return { formula: `HYPERLINK("#${target}!A1",${text})`, result: display }; }
 function copyRowStyle(source, target) { target.height = source.height; source.eachCell({ includeEmpty: true }, (cell, col) => { target.getCell(col).style = { ...cell.style }; }); }
-function uniqueRows(rows) { const map = new Map(); for (const row of rows) { const code = bill(row); if (code) map.set(code, row); } return [...map.values()]; }
+function uniqueRows(rows) {
+  const map=new Map();
+  for(const row of rows){
+    const code=bill(row);
+    if(!code)continue;
+    // Both scopes matter. The previous bill-only key discarded shipments
+    // appearing on consecutive report dates and hid cross-business owners.
+    const date=String(row.reportDate||'').slice(0,10);
+    const type=String(row.businessType||'').trim().toUpperCase();
+    map.set(date+'|'+type+'|'+code,row);
+  }
+  return [...map.values()];
+}
 function normalizeRows(value) { return Array.isArray(value) ? value : value && typeof value === 'object' ? Object.values(value) : []; }
 function bill(row = {}) { return String(row.shipmentCode || row.运单号 || row.运单编号 || '').trim().toUpperCase(); }
 function region(row = {}) {
@@ -319,6 +358,12 @@ function detailUrl(row = {}) {
   return `${base}/detail?${query.toString()}`;
 }
 function isPod(row = {}) {
+  // Never re-close a shipment that the final export overlay explicitly
+  // marked contradictory, even if old scan/JSON proof still says POD.
+  const terminalStatus=String(row.terminalEvidenceStatus||'').toUpperCase();
+  if(['CONFLICT','NONTERMINAL_80'].includes(terminalStatus))return false;
+  if(['STRICT_TMS','NORMALIZED_LABEL_ONLY'].includes(terminalStatus))
+    return String(row.currentState||'').toUpperCase()==='POD';
   const status=String(row.shipmentStatus||'').trim();
   if(status==='80'||status==='81')return false;
   return status==='60'||row.truthEvidence?.pod===true||Number(row.isPod||0)===1
@@ -326,6 +371,10 @@ function isPod(row = {}) {
     ||String(row.orderStatus||'')==='85'||row.是否POD==='是';
 }
 function isReturned(row = {}) {
+  const terminalStatus=String(row.terminalEvidenceStatus||'').toUpperCase();
+  if(['CONFLICT','NONTERMINAL_80'].includes(terminalStatus))return false;
+  if(['STRICT_TMS','NORMALIZED_LABEL_ONLY'].includes(terminalStatus))
+    return String(row.currentState||'').toUpperCase()==='RETURNED';
   if(isPod(row))return false;
   const status=String(row.shipmentStatus||'').trim();
   if(status==='80')return false;

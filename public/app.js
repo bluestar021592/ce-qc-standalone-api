@@ -358,6 +358,7 @@ function renderAll() {
   renderAuthPanels();
   renderNetworkSettings();
   if (currentPage === 'settings') void runPageLoad('settings-users', loadUserManagement, 30000);
+  if (currentPage === 'settings') void runPageLoad('settings-v788-evidence', loadV788WhppEvidenceStatus, 8000);
   if (currentPage === 'home') renderHome();
   else if (['ce', 'ceaf', 'tbkh', 'ali1688'].includes(currentPage)) renderCcslPage();
   else if (['shopeecn', 'shopeevn'].includes(currentPage)) renderShopeePage();
@@ -790,7 +791,7 @@ function renderSystemStatus() {
   const carry = Number(appState.carry || 0) + Number(shopeeState.carry || 0);
   document.getElementById('sideSystemStatus').innerHTML = `
     <strong>系统状态</strong>
-    ${statusLine('CE API连接', ceAuth.loggedIn ? '正常' : '未登录', ceAuth.loggedIn)}
+    ${statusLine('CE接口凭证', isCeApiSessionUsable(ceAuth) ? '本地未过期' : (ceAuth.loggedIn ? '已过期或即将过期' : '未登录'), isCeApiSessionUsable(ceAuth))}
     ${statusLine('数据库状态', db.ok ? '正常' : '异常', db.ok)}
     ${statusLine('存储状态', db.usingFallbackDataDir ? '备用目录' : '正常', !db.usingFallbackDataDir)}
     ${statusLine('POD锁状态', `${formatInt(podLocks)}条`, true)}
@@ -1938,10 +1939,98 @@ function runStatusMarkup(state) {
   return `${statusPill(runStatusText(state), state.runStatus === 'finished')}<p>当前阶段：${escapeHtml(processing.phase || '待处理')}</p><p>${label}：${formatInt(done)} / ${formatInt(total)} · 单批最大${batchSize}</p>`;
 }
 
+function isCeApiSessionUsable(auth = {}) {
+  // Local QC login is separate from the CE API token. A stored token can be
+  // expired while summarizeToken() still reports loggedIn=true.
+  if (!auth?.loggedIn || !auth?.hasAccessToken || auth?.expired === true) return false;
+  if (auth?.expiresAt && !(Number(auth.expiresInSeconds) > 120)) return false;
+  return true;
+}
+
+// V788 in-app evidence check: no ZIP, CMD or separate upload required.
+// It does NOT run until an administrator explicitly clicks confirmation.
+let v788EvidenceInFlight=false;
+let v788EvidencePoll=null;
+async function loadV788WhppEvidenceStatus() {
+  const panel=document.getElementById('v788WhppEvidencePanel');
+  const info=document.getElementById('v788WhppEvidenceText');
+  const start=document.getElementById('v788WhppEvidenceStart');
+  if(!panel||!info||!start||currentPage!=='settings')return;
+  panel.hidden=false;
+  try{
+    const data=await api('/api/v788/whpp-evidence/status');
+    const waiting=Boolean(data.active||data.status==='RUNNING');
+    const covered=Number(data.savedMembers||0),batches=Number(data.completedBatches||0);
+    const allBatchesPresent=covered===346&&batches===8;
+    const isFull=allBatchesPresent&&data.savedStatus==='346_TMS_ROWS_STAGED_NOT_BUSINESS_ACCEPTED'
+      &&data.isolatedCopyUnchanged===true&&data.distributionMatchesV3===true
+      &&Number(data.evidenceConflicts||0)===0&&data.sidecarVerified===true;
+    // A process restart may leave all eight batches committed while the
+    // previous report still says RUNNING. That needs safe resumption, not
+    // a blocked terminal "conflicting evidence" verdict.
+    const restartFinalize=allBatchesPresent&&data.status==='INTERRUPTED_RETRYABLE';
+    const needsReview=allBatchesPresent&&!isFull&&!restartFinalize;
+    const lines=[];
+    if(isFull){
+      lines.push('WHPP历史状态只读预览可用：346/346票，POD '+Number(data.pod||0)+'票，已退回 '+Number(data.returned||0)+'票。');
+      for(const day of data.statusOnlyPreview?.dates||[]){
+        if(!['2026-07-01','2026-07-02'].includes(day.date))continue;
+        lines.push(day.date+'：'+Number(day.total||0)+'票，POD '+Number(day.pod||0)+'票、已退回 '+Number(day.returned||0)+'票。');
+      }
+    }
+    else if(waiting)lines.push('正在核验，已保存 '+covered+'/346票；完成 '+batches+'/8批。页面可以保持打开。');
+    else if(restartFinalize)lines.push('已找到8批346票历史证据，但上次运行在写入最终报告前中断。可点击“继续安全核验”完成本地复核；无需清空或重传日报。');
+    else if(data.status==='INTERRUPTED_RETRYABLE'||data.status==='STOPPED_RETRYABLE')
+      lines.push('隔离核验中断：已保存 '+covered+'/346票、'+batches+'/8批。可从已有批次继续，不会重新扫描日报。');
+    else if(data.status==='FAILED')lines.push('核验失败：'+String(data.message||'请检查CE登录状态及隔离副本'));
+    else if(needsReview)lines.push('汇总报告显示346票，但逐票证据文件或状态一致性尚未通过复核。请检查隔离副本，不会自动修改数据或重复查询。');
+    else if(covered>0)lines.push('已有证据 '+covered+'/346票；完成 '+batches+'/8批，可继续补齐。');
+    else lines.push('尚未保存逐票证据；已完成的346票只读对账无需再上传。');
+    lines.push('试用范围只限上述历史状态只读预览；未核验签收时间、历史账本闭环和正式导出均不可宣称通过。不会修改正式数据库。');
+    info.textContent=lines.join(' ');
+    // All eight persisted batches only need offline verification after an
+    // APP restart. Requiring a fresh CE login here would force needless TMS
+    // credentials into a ZERO-query finalization.
+    const offlineFinalize=restartFinalize&&covered===346&&batches===8;
+    const loginMissing=!isCeApiSessionUsable(ceAuth);
+    start.disabled=waiting||v788EvidenceInFlight||isFull||needsReview
+      ||(loginMissing&&!offlineFinalize)||data.platformReady!==true;
+    start.textContent=waiting?'隔离核验进行中…':isFull?'346票已留存'
+      :needsReview?'需复核，禁止重复查询'
+      :data.resumeAvailable?'继续安全核验（保留已有批次）':'开始隔离核验（346票）';
+    if(loginMissing&&!isFull&&!offlineFinalize)
+      info.textContent+=' CE系统接口凭证未就绪，若需要继续TMS查询，请先在上方重新登录CE系统。';
+    if(v788EvidencePoll){clearTimeout(v788EvidencePoll);v788EvidencePoll=null;}
+    if(waiting&&currentPage==='settings')
+      v788EvidencePoll=setTimeout(()=>{void loadV788WhppEvidenceStatus()},4000);
+  }catch(error){
+    info.textContent='核验状态暂时无法读取：'+String(error?.message||'请稍后刷新')+'。没有启动TMS查询。';
+    start.disabled=true;
+  }
+}
+async function startV788WhppEvidence(){
+  const button=document.getElementById('v788WhppEvidenceStart');
+  if(v788EvidenceInFlight||button?.disabled)return;
+  if(!window.confirm('确认只对D盘V788隔离副本的346票查询TMS并保存独立证据？正式数据库、POD时间和历史账本不会修改。'))return;
+  v788EvidenceInFlight=true;
+  if(button)button.disabled=true;
+  try{
+    await api('/api/v788/whpp-evidence/start',{
+      method:'POST',headers:{'content-type':'application/json'},
+      body:JSON.stringify({acknowledgeIsolatedQuery:true})
+    });
+    await loadV788WhppEvidenceStatus();
+  }catch(error){
+    const target=document.getElementById('v788WhppEvidenceText');
+    if(target)target.textContent='核验没有启动：'+String(error?.message||'请检查登录状态');
+  }finally{v788EvidenceInFlight=false}
+}
+
 function renderAuthPanels() {
-  const html = ceAuth.loggedIn
+  const loginForm = `<label class="field-label">tenantId<input class="auth-tenant" value="000000" autocomplete="off"></label><label class="field-label">username<input class="auth-user" autocomplete="username"></label><label class="field-label">password<input class="auth-password" type="password" autocomplete="current-password"></label><button class="btn primary full" onclick="loginCe(this)">登录CE系统</button><div class="auth-message"></div>`;
+  const html = isCeApiSessionUsable(ceAuth)
     ? `${statusPill('CE系统已登录', true)}<p>登录用户：${escapeHtml(ceAuth.account || ceAuth.userId || '—')}</p><div class="button-row"><button class="btn ghost" onclick="showLoginForms()">重新登录</button><button class="btn ghost" onclick="logoutCe()">退出</button></div>`
-    : `<label class="field-label">tenantId<input class="auth-tenant" value="000000" autocomplete="off"></label><label class="field-label">username<input class="auth-user" autocomplete="username"></label><label class="field-label">password<input class="auth-password" type="password" autocomplete="current-password"></label><button class="btn primary full" onclick="loginCe(this)">登录CE系统</button><div class="auth-message"></div>`;
+    : `${ceAuth.loggedIn ? statusPill('CE接口凭证已过期或即将过期，请重新登录CE系统', false) : ''}${loginForm}`;
   document.getElementById('ceAuthPanel').innerHTML = html;
   document.getElementById('shopeeAuthPanel').innerHTML = html;
 }

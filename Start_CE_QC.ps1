@@ -144,7 +144,7 @@ if (Test-Path -LiteralPath $DedicatedCleanup) {
 
 $NoBackupCleanup = Join-Path $ProjectRoot 'scripts\CE_QC_NoBackup_Cleanup.mjs'
 if (Test-Path -LiteralPath $NoBackupCleanup) {
-    Write-Host '[CE-QC] No-backup policy: cleaning CE QC backups/temp data and checking CE-QC storage quickly; large live SQLite compaction is deferred so startup cannot hang...' -ForegroundColor Cyan
+    Write-Host '[CE-QC] No-new-backup policy: preserving existing backups, original uploads and evidence archive; cleaning disposable caches and checking storage safely...' -ForegroundColor Cyan
     try {
         & $NodeExe $NoBackupCleanup
         if ($LASTEXITCODE -ne 0) { Write-Host "[WARN] No-backup cleanup exited with code $LASTEXITCODE; startup will continue." -ForegroundColor Yellow }
@@ -253,7 +253,19 @@ function Test-AddressInUseLog {
 
 function Test-BackendProcessAlive($Backend) {
     if (-not $Backend -or -not $Backend.Id) { return $false }
-    try { return $null -ne (Get-Process -Id $Backend.Id -ErrorAction SilentlyContinue) } catch { return $false }
+    # Start-Process -PassThru owns a real System.Diagnostics.Process handle.
+    # On Windows Get-Process may still enumerate an already-exited process
+    # while its handle remains open. The actual exit signal is authoritative.
+    try {
+        $Backend.Refresh()
+        if ($Backend.HasExited) { return $false }
+        return $true
+    } catch {
+        try {
+            $candidate = Get-Process -Id $Backend.Id -ErrorAction Stop
+            return (-not $candidate.HasExited)
+        } catch { return $false }
+    }
 }
 
 function Get-BackendExitCode($Backend) {

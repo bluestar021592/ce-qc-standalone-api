@@ -105,6 +105,13 @@ export const BUSINESS_DATA_TABLES = [
   'dashboard_cache_dirty',
   'qc_tracking_ledger',
   'qc_tracking_audit',
+  // Historical daily membership, archives and derived signing caches must not
+  // survive a full business reset and contaminate the first clean re-import.
+  'shopee_delivery_tracking',
+  'shopee_delivery_tracking_daily',
+  'v207_daily_ownership',
+  'v209_import_source_archive',
+  'v328_attempt_daily_cache',
   'v329_three_business_daily_cache',
   'v334_generic_history_cache'
 ];

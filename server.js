@@ -3,6 +3,9 @@ import express from 'express';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs/promises';
+import fsSync from 'node:fs';
+import {DatabaseSync as V788ReadOnlyDatabaseSync} from 'node:sqlite';
+import {Worker as V788AuditWorker} from 'node:worker_threads';
 import { fileURLToPath } from 'url';
 import { networkInterfaces } from 'os';
 import { spawn } from 'node:child_process';
@@ -49,18 +52,24 @@ import {
   resetBusinessRunForReport, saveBusinessSnapshot, saveBusinessState, updateBusinessRunLock
 } from './src/businessStore.js';
 import { createPurgeChallenge, executePurge } from './src/dataPurge.js';
-import { queueDirectDataPurge, getDirectDataPurgeStatus, DIRECT_PURGE_ID } from './src/directDataPurge.js';
+import { queueDirectDataPurge, getDirectDataPurgeStatus, inspectDirectPurgeCp72Preflight, DIRECT_PURGE_ID } from './src/directDataPurge.js';
+import {inspectV788InstalledVersionEvidence} from './src/v788InstalledVersionEvidence.js';
 import { buildHomeQualitySummary, buildHomeQualitySummaryWithArchive, diagnoseSelectedDateTiming } from './src/homeQualitySummary.js';
 import { diagnoseV736Timing } from './src/v736TimingDiagnostics.js';
 import { readSelectedDateBusinessSourceTruth } from './src/v783SevenBusinessSourceTruth.js';
 import { diagnoseWhppDailyTimingSources } from './src/v745WhppTimingSourceDiagnostics.js';
 import { requestSelectedDateTimingRepair, inspectSelectedDateTimingRepair } from './src/selectedDateTimingEvidenceRepair.js';
+import { runV788Stage } from './scripts/v788-whpp-stage-tms-evidence.mjs';
+import { verifiedV788EvidenceCoverage } from './src/v788WhppStatusCoverage.js';
+import {verifyV788PersistedSidecar,v788ReadSourceMembershipSignature,previewV788WhppLedgerReconciliation} from './scripts/v788-whpp-tms-evidence-sidecar.mjs';
+import {summarizeV788WhppPodTimeSources} from './scripts/v788-whpp-pod-time-source-inventory.mjs';
 import { persistentSelectedDatePodTruth, persistentWhppCompletionTruth } from './src/selectedDatePersistentTruth.js';
 import { buildCanonicalBusinessAccounting } from './src/businessAccounting.js';
 import { buildDataIntegrityReport } from './src/dataIntegrity.js';
 import { v766ReadJob, v766ClearReadCache } from './src/v766ReadJobCoordinator.js';
 import { qcDetailRead } from './src/qcActionDetailRead.js';
 import { inspectStage0UpdateProbe } from './src/v788Stage0UpdateProbe.js';
+import { v788IsCurrentSpecialNonDelivery, v788ResolveCarryCurrentState } from './src/v788SpecialOpenTruth.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -724,6 +733,29 @@ function v766QuickHomeSummary({reportDate='',snapshotId=''}={}){
     returns:{},timing:{},timingTrend:{},timingEvidenceRepair:{active:false,types:{}}
   };
 }
+// V788 independent, exact-date read-only returned count/rate projection;
+// signing time worker may still run separately. Fail-closed when unverified.
+app.get('/api/home-return-summary',async(req,res)=>{
+  try{
+    const reportDate=String(req.query.reportDate||'').slice(0,10);
+    const snapshotId=String(req.query.snapshotId||'');
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(reportDate)||!snapshotId)
+      return res.status(400).json({ok:false,code:'HOME_RETURN_EXACT_SCOPE_REQUIRED'});
+    const pinned=fastDashboardBatch(snapshotId,reportDate);
+    if(!pinned||String(pinned.snapshotId)!==snapshotId||String(pinned.reportDate)!==reportDate)
+      return res.status(404).json({ok:false,code:'HOME_RETURN_SNAPSHOT_MISSING'});
+    const read=await v766ReadJob('HOME_RETURNS',{reportDate,snapshotId});
+    if(read.result?.reportDate!==reportDate||read.result?.snapshotId!==snapshotId
+      ||read.result?.selectionMatched!==true)throw Error('HOME_RETURN_WORKER_SCOPE_MISMATCH');
+    res.setHeader('Cache-Control','no-store');
+    res.setHeader('X-CE-QC-Read-Cache',read.cache);
+    return res.json(read.result);
+  }catch(error){
+    console.warn('[CE-QC][HOME_RETURN_VERIFICATION]',String(error?.message||error));
+    return res.status(503).json({ok:false,code:'HOME_RETURN_VERIFICATION_UNAVAILABLE',
+      error:'退回率只读核验暂不可用，不显示未核实的0票或百分比。'});
+  }
+});
 app.get('/api/home-quality-summary', async (req, res) => {
   try {
     const reportDate=String(req.query.reportDate||'');
@@ -1017,8 +1049,22 @@ app.get('/api/state/last-report', async (req, res) => {
 
 const directPurgeTerminalAudits = new Set();
 
+// This is an advisory, read-only CP72 check; the destructive SQLite
+// transaction repeats its own authoritative validation before DELETE.
+app.get('/api/admin/data-purge/direct/preflight', requireRole('ADMIN'), (req,res)=>{
+  res.setHeader('Cache-Control','no-store');
+  const check=inspectDirectPurgeCp72Preflight();
+  const version=inspectV788InstalledVersionEvidence();
+  res.json({...check,version,requiresAdministratorConfirmation:true,
+    freshBusinessExcelVerified:false,formalUpdateVerified:false,
+    readyForAutomaticDeletion:false});
+});
+
 app.post('/api/admin/data-purge/direct', requireRole('ADMIN'), async (req, res) => {
   try {
+    if(inspectV788InstalledVersionEvidence().formalUpdateVerified!==true)
+      return res.status(409).json({ok:false,code:'V788_MANAGED_RELEASE_REQUIRED',
+        error:'当前未验证通过正式托管更新器安装的版本，禁止直接清空。'});
     const queued = queueDirectDataPurge({ phrase: req.body?.phrase, user: req.user });
     try { auditAction(req, 'DATA_PURGE_DIRECT_QUEUED', { direct: true, jobId: queued.jobId, reused: queued.reused === true, patchId: DIRECT_PURGE_ID }); } catch {}
     return res.status(202).json(queued);
@@ -1828,13 +1874,23 @@ app.get('/api/tracking-workspace', async (req, res) => {
         if(!bill||dailySet.has(type+'|'+bill))continue;
         let state={};
         try{state=JSON.parse(String(row.stateJson||'{}'))||{}}catch{}
+        const carryCurrentState=v788ResolveCarryCurrentState(row.currentState,state.currentState,state.scanNormalizedState);
+        const specialExcluded=v788IsCurrentSpecialNonDelivery({
+          currentState:carryCurrentState,specialState:state.specialState,
+          shipmentStatus:state.shipmentStatus
+        });
+        // Existing OPEN ledger rows are not edited. Only the read-only
+        // unfinished-POD workspace stops treating terminal special routing as
+        // pending delivery. A later live Pending/OC/RETURNING stays visible.
         historicalCarryRows.push({
           shipmentCode:bill,businessType:type,reportDate:row.sourceReportDate,
-          sourceReportDate:row.sourceReportDate,historicalCarry:true,isClosed:false,isActionable:true,
-          currentState:String(row.currentState||state.currentState||state.scanNormalizedState||'未完结'),
+          sourceReportDate:row.sourceReportDate,historicalCarry:true,
+          isClosed:specialExcluded,isActionable:!specialExcluded,
+          currentState:carryCurrentState,specialState:state.specialState||'',
           category:String(state.primaryCategory||state.currentMainCategory||'历史未完结'),
           lastEventTime:String(row.lastEventTime||row.lastCheckedAt||''),
-          lastCheckedAt:String(row.lastCheckedAt||''),queryStatus:String(row.apiStatus||'需更新'),
+          lastCheckedAt:String(row.lastCheckedAt||''),
+          queryStatus:specialExcluded?'特殊节点跳过':String(row.apiStatus||'需更新'),
           pendingNonContinuous:false,oc2Plus:false,shopArrivedCurrent:false
         });
       }
@@ -1935,6 +1991,7 @@ app.get('/api/tracking-workspace', async (req, res) => {
       const extra=[...found].filter(key=>!required.has(key));
       openSourceCoverage={expected:required.size,observed:found.size,missing:missing.length,extra:extra.length,
         historicalCarryCount:historicalCarryRows.length,
+        excludedCurrentSpecialCarry:historicalCarryRows.filter(row=>row.isClosed).length,
         earliestCarryDate:historicalCarryRows.map(row=>row.sourceReportDate).filter(Boolean).sort()[0]||reportDate,
         historicalCarryError,
         complete:required.size>0&&missing.length===0&&extra.length===0&&!historicalCarryError,
@@ -2221,6 +2278,253 @@ app.get('/api/family-recovery-proof', async (req,res)=>{
   res.setHeader('Cache-Control','no-store');
   return res.json({ok:true,reportDate:date,snapshotId,businesses:result});
 });
+// V788: a single in-app, opt-in action replaces repeated ZIP/CMD transfers.
+// Executes ONLY against the exact D-drive ISOLATED COPY, writing a SEPARATE
+// sidecar SQLite. Never edits the production QC DB or legacy acceptance copy.
+// ADMIN access only. Never auto-runs during startup, import or dashboard reads.
+let v788StageActive=false;
+let v788StageResult={status:'NOT_STARTED',updatedAt:'',message:'尚未启动'};
+const v788StageReport=String.raw`D:\CE_QC_V788_验收副本\V788_WHPP_TMS_逐票证据验收.json`;
+const v788SidecarFile=String.raw`D:\CE_QC_V788_验收副本\V788_WHPP_TMS_逐票证据.sqlite`;
+const v788SourceCopy=String.raw`D:\CE_QC_V788_验收副本\ce_qc_monitor.db`;
+function v788IsRegularExactFile(file){
+  try{
+    const stat=fsSync.lstatSync(file);
+    return stat.isFile()&&!stat.isSymbolicLink()
+      &&path.win32.normalize(fsSync.realpathSync.native(file)).toLowerCase()
+        ===path.win32.normalize(file).toLowerCase();
+  }catch{return false}
+}
+function v788StagePublicStatus(){
+  let saved={sidecarVerified:false,sidecarCheck:'NOT_CHECKED'};
+  let independentlyVerifiedCoverage=null;
+  if(process.platform==='win32'){
+    try{
+      // Progress JSON can be missing, incomplete or stale after a crash.
+      // It is never a prerequisite for independently proving exact member
+      // identity from the existing read-only source + persisted TMS sidecar.
+      let data={};
+      if(v788IsRegularExactFile(v788StageReport)){
+        try{data=JSON.parse(fsSync.readFileSync(v788StageReport,'utf8'))}
+        catch{saved.reportCheck='REPORT_UNREADABLE_USING_SQLITE_PROOF'}
+      }else{
+        saved.reportCheck='REPORT_MISSING_OR_UNSAFE_USING_SQLITE_PROOF';
+      }
+      // Only inspect the exact expected regular sidecar. Refuse symlinks or
+      // redirected copies, and never open or mutate the source QC SQLite.
+      try{
+        if(!v788IsRegularExactFile(v788SidecarFile)||!v788IsRegularExactFile(v788SourceCopy))
+          throw Error('V788_SIDECAR_OR_SOURCE_UNSAFE');
+        let actualSourceSignature='';
+        const srcDb=new V788ReadOnlyDatabaseSync(v788SourceCopy,{readOnly:true});
+        try{
+          srcDb.exec('PRAGMA query_only=ON');
+          actualSourceSignature=v788ReadSourceMembershipSignature(srcDb);
+        }finally{srcDb.close()}
+        const reportSignature=String(data?.sourceSignature||'');
+        if(reportSignature&&actualSourceSignature!==reportSignature)
+          saved.reportCheck='STALE_REPORT_SIGNATURE_USING_SQLITE_PROOF';
+        if(!actualSourceSignature)
+          throw Error('V788_ISOLATED_SOURCE_SIGNATURE_MISSING');
+        {
+          const checkDb=new V788ReadOnlyDatabaseSync(v788SidecarFile,{readOnly:true});
+          try{
+            checkDb.exec('PRAGMA query_only=ON');
+            const checked=verifyV788PersistedSidecar(checkDb,actualSourceSignature);
+            saved.sidecarVerified=checked.verified===true;
+            saved.sidecarCheck=checked.reason;
+            // Only disclose aggregate day-by-day statuses after both the
+            // original D: source and the proof ledger are independently read.
+            // Do not leak shipment codes or claim POD-time/ledger readiness.
+            if(checked.verified===true){
+              independentlyVerifiedCoverage=verifiedV788EvidenceCoverage(checked);
+              if(!independentlyVerifiedCoverage)
+                throw Error('V788_VERIFIED_PROJECTION_INVALID');
+              // Independent proof-file read: these are explicit TMS time
+              // candidates only. They are NOT the formal POD time-lock,
+              // signed-days KPI or export acceptance.
+              saved.independentPodTimeEvidenceChecked=true;
+              saved.independentTrustedPodTimeCount=Number(checked.trustedExplicitPodTimes||0);
+              saved.independentMissingPodTimeCount=Number(checked.missingTrustedExplicitPodTimes||0);
+              // Reconcile ONLY from the exact independently verified D:
+              // source and proof files. No production DB, no ledger writes.
+              try{
+                const previewSource=new V788ReadOnlyDatabaseSync(v788SourceCopy,{readOnly:true});
+                try{
+                  previewSource.exec('PRAGMA query_only=ON');
+                  // Ledger and signing evidence have separate schemas and
+                  // must fail independently. A missing legacy ledger table
+                  // cannot hide otherwise readable stored POD time candidates.
+                  try{
+                    saved.ledgerReconciliation=previewV788WhppLedgerReconciliation(
+                      previewSource,checkDb,actualSourceSignature);
+                  }catch{
+                    saved.ledgerReconciliation={ready:false,reason:'ISOLATED_LEDGER_PREVIEW_UNAVAILABLE',
+                      productionModified:false};
+                  }
+                  try{
+                    saved.podTimeSourceInventory=summarizeV788WhppPodTimeSources(
+                      previewSource,checkDb,actualSourceSignature);
+                  }catch{
+                    saved.podTimeSourceInventory={
+                      available:false,reason:'ISOLATED_POD_TIME_INVENTORY_UNAVAILABLE',
+                      signingTimeAccepted:false,productionModified:false
+                    };
+                  }
+                }finally{previewSource.close()}
+              }catch{
+                saved.ledgerReconciliation={ready:false,reason:'ISOLATED_LEDGER_PREVIEW_UNAVAILABLE',
+                  productionModified:false};
+                saved.podTimeSourceInventory={available:false,
+                  reason:'ISOLATED_POD_TIME_INVENTORY_UNAVAILABLE',
+                  signingTimeAccepted:false,productionModified:false};
+              }
+              saved.statusOnlyPreview=independentlyVerifiedCoverage.statusOnlyPreview;
+            }
+          }finally{checkDb.close()}
+        }
+      }catch{
+        saved.sidecarVerified=false;
+        saved.sidecarCheck='SIDECAR_NOT_VERIFIABLE';
+      }
+      saved={
+        ...saved,
+        savedStatus:String(data?.status||'').slice(0,90),
+        completedBatches:Number(data?.coverage?.completedBatches||0),
+        savedMembers:Number(data?.coverage?.persistedMembers||0),
+        missingMembers:Number(data?.coverage?.missingMembers||0),
+        sourceMembers:Number(data?.coverage?.expectedMembers||346),
+        pod:Number(data?.coverage?.statuses?.s60||0),
+        returned:Number(data?.coverage?.statuses?.s81||0),
+        podWithExplicitTime:Number(data?.coverage?.podWithExplicitTime||0),
+        distributionMatchesV3:data?.coverage?.distributionMatchesV3===true,
+        evidenceConflicts:Number(data?.coverage?.conflictingExistingStates||0),
+        isolatedCopyUnchanged:data?.isolatedCopyUnchanged===true,
+        // Progress JSON is advisory. After independent SQLite verification,
+        // source membership, batch count and POD/return totals always win.
+        ...(independentlyVerifiedCoverage||{})
+      };
+    }catch{}
+  }
+  // The API process may restart after a committed batch and before the
+  // final report write. Recover its persisted result without launching TMS.
+  // A stale RUNNING report means interrupted, NOT a live/background task.
+  const lastStatus=String(saved.savedStatus||'');
+  const recovered=!v788StageActive&&v788StageResult.status==='NOT_STARTED';
+  const restoredStatus=recovered
+    ?lastStatus==='RUNNING'?'INTERRUPTED_RETRYABLE'
+      :lastStatus==='STOPPED_RETRYABLE'?'STOPPED_RETRYABLE'
+      :lastStatus==='346_TMS_ROWS_STAGED_NOT_BUSINESS_ACCEPTED'?'STAGED'
+      :lastStatus==='EVIDENCE_INCOMPLETE'?'EVIDENCE_INCOMPLETE'
+      :v788StageResult.status
+    :v788StageResult.status;
+  const resumeAvailable=restoredStatus==='INTERRUPTED_RETRYABLE'
+    ||restoredStatus==='STOPPED_RETRYABLE';
+  const restoredMessage=restoredStatus==='INTERRUPTED_RETRYABLE'
+    ?'APP重新启动后已发现未完成的隔离验收，已有批次将先核实再续查。'
+    :restoredStatus==='STOPPED_RETRYABLE'?'上次隔离查询已暂停，可以从已有批次继续。'
+    :v788StageResult.message;
+  const isolatedSourceReady=process.platform==='win32'&&v788IsRegularExactFile(v788SourceCopy);
+  return {ok:true,platformReady:process.platform==='win32',isolatedSourceReady,
+    ...v788StageResult,...saved,status:restoredStatus,message:restoredMessage,
+    active:v788StageActive,resumeAvailable,
+    source:'ISOLATED_COPY_ONLY',productionDatabaseModified:false,
+    businessStateUpdated:false,readyToPublish:false};
+}
+app.get('/api/v788/whpp-evidence/status',requireRole('ADMIN'),(req,res)=>{
+  res.setHeader('Cache-Control','no-store');
+  res.json(v788StagePublicStatus());
+});
+app.post('/api/v788/whpp-evidence/start',requireRole('ADMIN'),(req,res)=>{
+  if(process.platform!=='win32')return res.status(409).json({ok:false,error:'仅允许Windows隔离验收环境运行'});
+  if(!v788IsRegularExactFile(v788SourceCopy))
+    return res.status(409).json({ok:false,code:'V788_ISOLATED_SOURCE_MISSING',
+      error:'没有找到安全的D盘V788验收数据库副本。不会读取或替换为正式数据库。'});
+  if(v788StageActive)return res.status(409).json({ok:false,error:'已有验收任务运行中，请勿重复启动'});
+  if(req.body?.acknowledgeIsolatedQuery!==true)
+    return res.status(400).json({ok:false,error:'需要确认：仅查询D盘隔离副本、独立留存证据，不修改正式业务数据'});
+  v788StageActive=true;
+  v788StageResult={status:'RUNNING',updatedAt:new Date().toISOString(),
+    message:'正在核对346票并保存独立证据，最多8批，每批50票'};
+  setImmediate(async()=>{
+    try{
+      const result=await runV788Stage({execute:true});
+      v788StageResult={status:String(result?.status||'FAILED'),updatedAt:new Date().toISOString(),
+        message:result?.status==='346_TMS_ROWS_STAGED_NOT_BUSINESS_ACCEPTED'
+          ?'346票逐票TMS证据已保存在隔离副本目录；业务POD时间和账本仍未验收'
+          :'隔离证据检查未完成，请查看下方诊断状态'};
+    }catch(error){
+      const message=String(error?.message||'');
+      const safeCode=message.startsWith('V788_')?message.slice(0,80):'ISOLATED_STAGE_FAILED';
+      v788StageResult={status:'FAILED',updatedAt:new Date().toISOString(),
+        message:'隔离核验失败：'+safeCode+'。未修改正式数据库'};
+    }finally{v788StageActive=false}
+  });
+  res.status(202).json({ok:true,status:'RUNNING',message:'隔离证据查询已开始，请在本页面查看进度'});
+});
+
+// Explicit ADMIN-only read-only audit of the existing D: acceptance copy.
+// The worker keeps SQLite scanning off the UI server's event loop. It never
+// starts TMS, writes an output file, clears data or touches production.
+let v788ReadOnlyAuditState={status:'NOT_STARTED',updatedAt:'',message:'尚未核验'};
+let v788ReadOnlyAuditActive=false;
+app.get('/api/v788/readonly-audit/status',requireRole('ADMIN'),(req,res)=>{
+  res.setHeader('Cache-Control','no-store');
+  res.json({ok:true,...v788ReadOnlyAuditState,active:v788ReadOnlyAuditActive,
+    platformReady:process.platform==='win32',
+    isolatedSourceReady:process.platform==='win32'&&v788IsRegularExactFile(v788SourceCopy),
+    readyToPublish:false,productionModified:false});
+});
+app.post('/api/v788/readonly-audit/start',requireRole('ADMIN'),(req,res)=>{
+  if(process.platform!=='win32'||!v788IsRegularExactFile(v788SourceCopy))
+    return res.status(409).json({ok:false,code:'V788_ISOLATED_SOURCE_MISSING',
+      error:'D盘验收副本不可用；未读取正式数据库。'});
+  if(v788ReadOnlyAuditActive||v788StageActive)
+    return res.status(409).json({ok:false,code:'V788_READONLY_AUDIT_BUSY',
+      error:'已有隔离核验在运行，本次未重复执行。'});
+  if(req.body?.acknowledgeReadOnlyAudit!==true)
+    return res.status(400).json({ok:false,code:'V788_READONLY_AUDIT_ACK_REQUIRED',
+      error:'请先确认只读核对已有D盘隔离副本，不查询TMS、不写入业务数据。'});
+  v788ReadOnlyAuditActive=true;
+  v788ReadOnlyAuditState={status:'RUNNING',updatedAt:new Date().toISOString(),
+    message:'正在对现有D盘隔离副本进行只读核验；不查询TMS'};
+  try{
+    const worker=new V788AuditWorker(
+      new URL('./scripts/v788-inapp-readonly-audit-worker.mjs',import.meta.url));
+    let settled=false;
+    const watchdog=setTimeout(()=>{
+      void worker.terminate();
+      finish({ok:false,status:'BLOCKED',code:'ISOLATED_AUDIT_TIMEOUT'});
+    },90000);
+    const finish=result=>{
+      if(settled)return;
+      settled=true;
+      clearTimeout(watchdog);
+      v788ReadOnlyAuditActive=false;
+      v788ReadOnlyAuditState={...result,
+        status:String(result?.status||'BLOCKED'),
+        updatedAt:new Date().toISOString(),
+        message:result?.ok===true?'隔离只读审计完成；阻断项见下方'
+          :'隔离副本审计未完成，不允许据此发布或修改正式数据库'};
+    };
+    worker.once('message',finish);
+    worker.once('error',()=>finish({ok:false,status:'BLOCKED',
+      code:'ISOLATED_AUDIT_WORKER_FAILED'}));
+    worker.once('exit',code=>{
+      if(!settled)finish({ok:false,status:'BLOCKED',
+        code:code===0?'ISOLATED_AUDIT_NO_RESULT':'ISOLATED_AUDIT_WORKER_EXIT'});
+    });
+  }catch{
+    v788ReadOnlyAuditActive=false;
+    v788ReadOnlyAuditState={ok:false,status:'BLOCKED',
+      code:'ISOLATED_AUDIT_WORKER_UNAVAILABLE',updatedAt:new Date().toISOString(),
+      message:'隔离只读审计无法启动；未修改正式数据库'};
+    return res.status(503).json(v788ReadOnlyAuditState);
+  }
+  res.status(202).json({ok:true,status:'RUNNING',
+    readyToPublish:false,productionModified:false});
+});
+
 app.post('/api/timing-repair/start', (req,res)=>{
   const reportDate=String(req.body?.reportDate||'').slice(0,10);
   if(!/^\d{4}-\d{2}-\d{2}$/.test(reportDate))return res.status(400).json({ok:false,error:'缺少有效日报日期。'});
@@ -2853,9 +3157,10 @@ function workspaceRows(state = {}, businessType = 'CCSL') {
     const specialState = row.specialState || row.primaryCategory || row.主分类 || '';
     const shopState = row.shopState || row.shopStatus || row.门店状态 || row.storeFlowState || '';
     const category = row.primaryCategory || row.主分类 || row.异常分类 || '';
-    const normalizedSpecial=String(specialState||'').trim().toUpperCase().replace(/^(?:CEL|CE):/,'');
-    const specialClosed=['SELF_PICKUP','CECN_RETENTION','CEZT_RETENTION','CCSL580_RETENTION',
-      'CECN','CEZT','CCSL580'].includes(normalizedSpecial);
+    const specialClosed=v788IsCurrentSpecialNonDelivery({
+      currentState:row.currentState||row.scanNormalizedState,
+      specialState,shipmentStatus:terminalCode
+    });
     const normalFinal = category === '正常分流节点' || row.matchedRule === 'NORMAL_FINAL_HUB';
     // WHPP terminal cancellation must follow its saved analysis and close
     // status, never a bare scan orderStatus=10 or an unverified text hint.

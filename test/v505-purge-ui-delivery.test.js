@@ -60,7 +60,7 @@ test('V545 cache-busted purge owner is delivered after app.js and requires expli
   assert.match(owner,/if\(stepTwo\)stepTwo\.hidden=true/,'confirmation form must be hidden once EXECUTE is accepted client-side');
   assert.match(owner,/if\(stepOne\)stepOne\.hidden=false/,'the live status panel must be visible while EXECUTE runs');
   assert.match(owner,/if\(button\)button\.disabled=true/,'the destructive button must disable immediately after final confirmation');
-  assert.match(purgeConsole,/v560-direct-data-purge\.js\?v=20260921-v568-1/,'lightweight purge console now intentionally uses the direct no-backup owner');
+  assert.match(purgeConsole,/v560-direct-data-purge\.js\?v=20\d{6}-v788-[a-z0-9-]+/,'lightweight purge console now intentionally uses the direct no-backup owner');
   assert.doesNotMatch(purgeConsole,/v505-data-purge-recovery\.js/,'direct recovery console must not start the legacy backup owner');
   assert.match(owner,/v505ContinueDataPurge[\s\S]*?submitPrepareRecovering/,'PREPARE may start only from the explicit continue action');
   assert.match(owner,/v505ExecuteDataPurge[\s\S]*?executeChallenge\(preparedChallenge\)/,'EXECUTE may start only from the explicit final action');
@@ -232,4 +232,125 @@ test('V545 retries EXECUTE once only after explicit final confirmation and recov
   assert.equal(result.reloads,1);
   assert.deepEqual(result.alerts,[]);
   assert.equal(result.confirms.length,2);
+});
+
+test('V788 direct no-backup purge stops polling after a terminal FAILED response, even for a V788 error code',async()=>{
+  const source=read('public/v560-direct-data-purge.js');
+  const phrase='永久清除全部业务数据';
+  const nodes=new Map(), alerts=[];
+  let now=1_000_000, statusReads=0, deletePosts=0;
+  const node=id=>{
+    if(!nodes.has(id))nodes.set(id,{
+      id,hidden:true,disabled:false,value:'',innerHTML:'',textContent:''
+    });
+    return nodes.get(id);
+  };
+  class AdvancingDate extends Date {
+    static now(){now+=7000;return now;}
+  }
+  const context={
+    AbortController,Date:AdvancingDate,
+    console:{info(){},warn(){},error(){}},
+    document:{getElementById:node},
+    alert:message=>alerts.push(String(message)),
+    confirm:()=>true,
+    setInterval:()=>1,clearInterval(){},
+    setTimeout:callback=>{queueMicrotask(callback);return 1;},
+    clearTimeout(){},
+    fetch:async(url,options={})=>{
+      if(url==='/api/session')
+        return responseJson({ok:true,user:{role:'ADMIN'}});
+      if(url==='/api/admin/data-purge/direct/preflight')
+        return responseJson({ok:true,cp72Ready:true,activeCpCount:72,
+          dataStorageReady:true,safeToStartClear:true,alreadyClearedNoFreshBusiness:false,version:{
+            installedOnLocalMain:true,cachedMainMatchesInstalled:true,
+            formalUpdateVerified:true,installedThroughManagedUpdaterVerified:true,
+            installedCommit:'a'.repeat(40)
+          }});
+      if(url==='/api/admin/data-purge/direct'&&options.method==='POST'){
+        deletePosts++;
+        return responseJson({ok:true,jobId:'v788-terminal-failure',status:'QUEUED'},202);
+      }
+      if(url.startsWith('/api/admin/data-purge/direct/status?jobId=')){
+        statusReads++;
+        return responseJson({
+          ok:true,jobId:'v788-terminal-failure',status:'FAILED',
+          code:'V788_CP72_CHANGED',error:'CP门店配置变动，事务已安全回滚'
+        });
+      }
+      throw Error('Unexpected request: '+url);
+    }
+  };
+  context.window=context;
+  vm.runInNewContext(source,context,{filename:'v560-direct-data-purge.js'});
+  await context.openDirectDataPurge();
+  node('directPurgePhrase').value=phrase;
+  context.updateDirectPurgeButton();
+  assert.equal(node('directPurgeExecuteButton').disabled,false,
+    'exact phrase and elapsed countdown allow explicit submit in isolated UI test');
+  await context.executeDirectDataPurge();
+  assert.equal(deletePosts,1,'must submit the confirmed destructive action at most once');
+  assert.equal(statusReads,1,'terminal FAILED must stop polling on first response regardless of error prefix');
+  assert.match(node('directPurgePreview').innerHTML,/CP门店配置变动，事务已安全回滚/);
+  assert.doesNotMatch(node('directPurgePreview').innerHTML,/全部业务数据已直接清空/);
+  assert.equal(context.__CE_QC_V560_DIRECT_PURGE__.getStatus().active,false);
+  assert.equal(context.__CE_QC_V560_DIRECT_PURGE__.getStatus().requiresReconciliation,true,
+    'an uncertain destructive result must lock the current wizard');
+  assert.equal(node('directPurgeExecuteButton').disabled,true,
+    'failure must never silently re-enable the irreversible submit button');
+  assert.match(node('directPurgePreview').innerHTML,/已禁止重复提交/);
+  await context.openDirectDataPurge();
+  assert.equal(alerts.length,1,'second attempt on same page must be blocked');
+  assert.match(alerts[0],/上一笔直接清空请求的结果需要只读核对/);
+});
+
+test('V788 direct purge treats permanent task-status HTTP errors as non-retryable',()=>{
+  const source=read('public/v560-direct-data-purge.js');
+  assert.match(source,/Number\(error\?\.status\|\|0\)>=400&&Number\(error\?\.status\|\|0\)<500/,
+    'unknown or unauthorized job must not run twenty repeated status requests');
+  assert.match(source,/requiresReconciliation=true;/,
+    'unknown result must trigger destructive resubmission lock');
+});
+
+
+test('V788 direct purge browser rejects an already-cleared empty DB before showing confirmation',async()=>{
+  const source=read('public/v560-direct-data-purge.js');
+  const nodes=new Map(), alerts=[];
+  let deletePosts=0, confirms=0,preflightReads=0;
+  const node=id=>{
+    if(!nodes.has(id))nodes.set(id,{id,disabled:false,value:'',hidden:true,innerHTML:'',textContent:''});
+    return nodes.get(id);
+  };
+  const context={
+    AbortController,
+    console:{info(){},warn(){},error(){}},
+    document:{getElementById:node},
+    location:{replace(){throw Error('Unexpected login redirect')}},
+    alert:x=>alerts.push(String(x)),
+    confirm:()=>{confirms++;return true;},
+    setTimeout:()=>1,clearTimeout(){},
+    setInterval:()=>1,clearInterval(){},
+    fetch:async(url,options={})=>{
+      if(url==='/api/session')return responseJson({ok:true,user:{role:'ADMIN'}});
+      if(url==='/api/admin/data-purge/direct/preflight'){
+        preflightReads++;
+        return responseJson({ok:true,cp72Ready:true,activeCpCount:72,
+          dataStorageReady:true,alreadyClearedNoFreshBusiness:true,safeToStartClear:false,
+          code:'V788_PURGE_ALREADY_EMPTY'});
+      }
+      if(url==='/api/admin/data-purge/direct'&&options.method==='POST'){
+        deletePosts++;return responseJson({ok:true},202);
+      }
+      throw Error('Unexpected request: '+url);
+    }
+  };
+  context.window=context;
+  vm.runInNewContext(source,context,{filename:'v560-direct-data-purge.js'});
+  await context.openDirectDataPurge();
+  assert.equal(preflightReads,1,'fresh server preflight must run before opening any destructive dialog');
+  assert.equal(node('directPurgeDialog').hidden,true);
+  assert.equal(deletePosts,0,'a previously emptied database must not receive another DELETE');
+  assert.equal(confirms,0,'previously committed purge must bypass destructive confirmation entirely');
+  assert.equal(alerts.length,1);
+  assert.match(alerts[0],/上一笔清空已提交/);
 });

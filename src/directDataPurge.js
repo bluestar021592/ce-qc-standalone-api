@@ -92,7 +92,10 @@ function retireLegacyPurgeArtifacts(){
 }
 async function clearRegenerableFiles(){
   const cfg=getRuntimeConfig();const warnings=[];
-  for(const dir of [cfg.exportsDir,cfg.importsDir,cfg.longJsonExportsDir,cfg.evidenceArchiveDir]){
+  // Preserve original uploads and the V266 evidence archive. Neither an
+  // irreversible business reset nor "no new backup" authorizes evidence loss.
+  // Only derived export files may be regenerated from fresh daily sources.
+  for(const dir of [cfg.exportsDir,cfg.longJsonExportsDir]){
     if(!fs.existsSync(dir))continue;
     for(const entry of fs.readdirSync(dir)){
       try{await fs.promises.rm(path.join(dir,entry),{recursive:true,force:true});}
@@ -101,6 +104,101 @@ async function clearRegenerableFiles(){
   }
   return warnings;
 }
+// The current activated 72-code CP whitelist is authoritative. If it is
+// corrupt, abort BEFORE clearing any business data, rather than falling back
+// to the retired historical shop list on the next import.
+function readProtectedActiveShopSet(db){
+  const row=db.prepare("SELECT value FROM app_meta WHERE key='shop_current_complete_codes_v780'").get();
+  if(!row)throw new Error('V788_PURGE_CP72_MISSING: 当前72码门店名单尚未激活，禁止清空并回退旧白名单');
+  const value=String(row.value||'');
+  let config;
+  try{config=JSON.parse(value)}catch{throw new Error('V788_PURGE_CP72_INVALID: 当前72码配置无法解析，已拒绝清空');}
+  const members=Array.isArray(config?.members)?config.members:[];
+  const normalized=members.map(m=>String(m?.code||'').trim().toUpperCase());
+  const valid= config?.mode==='COMPLETE' && members.length===72
+    && new Set(normalized).size===72
+    && members.every((m,i)=>/^(?:(?:CP|FS)\d{6}|(?:PV|PNH)\d{3})$/.test(normalized[i])
+      && String(m?.name||'').trim().length>0);
+  if(!valid)throw new Error('V788_PURGE_CP72_INVALID: 当前有效门店名单不是72个唯一有效编码，已拒绝清空');
+  return value;
+}
+
+// A previous successful clear is committed with last_full_clear_at in the same
+// SQLite transaction as the deleted business rows. That durable marker must
+// prevent a SECOND deletion if the browser loses the result or 5177 restarts.
+// After real new business rows arrive, a separately confirmed future reset
+// may be requested. Checking row existence (rather than COUNT(*)) stays fast.
+function alreadyClearedWithoutNewBusiness(db){
+  const last=String(db.prepare("SELECT value FROM app_meta WHERE key='last_full_clear_at'").get()?.value||'').trim();
+  if(!last)return false;
+  const existing=new Set(db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(x=>String(x.name||'')));
+  // Only authoritative newly IMPORTED waybill membership can unlock another
+  // destructive reset. A scheduler may regenerate dashboard/cache/track rows
+  // even while the user has NOT imported a single new daily report.
+  const importMemberTables=['daily_parse_rows','business_daily_parse_rows','unified_import_rows'];
+  for(const table of importMemberTables){
+    if(!existing.has(table))continue;
+    if(db.prepare(`SELECT 1 FROM "${table}" LIMIT 1`).get())return false;
+  }
+  return true;
+}
+function assertNotAlreadyCleared(db){
+  if(!alreadyClearedWithoutNewBusiness(db))return;
+  const error=new Error('V788_PURGE_ALREADY_EMPTY: 上一次清空已经提交，当前未发现新导入的业务数据。禁止重复清空；请核对上次结果并重新启动后导入日报。');
+  error.code='V788_PURGE_ALREADY_EMPTY';
+  throw error;
+}
+
+// ADMIN preflight checks the exact 72-code activation using an independent
+// read-only SQLite connection. This does not authorize a live purge: the
+// transaction always revalidates the list inside BEGIN IMMEDIATE.
+export function inspectDirectPurgeCp72Preflight(){
+  const cfg=getRuntimeConfig();
+  if(cfg.usingFallbackDataDir)return {
+    ok:true,cp72Ready:false,activeCpCount:0,code:'PRIMARY_DATA_STORAGE_UNAVAILABLE',
+    dataStorageReady:false,backupCreated:false,existingBackupsPreserved:true
+  };
+  if(!fs.existsSync(cfg.dbFile))return {
+    ok:true,cp72Ready:false,activeCpCount:0,code:'ACTIVE_CP72_DB_MISSING',
+    dataStorageReady:true,backupCreated:false,existingBackupsPreserved:true
+  };
+  let db;
+  try{
+    db=new DatabaseSync(cfg.dbFile,{readOnly:true});
+    db.exec('PRAGMA query_only=ON');
+    const value=readProtectedActiveShopSet(db);
+    const members=JSON.parse(value).members;
+    const alreadyClearedNoFreshBusiness=alreadyClearedWithoutNewBusiness(db);
+    return {ok:true,cp72Ready:true,activeCpCount:members.length,
+      code:alreadyClearedNoFreshBusiness?'V788_PURGE_ALREADY_EMPTY':'ACTIVE_CP72_VALID',
+      alreadyClearedNoFreshBusiness,
+      safeToStartClear:!alreadyClearedNoFreshBusiness,
+      dataStorageReady:true,backupCreated:false,existingBackupsPreserved:true};
+  }catch(error){
+    const code=String(error?.message||'').includes('V788_PURGE_CP72_MISSING')
+      ?'ACTIVE_CP72_MISSING':'ACTIVE_CP72_INVALID_OR_UNREADABLE';
+    return {ok:true,cp72Ready:false,activeCpCount:0,code,
+      dataStorageReady:true,backupCreated:false,existingBackupsPreserved:true};
+  }finally{try{db?.close()}catch{}}
+}
+
+// Queue and worker both invoke this gate BEFORE retiring old jobs or
+// making any other filesystem change. The BEGIN IMMEDIATE transaction
+// independently revalidates again immediately before DELETE.
+function assertCp72SafeBeforeCleanup(){
+  const cfg=getRuntimeConfig();
+  if(cfg.usingFallbackDataDir)
+    throw new Error('V788_PURGE_PRIMARY_STORAGE_MISSING: 主数据盘不可用，禁止回退到其他数据库执行清空');
+  if(!fs.existsSync(cfg.dbFile))
+    throw new Error('V788_PURGE_CP72_MISSING: 当前数据库不存在，禁止清空');
+  const db=new DatabaseSync(cfg.dbFile,{readOnly:true});
+  try{
+    db.exec('PRAGMA query_only=ON');
+    readProtectedActiveShopSet(db);
+    assertNotAlreadyCleared(db);
+  }finally{db.close()}
+}
+
 function directResetTransaction(db,onProgress=()=>{}){
   const now=nowIso();
   const existing=new Set(db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(row=>String(row.name||'')));
@@ -113,6 +211,10 @@ function directResetTransaction(db,onProgress=()=>{}){
     onProgress({status:'RUNNING',stage:'WAITING_DB_LOCK',message:'正在取得数据库写锁。'});
     db.exec('BEGIN IMMEDIATE');
     transactionStarted=true;
+    const protectedShopSet=readProtectedActiveShopSet(db);
+    // Recheck under BEGIN IMMEDIATE: prior clear or concurrent state change
+    // cannot slip through a stale preflight or queued worker.
+    assertNotAlreadyCleared(db);
     onProgress({status:'RUNNING',stage:'DELETE_TABLES',message:'已取得数据库写锁，开始清空业务表。',completedTables:0,totalTables:clearTargets.length});
     for(let index=0;index<clearTargets.length;index+=1){
       const table=clearTargets[index];
@@ -127,11 +229,18 @@ function directResetTransaction(db,onProgress=()=>{}){
       after[table]=remaining;
       if(remaining!==0)throw new Error(`业务表清空校验失败：${table} 仍有 ${remaining} 行。`);
     }
+    if(readProtectedActiveShopSet(db)!==protectedShopSet)
+      throw new Error('V788_PURGE_CP72_CHANGED: 清空过程改变了已激活72码名单，已回滚');
     db.prepare(`INSERT INTO app_state(key,valueJson,updatedAt) VALUES('current',?,?) ON CONFLICT(key) DO UPDATE SET valueJson=excluded.valueJson,updatedAt=excluded.updatedAt`).run(JSON.stringify({logs:[]}),now);
     const meta=db.prepare(`INSERT INTO app_meta(key,value,updatedAt) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updatedAt=excluded.updatedAt`);
     meta.run('last_processed_report_date','',now);
     meta.run('last_full_clear_at',now,now);
     meta.run('current_snapshot_id','',now);
+    // The managed launcher reads this marker when it NEXT starts.
+    // Without it, V499 continues disabling V246 tracking even after
+    // the user has deliberately cleared old business data.
+    // Keep the marker in the SAME transaction as the verified reset.
+    meta.run('v499_fresh_start_tracking_ready','1',now);
     meta.run('v108_performance_indexes_ready','1',now);
     db.prepare(`DELETE FROM app_meta WHERE key LIKE 'carry_refresh_%' OR key LIKE 'v246_daily_0200_%' OR key IN (?,?,?,?)`).run(CACHE_WORKER_ACTIVE_KEY,CACHE_WORKER_ACTIVE_UNTIL_KEY,PURGE_BLOCK_KEY,PURGE_COMMIT_RECEIPT_KEY);
     onProgress({status:'RUNNING',stage:'COMMITTING',message:'校验完成，正在提交清空事务。',deletedRows:Object.values(before).reduce((sum,value)=>sum+Number(value||0),0)});
@@ -208,6 +317,9 @@ function compactPurgedDatabase(dbFile,onProgress=()=>{}){
 export async function executeDirectDataPurge({phrase,user={},onProgress=()=>{}}={}){
   if(String(phrase||'')!==DIRECT_PURGE_PHRASE)throw new Error(`请输入完整确认短语：${DIRECT_PURGE_PHRASE}`);
   const administrator=String(user.email||user.username||'');
+  // The prior implementation retired legacy task files BEFORE checking CP72.
+  // Refuse entirely before touching a file when active config is invalid.
+  assertCp72SafeBeforeCleanup();
   onProgress({status:'RUNNING',stage:'RETIRING_LEGACY',message:'正在结束旧的备份/清空任务状态。'});
   const retiredLegacyJobs=retireLegacyPurgeArtifacts();
   await new Promise(resolve=>setTimeout(resolve,350));
@@ -290,6 +402,10 @@ export function queueDirectDataPurge({phrase,user={}}={}){
       return {...publicDirectJob(existing),reused:true};
     }
   }
+
+  // Reject invalid CP activation before creating a job or starting a
+  // destructive worker. The worker repeats this gate before side effects.
+  assertCp72SafeBeforeCleanup();
 
   const jobId=crypto.randomUUID();
   const startedAt=Date.now();

@@ -10,7 +10,7 @@ import { getRuntimeConfig } from './db.js';
 
 export const V431_LOCAL_AUTH_SIDECAR_ID = '2026-09-05-v431-readonly-local-auth-sidecar-v1';
 export const V432_LOCAL_AUTH_SINGLE_OWNER_ID = '2026-09-05-v432-single-active-auth-sidecar-v1';
-export const V431_LOCAL_AUTH_COOKIE = 'ce_qc_local_auth_v431';
+export const V431_LOCAL_AUTH_COOKIE = process.env.CE_QC_V788_PILOT_ISOLATED==='1' ? 'ce_qc_local_auth_v788_pilot' : 'ce_qc_local_auth_v431';
 const PORT = Math.max(1024, Math.min(65535, Number(process.env.CE_QC_AUTH_SIDECAR_PORT || 5179)));
 const APP_PORT = Math.max(1024, Math.min(65535, Number(process.env.PORT || 5177)));
 const HOST = String(process.env.CE_QC_AUTH_SIDECAR_HOST || '0.0.0.0');
@@ -65,6 +65,13 @@ function sessionSecret() {
     cachedSecret = fs.readFileSync(file, 'utf8').trim();
   }
   return cachedSecret;
+}
+// Password resets invalidate future session renewals without exporting the
+// stored password hash (or opening the heavy main DB on the web process).
+function credentialTag(row){
+  return crypto.createHmac('sha256',sessionSecret())
+    .update('local-auth-credential:'+String(row.id)+':'+String(row.passwordHash||''))
+    .digest('base64url');
 }
 function sign(payload) {
   const body = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
@@ -168,6 +175,51 @@ const server = http.createServer(async (req, res) => {
     }
     catch (error) { return json(req, res, 503, { ok: false, id: V431_LOCAL_AUTH_SIDECAR_ID, ownerId: V432_LOCAL_AUTH_SINGLE_OWNER_ID, dbReady: false, error: String(error?.message || error) }); }
   }
+  // Renewal is reached only over the backend→sidecar loopback link. Re-check
+  // the active user through the existing READ-ONLY auth connection before
+  // signing a new bounded session. No main business DB write or new login.
+  if(req.method==='POST'&&url.pathname==='/api/local-auth/renew'){
+    const remote=ipOnly(req.socket?.remoteAddress||'');
+    if(remote!=='127.0.0.1'&&remote!=='::1')
+      return json(req,res,403,{ok:false,code:'LOCAL_AUTH_RENEW_LOOPBACK_REQUIRED'});
+    try{
+      const data=await body(req);
+      const token=String(data?.token||'');
+      const [encoded,sig,extra]=token.split('.');
+      if(!encoded||!sig||extra||token.length>8192)
+        return json(req,res,401,{ok:false,code:'LOCAL_AUTH_RENEW_INVALID'});
+      const expected=crypto.createHmac('sha256',sessionSecret()).update(encoded).digest('base64url');
+      const left=Buffer.from(sig),right=Buffer.from(expected);
+      if(left.length!==right.length||!crypto.timingSafeEqual(left,right))
+        return json(req,res,401,{ok:false,code:'LOCAL_AUTH_RENEW_INVALID'});
+      const previous=JSON.parse(Buffer.from(encoded,'base64url').toString('utf8'));
+      const now=Date.now();
+      if(previous?.v!==431||Number(previous.exp)<=now||
+          !['LOCAL','LAN'].includes(previous?.channel)||
+          !Number.isSafeInteger(previous.iat)||previous.iat>now+60_000||
+          !previous.user?.id||!previous.user?.username)
+        return json(req,res,401,{ok:false,code:'LOCAL_AUTH_RENEW_EXPIRED_OR_INVALID'});
+      const row=readAuthRow(cleanUsername(previous.user.username));
+      const currentTag=row?credentialTag(row):'';
+      const storedTag=String(previous?.credentialTag||'');
+      const matchingCredential=storedTag.length===currentTag.length&&
+        storedTag.length>0&&crypto.timingSafeEqual(Buffer.from(storedTag),Buffer.from(currentTag));
+      if(!row||String(row.id)!==String(previous.user.id)||!matchingCredential||
+          !Number(row.enabled)||
+          (row.expiresAt&&Date.parse(row.expiresAt)<=now)||
+          (row.lockedUntil&&Date.parse(row.lockedUntil)>now))
+        return json(req,res,401,{ok:false,code:'LOCAL_AUTH_RENEW_ACCOUNT_INACTIVE'});
+      const next={v:431,iat:now,exp:now+SESSION_HOURS*60*60_000,
+        channel:previous.channel,user:publicUser(row,previous.channel),
+        credentialTag:currentTag};
+      const cookie=`${V431_LOCAL_AUTH_COOKIE}=${sign(next)}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${SESSION_HOURS*3600}`;
+      return json(req,res,200,{ok:true,user:next.user,expiresAt:new Date(next.exp).toISOString(),
+        authMode:'V431_READONLY_RENEWAL'}, {'set-cookie':cookie});
+    }catch(error){
+      const busy=/SQLITE_BUSY|database is locked/i.test(String(error?.message||error));
+      return json(req,res,busy?503:401,{ok:false,code:busy?'LOCAL_AUTH_RENEW_DB_BUSY':'LOCAL_AUTH_RENEW_INVALID'});
+    }
+  }
   if (req.method !== 'POST' || url.pathname !== '/api/local-auth/login') return json(req, res, 404, { ok: false, error: 'Not found.' });
   const channel = localChannel(req);
   if (!channel) return json(req, res, 403, { ok: false, error: '当前访问来源不允许本机/LAN登录。' });
@@ -188,7 +240,8 @@ const server = http.createServer(async (req, res) => {
     if (row.lockedUntil && Date.parse(row.lockedUntil) > Date.now()) return json(req, res, 423, { ok: false, error: '账号暂时锁定，请稍后再试。' });
     clearFailures(username, req);
     const exp = Date.now() + SESSION_HOURS * 60 * 60_000;
-    const payload = { v: 431, iat: Date.now(), exp, channel, user: publicUser(row, channel) };
+    const payload = { v: 431, iat: Date.now(), exp, channel,
+      user: publicUser(row, channel),credentialTag:credentialTag(row) };
     const token = sign(payload);
     const cookie = `${V431_LOCAL_AUTH_COOKIE}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${SESSION_HOURS * 3600}`;
     console.log(`[CE-QC][V431_AUTH_OK] user=${username} channel=${channel} ms=${Date.now() - startedAt}`);

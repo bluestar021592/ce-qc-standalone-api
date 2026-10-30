@@ -238,7 +238,7 @@ assert.match(fs.readFileSync('public\/app.js','utf8'),/requestIdleCallback\(runI
 
 assert.match(purgeConsole,/CE QC 直接清空业务数据/,'recovery page must expose the direct no-backup purge mode');
 assert.match(purgeConsole,/onclick="window\.openDirectDataPurge\?\.\(\)"/,'recovery page must delegate direct purge to the V560 owner');
-assert.match(purgeConsole,/\/v560-direct-data-purge\.js\?v=20260921-v568-1/,'recovery page must load the direct purge owner');
+assert.match(purgeConsole,/\/v560-direct-data-purge\.js\?v=20\d{6}-v788-[a-z0-9-]+/,'recovery page must load a cache-busted V788 direct purge owner');
 assert.match(purgeConsole,/id="directPurgePreview"/,'direct purge progress must remain visible on the lightweight recovery page');
 assert.match(purgeConsole,/不创建新备份、不启用安全封锁/,'recovery page must state the requested no-backup/no-seal behavior');
 assert.match(purgeConsole,/id="directPurgePhrase"[^>]*oninput="updateDirectPurgeButton\(\)"/,'recovery console must expose the exact confirmation phrase field');
