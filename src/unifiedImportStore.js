@@ -55,14 +55,14 @@ export function saveUnifiedImport(parsed, sourceName, options = {}) {
   return { batchId, snapshotId, reportDate: parsed.reportDate, dateDetectionSource: parsed.dateDetectionSource, dateCandidates: parsed.dateCandidates, dateConflict: parsed.dateConflict, dateWasManuallyCorrected: parsed.dateWasManuallyCorrected, containerFormat: parsed.containerFormat, fileHash: parsed.fileHash, classificationCounts: parsed.classificationCounts, sourceReconciliation: parsed.sourceReconciliation, regionCounts: parsed.regionCounts, summary: parsed.summary, sheetDiagnostics: parsed.sheetDiagnostics, warnings: parsed.warnings, carryover, duplicateFile: false, sameDateOverwrite: Boolean(previousValid), replacedSameFile: exactSameFile, replacedBatchId: previousValid?.batchId || '' };
 }
 
-export function getLatestUnifiedImport() {
+export function getLatestUnifiedImport({ includeCarryover = true } = {}) {
   const row = getDb().prepare(`SELECT b.*,s.status snapshotStatus,s.createdAt snapshotCreatedAt
     FROM unified_import_batches b
     LEFT JOIN unified_snapshots s ON s.snapshotId=b.snapshotId
     WHERE b.status='VALID'
     ORDER BY b.reportDate DESC,b.createdAt DESC,b.rowid DESC LIMIT 1`).get();
   return row ? {
-    ...hydrateBatch(row, false),
+    ...hydrateBatch(row, false, { includeCarryover }),
     snapshotStatus: row.snapshotStatus || 'IMPORTED',
     createdAt: row.snapshotCreatedAt || row.createdAt
   } : null;
@@ -112,32 +112,104 @@ export function getUnifiedProcessingQueue(batchId) {
   return { batchId, snapshotId: batch.snapshotId, reportDate: batch.reportDate, rows, summary };
 }
 
-export function updateCarryoverResults({ snapshotId, reportDate, rows = [] }) {
+// Only TMS shipment-status results produced by this run can reconcile a stale
+// OPEN ledger. Order scan status/eventCode are different namespaces.
+export function matchedTmsTerminalEvidence(scan={},bill='',businessType=''){
+  const code=String(scan.shipmentStatus??'').trim();
+  const expected={'60':'SHIPMENT_STATUS_60_POD','80':'SHIPMENT_STATUS_80_RETURN_IN_PROGRESS',
+    '81':'SHIPMENT_STATUS_81_RETURN_COMPLETED'}[code];
+  const scanBill=String(scan.shipmentCode||scan.运单号||'').trim().toUpperCase();
+  if(!expected||scan.shipmentStatusSource!==expected||scanBill!==bill||!businessType
+    ||!carryBusinessMatches(scan.businessType,businessType))return null;
+  // The order-scan and TMS shipment-status endpoints can succeed independently.
+  // A failed order scan must not invalidate the proven shipment-status marker.
+  return {source:'TMS_SHIPMENT_STATUS',verified:true,shipmentStatus:code,
+    shipmentCode:bill,businessType};
+}
+export function carryBusinessMatches(source='',actual=''){
+  const a=String(actual||'').toUpperCase(),s=String(source||'').toUpperCase();
+  return s===a||(s==='CCSL'&&['CE','CEAF','TBKH','ALI1688'].includes(a))
+    ||(s==='SHOPEE'&&['SHOPEECN','SHOPEEVN'].includes(a));
+}
+
+export function updateCarryoverResults({ snapshotId, reportDate, rows = [], scanResults = [], guardOpenAtOrBefore = '', expectedCarryVersions = null }) {
   const db = getDb();
-  const update = db.prepare(`UPDATE carryover_open_items SET status=?,apiStatus=?,closeReason=?,lastReportDate=?,lastSnapshotId=?,stateJson=?,updatedAt=? WHERE shipmentCode=?`);
-  const current = db.prepare(`UPDATE shipment_current_state SET state=?,apiStatus=?,reportDate=?,snapshotId=?,lastEventTime=?,stateJson=?,updatedAt=? WHERE shipmentCode=?`);
+  const scans=new Map(scanResults.map(row=>[String(row.shipmentCode||row.运单号||'').trim().toUpperCase(),row]));
+  const currentBusiness=db.prepare('SELECT businessType,lastSnapshotId,updatedAt FROM carryover_open_items WHERE shipmentCode=?');
+  const currentReportDate=db.prepare('SELECT reportDate,state FROM shipment_current_state WHERE shipmentCode=? AND businessType=?');
+  // Guarded recovery writes are conditional within the same SQLite transaction,
+  // so a new daily import cannot be overwritten after a slow remote TMS read.
+  const guardedUpdate=db.prepare(`UPDATE carryover_open_items SET status=?,apiStatus=?,closeReason=?,lastReportDate=?,lastSnapshotId=?,stateJson=?,updatedAt=?
+    WHERE shipmentCode=? AND businessType=? AND status='OPEN' AND lastReportDate<=?`);
+  const update = db.prepare(`UPDATE carryover_open_items SET status=?,apiStatus=?,closeReason=?,lastReportDate=?,lastSnapshotId=?,stateJson=?,updatedAt=? WHERE shipmentCode=? AND businessType=?`);
+  const current = db.prepare(`UPDATE shipment_current_state SET state=?,apiStatus=?,reportDate=?,snapshotId=?,lastEventTime=?,stateJson=?,updatedAt=? WHERE shipmentCode=? AND businessType=?`);
+  const guardedCurrent=db.prepare(`UPDATE shipment_current_state SET state=?,apiStatus=?,reportDate=?,snapshotId=?,lastEventTime=COALESCE(NULLIF(?,''),lastEventTime),stateJson=?,updatedAt=?
+    WHERE shipmentCode=? AND businessType=? AND reportDate<=?`);
   const now = nowIso();
   let ledgerSync = null;
+  const acceptedRows=[];
   db.exec('BEGIN IMMEDIATE');
   try {
     for (const row of rows) {
       const bill = String(row.shipmentCode || row.运单号 || '').trim().toUpperCase();
       if (!bill) continue;
-      const pod = row.是否POD === '是' || String(row.orderStatus || '') === '85';
-      const returned = row.退回状态 === '已退回' || /退回|RETURN/i.test(String(row.primaryCategory || row.主分类 || ''));
-      const specialState = String(row.specialState || row.primaryCategory || row.主分类 || '').trim().toUpperCase();
-      const specialClosed = ['SELF_PICKUP', 'CECN_RETENTION', 'CEZT_RETENTION', 'CCSL580_RETENTION'].includes(specialState) || row.主分类 === '仓库自提';
-      const normal = row.primaryCategory === '正常分流节点' || row.matchedRule === 'NORMAL_FINAL_HUB';
-      const apiFailed = /失败|retry/i.test(String(row.API状态 || row.查询状态 || ''));
-      const closed = pod || returned || specialClosed || normal;
-      const status = closed ? 'CLOSED' : 'OPEN';
-      const reason = pod ? 'POD' : returned ? 'RETURNED' : specialClosed ? (specialState || 'SELF_PICKUP') : normal ? 'NORMAL_FINAL' : '';
-      const apiStatus = apiFailed ? 'API_PENDING_RETRY' : 'SUCCESS';
-      const json = JSON.stringify(row);
-      update.run(status, apiStatus, reason, reportDate, snapshotId, json, now, bill);
-      current.run(closed ? reason : String(row.primaryCategory || row.主分类 || 'OPEN'), apiStatus, reportDate, snapshotId, row.latestEventTime || row.最后节点时间 || '', json, now, bill);
+      const persistedCarry=currentBusiness.get(bill)||{};
+      const businessType=String(persistedCarry.businessType||'').trim().toUpperCase();
+      if(!businessType||!carryBusinessMatches(row.businessType,businessType))continue;
+      if(expectedCarryVersions){
+        const expected=expectedCarryVersions[bill];
+        if(!expected||String(expected.lastSnapshotId||'')!==String(persistedCarry.lastSnapshotId||'')
+          ||String(expected.updatedAt||'')!==String(persistedCarry.updatedAt||''))continue;
+      }
+      if(guardOpenAtOrBefore){
+        const persisted=currentReportDate.get(bill,businessType)||{};
+        const currentDate=String(persisted.reportDate||'');
+        if(currentDate&&currentDate>guardOpenAtOrBefore)continue;
+        // Protect an already verified shipment terminal even if the older
+        // carryover row is accidentally still OPEN. Never downgrade POD to
+        // returning/returned, nor returned to a stale POD.
+        const existing=String(persisted.state||'').trim().toUpperCase();
+        const proposed=String(row.shipmentStatus||row.terminalEvidence?.shipmentStatus||'').trim();
+        if(['POD','SIGNED','DELIVERED'].includes(existing)&&proposed!=='60')continue;
+        if(['RETURNED','RETURN_COMPLETED'].includes(existing)&&proposed!=='81')continue;
+      }
+      const proof=matchedTmsTerminalEvidence(scans.get(bill)||{},bill,businessType);
+      const truth=proof?.shipmentStatus||'';
+      // Preserve existing explicit scan POD evidence when TMS has no newer
+      // recognized result. A real 80 result must never be a completed return.
+      const pod=truth==='60'||(!truth&&(row.是否POD==='是'||String(row.orderStatus||'')==='85'));
+      const returned=truth==='81'||(!truth&&row.退回状态==='已退回');
+      const returnInProgress=truth==='80'||(!pod&&!returned
+        &&[row.currentState,row.退回状态,row.scanNormalizedState].some(value=>
+          /^(?:RETURN_IN_PROGRESS|退回处理中|正在退回)$/.test(String(value||'').trim().toUpperCase())));
+      const specialState=String(row.specialState||row.primaryCategory||row.主分类||'').trim().toUpperCase();
+      const specialClosed=['SELF_PICKUP','CECN_RETENTION','CEZT_RETENTION','CCSL580_RETENTION',
+        'CCSLCN_DIVERSION','CCSLZT_DIVERSION','CCSL580_DIVERSION'].includes(specialState)
+        ||row.主分类==='仓库自提';
+      const normal=row.primaryCategory==='正常分流节点'||row.matchedRule==='NORMAL_FINAL_HUB';
+      const apiFailed=/失败|retry/i.test(String(row.API状态||row.查询状态||''));
+      const closed=!returnInProgress&&(pod||returned||specialClosed||normal);
+      const status=closed?'CLOSED':'OPEN';
+      const reason=pod?'POD':returned?'RETURNED':closed&&specialClosed?(specialState||'SELF_PICKUP'):closed&&normal?'NORMAL_FINAL':'';
+      // A successful independent TMS terminal proof supersedes stale scan-query failure.
+      const apiStatus=proof?'SUCCESS':(apiFailed?'API_PENDING_RETRY':'SUCCESS');
+      const currentState=returnInProgress?'RETURN_IN_PROGRESS'
+        :closed?reason:String(row.primaryCategory||row.主分类||'OPEN');
+      const enriched={...row,businessType,shipmentCode:bill,currentState,
+        ...(proof?{shipmentStatus:proof.shipmentStatus,terminalEvidence:proof}:{}),
+        ...(returnInProgress?{退回状态:'退回处理中',是否POD:'否'}:{})};
+      const json=JSON.stringify(enriched);
+      const updated=guardOpenAtOrBefore
+        ?guardedUpdate.run(status,apiStatus,reason,reportDate,snapshotId,json,now,bill,businessType,guardOpenAtOrBefore)
+        :update.run(status,apiStatus,reason,reportDate,snapshotId,json,now,bill,businessType);
+      if(Number(updated.changes||0)!==1)continue;
+      if(guardOpenAtOrBefore)guardedCurrent.run(currentState,apiStatus,reportDate,snapshotId,
+        row.latestEventTime||row.最后节点时间||'',json,now,bill,businessType,guardOpenAtOrBefore);
+      else current.run(currentState,apiStatus,reportDate,snapshotId,
+        row.latestEventTime||row.最后节点时间||'',json,now,bill,businessType);
+      acceptedRows.push(enriched);
     }
-    ledgerSync = syncCarryRowsToV246Ledger(rows, {
+    ledgerSync = syncCarryRowsToV246Ledger(acceptedRows, {
       db,
       reason: `UPDATE_CARRYOVER_RESULTS:${snapshotId || reportDate || 'UNKNOWN'}`,
       manageTransaction: false,
@@ -148,7 +220,13 @@ export function updateCarryoverResults({ snapshotId, reportDate, rows = [] }) {
   invalidateCarryLedgerReadCaches();
   const summary = carryoverSummary(reportDate);
   console.log(`[CE-QC][CARRY_LEDGER_SYNC] reportDate=${reportDate} processed=${Number(ledgerSync?.processed || 0)} terminal=${Number(ledgerSync?.terminal || 0)} open=${Number(ledgerSync?.open || 0)} reopened=${Number(ledgerSync?.reopened || 0)} changed=${Number(ledgerSync?.changed || 0)}`);
-  return { ...summary, ledgerSync };
+  const appliedStats={
+    processed:acceptedRows.length,
+    pod:acceptedRows.filter(row=>row.terminalEvidence?.shipmentStatus==='60').length,
+    returned:acceptedRows.filter(row=>row.terminalEvidence?.shipmentStatus==='81').length,
+    returnInProgress:acceptedRows.filter(row=>row.terminalEvidence?.shipmentStatus==='80').length
+  };
+  return { ...summary, ledgerSync, appliedStats };
 }
 
 export function carryoverSummary(reportDate) {

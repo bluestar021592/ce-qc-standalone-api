@@ -98,7 +98,40 @@ function probeLocalAuthHealth(timeoutMs = 2500) {
   });
 }
 
+// V796 local-only, non-secret session diagnosis. No identifiers, tokens or
+// cookie values are returned; no database access or login attempts occur.
+function localSessionStatus(req) {
+  const token=cookieValue(req,LOCAL_AUTH_COOKIE);
+  if(!token)return {sessionValid:false,reason:'COOKIE_MISSING'};
+  const secret=localAuthSecret();
+  if(!secret)return {sessionValid:false,reason:'SESSION_SECRET_UNAVAILABLE'};
+  const [body,sig,extra]=String(token).split('.');
+  if(!body||!sig||extra)return {sessionValid:false,reason:'COOKIE_FORMAT_INVALID'};
+  const expected=crypto.createHmac('sha256',secret).update(body).digest('base64url');
+  const actualSig=Buffer.from(sig),expectedSig=Buffer.from(expected);
+  if(actualSig.length!==expectedSig.length||!crypto.timingSafeEqual(actualSig,expectedSig))
+    return {sessionValid:false,reason:'SESSION_SIGNATURE_MISMATCH'};
+  try{
+    const value=JSON.parse(Buffer.from(body,'base64url').toString('utf8'));
+    if(value?.v!==431||value?.channel!=='LOCAL')return {sessionValid:false,reason:'SESSION_CHANNEL_MISMATCH'};
+    if(Number(value?.exp||0)<=Date.now())return {sessionValid:false,reason:'SESSION_EXPIRED'};
+    if(!value.user?.username)return {sessionValid:false,reason:'SESSION_PAYLOAD_INVALID'};
+    return {sessionValid:true,reason:'SESSION_VALID'};
+  }catch{return {sessionValid:false,reason:'SESSION_PAYLOAD_INVALID'}}
+}
 export async function accessIdentity(req, res, next) {
+  if(req.method==='GET'&&req.path==='/api/local-auth/session-check'){
+    const host=normalizeHost(req.hostname||req.get('host'));
+    const remote=normalizeIp(req.socket?.remoteAddress);
+    if(!isLoopbackHost(host)||!isLoopbackIp(remote))
+      return res.status(403).json({ok:false,code:'LOCAL_ONLY'});
+    const state=localSessionStatus(req);
+    const auth=await probeLocalAuthHealth(1200);
+    res.setHeader('Cache-Control','no-store');
+    return res.json({ok:true,appPort:Number(process.env.PORT||5177),
+      authPort:AUTH_SIDECAR_PORT,host,sessionValid:state.sessionValid,
+      reason:state.reason,authServiceReady:auth.ok,authDatabaseReady:auth.dbReady});
+  }
   if(String(req.method||'').toUpperCase()==='GET'&&PURGE_STATUS_PATH.test(String(req.path||''))){
     res.setHeader('Cache-Control','no-store, no-cache, must-revalidate');
     res.setHeader('Pragma','no-cache');

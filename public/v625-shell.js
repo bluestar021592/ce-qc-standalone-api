@@ -636,7 +636,7 @@ function scheduleHistoricalEvidenceRefresh(target='home'){
   if(v640EvidenceRefreshTimer)clearTimeout(v640EvidenceRefreshTimer);
   v640EvidenceRefreshTimer=setTimeout(()=>{
     v640EvidenceRefreshTimer=null;
-    if(target==='business'&&page==='business')void loadBusiness();
+    if(target==='business'&&Boolean(business))void loadBusiness();
     else if(page==='home')void loadHome({skipAux:true});
   },3000);
 }
@@ -999,30 +999,105 @@ async function pollTrackingJob(jobId){
   }
   throw new Error('未完成POD更新超时');
 }
+// V791: one operator click checks CEAF historical terminal statuses in
+// bounded batches. All writes are made by the server only after exact snapshot
+// and authoritative TMS membership checks. No automatic import or purge.
+let v791CeafRefreshBusy=false;
+async function v791RefreshHistoricalCeaf(reportDate,snapshotId){
+  let after='',checked=0,pod=0,returned=0,returning=0,conflicts=0,unverified=0,skipped=0;
+  let complete=false;
+  for(let batchNo=0;batchNo<120;batchNo++){
+    const result=await post('/api/v791/historical-ceaf-tms-reconcile',
+      {reportDate,snapshotId,after,limit:50,apply:true},60000);
+    if(!result?.ok||result.reportDate!==reportDate||result.snapshotId!==snapshotId)
+      throw new Error('CEAF历史TMS核验返回了其他日期或快照，已停止同步。');
+    checked+=Number(result.checked||0);
+    pod+=Number(result.closedPod||0);
+    returned+=Number(result.returned||0);
+    returning+=Number(result.returnInProgress||0);
+    conflicts+=Number(result.conflicts||0);
+    unverified+=Number(result.unverified||0);
+    skipped+=Number(result.skippedAfterCheck||0);
+    complete=result.complete===true;
+    if(result.checked){
+      note('v626RefreshPodMessage','CEAF历史核验 '+fmt(checked)+'票：TMS已POD '+fmt(pod)+
+        '票，已退回 '+fmt(returned)+'票，退回中 '+fmt(returning)+'票，证据待核实 '+fmt(unverified+conflicts)+'票，版本变化未写入 '+fmt(skipped)+'票。');
+    }
+    if(complete)break;
+    const next=String(result.nextCursor||'').toUpperCase();
+    if(!next||next<=after)throw new Error('CEAF分页游标异常，已安全停止。');
+    after=next;
+  }
+  if(!complete)throw new Error('CEAF历史核验达到单次6000票安全上限；已保存已验证结果，其余待继续核验。');
+  return {checked,pod,returned,returning,conflicts,unverified,skipped};
+}
 async function refreshOpenPodNow(){
-  if(runBusy)return;
-  const latest=v626LatestImport||await latestImportContext();if(!latest?.reportDate){note('v626RefreshPodMessage','请先上传综合日报。','error');return}
+  if(runBusy||v791CeafRefreshBusy)return;
+  const latest=v626LatestImport||await latestImportContext();
+  if(!latest?.reportDate){note('v626RefreshPodMessage','请先上传综合日报。','error');return}
   const reportDate=selectedReportDate()||latest.reportDate;
-  note('v626RefreshPodMessage','正在补查 '+reportDate+' 当日报表未完成POD与签收轨迹…');
+  v791CeafRefreshBusy=true;
+  for(const id of ['v626RefreshOpenPod','v626ImportRefreshOpen']){
+    const btn=byId(id);if(btn)btn.disabled=true;
+  }
+  let ceaf=null,ceafIssue='';
   try{
     if(!v785OpenSourceVerified)await loadOpenPod();
-    if(!v785OpenSourceVerified)throw new Error('未完成来源尚未核验，不能启动批量轨迹处理。');
+    const allSourceVerified=v785OpenSourceVerified;
+    // CEAF typed TMS status can be independently validated against its exact
+    // imported snapshot even when WHPP historical finals are still missing.
+    if(reportDate){
+      try{
+        // Resolve the report-date snapshot independently of the latest import.
+        // A July-11 selection must never write against July-12's snapshot.
+        const context=await json('/api/v791/historical-ceaf-tms-context?reportDate='+
+          encodeURIComponent(reportDate),12000);
+        if(context?.ok!==true||context.reportDate!==reportDate||!context.snapshotId)
+          throw new Error('所选日期缺少有效日报快照，已停止CEAF写入。');
+        ceaf=await v791RefreshHistoricalCeaf(reportDate,String(context.snapshotId));
+        appendLiveLog('CEAF历史TMS复核：'+fmt(ceaf.checked)+'票，POD '+fmt(ceaf.pod)+
+          '票，已退回 '+fmt(ceaf.returned)+'票，退回中 '+fmt(ceaf.returning)+'票。');
+      }catch(error){
+        if(/日期或快照|SOURCE_SNAPSHOT_MISMATCH/.test(String(error.message||'')))throw error;
+        ceafIssue=String(error.message||error);
+        appendLiveLog('CEAF真实TMS补查未完成：'+ceafIssue);
+      }
+    }
+    if(!allSourceVerified){
+      note('v626RefreshPodMessage','CEAF独立TMS核验'+(ceaf?'已处理 '+fmt(ceaf.checked)+'票，POD '+fmt(ceaf.pod)+'票；':'尚未完成；')+
+        '七业务日报来源尚未完整核验，已暂停其他业务批量轨迹刷新。'+(ceafIssue?'CEAF异常：'+ceafIssue:''),
+        'warning');
+      return;
+    }
+    note('v626RefreshPodMessage',ceafIssue
+      ?'CEAF补查尚有未核验项；继续执行其他业务轨迹补查。'
+      :'CEAF真实终态已核对，继续执行各业务轨迹补查…');
     const fromDate=v785OpenEarliestDate&&v785OpenEarliestDate<reportDate?v785OpenEarliestDate:reportDate;
     const r=await post('/api/v246/tracking/reconcile',{businessType:'ALL',fromDate,toDate:reportDate},30000);
     const job=await pollTrackingJob(r.job?.jobId||'');
-    // V786: a completed HTTP task is NOT a completed business publication.
-    // Re-read the dated source and current OPEN queue before announcing success.
     const verified=await loadOpenPod();
     if(!verified?.openSourceCoverage?.complete)
-      throw new Error('接口刷新结束，但未能重新核对全部原始成员和未完结队列，不能宣称业务闭环');
+      throw new Error('轨迹刷新结束，但来源成员未能全部核对，不能宣布业务闭环。');
     await Promise.all([page==='home'?loadHome({skipAux:true}):Promise.resolve(),
-      page==='business'?loadBusiness({skipQualityRefresh:true}):Promise.resolve()]);
+      Boolean(business)?loadBusiness({skipQualityRefresh:true}):Promise.resolve()]);
     const retryCount=Number(job.failed||0);
-    note('v626RefreshPodMessage',reportDate+' 定向补查完成：已复核来源 '+fmt(v785OpenExpectedCount)+
-      '票；当前仍未完结 '+fmt(v785OpenTotal)+'票；成功刷新 '+fmt(job.refreshed||0)+
-      '票，待重试 '+fmt(retryCount)+'票。'+(retryCount?'部分运单仍需继续补查。':'最新状态已保存并重新核对。'),
-      retryCount?'warning':'success');
-  }catch(error){note('v626RefreshPodMessage','更新失败：'+error.message,'error')}
+    note('v626RefreshPodMessage',reportDate+' 复核完成：来源 '+fmt(v785OpenExpectedCount)+
+      '票；派送续查 '+fmt(v785OpenTotal)+'票；'+(ceaf?'CEAF新核实POD '+fmt(ceaf.pod)+'票、退回 '+fmt(ceaf.returned)+'票；':'')+
+      '轨迹刷新 '+fmt(job.refreshed||0)+'票，待重试 '+fmt(retryCount)+'票。'+
+      (ceafIssue?'CEAF补查仍待核验：'+ceafIssue:'') ,
+      retryCount||ceafIssue?'warning':'success');
+  }catch(error){
+    // If the older V246 job fails after a successful CEAF reconciliation,
+    // report the partial result truthfully and re-read source evidence.
+    try{await loadOpenPod()}catch{}
+    note('v626RefreshPodMessage',(ceaf?'CEAF已按真实TMS证据保存；其他业务':'')+
+      '补查未完全通过：'+error.message,'error');
+  }finally{
+    v791CeafRefreshBusy=false;
+    for(const id of ['v626RefreshOpenPod','v626ImportRefreshOpen']){
+      const btn=byId(id);if(btn)btn.disabled=false;
+    }
+  }
 }
 
 async function scanWhppPending(){
@@ -1496,7 +1571,7 @@ async function refreshV748BusinessTrackQuality(reportDate=''){
         if(status==='FAILED')throw new Error(job.error||job.message||'精准轨迹补抓失败');
         if(!sameTarget){
           v748QualityRefreshKeys.delete(key);
-          if(page==='business'&&business===requestedBusiness)setTimeout(()=>void refreshV748BusinessTrackQuality(date),800);
+          if(Boolean(business)&&business===requestedBusiness)setTimeout(()=>void refreshV748BusinessTrackQuality(date),800);
           return;
         }
         setText('v748QualityRefreshMeta','轨迹补抓完成 · 成功 '+fmt(job.refreshed||0)+' 票 · 待重试 '+fmt(job.failed||0)+' 票');
@@ -1520,7 +1595,7 @@ async function v765LoadBusinessDetailLane({reportDate,snapshotId,m,options,gener
   // Do not make a large business-details query compete with the first KPI
   // paint. A short deferred task allows layout and user navigation first.
   await new Promise(resolve=>setTimeout(resolve,350));
-  const stillSelected=()=>page==='business'&&business===targetBusiness
+  const stillSelected=()=>Boolean(business)&&business===targetBusiness
     &&generation===v765BoardLoadGeneration
     &&String(v628BusinessReportDate||'')===reportDate;
   if(!stillSelected())return;
@@ -1578,6 +1653,8 @@ async function v765LoadBusinessDetailLane({reportDate,snapshotId,m,options,gener
 
     const wr=workspaceR.status==='fulfilled'?workspaceR.value:{rows:[]};
     v628BusinessWorkspaceRows=(wr.rows||[]).filter(businessTypeMatches);
+    if(business==='WHPP')v792RenderWhppDetails(v628BusinessWorkspaceRows,
+      Number(wr.allRowCount||0)>v628BusinessWorkspaceRows.length);
     applyV748QualitySignals(wr);
     const workspaceAllCount=Number(wr.allRowCount||v628BusinessWorkspaceRows.length);
     const workspaceTruncated=workspaceAllCount>v628BusinessWorkspaceRows.length;
@@ -1677,6 +1754,8 @@ async function loadBusiness(options={}){
     if(byId('kpiOtherCard')){byId('kpiOtherCard').hidden=false;setText('kpiOtherNormal',fmt(m.otherNormal||0))}
     if(byId('kpiUnprocessedCard')){byId('kpiUnprocessedCard').hidden=true;setText('kpiUnprocessed',fmt(0))}
     renderDonut({total:m.total,delivery:m.delivery||0,pod:m.pod||0,pending:m.pending||0,unresolved:m.unresolved||0});
+    if(business==='WHPP'){v792SetWhppMetrics(m);v792WhppStatusDonut(m)}
+    if(business==='WHPP')void v792LoadWhppTrend(reportDate);
 
     // Fast summary/timing updates are useful, but never gate the board's first paint.
     void summaryPromise.then(summary=>{
@@ -1687,6 +1766,7 @@ async function loadBusiness(options={}){
       else if(evidenceState==='COMPLETED'||summary?.timingEvidenceRepair)stopHistoricalEvidenceRefresh();
       const timing=summary?.reportDate===reportDate?summary?.timing?.[business]:null;
       if(timing?.overall?.avgDays!=null)setText('kpiAvgDays',Number(timing.overall.avgDays).toFixed(2).replace(/\.00$/,''));
+      if(business==='WHPP'&&summary?.reportDate===reportDate)v792SetWhppMetrics(m,timing);
     });
 
     // V765: the business summary is already visible. Run 5,000-row
@@ -1758,29 +1838,84 @@ async function refreshImportCanonicalClassification(reportDate=''){
   }
 }
 async function loadImport(){
-  try{
-    const [latest,history]=await Promise.all([json('/api/import/unified-latest',7000),json('/api/unified-history?limit=15',7000)]);
-    const latestImport=latest.import||v626LatestImport||null;
-    const exactHistory=(history.rows||[]).find(r=>String(r.reportDate||'').slice(0,10)===String(latestImport?.reportDate||'').slice(0,10))||null;
-    v626LatestImport=latestImport?{...latestImport,...(exactHistory?{snapshotStatus:exactHistory.snapshotStatus||exactHistory.status||latestImport.snapshotStatus||'IMPORTED',createdAt:exactHistory.createdAt||latestImport.createdAt}:{} )}:v626LatestImport;
-    if(v626LatestImport){
-      rememberV755ImportCounts(v626LatestImport,'UNIFIED_LATEST_LOAD');
-      renderImport(v626LatestImport);
-      note('v625ImportMessage','已读取最近一次综合日报。','success');
-    }
-    const tbody=byId('v625ImportHistory');if(tbody){tbody.replaceChildren();
-      for(const r of history.rows||[]){
-        const tr=document.createElement('tr');
-        const values=[dateTime(r.createdAt),r.sourceName||'综合日报',r.reportDate||'—',r.dateDetectionSource||'系统自动识别',r.summary?.validUniqueWaybills??r.summary?.totalUnique??'—',r.snapshotStatus||r.status||'IMPORTED'];
-        for(const value of values){const td=document.createElement('td');td.textContent=value;tr.appendChild(td)}tbody.appendChild(tr)
+  // V795: the latest summary and import history are independent READ-ONLY
+  // evidence sources. A timeout in one must not erase or hide the other.
+  const [latestRead,historyRead]=await Promise.allSettled([
+    json('/api/import/unified-latest?compact=1',9000),
+    json('/api/unified-history?limit=15',7000)
+  ]);
+  const latestOk=latestRead.status==='fulfilled'&&latestRead.value?.ok===true;
+  const historyOk=historyRead.status==='fulfilled'&&historyRead.value?.ok===true;
+  const latest=latestOk?latestRead.value:{};
+  const history=historyOk?historyRead.value:{rows:[]};
+  const latestImport=latest.import||v626LatestImport||null;
+  const exactHistory=(history.rows||[]).find(r=>String(r.reportDate||'').slice(0,10)===String(latestImport?.reportDate||'').slice(0,10))||null;
+  v626LatestImport=latestImport?{...latestImport,...(exactHistory?{
+    snapshotStatus:exactHistory.snapshotStatus||exactHistory.status||latestImport.snapshotStatus||'IMPORTED',
+    createdAt:exactHistory.createdAt||latestImport.createdAt
+  }:{})}:v626LatestImport;
+  if(v626LatestImport){
+    rememberV755ImportCounts(v626LatestImport,'UNIFIED_LATEST_LOAD');
+    renderImport(v626LatestImport);
+  }
+  // Do not replace an existing history table with "no imports" when the
+  // history API timed out; keep the last verified on-screen evidence.
+  const tbody=byId('v625ImportHistory');
+  if(tbody&&historyOk){
+    tbody.replaceChildren();
+    for(const r of history.rows||[]){
+      const tr=document.createElement('tr');
+      const values=[dateTime(r.createdAt),r.sourceName||'综合日报',
+        r.reportDate||'—',r.dateDetectionSource||'系统自动识别',
+        r.summary?.validUniqueWaybills??r.summary?.totalUnique??'—',
+        r.snapshotStatus||r.status||'IMPORTED'];
+      for(const value of values){
+        const td=document.createElement('td');td.textContent=value;tr.appendChild(td);
       }
-      if(!(history.rows||[]).length)tbody.innerHTML='<tr><td colspan="6">暂无导入记录</td></tr>';
+      tbody.appendChild(tr);
     }
-    await refreshImportCanonicalClassification(v626LatestImport?.reportDate||'');
-    void v759VerifyWhppCompletionOnce(v626LatestImport?.reportDate||'');
-    void refreshLiveProgress();
-    void loadOpenPod();
-  }catch(error){note('v625ImportMessage','读取导入状态失败：'+error.message,'error')}
+    if(!(history.rows||[]).length)tbody.innerHTML='<tr><td colspan="6">历史接口未发现导入记录（仅代表此次查询结果）</td></tr>';
+  }
+  if(!v626LatestImport){
+    // Without an exact imported snapshot 0/0 means 'not read', NOT zero work.
+    for(const id of ['v626ImportProgressCount','v626ProcessCount',
+      'v626ImportCcsl','v626ImportShopee','v626ImportWhpp',
+      'v626CcslProgress','v626ShopeeProgress','v626WhppProgress'])setText(id,'待核验');
+    setText('v626ImportProgressText','历史处理状态暂未读取成功，0/0不代表没有包裹或已经完成。');
+    const fromHistory=(history.rows||[])[0]||null;
+    if(fromHistory&&historyOk){
+      const date=String(fromHistory.reportDate||'').slice(0,10);
+      setText('v625ImportState','有历史日报·状态待核验');
+      if(date){
+        setText('v625ImportDateMeta',date+' · 历史记录');
+        setText('v626DetectedReportDate',date);
+        setText('v626ImportProgressDate',date);
+      }
+      note('v625ImportMessage','已找到历史日报记录，但最近导入详情尚未读取成功。不能认定未导入，也不能据此启动重复上传。','warning');
+    }else{
+      setText('v625ImportState',latestOk&&historyOk?'无已确认的日报':'读取超时·历史状态待核验');
+      note('v625ImportMessage',latestOk&&historyOk
+        ?'这两个只读来源均未提供可确认的日报；请核对首页和具体日期，勿直接清空数据。'
+        :'历史日报查询超时或失败，不能认定业务数据丢失。请使用下方只读诊断核对7月12日。','warning');
+    }
+  }else if(!latestOk||!historyOk){
+    note('v625ImportMessage','已有日报信息已保留；'+
+      (!latestOk?'最近日报读取超时；':'')+
+      (!historyOk?'历史列表读取超时；':'')+
+      '进度与终态继续以同日期的只读来源证据为准。','warning');
+  }else{
+    note('v625ImportMessage','已读取最近一次综合日报及历史记录。','success');
+  }
+  // Import status can time out independently from business progress. Continue
+  // read-only probes without chaining them behind the failed API.
+  if(v626LatestImport?.reportDate&&v626LatestImport?.snapshotId){
+    void refreshImportCanonicalClassification(v626LatestImport.reportDate).catch(()=>{});
+    void v759VerifyWhppCompletionOnce(v626LatestImport.reportDate).catch(()=>{});
+  }
+  if(v626LatestImport?.reportDate){
+    void refreshLiveProgress().catch(()=>{});
+    void loadOpenPod().catch(()=>{});
+  }
 }
 function dateSourceText(data={}){
   const source=String(data.dateDetectionSource||data.reportDateSource||'').trim();
@@ -1969,8 +2104,15 @@ async function v761ContinueFamily(type,disposition,date){
 async function v761DiagnoseFamilyRecovery(){
   const view=byId('v761FamilyRecoveryResult'),button=byId('v761FamilyRecoveryDiagnostic');
   if(!view)return;
-  const date=String(v626LatestImport?.reportDate||'').slice(0,10);
+  const shown=String(byId('v626ImportProgressDate')?.textContent||'').slice(0,10);
+  const date=String(v626LatestImport?.reportDate||
+    (/^\d{4}-\d{2}-\d{2}$/.test(shown)?shown:'')||
+    selectedReportDate()||'').slice(0,10);
   view.hidden=false;
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(date)){
+    view.textContent='未能确认日报日期。该页面读取超时不代表未导入，请先打开对应日期的历史记录再只读诊断。';
+    return;
+  }
   if(button){button.disabled=true;button.textContent='正在诊断…'}
   try{
     const proof=await v761FamilyRecoveryProof(date);
@@ -2699,7 +2841,7 @@ async function activateSavedShopCodes(){
     if(btn)btn.disabled=false;
   }
 }
-async function importShop(){const file=byId('v625ShopFile').files?.[0];if(!file)return;const fd=new FormData();fd.append('file',file);try{const r=await request('/api/import-shop-codes',{method:'POST',body:fd},60000);v748QualityRefreshKeys.clear();setText('v625ShopMeta','保存完成 · '+fmt(r.imported?.imported||0)+'码，需激活完整名单后生效');void loadCompleteShopStatus();if(page==='business'&&v628BusinessReportDate)void refreshV748BusinessTrackQuality(v628BusinessReportDate)}catch(e){setText('v625ShopMeta','更新失败：'+e.message)}}
+async function importShop(){const file=byId('v625ShopFile').files?.[0];if(!file)return;const fd=new FormData();fd.append('file',file);try{const r=await request('/api/import-shop-codes',{method:'POST',body:fd},60000);v748QualityRefreshKeys.clear();setText('v625ShopMeta','保存完成 · '+fmt(r.imported?.imported||0)+'码，需激活完整名单后生效');void loadCompleteShopStatus();if(Boolean(business)&&v628BusinessReportDate)void refreshV748BusinessTrackQuality(v628BusinessReportDate)}catch(e){setText('v625ShopMeta','更新失败：'+e.message)}}
 
 async function loadLogs(){
   try{
@@ -2853,7 +2995,240 @@ function bind(){
   byId('v626ClearAllData')?.addEventListener('click',clearAllBusinessData);
   qa('#v626DataTabs [data-data-tab]').forEach(btn=>btn.addEventListener('click',()=>switchDataTab(btn.dataset.dataTab)));
 }
+// V792: match the supplied home + WHPP dashboard references without cloning
+// fake chart numbers or replacing existing live-data IDs and event listeners.
+function v792ApplyReferenceLayout(){
+  if(page==='home'){
+    document.body.classList.add('v792-reference');
+    if(byId('v625BoardJump'))byId('v625BoardJump').value='/?auth=v625';
+    setText('v625PageSub','自动识别日报日期 · 实时整合七业务质控数据');
+    const home=byId('v625Home');
+    const overview=home?.querySelector('.v625-home-business-panel');
+    const live=home?.querySelector('.v626-live-grid');
+    const three=home?.querySelector('.v625-home-three');
+    const validation=home?.querySelector('.v625-home-validation');
+    const timing=home?.querySelector('.v625-signing-panel');
+    const logs=home?.querySelector('.v626-log-panel');
+    const process=home?.querySelector('.v626-processing-panel');
+    const open=home?.querySelector('.v626-open-pod-panel');
+    const status=home?.querySelector('.v625-home-status-panel');
+    const quick=home?.querySelector('.v625-home-quick-panel');
+    const trend=home?.querySelector('.v625-home-trend-panel');
+    if(!home||!overview||!live||!three||!validation||!timing||!logs
+      ||!process||!open||!status||!quick||!trend)return;
+    const top=document.createElement('div');top.className='v792-home-main-row';
+    overview.after(top);top.append(process,status,quick,logs);
+    // Preserve the source completeness indicator, but position it with
+    // reference screenshot's data-management area rather than bloating
+    // the above-the-fold seven-business overview.
+    const integrity=byId('v637HomeIntegrityBar');
+    const management=byId('v792HomeManagement');
+    if(integrity&&management)management.append(integrity);
+    const bottom=document.createElement('div');bottom.className='v792-home-bottom-row';
+    timing.before(bottom);bottom.append(timing,open);
+    const optional=document.createElement('details');optional.className='v792-optional-trend v625-panel';
+    const caption=document.createElement('summary');caption.textContent='近7天总票数趋势（已保存来源）';
+    optional.append(caption,trend);bottom.after(optional);
+    // The screenshot places data management immediately beneath the
+    // signing/open POD row. Keep the optional trend below management.
+    if(management)bottom.after(management);
+    live.remove();three.remove();
+    // The seventh business card is the screenshot's last tile; grand total
+    // remains in the underlying verified summary, not a duplicated eighth tile.
+  }
+  if(business==='WHPP'){
+    document.body.classList.add('v792-reference');
+    const icons=['icon-package','icon-route','icon-check','icon-clipboard',
+      'icon-alert','icon-clock','icon-archive','icon-refresh'];
+    for(const [i,tile] of [...(byId('v625Business')?.querySelectorAll('.v625-kpi-row>article')||[])].entries()){
+      if(i>7||tile.querySelector('.v792-kpi-symbol'))continue;
+      const symbol=document.createElement('i');symbol.className='v792-kpi-symbol';
+      symbol.setAttribute('aria-hidden','true');
+      symbol.innerHTML='<svg><use href="/assets/ui-icons-v625.svg#'+icons[i]+'"/></svg>';
+      tile.insertBefore(symbol,tile.firstChild);
+    }
+    if(byId('v625BoardJump'))byId('v625BoardJump').value='/whpp?auth=v625';
+    setText('v625PageSub','按真实所选日期与运单号核验 WHPP POD、退回和签收时效');
+    const a=byId('v792WhppAnalysis'),b=byId('v792WhppTables');
+    if(a)a.hidden=false;if(b)b.hidden=false;
+    // Keep all source-integrity and trajectory quality controls available,
+    // but don't let operational audit strips displace the screenshot's charts.
+    const board=byId('v625Business'),quality=board?.querySelector('.v748-quality-signals');
+    const accounting=board?.querySelector('.v631-accounting-bar');
+    const integrity=board?.querySelector('.v637-integrity-bar');
+    if(board&&a&&b&&quality&&accounting&&integrity){
+      const technical=document.createElement('details');technical.className='v792-whpp-technical v625-panel';
+      const heading=document.createElement('summary');heading.textContent='来源完整性及轨迹质量核查';
+      technical.append(heading,quality,accounting,integrity);
+      b.after(technical);
+    }
+    const range=byId('v625BusinessTrendRange');
+    if(range)range.innerHTML='<option value="7">近7天</option>';
+    const trendHeader=byId('v625BusinessTrend')?.closest('.v625-panel')?.querySelector('.v625-section-head h2');
+    if(trendHeader)trendHeader.textContent='业务趋势（近7天）';
+    const panel=qa('#v625Business>section.v625-panel').find(node=>
+      node.querySelector('.v625-section-head h2')?.textContent?.trim()==='最新异常明细');
+    if(panel)panel.classList.add('v792-whpp-original-exceptions');
+  }
+}
+function v792SetWhppMetrics(m={},timing=null){
+  if(business!=='WHPP')return;
+  const showDays=v=>v===null||v===undefined?'—':Number(v).toFixed(1)+'天';
+  const verifiedDays=bucket=>Number(bucket?.podCount||0)>0
+    &&Number.isFinite(Number(bucket?.avgDays))?Number(bucket.avgDays):null;
+  const overall=verifiedDays(timing?.overall);
+  setText('v792WhppOverall',showDays(overall));
+  setText('kpiAvgDays',overall===null?'—':Number(overall).toFixed(1));
+  setText('v792WhppPP',showDays(verifiedDays(timing?.pp)));
+  setText('v792WhppPV',showDays(verifiedDays(timing?.pv)));
+  // Only actual first/second/third attempt samples may produce an average.
+  setText('v792WhppFirst',showDays(verifiedDays(timing?.attempt1)));
+  setText('v792WhppSecond',showDays(verifiedDays(timing?.attempt2)));
+  setText('v792WhppThird',showDays(verifiedDays(timing?.attempt3)));
+  setText('v792WhppReturnCount',fmt(m.returned));
+  setText('v792WhppReturnRate',m.total>0?pct(m.returned/m.total*100):'—');
+  setText('v792WhppTimingSource',timing?.overall?.avgDays!=null
+    ?'平均时效依据真实POD/派送日期计算；一/二/三派只使用已核实的派送次数证据。'
+    :'签收时效缺少已核实的日期轨迹，当前不推算平均签收天数。');
+}
+function v792WhppStatusDonut(m={}){
+  if(business!=='WHPP')return;
+  const total=Math.max(0,Number(m.total||0));
+  const pod=Math.max(0,Number(m.pod||0));
+  const returned=Math.max(0,Number(m.returned||0));
+  const donut=byId('v625BusinessDonut'),legend=byId('v625BusinessLegend');
+  if(!donut||!legend)return;
+  if(!total||pod+returned>total){
+    donut.style.background='conic-gradient(#e5ebf2 0% 100%)';
+    legend.textContent=total?'POD与退回票数超过总票数；等待来源核验。':'暂无可核对的WHPP运单统计';
+    return;
+  }
+  const rest=total-pod-returned;
+  // Pending, delivery and abnormal can overlap in historical quick summaries.
+  // Do not invent a breakdown: keep remaining tickets visibly unverified.
+  const portions=[['已签收(POD)',pod,'#19bb81'],['已退回',returned,'#ef5261'],
+    ['其他状态待核验',rest,'#b8c7d8']];
+  let at=0;
+  const gradients=[];
+  for(const [,value,color] of portions){const next=at+value/total*100;
+    if(value>0)gradients.push(color+' '+at+'% '+next+'%');
+    at=next;
+  }
+  donut.style.background='conic-gradient('+gradients.join(',')+')';
+  legend.innerHTML=portions.map(([name,value,color])=>
+    '<div><i style="background:'+color+'"></i><span>'+esc(name)+' '+fmt(value)+
+    ' ('+pct(value/total*100)+')</span></div>').join('');
+}
+function v792RenderWhppTrend(points=[]){
+  if(business!=='WHPP')return;
+  const root=byId('v625BusinessTrend');if(!root)return;
+  const rows=(points||[]).slice(-7);
+  const max=Math.max(1,...rows.map(p=>Number(p.total||0)),...rows.map(p=>Number(p.pod||0)),...rows.map(p=>Number(p.returned||0)));
+  if(!rows.some(p=>p.total!==null)){
+    root.innerHTML='<div class="v792-data-unknown">近7日没有可核验的WHPP原始日报，不绘制示例曲线。</div>';return;
+  }
+  const width=700,height=186,x0=38,right=16,top=18,bottom=34;
+  const x=i=>x0+i*(width-x0-right)/Math.max(1,rows.length-1);
+  const y=n=>height-bottom-(Number(n)/max)*(height-top-bottom);
+  const buildSegments=key=>{
+    const paths=[];let current=[];
+    rows.forEach((point,i)=>{
+      if(point[key]===null||point[key]===undefined){
+        if(current.length)paths.push(current);
+        current=[];return;
+      }
+      current.push([x(i),y(point[key]),point[key]]);
+    });
+    if(current.length)paths.push(current);
+    return paths.map(points=>'<path d="'+points.map((p,i)=>(i?'L':'M')+
+      p[0].toFixed(1)+','+p[1].toFixed(1)).join(' ')+'" class="v792-'+key+'-line"/>').join('');
+  };
+  let svg='<svg class="v792-whpp-chart-svg" viewBox="0 0 '+width+' '+height+
+    '" preserveAspectRatio="none" role="img" aria-label="WHPP已保存日报近7日总票数与经来源核验的POD数量">';
+  for(let i=0;i<=4;i++){
+    const value=max*i/4, yy=y(value);
+    svg+='<line class="v792-grid-line" x1="'+x0+'" y1="'+yy+
+      '" x2="'+(width-right)+'" y2="'+yy+'"/><text x="1" y="'+(yy+4)+'">'+
+      fmt(Math.round(value))+'</text>';
+  }
+  svg+=buildSegments('total')+buildSegments('pod')+buildSegments('returned');
+  rows.forEach((point,i)=>{
+    const xx=x(i);svg+='<text x="'+xx+'" y="'+(height-9)+
+      '" text-anchor="middle">'+esc(String(point.date||'').slice(5))+'</text>';
+    for(const key of ['total','pod','returned']){
+      if(point[key]===null||point[key]===undefined)continue;
+      svg+='<circle cx="'+xx+'" cy="'+y(point[key])+'" r="3.4" fill="'+
+        (key==='total'?'#147ef5':key==='pod'?'#11b782':'#ef5261')+'"><title>'+
+        esc(point.date+' · '+(key==='total'?'源票':key==='pod'?'已核验POD':'已核验退回')+' '+fmt(point[key]))+
+        '</title></circle>';
+    }
+  });
+  root.innerHTML='<div class="v792-whpp-chart-legend"><span><i style="background:#147ef5"></i>日报源票</span>'+
+    '<span><i style="background:#11b782"></i>已核验POD</span>'+ 
+    '<span><i style="background:#ef5261"></i>已核验退回</span></div>'+
+    '<p class="v792-whpp-chart-note">缺少终态证据的日期显示空缺；部分核实的数量不代表全部终态已完成。</p>'+svg+'</svg>';
+}
+async function v792LoadWhppTrend(date=''){
+  if(business!=='WHPP'||!date)return;
+  const root=byId('v625BusinessTrend');if(root)root.textContent='正在核对近7日WHPP来源票数和最终记录…';
+  try{
+    const response=await json('/api/v792/whpp/trend?toDate='+encodeURIComponent(date),12000);
+    if(!business||business!=='WHPP'||v628BusinessReportDate!==date)return;
+    if(!response?.ok||response.toDate!==date||response.businessType!=='WHPP')
+      throw new Error('趋势来源与当前业务日期不一致');
+    v792RenderWhppTrend(response.points||[]);
+  }catch(error){
+    if(Boolean(business)&&business==='WHPP'&&v628BusinessReportDate===date&&root)
+      root.innerHTML='<div class="v792-data-unknown">近7日趋势尚未取得可信来源：'+esc(error.message)+'</div>';
+  }
+}
+function v792RenderWhppDetails(rows=[],truncated=false){
+  if(business!=='WHPP')return;
+  const issues=rows.filter(row=>row.isActionable===true).slice(0,8);
+  const returned=rows.filter(row=>row.isReturned===true
+    ||String(row.currentState||'').toUpperCase()==='RETURN_COMPLETED').slice(0,8);
+  const fill=(id,items,getValues)=>{
+    const el=byId(id);if(!el)return;el.replaceChildren();
+    if(!items.length){el.innerHTML='<tr><td colspan="4">'+
+      (truncated?'当前仅显示已读取明细；完整来源请打开指标逐票查看':'当前已读取范围暂无该类运单')+
+      '</td></tr>';return}
+    for(const row of items){
+      const tr=document.createElement('tr');
+      for(const value of getValues(row)){
+        const td=document.createElement('td');td.textContent=String(value??'—');tr.append(td);
+      }
+      const td=document.createElement('td'),a=document.createElement('a');
+      a.href='/tracking?auth=v625&code='+encodeURIComponent(row.shipmentCode||'')+
+        '&businessType=WHPP&reportDate='+encodeURIComponent(row.reportDate||v628BusinessReportDate||'');
+      a.textContent='查看';a.style.color='#1275eb';td.append(a);tr.append(td);el.append(tr);
+    }
+  };
+  fill('v792WhppAnomalyRows',issues,row=>[
+    row.shipmentCode,row.category||row.queryStatus||'待核验',row.currentState||'—']);
+  fill('v792WhppReturnedRows',returned,row=>[
+    row.shipmentCode,row.currentState||'RETURN_COMPLETED',
+    row.latestTime||row.lastEventTime||row.lastCheckedAt||'—']);
+  const returnedAll=rows.filter(row=>row.isReturned===true
+    ||String(row.currentState||'').toUpperCase()==='RETURN_COMPLETED');
+  const validReasons=returnedAll.map(row=>String(row.returnReason||row.退回原因||'').trim()).filter(Boolean);
+  const root=byId('v792WhppReturnReasons');
+  if(!root)return;
+  if(!validReasons.length){root.textContent='退回原因尚无可信的逐票字段，暂不生成TOP5占比。';return}
+  const groups=new Map();
+  for(const reason of validReasons)groups.set(reason,(groups.get(reason)||0)+1);
+  const top=[...groups].sort((a,b)=>b[1]-a[1]).slice(0,5);
+  root.replaceChildren();
+  const label=document.createElement('div');label.textContent='已核验退回原因（仅'+
+    fmt(validReasons.length)+'票有原因证据'+(truncated?'，当前为截断预览':'')+'）';
+  label.style.marginBottom='8px';root.append(label);
+  for(const [name,count] of top){
+    const div=document.createElement('div');div.style.margin='5px 0';
+    div.textContent=name+'：'+fmt(count)+'票（有原因证据的 '+pct(count/validReasons.length*100)+'）';
+    root.append(div);
+  }
+}
 async function init(){
+  v792ApplyReferenceLayout();
   bind();void loadSession();
   if(page==='home'){
     await loadHome();

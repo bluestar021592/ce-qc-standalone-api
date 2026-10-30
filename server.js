@@ -1,3 +1,5 @@
+import { deliveryFollowupDisposition, savedTerminalProof } from './src/openPodDeliveryScope.js';
+import { planHistoricalTmsReconcile } from './src/v791HistoricalTmsReconcile.js';
 import 'dotenv/config';
 import express from 'express';
 import multer from 'multer';
@@ -1135,7 +1137,8 @@ async function handleResumeRequest(req, res) {
 app.post('/api/import-excel', upload.single('file'), handleDailyReportImport);
 app.post('/api/import/daily-report', upload.single('file'), handleDailyReportImport);
 app.post('/api/import/unified-daily-report', upload.single('file'), handleUnifiedDailyImport);
-app.get('/api/import/unified-latest', (req, res) => res.json({ ok: true, import: getLatestUnifiedImport() }));
+app.get('/api/import/unified-latest', (req, res) => res.json({ ok: true,
+  import: getLatestUnifiedImport({ includeCarryover: req.query.compact !== '1' }) }));
 app.post('/api/shopee/import-excel', upload.single('file'), handleShopeeDailyImport);
 // An explicit ADMIN activation, never automatic on startup or import.
 // The existing 72 rows are snapshotted; older shop rows and track evidence stay
@@ -1496,7 +1499,8 @@ async function executeRunRequest(req, res, options = {}) {
     result.state.historySummary = appendHistorySummary(result.state.historySummary || [], metricSnapshot);
     await saveState(result.state);
     const snapshot = createDashboardSnapshot(result.state, { reportDate, runId: run.runId });
-    updateCarryoverResults({ snapshotId: snapshot.snapshotId, reportDate, rows: result.state.finalRows || [] });
+    updateCarryoverResults({ snapshotId: snapshot.snapshotId, reportDate,
+      rows: result.state.finalRows || [], scanResults: result.state.scanResults || [] });
     await appendRuntimeLog(`处理快照已保存：${snapshot.snapshotId}`);
     launchDashboardCacheWorker({ reportDate, reason: 'CCSL_RUN_COMPLETED' });
     res.json({ ok: true, summary: result.summary, run: { runId: run.runId, reportDate, recovered: outcome.recovered }, snapshotId: snapshot.snapshotId, state: summarizeState(await loadState()) });
@@ -1632,7 +1636,8 @@ async function executeShopeeRunRequest(req, res, options = {}) {
     saveBusinessState(result.state, SHOPEE);
     const snapshot = saveBusinessSnapshot(SHOPEE, result.state, buildShopeeDashboard(result.state));
     result.state.snapshotId = snapshot.snapshotId;
-    updateCarryoverResults({ snapshotId: snapshot.snapshotId, reportDate, rows: result.state.finalRows || [] });
+    updateCarryoverResults({ snapshotId: snapshot.snapshotId, reportDate,
+      rows: result.state.finalRows || [], scanResults: result.state.scanResults || [] });
     const ccslState = await loadState();
     const ccslSnapshot = getMatchingSnapshot(ccslState);
     completeUnifiedSnapshot({ reportDate, ccslSnapshot, shopeeSnapshot: snapshot });
@@ -1817,7 +1822,8 @@ app.get('/api/tracking-workspace', async (req, res) => {
       const oldCarry=getDb().prepare(`SELECT o.shipmentCode,o.businessType,o.sourceReportDate,
           o.stateJson,o.apiStatus,q.currentState,q.lastEventTime,q.lastCheckedAt
         FROM carryover_open_items o
-        LEFT JOIN qc_tracking_ledger q ON q.shipmentCode=o.shipmentCode
+        LEFT JOIN qc_tracking_ledger q ON UPPER(TRIM(q.shipmentCode))=UPPER(TRIM(o.shipmentCode))
+          AND UPPER(TRIM(q.businessType))=UPPER(TRIM(o.businessType))
         WHERE o.status='OPEN' AND o.sourceReportDate<? AND
           (q.shipmentCode IS NULL OR (q.trackingStatus='OPEN' AND
             UPPER(COALESCE(q.terminalReason,'')) NOT IN ('POD','RETURNED','ORDER_CANCELLED')))
@@ -1828,11 +1834,30 @@ app.get('/api/tracking-workspace', async (req, res) => {
         if(!bill||dailySet.has(type+'|'+bill))continue;
         let state={};
         try{state=JSON.parse(String(row.stateJson||'{}'))||{}}catch{}
+        const savedState=String(row.currentState||state.currentState||state.scanNormalizedState||'未完结');
+        // Only an explicitly verified, same-business and same-waybill TMS
+        // shipment status may override a stale OPEN carryover record.
+        // The snapshot's original state and database remain untouched.
+        const proof=savedTerminalProof(state,bill,type)||{};
+        const proofBill=String(proof.shipmentCode||'').trim().toUpperCase();
+        const proofType=String(proof.businessType||'').trim().toUpperCase();
+        const proofMatches=proof.source==='TMS_SHIPMENT_STATUS'
+          &&proof.verified===true&&proofBill===bill&&proofType===type;
+        const disposition=deliveryFollowupDisposition({
+          ...state,currentState:savedState,
+          shipmentStatus:proofMatches?String(proof.shipmentStatus||''):'',
+          terminalEvidenceVerified:proofMatches,
+          terminalEvidenceWaybillMatched:proofMatches,
+          terminalEvidenceBusinessMatched:proofMatches
+        });
+        // Courier diversion ends delivery follow-up; it does NOT create POD.
+        // Keep original evidence/ledger untouched and do not synthesize terminal states.
+        if(!disposition.include)continue;
         historicalCarryRows.push({
           shipmentCode:bill,businessType:type,reportDate:row.sourceReportDate,
           sourceReportDate:row.sourceReportDate,historicalCarry:true,isClosed:false,isActionable:true,
-          currentState:String(row.currentState||state.currentState||state.scanNormalizedState||'未完结'),
-          category:String(state.primaryCategory||state.currentMainCategory||'历史未完结'),
+          currentState:disposition.reason==='SCAN_EVIDENCE_MISSING'?'扫描证据待核实':savedState,
+          category:disposition.reason==='SCAN_EVIDENCE_MISSING'?'扫描证据待核实':String(state.primaryCategory||state.currentMainCategory||'历史未完结'),
           lastEventTime:String(row.lastEventTime||row.lastCheckedAt||''),
           lastCheckedAt:String(row.lastCheckedAt||''),queryStatus:String(row.apiStatus||'需更新'),
           pendingNonContinuous:false,oc2Plus:false,shopArrivedCurrent:false
@@ -1843,8 +1868,9 @@ app.get('/api/tracking-workspace', async (req, res) => {
   const allRows=[...dailyRows,...historicalCarryRows];
   const priority = row => row.queryStatus === '待重试' ? 0 : row.isActionable ? 1 : 2;
   allRows.sort((a, b) => priority(a) - priority(b) || String(a.businessType).localeCompare(String(b.businessType)) || String(a.shipmentCode).localeCompare(String(b.shipmentCode)));
+  const effectiveOpenRows=allRows.filter(row=>!row.isClosed&&deliveryFollowupDisposition(row).include);
   const rows = scope === 'all' ? allRows : scope === 'pod' ? allRows.filter(row => row.isClosed)
-    : scope==='open' ? allRows.filter(row=>!row.isClosed) : allRows.filter(row => row.isActionable);
+    : scope==='open' ? effectiveOpenRows : allRows.filter(row => row.isActionable);
   const qualityBuckets={
     shopArrived:allRows.filter(row=>row.shopArrivedCurrent),
     pendingGap:allRows.filter(row=>row.pendingNonContinuous),
@@ -1862,7 +1888,7 @@ app.get('/api/tracking-workspace', async (req, res) => {
   const qualityRows=Object.fromEntries(Object.entries(qualityBuckets).map(([key,list])=>[key,list.slice(0,1000)]));
   const summary = {
     dailyNew: Number(unified?.summary?.validUniqueWaybills || unified?.summary?.totalUnique || 0),
-    historicalCarry: Number(unified?.carryover?.historicalOpen || 0),
+    historicalCarry: scope==='open'?historicalCarryRows.length:Number(unified?.carryover?.historicalOpen || 0),
     scanCompleted: allRows.filter(row => row.scanStatus && row.scanStatus !== '待扫描').length,
     podSkipped: allRows.filter(row => row.scanStatus === 'POD').length,
     returnSkipped: allRows.filter(row => row.scanStatus === 'RETURN').length,
@@ -1944,7 +1970,7 @@ app.get('/api/tracking-workspace', async (req, res) => {
     }
   }
   const payload={ok:true,reportDate,batchId:unified?.batchId||'',snapshotId,scope,
-    allRowCount: allRows.length,openRowCount:allRows.filter(row=>!row.isClosed).length,
+    allRowCount: allRows.length,openRowCount:effectiveOpenRows.length,
     returnedCompletedCount:allRows.filter(row=>row.isReturned===true).length,
     displayedRows:Math.min(rows.length,5000),truncated:rows.length>5000,
     summary,qualitySignals,qualityRows,qcCoverage,openSourceCoverage,rows: rows.slice(0, 5000)};
@@ -1956,6 +1982,141 @@ app.get('/api/tracking-workspace', async (req, res) => {
   res.setHeader('Cache-Control','no-store');
   res.setHeader('X-CE-QC-Workspace-Cache','MISS');
   res.json(payload);
+});
+
+// V791: bounded operator-triggered recovery for CEAF historical OPEN items.
+// Default is PREVIEW. No writes occur unless apply:true and the selected
+// reportDate/snapshotId match an existing valid import batch.
+// Preview-only exact selected-date context; never reuse the latest different
+// report date's snapshot for historical CEAF recovery.
+app.get('/api/v791/historical-ceaf-tms-context', (req,res)=>{
+  const reportDate=String(req.query?.reportDate||'').trim();
+  if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(reportDate))
+    return res.status(400).json({ok:false,code:'V791_REPORT_DATE_REQUIRED'});
+  const batch=getDb().prepare(`SELECT snapshotId,reportDate FROM unified_import_batches
+    WHERE reportDate=? AND status='VALID' ORDER BY createdAt DESC,rowid DESC LIMIT 1`).get(reportDate);
+  res.setHeader('Cache-Control','no-store');
+  if(!batch)return res.status(404).json({ok:false,code:'V791_VALID_SELECTED_DATE_MISSING'});
+  return res.json({ok:true,reportDate,snapshotId:String(batch.snapshotId)});
+});
+app.post('/api/v791/historical-ceaf-tms-reconcile', async (req,res) => {
+  const reportDate=String(req.body?.reportDate||'').trim();
+  const snapshotId=String(req.body?.snapshotId||'').trim();
+  if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(reportDate)||!snapshotId)
+    return res.status(400).json({ok:false,code:'V791_EXACT_DATE_SNAPSHOT_REQUIRED'});
+  const db=getDb();
+  const exact=db.prepare(`SELECT snapshotId FROM unified_import_batches
+    WHERE snapshotId=? AND reportDate=? AND status='VALID' LIMIT 1`).get(snapshotId,reportDate);
+  if(!exact)return res.status(409).json({ok:false,code:'V791_SOURCE_SNAPSHOT_MISMATCH'});
+  const apply=req.body?.apply===true;
+  if(apply){
+    const latestSameDate=db.prepare(`SELECT snapshotId FROM unified_import_batches
+      WHERE reportDate=? AND status='VALID' ORDER BY createdAt DESC,rowid DESC LIMIT 1`).get(reportDate);
+    if(String(latestSameDate?.snapshotId||'')!==snapshotId)
+      return res.status(409).json({ok:false,code:'V791_SELECTED_DATE_SNAPSHOT_SUPERSEDED',
+        error:'该日期已有更新的日报快照，已禁止旧快照写入。'});
+  }
+  const limit=Math.min(50,Math.max(1,Number(req.body?.limit||50)|0));
+  const after=String(req.body?.after||'').trim().toUpperCase();
+  const candidates=db.prepare(`SELECT o.shipmentCode,o.businessType,o.stateJson,o.closeReason,o.sourceReportDate,
+      o.lastSnapshotId,o.updatedAt,q.terminalReason
+    FROM carryover_open_items o
+    LEFT JOIN qc_tracking_ledger q ON UPPER(TRIM(q.shipmentCode))=UPPER(TRIM(o.shipmentCode))
+      AND UPPER(TRIM(q.businessType))=UPPER(TRIM(o.businessType))
+    WHERE o.status='OPEN' AND o.businessType='CEAF'
+      AND o.sourceReportDate<=? AND o.lastReportDate<=?
+      AND UPPER(TRIM(o.shipmentCode))>?
+    ORDER BY UPPER(TRIM(o.shipmentCode)) LIMIT ?`).all(reportDate,reportDate,after,limit);
+  if(!candidates.length)return res.json({ok:true,reportDate,snapshotId,preview:req.body?.apply!==true,
+    checked:0,matched:0,closedPod:0,returned:0,returnInProgress:0,nextCursor:'',complete:true});
+  const auth=summarizeToken(await loadToken());
+  if(!auth.hasAccessToken)return res.status(409).json({ok:false,code:'CE_AUTH_REQUIRED',
+    error:'真实TMS终态核验需要有效CE登录，未修改数据库。'});
+  let tmsRows=[];
+  try{
+    tmsRows=await client.shipmentTrack(candidates.map(row=>row.shipmentCode));
+  }catch(error){
+    return res.status(502).json({ok:false,code:'V791_TMS_READ_FAILED',
+      error:String(error?.message||error),changed:0});
+  }
+  const plan=planHistoricalTmsReconcile(candidates,tmsRows,new Date().toISOString());
+  if(apply){
+    // A same-day re-import can happen while the remote TMS request is pending.
+    const newest=db.prepare(`SELECT snapshotId FROM unified_import_batches
+      WHERE reportDate=? AND status='VALID' ORDER BY createdAt DESC,rowid DESC LIMIT 1`).get(reportDate);
+    if(String(newest?.snapshotId||'')!==snapshotId)
+      return res.status(409).json({ok:false,code:'V791_SELECTED_DATE_CHANGED_DURING_TMS',
+        error:'查询期间所选日期出现新快照，已安全放弃本次历史回写。',changed:0});
+  }
+  let persistence=null;
+  if(apply&&plan.updates.length){
+    // Exact-members only: the writer and canonical V246 ledger synchronize
+    // the same validated CEAF bills. Unknown/contradictory TMS rows remain open.
+    const expectedCarryVersions=Object.fromEntries(candidates.map(row=>[
+      String(row.shipmentCode||'').trim().toUpperCase(),{
+        lastSnapshotId:String(row.lastSnapshotId||''),
+        updatedAt:String(row.updatedAt||'')
+      }
+    ]));
+    persistence=updateCarryoverResults({snapshotId,reportDate,
+      rows:plan.updates,scanResults:plan.scanResults,
+      guardOpenAtOrBefore:reportDate,expectedCarryVersions});
+    const dirty=new Set([reportDate,...(persistence.ledgerSync?.affectedDates||[])]);
+    for(const day of dirty)try{markDashboardCacheDirty(day,'V791_CEAF_TMS_HISTORY_RECONCILED')}catch{}
+  }
+  res.setHeader('Cache-Control','no-store');
+  const applied=persistence?.appliedStats||{processed:0,pod:0,returned:0,returnInProgress:0};
+  const skippedAfterCheck=apply?Math.max(0,plan.matched-applied.processed):0;
+  res.json({ok:true,reportDate,snapshotId,preview:!apply,
+    checked:plan.checked,matched:apply?applied.processed:plan.matched,
+    closedPod:apply?applied.pod:plan.closedPod,
+    returned:apply?applied.returned:plan.returned,
+    returnInProgress:apply?applied.returnInProgress:plan.returnInProgress,
+    unverified:plan.unverified.length,conflicts:plan.conflicts.length,
+    skippedAfterCheck,conflictSamples:plan.conflicts.slice(0,10),
+    nextCursor:String(candidates.at(-1)?.shipmentCode||'').toUpperCase(),
+    complete:candidates.length<limit,
+    changed:apply?applied.processed:0,
+    evidenceBasis:'EXACT_CEAF_WAYBILL_TMS_SHIPMENT_STATUS_60_80_81'});
+});
+
+// V792: use the SAME canonical member and saved-terminal truth as the WHPP
+// dashboard (unified import members, independent WHPP daily, recovered snapshot).
+// Never claim missing final evidence is a verified 0 POD.
+app.get('/api/v792/whpp/trend', (req,res)=>{
+  const toDate=String(req.query?.toDate||'').slice(0,10);
+  if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(toDate)
+    ||!Number.isFinite(new Date(toDate+'T00:00:00.000Z').getTime())
+    ||new Date(toDate+'T00:00:00.000Z').toISOString().slice(0,10)!==toDate)
+    return res.status(400).json({ok:false,code:'V792_DATE_REQUIRED'});
+  const db=getDb(),points=[];
+  for(let offset=6;offset>=0;offset--){
+    const d=new Date(toDate+'T00:00:00.000Z');
+    d.setUTCDate(d.getUTCDate()-offset);
+    const date=d.toISOString().slice(0,10);
+    const truth=loadWhppCanonicalTruth(date,'',db);
+    const count=Number(truth.total||0);
+    if(!count){
+      points.push({date,total:null,pod:null,returned:null,
+        sourceVerified:false,finalVerified:false,evidenceCoverage:0});
+      continue;
+    }
+    const covered=truth.rows.filter(row=>row.finalRowAvailable===true).length;
+    const verifiedPod=Number(truth.evidence?.podRows||0);
+    const verifiedReturned=Number(truth.evidence?.returnedRows||0);
+    // A nonempty verified subset is useful but flagged as partial; no
+    // detected evidence at all is null rather than a fabricated zero.
+    const hasEvidence=covered>0;
+    points.push({date,total:count,pod:hasEvidence?verifiedPod:null,
+      returned:hasEvidence?verifiedReturned:null,sourceVerified:true,
+      finalVerified:covered===count,
+      evidenceCoverage:covered,
+      snapshotRecovered:Number(truth.evidence?.snapshotRecoveredFinalRows||0)>0});
+  }
+  res.setHeader('Cache-Control','no-store');
+  res.json({ok:true,toDate,businessType:'WHPP',
+    basis:'WHPP_CANONICAL_SOURCE_MEMBERS_AND_SAVED_TERMINAL_EVIDENCE',
+    points,partial:points.some(point=>!point.sourceVerified||!point.finalVerified)});
 });
 
 app.post('/api/test-ce-api', async (req, res) => {
@@ -2835,10 +2996,11 @@ function workspaceRows(state = {}, businessType = 'CCSL') {
     const batch = queryStatus.get(shipmentCode) || {};
     // TMS terminal facts: 60=POD, 81=returned; 80 remains RETURNING.
     // 85 is historical POD evidence. Prefer the saved shipment terminal code.
-    const terminalCode=String(row.shipmentStatus ?? scan.shipmentStatus ?? row.orderStatus ?? scan.orderStatus ?? '').trim();
-    const isPod = row.是否POD === '是' || Number(row.isPod||0)===1
-      || Number(scan.isPod||0)===1 || terminalCode==='60' || terminalCode==='85'
-      || String(scan.skipTrackReason||'')==='MANUAL_TERMINAL_POD';
+    const terminalCode=String(row.shipmentStatus ?? scan.shipmentStatus ?? '').trim();
+    const isPod = terminalCode==='60' || (terminalCode!=='80'&&terminalCode!=='81'
+      &&(row.是否POD === '是' || Number(row.isPod||0)===1
+        || Number(scan.isPod||0)===1
+        || String(scan.skipTrackReason||'')==='MANUAL_TERMINAL_POD'));
     const returnText = `${row.退回状态 || ''} ${row.primaryCategory || ''}`.trim().toUpperCase();
     const explicitReturn = row.truthEvidence?.returned===true || terminalCode==='81'
       || String(scan.skipTrackReason||'')==='MANUAL_TERMINAL_RETURNED';
@@ -2855,7 +3017,7 @@ function workspaceRows(state = {}, businessType = 'CCSL') {
     const category = row.primaryCategory || row.主分类 || row.异常分类 || '';
     const normalizedSpecial=String(specialState||'').trim().toUpperCase().replace(/^(?:CEL|CE):/,'');
     const specialClosed=['SELF_PICKUP','CECN_RETENTION','CEZT_RETENTION','CCSL580_RETENTION',
-      'CECN','CEZT','CCSL580'].includes(normalizedSpecial);
+      'CECN','CEZT','CCSL580','CCSLCN_DIVERSION','CCSLZT_DIVERSION','CCSL580_DIVERSION'].includes(normalizedSpecial);
     const normalFinal = category === '正常分流节点' || row.matchedRule === 'NORMAL_FINAL_HUB';
     // WHPP terminal cancellation must follow its saved analysis and close
     // status, never a bare scan orderStatus=10 or an unverified text hint.
@@ -2888,6 +3050,9 @@ function workspaceRows(state = {}, businessType = 'CCSL') {
       shopRetentionDays:Number(row.shopRetentionNaturalDays || row.门店滞留天数 || 0),
       storeTags:Array.isArray(row.storeTags)?row.storeTags:[],
       category, isClosed, isActionable, isPod, isReturned:isReturn, whppCancelled,
+      // Raw, explicit return-reason evidence for the WHPP details view.
+      // Never infer a reason from the generic category or Pending text.
+      returnReason:String(row.returnReason || row.退回原因 || row.退件原因 || '').trim(),
       queryStatus: isPod ? 'POD跳过' : (isReturn ? '退回跳过' : (whppCancelled ? '订单取消跳过' : (specialClosed ? '特殊节点跳过' : (normalFinal ? '正常分流跳过' : (failed ? '待重试' : ((row.轨迹节点数 || row.轨迹节点数量 || 0) > 0 ? '成功' : '需查轨迹')))))),
       retryCount: Number(batch.attemptCount || row.retryCount || 0), reportDate, snapshotId: state.snapshotId || ''
     };

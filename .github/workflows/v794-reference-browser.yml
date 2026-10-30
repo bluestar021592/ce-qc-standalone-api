@@ -1,0 +1,35 @@
+name: V794 reference browser screenshot
+on:
+  push:
+    branches:
+      - fix/v792-reference-home-whpp-ui
+  pull_request:
+    paths:
+      - 'public/v625-shell.html'
+      - 'public/v625-shell.css'
+      - 'public/v625-shell.js'
+      - 'public/v792-reference-ui.css'
+      - 'scripts/v794-reference-browser-render.mjs'
+      - '.github/workflows/v794-reference-browser.yml'
+jobs:
+  reference-browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm install --no-save --package-lock=false playwright@1.56.1
+      - run: npx playwright install --with-deps chromium
+      - name: Render actual V625/V792 home and WHPP HTML at reference viewport
+        run: node scripts/v794-reference-browser-render.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v794-home-whpp-reference-browser-screenshots
+          path: artifacts/v794-visual/*.png
+          if-no-files-found: warn
+          retention-days: 7

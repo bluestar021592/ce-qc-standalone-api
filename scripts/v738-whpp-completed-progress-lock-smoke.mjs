@@ -34,7 +34,8 @@ assert.match(shell,/const pinnedProof=v759PinnedWhppProof\(date\)/,'live WHPP pr
 assert.match(shell,/void v759VerifyWhppCompletionOnce\(date\)/,'WHPP terminal verification must not delay each board paint');
 assert.match(shell,/if\(verified\|\|v763WhppEvidenceGaps\.has\(key\)\)void refreshLiveProgress\(\)/,'terminal evidence gaps must repaint immediately');
 assert.match(shell,/phase:'终态核验中'/,'WHPP must not show completed until exact proof passes');
-assert.match(shell,/v759VerifyWhppCompletionOnce\(v626LatestImport\?\.reportDate\|\|''\)/,'import page must automatically verify the selected date once, not on every progress poll');
+assert.match(shell,/void v759VerifyWhppCompletionOnce\(v626LatestImport\.reportDate\)\.catch\(\(\)=>\{\}\)/,
+  'import page must schedule saved WHPP proof independently of transient history read failure');
 
 const fnStart=shell.indexOf('function v759RememberWhppProof(');
 const fnEnd=shell.indexOf('async function v759VerifyWhppCompletionOnce(');

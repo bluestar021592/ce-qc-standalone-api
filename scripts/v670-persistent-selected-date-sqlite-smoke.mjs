@@ -138,12 +138,17 @@ assert.deepEqual(cn.bills,['C001','C002','C003','C004']);
 // Same date old/superseded source and historical carry rows must not inflate the denominator.
 assert.equal(vn.bills.includes('OLD-CARRY-POD'),false);
 
-// Unified COMPLETED is a terminal receipt: even if runtime/final-row-only counters are imperfect,
-// selected-date WHPP progress must remain complete.
+// V798: a COMPLETED child receipt with no attested immutable member rows
+// cannot fabricate 190 final records after the live final table was lost.
+// Only an immutable snapshot containing exact 190 member final rows can restore
+// this proof. The fixture's WHPP snapshot deliberately has metadata alone.
 db.prepare("DELETE FROM business_final_rows WHERE businessType='WHPP' AND reportDate=?").run(date);
 const completionAfterLossyFinalRows=persistentWhppCompletionTruth(db,date);
-assert.equal(completionAfterLossyFinalRows.locked,true);
-assert.equal(completionAfterLossyFinalRows.completionSource,'UNIFIED_VERIFIED_WHPP_CHILD');
+assert.equal(completionAfterLossyFinalRows.locked,false);
+assert.equal(completionAfterLossyFinalRows.unifiedWhppCompleted,false);
+assert.equal(completionAfterLossyFinalRows.canonicalTotal,190);
+assert.equal(completionAfterLossyFinalRows.missingFinals,190);
+assert.equal(completionAfterLossyFinalRows.reason,'WHPP_SCAN_FINAL_EVIDENCE_MISSING');
 
 
 // V754 regression: an aggregate unified COMPLETED receipt without a real persisted WHPP child

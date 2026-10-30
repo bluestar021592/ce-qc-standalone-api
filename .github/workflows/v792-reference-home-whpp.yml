@@ -1,0 +1,29 @@
+name: V792 home and WHPP reference UI
+on:
+  push:
+    branches:
+      - fix/v792-reference-home-whpp-ui
+  pull_request:
+    paths:
+      - 'public/v625-shell.html'
+      - 'public/v625-shell.js'
+      - 'public/v792-reference-ui.css'
+      - 'server.js'
+      - 'scripts/v792-home-whpp-reference-ui-smoke.mjs'
+jobs:
+  reference-ui:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: node --check public/v625-shell.js
+      - run: node --check server.js
+      - run: node scripts/v792-home-whpp-reference-ui-smoke.mjs
+      - run: node scripts/v719-valid-html-shell-smoke.mjs
+      - run: node scripts/v628-dashboard-date-kpi-drilldown-smoke.mjs
+      - run: node scripts/v791-historical-ledger-integration-smoke.mjs
+      - run: node scripts/v584-local-candidate-gate.mjs
