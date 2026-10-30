@@ -7,7 +7,7 @@ $tokens=$null
 $parseErrors=$null
 $ast=[System.Management.Automation.Language.Parser]::ParseFile($launcher,[ref]$tokens,[ref]$parseErrors)
 if ($parseErrors.Count -ne 0) { throw ('Launcher parse failed: '+($parseErrors | Out-String)) }
-$names=@('Invoke-SafeAutoUpdate','Write-V788ManagedInstallReceipt','Test-V788ManagedInstallReceipt')
+$names=@('Invoke-SafeAutoUpdate','Write-V788ManagedInstallReceipt','Test-V788ManagedInstallReceipt','Test-V788ScriptOnlyManifestChange')
 foreach ($name in $names) {
   $parts=@($ast.FindAll({param($a) ($a -is [System.Management.Automation.Language.FunctionDefinitionAst]) -and ($a.Name -eq $name)},$true))
   if ($parts.Count -ne 1) { throw "Expected one actual launcher function: $name, got $($parts.Count)" }
@@ -107,11 +107,14 @@ try {
   $global:revalidateResponse=$true
   Invoke-SafeAutoUpdate
   Assert ((Test-V788ManagedInstallReceipt $release) -eq $true) 'valid gate must recover after malformed proof'
-  # A package-lock change must be rejected BEFORE touching the installed HEAD.
-  # Exercise the real updater function with mocked Git/npm operations.
+  # Real updater execution with stubbed Git/npm against disposable files.
+  # Lockfile, dependency and malformed manifest changes stay blocked; scripts
+  # only must install exact SHA without npm ci or changing dependency modules.
   $nextRelease=('b'*40)
   $global:installAttempts=0
   $global:mockPackageDiff='package-lock.json'
+  $global:mockManifestMode='scripts'
+  $global:mockNpmCalls=0
   function Get-GitText {
     param([string[]]$GitArguments)
     if ($GitArguments[0] -eq 'rev-parse') {
@@ -119,24 +122,55 @@ try {
       if ($GitArguments[1] -eq 'origin/main') { return $nextRelease }
     }
     if ($GitArguments[0] -eq 'diff') { return $global:mockPackageDiff }
+    if ($GitArguments[0] -eq 'show') {
+      if ($GitArguments[1] -eq "${release}:package.json") {
+        return '{"name":"ce-qc","scripts":{"test":"old"},"dependencies":{"alpha":"1.0.0"}}'
+      }
+      if ($GitArguments[1] -eq "${nextRelease}:package.json") {
+        if ($global:mockManifestMode -eq 'malformed') { return '{broken' }
+        if ($global:mockManifestMode -eq 'deps') {
+          return '{"name":"ce-qc","scripts":{"test":"new"},"dependencies":{"alpha":"2.0.0"}}'
+        }
+        return '{"name":"ce-qc","scripts":{"test":"new"},"dependencies":{"alpha":"1.0.0"}}'
+      }
+    }
     throw 'Unexpected Git command in package-change runtime fixture.'
   }
   function Invoke-Exe {
     param([string]$File,[string[]]$ArgumentList,[switch]$AllowFailure)
     if ($ArgumentList[0] -eq 'merge-base') { return 0 }
-    throw 'Unexpected external command during package-change safety test.'
+    if ($File -eq 'npm.cmd') { $global:mockNpmCalls++ }
+    throw 'Unexpected external command during updater safety test.'
   }
   function Test-RemoteCandidate { param([string]$RemoteCommit,[string]$CurrentCommit) return $true }
   function Install-VerifiedCommitLocally {
     param([string]$ExpectedCurrent,[string]$VerifiedCommit)
     $global:installAttempts++
-    throw 'Unsafe live HEAD installation was attempted before dependencies were safely staged.'
+    if ($ExpectedCurrent -ne $release -or $VerifiedCommit -ne $nextRelease) { throw 'Installed wrong SHA.' }
+    return $VerifiedCommit
   }
   Remove-Item -LiteralPath $receiptPath -Force -ErrorAction SilentlyContinue
   Invoke-SafeAutoUpdate
-  Assert ($global:installAttempts -eq 0) 'package-change update must abort before live git merge'
-  Assert (-not (Test-Path -LiteralPath $receiptPath)) 'rejected package change must not issue release receipt'
-  Write-Output '[V788_DEPENDENCY_GUARD] PASS dependency-changing candidate rejected before live HEAD change; old dependencies remain intact'
+  Assert ($global:installAttempts -eq 0) 'lockfile change must abort before live git merge'
+  Assert (-not (Test-Path -LiteralPath $receiptPath)) 'lockfile rejection must not issue release receipt'
+
+  $global:mockPackageDiff='package.json'
+  $global:mockManifestMode='deps'
+  Invoke-SafeAutoUpdate
+  Assert ($global:installAttempts -eq 0) 'dependency change must abort before live git merge'
+  Assert (-not (Test-Path -LiteralPath $receiptPath)) 'dependency rejection must not issue release receipt'
+
+  $global:mockManifestMode='malformed'
+  Invoke-SafeAutoUpdate
+  Assert ($global:installAttempts -eq 0) 'unreadable manifest must fail closed'
+  Assert (-not (Test-Path -LiteralPath $receiptPath)) 'malformed manifest must not issue release receipt'
+
+  $global:mockManifestMode='scripts'
+  Invoke-SafeAutoUpdate
+  Assert ($global:installAttempts -eq 1) 'script-only change must install exact validated SHA once'
+  Assert ($global:mockNpmCalls -eq 0) 'script-only change must not execute npm ci'
+  Assert ((Test-V788ManagedInstallReceipt $nextRelease) -eq $true) 'script-only install must emit exact SHA receipt'
+  Write-Output '[V788_DEPENDENCY_GUARD] PASS lockfile, dependency, malformed blocked; scripts-only exact SHA accepted without npm ci'
   Write-Output '[V788_RECEIPT_RUNTIME] PASS missing, valid, stale, failed, typed malformed, oversized and recovered receipt; no actual SQLite writes'
 } finally {
   Remove-Item -LiteralPath $case -Force -Recurse -ErrorAction SilentlyContinue
