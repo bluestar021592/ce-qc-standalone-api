@@ -197,15 +197,57 @@ export function persistentWhppCompletionTruth(db,reportDate=''){
       if(verifiedChild?.snapshotId){
         let sourceCount=0;
         try{sourceCount=Number(db.prepare("SELECT COUNT(DISTINCT UPPER(TRIM(shipmentCode))) count FROM unified_import_rows WHERE batchId=? AND reportDate=? AND UPPER(TRIM(businessType))='WHPP'").get(batch.batchId,date)?.count||0)}catch{}
-        return{
-          locked:true,finalized:true,reportDate:date,sourceCount,finalCount:sourceCount,
-          canonicalTotal:sourceCount,canonicalResolved:sourceCount,
-          unifiedCompleted:true,unifiedWhppCompleted:true,
-          snapshotLocked:true,dailyLocked:false,historyLocked:false,membershipMatches:true,
-          snapshotId:String(verifiedChild.snapshotId||''),finalizedAt:String(verifiedChild.generatedAt||verifiedChild.createdAt||unified?.createdAt||''),
-          completionSource:'UNIFIED_VERIFIED_WHPP_CHILD',completionFastPath:true,
-          reason:'PERSISTED_WHPP_COMPLETED'
-        };
+        // V798: the unified/WHPP child receipt proves only a historical job
+        // ran. July-12 can have 103 independent daily members while the
+        // unified WHPP subset is zero. Never turn that snapshot into 0/0 or
+        // synthetic "all scanned" completion.
+        const canonicalFast=loadWhppCanonicalTruth(date,String(batch.snapshotId||''),db);
+        const canonicalTotal=Number(canonicalFast?.total||0);
+        const rows=Array.isArray(canonicalFast?.rows)?canonicalFast.rows:[];
+        const evidence=canonicalFast?.evidence||{};
+        const exactProcessing=canonicalTotal>0&&rows.length===canonicalTotal
+          &&(sourceCount===0||canonicalTotal===sourceCount)
+          &&Number(evidence.scanRows||0)===canonicalTotal
+          &&Number(evidence.finalRows||0)===canonicalTotal
+          &&rows.every(row=>row?.truthEvidence?.scan===true&&row?.truthEvidence?.final===true);
+        if(exactProcessing){
+          const unresolved=rows.filter(row=>{
+            const item=row?.truthEvidence||{};
+            const api=String(row?.apiStatus||row?.API状态||'').trim().toUpperCase();
+            const carry=String(row?.carryStatus||'').trim().toUpperCase();
+            return Boolean(item.pod)===Boolean(item.returned)
+              ||api==='API_PENDING_RETRY'||api==='FAILED'||carry==='OPEN';
+          });
+          return{
+            locked:true,finalized:true,reportDate:date,sourceCount,
+            importedWhppCount:sourceCount,independentWhppCount:canonicalTotal,
+            finalCount:Number(evidence.finalRows||0),
+            canonicalTotal,canonicalResolved:rows.length,missingScans:0,missingFinals:0,
+            processingEvidenceMissing:false,
+            unifiedCompleted:true,unifiedWhppCompleted:true,
+            snapshotLocked:true,dailyLocked:false,historyLocked:false,membershipMatches:true,
+            terminalEvidenceVerified:unresolved.length===0,processingEvidenceVerified:true,
+            terminalEvidenceCoverage:{
+              sourceCount:canonicalTotal,scanRows:Number(evidence.scanRows||0),
+              finalRows:Number(evidence.finalRows||0),podRows:Number(evidence.podRows||0),
+              returnedRows:Number(evidence.returnedRows||0),unverifiedRows:unresolved.length
+            },
+            terminalEvidenceGaps:unresolved.slice(0,50).map(row=>({
+              shipmentCode:String(row?.shipmentCode||row?.运单号||'').trim().toUpperCase(),
+              scan:Boolean(row?.truthEvidence?.scan),final:Boolean(row?.truthEvidence?.final),
+              pod:Boolean(row?.truthEvidence?.pod),returned:Boolean(row?.truthEvidence?.returned),
+              currentState:String(row?.currentState||''),
+              apiStatus:String(row?.apiStatus||row?.API状态||''),
+              primaryCategory:String(row?.primaryCategory||'')
+            })),
+            snapshotId:String(verifiedChild.snapshotId||''),
+            finalizedAt:String(verifiedChild.generatedAt||verifiedChild.createdAt||unified?.createdAt||''),
+            completionSource:'UNIFIED_VERIFIED_WHPP_CHILD',completionFastPath:true,
+            reason:'PERSISTED_WHPP_COMPLETED'
+          };
+        }
+        // Missing even one actual scan/final member: fall back to the
+        // negative-proof path below instead of returning locked:true.
       }
     }catch{}
   }
@@ -283,7 +325,12 @@ export function persistentWhppCompletionTruth(db,reportDate=''){
         LIMIT 1`).get(date,unifiedWhppSnapshotId)?.ok);
     }catch{}
   }
-  const unifiedWhppCompleted=unifiedCompleted&&unifiedChildStatus==='COMPLETED'&&unifiedWhppSnapshotVerified;
+  const unifiedWhppCompleted=unifiedCompleted&&unifiedChildStatus==='COMPLETED'&&unifiedWhppSnapshotVerified
+    &&canonicalTotal>0&&canonicalResolved===canonicalTotal
+    &&(sourceCount===0||canonicalTotal===sourceCount)
+    &&Number(canonical?.evidence?.scanRows||0)===canonicalTotal
+    &&Number(canonical?.evidence?.finalRows||0)===canonicalTotal
+    &&exactTerminalRows.every(row=>row?.truthEvidence?.scan===true&&row?.truthEvidence?.final===true);
 
   // V764: keep processing completion distinct from POD/returned closure.
   // Every exact saved source member must have been scanned and finalized, and
