@@ -107,6 +107,36 @@ try {
   $global:revalidateResponse=$true
   Invoke-SafeAutoUpdate
   Assert ((Test-V788ManagedInstallReceipt $release) -eq $true) 'valid gate must recover after malformed proof'
+  # A package-lock change must be rejected BEFORE touching the installed HEAD.
+  # Exercise the real updater function with mocked Git/npm operations.
+  $nextRelease=('b'*40)
+  $global:installAttempts=0
+  $global:mockPackageDiff='package-lock.json'
+  function Get-GitText {
+    param([string[]]$GitArguments)
+    if ($GitArguments[0] -eq 'rev-parse') {
+      if ($GitArguments[1] -eq 'HEAD') { return $release }
+      if ($GitArguments[1] -eq 'origin/main') { return $nextRelease }
+    }
+    if ($GitArguments[0] -eq 'diff') { return $global:mockPackageDiff }
+    throw 'Unexpected Git command in package-change runtime fixture.'
+  }
+  function Invoke-Exe {
+    param([string]$File,[string[]]$ArgumentList,[switch]$AllowFailure)
+    if ($ArgumentList[0] -eq 'merge-base') { return 0 }
+    throw 'Unexpected external command during package-change safety test.'
+  }
+  function Test-RemoteCandidate { param([string]$RemoteCommit,[string]$CurrentCommit) return $true }
+  function Install-VerifiedCommitLocally {
+    param([string]$ExpectedCurrent,[string]$VerifiedCommit)
+    $global:installAttempts++
+    throw 'Unsafe live HEAD installation was attempted before dependencies were safely staged.'
+  }
+  Remove-Item -LiteralPath $receiptPath -Force -ErrorAction SilentlyContinue
+  Invoke-SafeAutoUpdate
+  Assert ($global:installAttempts -eq 0) 'package-change update must abort before live git merge'
+  Assert (-not (Test-Path -LiteralPath $receiptPath)) 'rejected package change must not issue release receipt'
+  Write-Output '[V788_DEPENDENCY_GUARD] PASS dependency-changing candidate rejected before live HEAD change; old dependencies remain intact'
   Write-Output '[V788_RECEIPT_RUNTIME] PASS missing, valid, stale, failed, typed malformed, oversized and recovered receipt; no actual SQLite writes'
 } finally {
   Remove-Item -LiteralPath $case -Force -Recurse -ErrorAction SilentlyContinue
