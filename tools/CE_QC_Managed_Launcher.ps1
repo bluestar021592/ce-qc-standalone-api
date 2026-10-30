@@ -451,6 +451,13 @@ function Invoke-SafeAutoUpdate {
   }
 
   $dependencyFiles = Get-GitText @('diff','--name-only',$current,$remote,'--','package.json','package-lock.json')
+  # Fail closed: npm ci after changing live HEAD can remove the known-good
+  # node_modules before it fails. Until a staged atomic dependency swap is
+  # available, dependency-changing releases must NOT modify the live checkout.
+  if (-not [string]::IsNullOrWhiteSpace($dependencyFiles)) {
+    Write-ManagedLog '[UPDATE] Candidate changes package dependencies. Safe staged dependency installation is not available; keeping the existing known-good version and blocking automatic installation.' Yellow
+    return
+  }
   Write-ManagedLog "[UPDATE] Installing verified exact commit $($remote.Substring(0,8)) from local Git object store; no second GitHub request is required." Cyan
   $installed = Install-VerifiedCommitLocally $current $remote
   if (-not [string]::IsNullOrWhiteSpace($dependencyFiles)) {
