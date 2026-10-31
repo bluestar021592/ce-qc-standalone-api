@@ -49,13 +49,14 @@ jobs:
         env:
           CE_QC_V788_PILOT_CI_NO_BROWSER: '1'
           CE_QC_V788_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          CE_QC_V788_CANDIDATE_REF: ${{ github.head_ref || github.ref_name }}
         run: |
           $ErrorActionPreference='Stop'
           $env:NODE_ENV='test'
           node --input-type=module -e "import {createV788SyntheticEvidence} from './scripts/v788-edge-synthetic-evidence-fixture.mjs';createV788SyntheticEvidence()"
           if ($LASTEXITCODE -ne 0) { throw 'Synthetic isolated fixture setup failed' }
           try {
-            & pwsh -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'tools/CE_QC_V788_隔离试用.ps1' -ExpectedSha $env:CE_QC_V788_CANDIDATE_SHA -CandidateRef 'v788-board-calibration'
+            & pwsh -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'tools/CE_QC_V788_隔离试用.ps1' -ExpectedSha $env:CE_QC_V788_CANDIDATE_SHA -CandidateRef $env:CE_QC_V788_CANDIDATE_REF
             if ($LASTEXITCODE -ne 0) { throw 'Real isolated V788 pilot launcher did not start/stop correctly' }
           } finally {
             node --input-type=module -e "import {deleteV788SyntheticEvidence} from './scripts/v788-edge-synthetic-evidence-fixture.mjs';deleteV788SyntheticEvidence()"

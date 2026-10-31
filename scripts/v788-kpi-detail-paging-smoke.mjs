@@ -12,8 +12,9 @@ assert.ok(begin>=0&&end>begin,'V788 paginated renderer missing');
 for(const id of ['v788KpiDetailPrevious','v788KpiDetailNext'])assert.ok(html.includes('id="'+id+'"'));
 assert.match(js,/byId\('v788KpiDetailNext'\)\?\.addEventListener/);
 assert.match(js,/byId\('v788KpiDetailPrevious'\)\?\.addEventListener/);
-const browserAsset=html.match(/v625-shell\.js\?v=20261019-v788-1&patch=(\d+)/);
-assert.ok(browserAsset&&Number(browserAsset[1])>=793,'KPI detail browser JS must use the latest V788 patch revision');
+const browserAsset=html.match(/v625-shell\.js\?v=(\d{8})-v(\d+)-1&patch=(\d+)/);
+assert.ok(browserAsset&&browserAsset[1]>='20261019'&&Number(browserAsset[2])>=788
+  &&Number(browserAsset[3])>=793,'KPI detail must use a V788-or-newer versioned browser asset');
 assert.match(js,/setText\('v625TrackMeta','运单 '\+code\+' · 查询完成/);
 assert.match(js,/setText\('v625TrackMeta','运单 '\+code\+' · 查询失败/);
 assert.match(js,/byId\('v625TrackDate'\)\.value=currentParams\(\)\.get\('reportDate'\)\|\|today\(\)/);

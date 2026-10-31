@@ -7,6 +7,7 @@
   <meta name="ce-qc-build" content="V750_TIMING_EVIDENCE_TRACK_VIEW">
   <title>__V625_PAGE_TITLE__ - CE EXPRESS 质量控制管理系统</title>
   <link rel="stylesheet" href="/v625-shell.css?v=20261009-v769-1">
+  <link rel="stylesheet" href="/v792-reference-ui.css?v=20261031-v800-1">
 </head>
 <body data-page="__V625_PAGE_KEY__" data-business="__V625_BUSINESS_TYPE__">
   <div class="v625-app">
@@ -225,6 +226,26 @@
             <div class="v625-section-head"><h2 id="v631TimingMissingTitle">待补轨迹明细</h2><span id="v631TimingMissingMeta">—</span></div>
             <div class="v625-table-wrap"><table class="v625-table"><thead><tr><th>运单号</th><th>业务类型</th><th>缺失原因</th><th>操作</th></tr></thead><tbody id="v631TimingMissingRows"><tr><td colspan="4">暂无待补轨迹</td></tr></tbody></table></div>
           </section>
+          <section id="v792HomeManagement" class="v625-panel v792-home-management">
+            <div class="v625-section-head"><h2>数据管理 · 安全操作入口</h2><span>不会直接清空或修改数据</span></div>
+            <div class="v792-management-grid">
+              <div class="v792-management-tile is-danger">
+                <strong>业务数据清空</strong>
+                <p>仅在明确确认后进入正式清空流程；这里不会直接删除日报、轨迹或数据库。</p>
+                <a href="/data-management?auth=v625&tab=clear">进入清空管理</a>
+              </div>
+              <div class="v792-management-tile">
+                <strong>数据库备份（可选）</strong>
+                <p>查看现有数据备份入口，由你决定是否备份，不强制新建备份。</p>
+                <a href="/data-management?auth=v625&tab=backup">打开备份管理</a>
+              </div>
+              <div class="v792-management-tile">
+                <strong>存储状态和清理</strong>
+                <p>查看C/D盘使用情况，数据库与72个有效CP门店配置按现有安全规则保护。</p>
+                <a href="/data-management?auth=v625&tab=storage">查看存储状态</a>
+              </div>
+            </div>
+          </section>
         </section>
 
         <!-- BUSINESS -->
@@ -276,6 +297,46 @@
             <section class="v625-panel">
               <div class="v625-section-head"><h2>状态分布</h2></div>
               <div class="v625-donut-wrap"><div id="v625BusinessDonut" class="v625-donut"></div><div id="v625BusinessLegend" class="v625-legend"></div></div>
+            </section>
+          </div>
+          <div id="v792WhppAnalysis" class="v792-whpp-analysis" hidden>
+            <section class="v625-panel">
+              <div class="v625-section-head"><h2>签收时效分析</h2><a href="/reports?auth=v625">查看详情</a></div>
+              <div class="v792-whpp-timing">
+                <div><span>平均签收天数</span><b id="v792WhppOverall">—</b></div>
+                <div><span>PP（金边）</span><b id="v792WhppPP">—</b></div>
+                <div><span>PV（外省）</span><b id="v792WhppPV">—</b></div>
+                <div><span>1派平均签收</span><b id="v792WhppFirst">—</b></div>
+                <div><span>2派平均签收</span><b id="v792WhppSecond">—</b></div>
+                <div><span>3派平均签收</span><b id="v792WhppThird">—</b></div>
+              </div>
+              <p id="v792WhppTimingSource" class="v792-data-unknown">等待读取实际POD日期及派送轨迹；没有有效证据时不推算。</p>
+            </section>
+            <section class="v625-panel">
+              <div class="v625-section-head"><h2>退回件分析</h2><a href="/reports?auth=v625">查看详情</a></div>
+              <div class="v792-whpp-return-summary">
+                <div><span>已退回件数</span><b id="v792WhppReturnCount">—</b></div>
+                <div><span>退回率</span><b id="v792WhppReturnRate">—</b></div>
+              </div>
+              <div id="v792WhppReturnReasons" class="v792-data-unknown">退回原因TOP5按有效历史备注或退回原因字段统计；暂无可信原因不显示示例数据。</div>
+            </section>
+          </div>
+          <div id="v792WhppTables" class="v792-whpp-table-row" hidden>
+            <section class="v625-panel">
+              <div class="v625-section-head"><h2>最新异常明细</h2><a href="/exceptions?auth=v625">查看全部</a></div>
+              <div class="v625-table-wrap">
+                <table class="v625-table"><thead><tr><th>运单号</th><th>异常类型</th><th>当前状态</th><th>操作</th></tr></thead>
+                  <tbody id="v792WhppAnomalyRows"><tr><td colspan="4">正在核对真实运单…</td></tr></tbody>
+                </table>
+              </div>
+            </section>
+            <section class="v625-panel">
+              <div class="v625-section-head"><h2>退回件明细</h2><a href="/reports?auth=v625">查看全部</a></div>
+              <div class="v625-table-wrap">
+                <table class="v625-table"><thead><tr><th>运单号</th><th>真实终态</th><th>最新轨迹时间</th><th>操作</th></tr></thead>
+                  <tbody id="v792WhppReturnedRows"><tr><td colspan="4">正在核对真实退回记录…</td></tr></tbody>
+                </table>
+              </div>
             </section>
           </div>
           <section class="v625-panel">
@@ -725,7 +786,7 @@
       </main>
     </div>
   </div>
-  <script src="/v625-shell.js?v=20261019-v788-1&patch=794" defer></script>
+  <script src="/v625-shell.js?v=20261031-v800-1&patch=800" defer></script>
   <script src="/v788-stage0-update.js?v=20261019-stage0-1" defer></script>
 </body>
 </html>
