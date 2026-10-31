@@ -9,6 +9,7 @@ on:
       - 'src/homeQualitySummary.js'
       - 'server.js'
       - 'scripts/v809-timing-and-job-recovery-smoke.mjs'
+      - 'scripts/v809-snapshot-timing-sql-smoke.mjs'
       - 'scripts/v584-local-candidate-gate.mjs'
       - '.github/workflows/v809-tracking-recovery.yml'
   workflow_dispatch:
@@ -31,6 +32,7 @@ jobs:
           node --check public/v625-shell.js
           node --check scripts/v809-timing-and-job-recovery-smoke.mjs
           node scripts/v809-timing-and-job-recovery-smoke.mjs
+          node scripts/v809-snapshot-timing-sql-smoke.mjs
           node scripts/v808-selected-day-pod-refresh-smoke.mjs
           node scripts/v807-home-timing-isolation-smoke.mjs
           node scripts/v802-home-selected-timing-smoke.mjs
