@@ -3230,6 +3230,9 @@ function workspaceRows(state = {}, businessType = 'CCSL') {
       shopRetentionDays:Number(row.shopRetentionNaturalDays || row.门店滞留天数 || 0),
       storeTags:Array.isArray(row.storeTags)?row.storeTags:[],
       category, isClosed, isActionable, isPod, isReturned:isReturn, whppCancelled,
+      // Preserve only a real source return-reason field, never infer the reason
+      // from generic Pending/category labels or create placeholder percentages.
+      returnReason:String(row.returnReason || row.退回原因 || row.退件原因 || '').trim(),
       queryStatus: isPod ? 'POD跳过' : (isReturn ? '退回跳过' : (whppCancelled ? '订单取消跳过' : (specialClosed ? '特殊节点跳过' : (normalFinal ? '正常分流跳过' : (failed ? '待重试' : ((row.轨迹节点数 || row.轨迹节点数量 || 0) > 0 ? '成功' : '需查轨迹')))))),
       retryCount: Number(batch.attemptCount || row.retryCount || 0), reportDate, snapshotId: state.snapshotId || ''
     };
