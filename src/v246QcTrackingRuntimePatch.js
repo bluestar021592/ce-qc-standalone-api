@@ -182,7 +182,40 @@ function startJob(selection,reason='MANUAL'){
 }
 
 function summaryHandler(req,res){try{const selection=selectionOf(req.query);const db=getDb();const repair=String(req.query.repair||'')==='1'?reconcileV246TrackingLedger(selection,{db,reason:'SUMMARY_REPAIR'}):null;return res.json({...v246TrackingSummary(selection,db),repair});}catch(error){return res.status(400).json({ok:false,version:V246_QC_TRACKING_RUNTIME_ID,error:error?.message||String(error)});}}
-function startHandler(req,res){try{const selection=selectionOf(req.body||{});const job=startJob(selection,'MANUAL_ONE_CLICK');return res.status(202).json({ok:true,version:V246_QC_TRACKING_RUNTIME_ID,job:jobPublic(job)});}catch(error){return res.status(400).json({ok:false,version:V246_QC_TRACKING_RUNTIME_ID,error:error?.message||String(error)});}}
+function sameSelectedScope(a={},b={}){
+  return a.businessType===b.businessType&&a.fromDate===b.fromDate&&a.toDate===b.toDate;
+}
+function scopedJob(selection,{activeOnly=false,createdAfter=''}={}){
+  cleanupJobs();
+  const threshold=Date.parse(String(createdAfter||''));
+  const minTime=Number.isFinite(threshold)?threshold-2000:0;
+  const matches=[...jobs.values()].filter(job=>sameSelectedScope(job.selection,selection)
+    &&(!activeOnly||['QUEUED','RUNNING'].includes(job.status))
+    &&Date.parse(job.createdAt||'')>=minTime);
+  return matches.sort((a,b)=>Date.parse(b.createdAt||'')-Date.parse(a.createdAt||''))[0]||null;
+}
+function jobStatusHandler(req,res){
+  try{
+    // V809: read-only, authenticated, exact-date task recovery. Never query
+    // SQLite, start remote TMS, or mistake a different day's job for this day.
+    const selection=selectionOf(req.query||{});
+    return res.json({ok:true,version:V246_QC_TRACKING_RUNTIME_ID,selection,
+      job:jobPublic(scopedJob(selection,{createdAfter:req.query.createdAfter||''})||{})?.jobId
+        ?jobPublic(scopedJob(selection,{createdAfter:req.query.createdAfter||''})):null});
+  }catch(error){return res.status(400).json({ok:false,error:error?.message||String(error)})}
+}
+function startHandler(req,res){
+  try{
+    const selection=selectionOf(req.body||{});
+    const active=[...jobs.values()].find(job=>['QUEUED','RUNNING'].includes(job.status));
+    if(active&&!sameSelectedScope(active.selection,selection))
+      return res.status(409).json({ok:false,code:'V246_DIFFERENT_SCOPE_JOB_RUNNING',
+        error:'已有其他日报日期的轨迹更新任务运行，不能复用其任务编号或跨日期发布结果。',
+        activeSelection:active.selection});
+    const job=active||startJob(selection,'MANUAL_ONE_CLICK');
+    return res.status(202).json({ok:true,version:V246_QC_TRACKING_RUNTIME_ID,job:jobPublic(job)});
+  }catch(error){return res.status(400).json({ok:false,version:V246_QC_TRACKING_RUNTIME_ID,error:error?.message||String(error)});}
+}
 function jobHandler(req,res){const job=jobs.get(text(req.params?.jobId));if(!job)return res.status(404).json({ok:false,error:'QC追踪任务不存在或已过期'});return res.json({ok:true,version:V246_QC_TRACKING_RUNTIME_ID,job:jobPublic(job)});}
 function billHandler(req,res){
   try{const bill=billOf(req.params?.shipmentCode);const db=getDb();ensureV246TrackingSchema(db);const ledger=db.prepare('SELECT * FROM qc_tracking_ledger WHERE shipmentCode=?').get(bill)||null;const carry=db.prepare('SELECT * FROM carryover_open_items WHERE shipmentCode=?').get(bill)||null;const current=db.prepare('SELECT * FROM shipment_current_state WHERE shipmentCode=?').get(bill)||null;const audits=db.prepare('SELECT action,reason,beforeJson,afterJson,createdAt FROM qc_tracking_audit WHERE shipmentCode=? ORDER BY id DESC LIMIT 50').all(bill);return res.json({ok:true,version:V246_QC_TRACKING_RUNTIME_ID,shipmentCode:bill,ledger,carry,current,audits});
@@ -235,9 +268,10 @@ function registerRoutes(app){
   if(routesRegistered)return;routesRegistered=true;
   previousGet.call(app,'/api/v246/tracking/summary',summaryHandler);
   previousGet.call(app,'/api/v246/tracking/job/:jobId',jobHandler);
+  previousGet.call(app,'/api/v246/tracking/active-job',jobStatusHandler);
   previousGet.call(app,'/api/v246/tracking/bill/:shipmentCode',billHandler);
   previousPost.call(app,'/api/v246/tracking/reconcile',startHandler);
-  console.info('[CE-QC][V246_TRACKING_ROUTES] registered summary/reconcile/job/bill routes');
+  console.info('[CE-QC][V809_TRACKING_ROUTES] registered summary/reconcile/job/active-job/bill routes');
 }
 express.application.get=function v246TrackingGet(pathValue,...handlers){if(!routesRegistered&&String(pathValue||'')==='/api/v234/trends')registerRoutes(this);return previousGet.call(this,pathValue,...handlers);};
 express.application.post=function v246TrackingPost(pathValue,...handlers){return previousPost.call(this,pathValue,...handlers);};
