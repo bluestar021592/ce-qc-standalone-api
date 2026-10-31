@@ -8,6 +8,7 @@
   <title>__V625_PAGE_TITLE__ - CE EXPRESS 质量控制管理系统</title>
   <link rel="stylesheet" href="/v625-shell.css?v=20261009-v769-1">
   <link rel="stylesheet" href="/v792-reference-ui.css?v=20261031-v800-1">
+  <link rel="stylesheet" href="/v801-home-layout.css?v=20261031-v801-1">
 </head>
 <body data-page="__V625_PAGE_KEY__" data-business="__V625_BUSINESS_TYPE__">
   <div class="v625-app">
@@ -68,7 +69,7 @@
         <!-- HOME -->
         <section id="v625Home" class="v625-page" hidden>
           <section class="v625-panel v625-home-business-panel">
-            <div class="v625-section-head"><h2><span class="v625-title-icon">▥</span>业务概览</h2><span id="v625HomeDateMeta">今日数据统计</span></div>
+            <div class="v625-section-head"><h2><span class="v625-title-icon">▥</span>业务概览</h2><div class="v801-home-shortcuts"><span id="v625HomeDateMeta">今日数据统计</span><a href="#v801TimingDashboard" class="v801-signing-jump">查看签收时效</a></div></div>
             <div class="v625-business-grid">
               <article class="v625-business-card v632-total-card tone-total" data-card="TOTAL">
                 <div class="v625-card-label"><span class="v625-card-icon v632-total-icon"><svg><use href="/assets/ui-icons-v625.svg#icon-stack-total"/></svg></span><b>总票数</b></div>
@@ -181,8 +182,23 @@
             </section>
           </div>
 
-          <section class="v625-panel v625-signing-panel">
+          <section id="v801TimingDashboard" class="v625-panel v625-signing-panel">
             <div class="v625-section-head"><h2><span class="v625-title-icon">⌁</span>签收时效总览</h2><div style="display:flex;align-items:center;gap:10px"><span id="v625TimingPeriod">统计当前日报POD</span><button id="v734TimingRepairNow" class="v625-btn outline" type="button">补齐签收时效</button></div></div>
+            <div class="v801-timing-intro">
+              <span id="v801TimingStatus" class="v801-timing-status" role="status" aria-live="polite">等待该日期签收时间证据核验</span>
+              <span class="v801-timing-scope">四业务可信POD样本汇总 · 不含CE/CEAF/ALI1688 · 缺失不按0计算</span>
+            </div>
+            <div class="v801-timing-summary" aria-label="可信签收时效汇总">
+              <div class="v801-timing-summary-tile emphasis"><span>四业务平均签收</span><strong id="v801TimingOverall">—</strong><small id="v801TimingOverallSample">可信样本待核验</small></div>
+              <div class="v801-timing-summary-tile"><span>PP金边</span><strong id="v801TimingPP">—</strong><small id="v801TimingPPSample">可信样本待核验</small></div>
+              <div class="v801-timing-summary-tile"><span>PV外省</span><strong id="v801TimingPV">—</strong><small id="v801TimingPVSample">可信样本待核验</small></div>
+              <div class="v801-timing-summary-tile"><span>首派签收</span><strong id="v801TimingAttempt1">—</strong><small id="v801TimingAttempt1Sample">可信样本待核验</small></div>
+              <div class="v801-timing-summary-tile"><span>二派签收</span><strong id="v801TimingAttempt2">—</strong><small id="v801TimingAttempt2Sample">可信样本待核验</small></div>
+              <div class="v801-timing-summary-tile"><span>三派及以上签收</span><strong id="v801TimingAttempt3">—</strong><small id="v801TimingAttempt3Sample">可信样本待核验</small></div>
+              <div class="v801-timing-summary-tile"><span>已退回</span><strong id="v801TimingReturned">—</strong><small>仅WHPP / SHOPEE CN / VN</small></div>
+              <div class="v801-timing-summary-tile"><span>退回率</span><strong id="v801TimingReturnRate">—</strong><small id="v801TimingReturnScope">须核验三业务来源</small></div>
+            </div>
+            <div class="v801-timing-business-title"><b>各业务签收时效</b><span>按原始日报成员及可信时间计算 · 可查看待补轨迹</span></div>
             <div class="v625-timing-grid">
               <article class="v625-timing-card timing-tbkh" data-timing="TBKH">
                 <div class="v625-timing-head"><span class="v625-timing-icon"><svg><use href="/assets/ui-icons-v625.svg#icon-package"/></svg></span><div><b>TBKH</b><small>签收时效</small></div></div>
@@ -786,7 +802,7 @@
       </main>
     </div>
   </div>
-  <script src="/v625-shell.js?v=20261031-v800-1&patch=800" defer></script>
+  <script src="/v625-shell.js?v=20261031-v801-1&patch=801" defer></script>
   <script src="/v788-stage0-update.js?v=20261019-stage0-1" defer></script>
 </body>
 </html>

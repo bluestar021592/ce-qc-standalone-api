@@ -6,8 +6,8 @@ const css=fs.readFileSync('public/v792-reference-ui.css','utf8');
 const server=fs.readFileSync('server.js','utf8');
 const file=fs.readFileSync('src/whppCanonicalTruth.js','utf8');
 
-assert.match(html,/<link rel="stylesheet" href="\/v792-reference-ui.css\?v=20261031-v800-1">\s*<\/head>/);
-assert.match(html,/v625-shell\.js\?v=20261031-v800-1/);
+assert.match(html,/<link rel="stylesheet" href="\/v792-reference-ui.css\?v=20261031-v800-1">\s*<link rel="stylesheet" href="\/v801-home-layout.css\?v=20261031-v801-1">\s*<\/head>/);
+assert.match(html,/v625-shell\.js\?v=20261031-v801-1&patch=801/);
 for(const id of ['v792HomeManagement','v792WhppAnalysis','v792WhppTables',
   'v792WhppOverall','v792WhppPP','v792WhppPV','v792WhppFirst',
   'v792WhppSecond','v792WhppThird','v792WhppReturnCount','v792WhppReturnRate',
@@ -21,7 +21,7 @@ assert.match(html,/id="kpiReturnRateCard"[^>]*data-kpi-detail="returned"/);
 assert.match(js,/function v800ApplyReferenceLayout\(\)/);
 assert.match(js,/v800ApplyReferenceLayout\(\);\s*bind\(\);/);
 assert.match(js,/overview\.after\(top\);top\.append\(process,status,quick,logs\)/);
-assert.match(js,/bottom\.append\(timing,open\)/);
+assert.match(js,/bottom\.append\(timing\);bottom\.after\(open\)/);
 assert.match(js,/total\.classList\.add\('v792-total-summary'\)/);
 assert.match(js,/v800SetWhppMetrics\(m,timing\)/);
 assert.match(js,/v800RenderWhppDetails\(v628BusinessWorkspaceRows/);
@@ -46,4 +46,4 @@ for(const tab of ['clear','backup','storage'])
 assert.match(js,/switchDataTab\(\['clear','backup','storage'\]\.includes\(requestedTab\)\?requestedTab:'clear'\)/);
 assert.match(html,/id="v626OpenPodRows"/);
 assert.match(html,/id="v625BusinessRows"/);
-console.log('[V800_UI] PASS: home/WHPP reference, protected V788 controls, same-day links, real null-gap trend and brand layout');
+console.log('[V800/V801_UI] PASS: home/WHPP reference, protected V788 controls, same-day links, real null-gap trend and brand layout');

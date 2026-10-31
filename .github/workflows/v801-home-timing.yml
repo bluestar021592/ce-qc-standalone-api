@@ -1,0 +1,27 @@
+name: V801 homepage signing truth and density
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'public/v625-shell.html'
+      - 'public/v625-shell.js'
+      - 'public/v801-home-layout.css'
+      - 'scripts/v801-home-timing-overview-smoke.mjs'
+      - '.github/workflows/v801-home-timing.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  v801-home-signing:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Syntax and trusted-data smoke
+        run: |
+          node --check public/v625-shell.js
+          node --check scripts/v801-home-timing-overview-smoke.mjs
+          node scripts/v801-home-timing-overview-smoke.mjs
