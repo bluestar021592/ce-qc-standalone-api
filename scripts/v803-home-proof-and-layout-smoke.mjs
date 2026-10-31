@@ -4,7 +4,7 @@ import vm from 'node:vm';
 const js=fs.readFileSync('public/v625-shell.js','utf8');
 const html=fs.readFileSync('public/v625-shell.html','utf8');
 const css=fs.readFileSync('public/v801-home-layout.css','utf8');
-assert.match(html,/v625-shell\.js\?v=20261031-v803-1&patch=803/);
+assert.match(html,/v625-shell\.js\?v=20261031-v804-1&patch=804/);
 assert.match(html,/id="v803RetryOpenSource"/);
 assert.match(js,/v803RetryOpenSource'\)\?\.addEventListener\('click',\(\)=>void loadOpenPod\(\)\)/);
 assert.match(js,/const viewSequence=options\.summaryOverride&&options\.expectedViewSequence/);
