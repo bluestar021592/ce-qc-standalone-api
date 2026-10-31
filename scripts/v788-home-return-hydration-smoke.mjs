@@ -10,7 +10,7 @@ const summary=fs.readFileSync('src/homeQualitySummary.js','utf8');
 const html=fs.readFileSync('public/v625-shell.html','utf8');
 assert.match(summary,/export function buildHomeReturnVerification\(/);
 assert.match(summary,/bills\.size!==expected\|\|sourceRows\.length!==expected/,'partial members cannot be zero return');
-assert.match(manager,/'HOME_FULL','HOME_RETURNS','READ_ONLY_CHECK'/);
+assert.match(manager,/'HOME_FULL','HOME_RETURNS','HOME_TIMING','READ_ONLY_CHECK'/,'V802 must retain original read kinds and add independent timing');
 assert.match(worker,/message\.kind==='HOME_RETURNS'/);
 assert.match(server,/app\.get\('\/api\/home-return-summary'/);
 assert.match(server,/v766ReadJob\('HOME_RETURNS'/);
