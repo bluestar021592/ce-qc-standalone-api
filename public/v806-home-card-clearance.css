@@ -1,0 +1,211 @@
+/* V806 home dashboard: prevent the native absolute 42px footer from
+   overlaying text when V792/V805 display seven compact business cards.
+   Content flow owns height; footers may never paint over label/count/returns.
+   Presentation only: no metrics, source, or API behavior is changed. */
+
+body.v792-reference[data-page="home"] .v625-home-business-panel .v625-business-grid{
+  align-items:stretch;
+}
+
+body.v792-reference[data-page="home"] .v625-home-business-panel .v625-business-grid>.v625-business-card:not(.v632-total-card){
+  display:flex!important;
+  flex-direction:column;
+  justify-content:flex-start;
+  position:relative;
+  min-width:0;
+  min-height:174px!important;
+  height:auto!important;
+  padding:11px 11px 10px!important;
+  overflow:hidden;
+  box-sizing:border-box;
+}
+body.v792-reference[data-page="home"] .v625-home-business-panel .v625-business-card:not(.v632-total-card)>.v625-card-label{
+  min-height:32px;
+  flex:0 0 auto;
+  gap:7px;
+  min-width:0;
+  align-items:center;
+}
+body.v792-reference[data-page="home"] .v625-home-business-panel .v625-business-card:not(.v632-total-card)>.v625-card-label>b{
+  min-width:0;
+  font-size:12px;
+  line-height:1.3;
+  overflow-wrap:anywhere;
+}
+body.v792-reference[data-page="home"] .v625-home-business-panel .v625-business-card:not(.v632-total-card)>strong{
+  flex:0 0 auto;
+  margin:8px 0 2px!important;
+  line-height:1.13!important;
+  font-size:25px;
+}
+body.v792-reference[data-page="home"] .v625-home-business-panel .v625-business-card:not(.v632-total-card)>small{
+  flex:0 0 auto;
+  margin:3px 0 5px!important;
+  line-height:1.35!important;
+  position:relative;
+  z-index:2;
+}
+body.v792-reference[data-page="home"] .v625-home-business-panel .v625-business-card:not(.v632-total-card)>.v626-return-mini{
+  flex:0 0 auto;
+  display:flex!important;
+  flex-wrap:wrap!important;
+  align-items:center;
+  align-content:flex-start;
+  gap:4px 11px!important;
+  position:relative;
+  z-index:2;
+  margin:2px 0 9px!important;
+  padding:0;
+  line-height:1.35;
+  font-size:10px;
+  min-width:0;
+  color:#607b99;
+}
+body.v792-reference[data-page="home"] .v625-home-business-panel .v626-return-mini>span{
+  display:inline-flex;
+  align-items:baseline;
+  flex-wrap:wrap;
+  gap:3px;
+  min-width:0;
+  max-width:100%;
+  white-space:normal;
+}
+body.v792-reference[data-page="home"] .v625-home-business-panel .v626-return-mini b{
+  font-variant-numeric:tabular-nums;
+}
+body.v792-reference[data-page="home"] .v625-home-business-panel .v625-business-card:not(.v632-total-card)>.v625-card-foot{
+  position:relative!important;
+  left:auto!important;
+  right:auto!important;
+  bottom:auto!important;
+  width:100%;
+  height:auto!important;
+  min-height:37px;
+  flex:0 0 auto;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  flex-wrap:nowrap;
+  gap:8px;
+  padding:8px 0 1px!important;
+  margin:auto 0 0!important;
+  background:transparent;
+  border-top:1px solid #e6edf5;
+  z-index:2;
+  box-sizing:border-box;
+  color:#627d99;
+}
+body.v792-reference[data-page="home"] .v625-home-business-panel .v625-card-foot>span{
+  flex:0 0 auto;
+  min-width:0;
+  white-space:normal!important;
+  font-size:10px;
+  line-height:1.3;
+}
+body.v792-reference[data-page="home"] .v625-home-business-panel .v625-card-foot>i{
+  display:block;
+  flex:1 1 auto;
+  min-width:16px;
+  max-width:none;
+  height:8px;
+  margin:0;
+  overflow:hidden;
+  background:#eaf0f6;
+  border-radius:99px;
+}
+body.v792-reference[data-page="home"] .v625-home-business-panel .v625-card-foot>i>em{
+  display:block;
+  max-width:100%;
+}
+
+/* Total bar is a 2-row grid, not an old 42px absolutely positioned footer.
+   Its label, count, description and conservation indicator never overlap. */
+body.v792-reference[data-page="home"] .v632-total-card.v792-total-summary{
+  display:grid!important;
+  grid-template-columns:max-content max-content minmax(0,1fr);
+  grid-template-areas:"title total description" "foot foot foot";
+  column-gap:16px;
+  row-gap:8px;
+  align-items:center;
+  min-width:0;
+  width:100%;
+  min-height:94px!important;
+  height:auto!important;
+  margin:0 0 10px;
+  padding:12px 15px 11px!important;
+  box-sizing:border-box;
+  overflow:hidden;
+}
+body.v792-reference[data-page="home"] .v632-total-card.v792-total-summary>.v625-card-label{
+  grid-area:title;
+  min-width:0;
+  margin:0!important;
+  display:flex;
+  align-items:center;
+  gap:8px;
+}
+body.v792-reference[data-page="home"] .v632-total-card.v792-total-summary>.v625-card-label>b{
+  font-size:14px;
+  line-height:1.3;
+  white-space:nowrap;
+}
+body.v792-reference[data-page="home"] .v632-total-card.v792-total-summary>strong{
+  grid-area:total;
+  margin:0!important;
+  font-size:29px;
+  line-height:1.2!important;
+  white-space:nowrap;
+}
+body.v792-reference[data-page="home"] .v632-total-card.v792-total-summary>small{
+  grid-area:description;
+  margin:0!important;
+  min-width:0;
+  font-size:11px;
+  line-height:1.4;
+}
+body.v792-reference[data-page="home"] .v632-total-card.v792-total-summary>.v632-total-foot{
+  grid-area:foot;
+  display:flex!important;
+  position:relative!important;
+  left:auto!important;
+  right:auto!important;
+  bottom:auto!important;
+  width:100%;
+  height:auto!important;
+  min-height:18px;
+  margin:0!important;
+  padding:5px 0 0!important;
+  gap:12px;
+  background:transparent;
+  border-top:1px solid #e8e4f8;
+  z-index:2;
+}
+body.v792-reference[data-page="home"] .v632-total-card.v792-total-summary>.v632-total-foot>span{
+  flex:0 0 auto;
+  white-space:nowrap!important;
+  color:#746190;
+}
+body.v792-reference[data-page="home"] .v632-total-card.v792-total-summary>.v632-total-foot>i{
+  flex:1 1 auto;
+  min-width:16px;
+}
+
+@media(max-width:1100px){
+  body.v792-reference[data-page="home"] .v625-home-business-panel .v625-business-grid>.v625-business-card:not(.v632-total-card){
+    min-height:164px!important;
+  }
+}
+@media(max-width:600px){
+  body.v792-reference[data-page="home"] .v632-total-card.v792-total-summary{
+    grid-template-columns:minmax(0,1fr) max-content;
+    grid-template-areas:"title total" "description description" "foot foot";
+    column-gap:9px;
+    padding:10px 11px!important;
+  }
+  body.v792-reference[data-page="home"] .v632-total-card.v792-total-summary>strong{
+    font-size:24px;
+  }
+  body.v792-reference[data-page="home"] .v625-home-business-panel .v625-business-grid>.v625-business-card:not(.v632-total-card){
+    min-height:174px!important;
+  }
+}
