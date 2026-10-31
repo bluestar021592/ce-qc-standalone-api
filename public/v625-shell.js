@@ -3755,7 +3755,11 @@ async function init(){
   }
   else if(page==='settings'){await loadSettings();switchSettingsTab('basic');}
   else if(page==='logs')await loadLogs();
-  else if(page==='data-management'){switchDataTab('clear');await loadBackups()}
+  else if(page==='data-management'){
+    const requestedTab=currentParams().get('tab');
+    switchDataTab(['clear','backup','storage'].includes(requestedTab)?requestedTab:'clear');
+    await loadBackups();
+  }
   else if(page==='users')await loadUsers();
   else if(page==='profile')await loadSession();
 }
