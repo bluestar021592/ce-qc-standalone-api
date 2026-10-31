@@ -2015,6 +2015,43 @@ app.get('/api/tracking-workspace', async (req, res) => {
   res.json(payload);
 });
 
+// V800: reference WHPP trend is strictly read-only and uses the exact
+// saved canonical WHPP member set. No TMS requests, writing or fallback zeros.
+app.get('/api/v800/whpp/trend', (req,res)=>{
+  const date=String(req.query?.toDate||'').trim();
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(date)
+    ||!Number.isFinite(Date.parse(date+'T00:00:00.000Z'))
+    ||new Date(date+'T00:00:00.000Z').toISOString().slice(0,10)!==date)
+    return res.status(400).json({ok:false,code:'V800_DATE_REQUIRED'});
+  try{
+    const db=getDb(),points=[];
+    for(let offset=6;offset>=0;offset--){
+      const day=new Date(date+'T00:00:00.000Z');
+      day.setUTCDate(day.getUTCDate()-offset);
+      const d=day.toISOString().slice(0,10);
+      const truth=loadWhppCanonicalTruth(d,'',db);
+      const total=Number(truth.total||0);
+      if(total<=0){
+        points.push({date:d,total:null,pod:null,returned:null,
+          sourceVerified:false,terminalCoverage:0,fullyVerified:false});
+        continue;
+      }
+      const covered=truth.rows.filter(row=>row.finalRowAvailable===true).length;
+      const hasEvidence=covered>0;
+      points.push({date:d,total,pod:hasEvidence?Number(truth.evidence?.podRows||0):null,
+        returned:hasEvidence?Number(truth.evidence?.returnedRows||0):null,
+        sourceVerified:true,terminalCoverage:covered,fullyVerified:covered===total});
+    }
+    res.setHeader('Cache-Control','private, no-store');
+    res.json({ok:true,toDate:date,businessType:'WHPP',
+      basis:'EXACT_SAVED_WHPP_DAILY_MEMBERS_AND_TERMINAL_EVIDENCE',
+      points,partial:points.some(x=>!x.sourceVerified||!x.fullyVerified)});
+  }catch(error){
+    res.status(503).json({ok:false,code:'V800_WHPP_TREND_SOURCE_UNAVAILABLE',
+      error:'WHPP历史来源暂时无法核验；未生成示例数据'});
+  }
+});
+
 app.post('/api/test-ce-api', async (req, res) => {
   const requestHeadersDebug = client.headerDebug();
   const headersConfigured = ceHeaderStatus(requestHeadersDebug);
