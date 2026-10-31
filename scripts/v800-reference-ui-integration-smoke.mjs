@@ -7,7 +7,7 @@ const server=fs.readFileSync('server.js','utf8');
 const file=fs.readFileSync('src/whppCanonicalTruth.js','utf8');
 
 assert.match(html,/<link rel="stylesheet" href="\/v792-reference-ui.css\?v=20261031-v800-1">\s*<link rel="stylesheet" href="\/v801-home-layout.css\?v=20261031-v801-1">\s*<\/head>/);
-assert.match(html,/v625-shell\.js\?v=20261031-v801-1&patch=801/);
+assert.match(html,/v625-shell\.js\?v=20261031-v802-1&patch=802/);
 for(const id of ['v792HomeManagement','v792WhppAnalysis','v792WhppTables',
   'v792WhppOverall','v792WhppPP','v792WhppPV','v792WhppFirst',
   'v792WhppSecond','v792WhppThird','v792WhppReturnCount','v792WhppReturnRate',
