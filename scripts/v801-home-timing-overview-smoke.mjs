@@ -15,13 +15,13 @@ assert.match(home,/id="v801TimingDashboard" class="v625-panel v625-signing-panel
 for(const type of ['TBKH','WHPP','SHOPEECN','SHOPEEVN'])
   assert.equal(home.split('data-timing="'+type+'"').length-1,1,'visible timing card '+type);
 assert.match(js,/bottom\.append\(timing\);bottom\.after\(open\)/);
-assert.match(js,/open\.after\(management\);management\.after\(optional\)/);
+assert.match(js,/bottom\.replaceChildren\(signing,unfinished\)/);
 assert.match(css,/\.v625-timing-grid\{grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
 assert.match(css,/\.v801-timing-summary\{display:grid;grid-template-columns:repeat\(4,minmax\(0,1fr\)\)/);
 assert.match(css,/max-height:none!important/);
 assert.match(css,/overflow:visible!important/);
 assert.match(html,/v801-home-layout\.css\?v=20261031-v801-1/);
-assert.match(html,/v625-shell\.js\?v=20261031-v804-1&patch=804/);
+assert.match(html,/v625-shell\.js\?v=20261031-v805-1&patch=805/);
 assert.match(js,/v801RenderTimingSummary\(timing,summary\?\.reportDate\|\|requestedDate\|\|''\)/);
 assert.match(js,/v801RenderVerifiedReturns\(payload\)/);
 const start=js.indexOf('function v801TimingAggregate(');

@@ -1,0 +1,184 @@
+/* V805 restore reference composition approved on 2026-10-28:
+   7 businesses -> 4 operations -> quality/recognition -> signing/OPEN POD
+   -> safe management -> optional trend.
+   No new/duplicated business widgets; all values remain data-backed. */
+body.v792-reference[data-page="home"] .v625-content{padding:11px 15px 22px}
+body.v792-reference[data-page="home"] .v625-page{gap:11px}
+body.v792-reference[data-page="home"] .v625-home-business-panel{padding:10px 12px 11px}
+body.v792-reference[data-page="home"] .v625-business-grid{grid-template-columns:repeat(7,minmax(0,1fr));gap:8px}
+body.v792-reference[data-page="home"] .v625-business-card{min-width:0;min-height:112px;padding:10px 10px}
+body.v792-reference[data-page="home"] .v625-business-card>strong{font-size:23px}
+body.v792-reference[data-page="home"] .v792-home-main-row.v805-reference-operations{
+  display:grid;grid-template-columns:minmax(0,2.35fr) minmax(0,.88fr) minmax(0,1.05fr) minmax(0,1.03fr);
+  gap:10px;align-items:stretch
+}
+body.v792-reference[data-page="home"] .v792-home-main-row.v805-reference-operations>.v625-panel{
+  padding:11px 12px!important;min-width:0!important;
+  min-height:211px!important;height:auto!important;max-height:none!important;
+  overflow:visible!important
+}
+body.v792-reference[data-page="home"] .v626-processing-panel .v626-stage-row{
+  display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:4px
+}
+body.v792-reference[data-page="home"] .v626-processing-panel .v626-stage-row>div{
+  min-width:0;padding:7px 3px
+}
+body.v792-reference[data-page="home"] .v625-home-status-panel .v625-status-banner{
+  padding:9px 8px;min-width:0
+}
+body.v792-reference[data-page="home"] .v625-home-status-panel .v625-status-banner p{
+  font-size:10px;line-height:1.5;max-height:none;overflow-wrap:anywhere
+}
+body.v792-reference[data-page="home"] .v625-home-status-panel .v625-status-meta{
+  display:block!important;margin-top:7px
+}
+body.v792-reference[data-page="home"] .v625-home-status-panel .v625-status-meta>div{
+  font-size:10px;line-height:1.3;padding:5px 0
+}
+body.v792-reference[data-page="home"] .v625-home-quick-panel .v625-quick-grid{
+  display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px
+}
+body.v792-reference[data-page="home"] .v625-home-quick-panel .v625-quick-grid>a{
+  min-height:42px;padding:6px 2px;font-size:10px
+}
+body.v792-reference[data-page="home"] .v625-home-quick-panel .v625-quick-grid svg{
+  width:16px;height:16px
+}
+body.v792-reference[data-page="home"] .v626-log-panel .v626-live-log{
+  min-height:120px;max-height:175px;overflow:auto
+}
+body.v792-reference[data-page="home"] .v625-home-validation{
+  display:grid;grid-template-columns:minmax(0,1.65fr) minmax(0,1fr);
+  gap:10px;align-items:stretch
+}
+body.v792-reference[data-page="home"] .v625-home-validation>.v625-panel{
+  padding:12px!important;min-width:0;min-height:150px
+}
+body.v792-reference[data-page="home"] .v625-classification-kpis{gap:7px}
+body.v792-reference[data-page="home"] .v625-classification-kpis article{
+  padding:8px;min-width:0;min-height:76px
+}
+body.v792-reference[data-page="home"] .v792-home-bottom-row.v805-reference-bottom{
+  display:grid!important;grid-template-columns:minmax(0,3.05fr) minmax(280px,1fr);
+  gap:10px;align-items:stretch
+}
+body.v792-reference[data-page="home"] .v792-home-bottom-row.v805-reference-bottom>.v625-panel{
+  min-width:0;min-height:0!important;
+  height:auto!important;max-height:none!important;overflow:visible!important;
+  padding:12px 13px!important;margin:0
+}
+body.v792-reference[data-page="home"] .v625-signing-panel .v625-section-head{
+  flex-wrap:wrap;gap:8px;margin-bottom:6px
+}
+body.v792-reference[data-page="home"] .v625-signing-panel .v801-timing-intro{
+  margin:5px 0 9px;gap:5px 10px
+}
+body.v792-reference[data-page="home"] .v625-signing-panel .v801-timing-status{
+  font-size:10px;padding:5px 8px
+}
+body.v792-reference[data-page="home"] .v625-signing-panel .v801-timing-scope{
+  font-size:10px
+}
+body.v792-reference[data-page="home"] .v625-signing-panel .v801-timing-summary{
+  display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px;margin-bottom:7px
+}
+body.v792-reference[data-page="home"] .v625-signing-panel .v801-timing-summary-tile{
+  padding:7px 9px;min-height:69px;gap:4px
+}
+body.v792-reference[data-page="home"] .v625-signing-panel .v801-timing-summary-tile span{
+  font-size:10px;line-height:1.2
+}
+body.v792-reference[data-page="home"] .v625-signing-panel .v801-timing-summary-tile strong{
+  font-size:19px;line-height:1.1
+}
+body.v792-reference[data-page="home"] .v625-signing-panel .v801-timing-summary-tile small{
+  font-size:9px;line-height:1.25
+}
+body.v792-reference[data-page="home"] .v805-timing-advanced{margin:0 0 10px}
+body.v792-reference[data-page="home"] .v805-timing-advanced>summary{
+  cursor:pointer;font-size:11px;color:#176aca;
+  border-bottom:1px solid #e8eef7;padding:2px 0 7px
+}
+body.v792-reference[data-page="home"] .v805-timing-advanced-grid{
+  display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px;
+  margin:7px 0 0
+}
+body.v792-reference[data-page="home"] details.v805-timing-advanced:not([open])>.v805-timing-advanced-grid{display:none!important}
+body.v792-reference[data-page="home"] .v625-signing-panel .v801-timing-business-title{
+  padding-bottom:5px;margin:0 0 8px
+}
+body.v792-reference[data-page="home"] .v625-signing-panel .v625-timing-grid{
+  display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px
+}
+body.v792-reference[data-page="home"] .v625-signing-panel .v625-timing-grid .v625-timing-card{
+  display:block!important;min-height:0;padding:8px 9px
+}
+body.v792-reference[data-page="home"] .v625-signing-panel .v625-timing-head{padding:5px 6px 7px}
+body.v792-reference[data-page="home"] .v625-signing-panel .v625-timing-body{
+  padding:6px;gap:7px
+}
+body.v792-reference[data-page="home"] .v625-signing-panel .v625-timing-primary strong{font-size:19px}
+body.v792-reference[data-page="home"] .v625-signing-panel .v625-mini-trend{
+  min-height:0;height:34px
+}
+body.v792-reference[data-page="home"] .v626-open-pod-panel .v625-section-head{
+  display:flex;gap:8px;align-items:center;flex-wrap:wrap
+}
+body.v792-reference[data-page="home"] .v626-open-pod-panel .v803-open-actions{
+  display:flex;align-items:center;flex-wrap:wrap;gap:6px
+}
+body.v792-reference[data-page="home"] .v626-open-pod-panel .v803-open-actions .v625-btn{
+  min-height:32px;font-size:10px;padding:5px 7px
+}
+body.v792-reference[data-page="home"] .v626-open-pod-panel .v626-open-table{
+  max-height:270px;overflow:auto
+}
+body.v792-reference[data-page="home"] .v626-open-pod-panel .v625-table{font-size:10px}
+body.v792-reference[data-page="home"] .v792-home-management{
+  margin-top:0;padding:10px 12px!important
+}
+body.v792-reference[data-page="home"] .v792-management-grid{gap:8px}
+body.v792-reference[data-page="home"] .v792-management-tile{
+  padding:9px 11px;min-height:95px!important
+}
+body.v792-reference[data-page="home"] .v792-management-tile p{
+  font-size:10px;line-height:1.5
+}
+body.v792-reference[data-page="home"] .v792-optional-trend{margin-top:0}
+@media(max-width:1300px){
+  body.v792-reference[data-page="home"] .v792-home-main-row.v805-reference-operations{
+    grid-template-columns:minmax(0,2.1fr) minmax(0,.9fr) minmax(0,1fr) minmax(0,1fr)
+  }
+  body.v792-reference[data-page="home"] .v792-home-bottom-row.v805-reference-bottom{
+    grid-template-columns:minmax(0,2.3fr) minmax(240px,1fr)
+  }
+}
+@media(max-width:1050px){
+  body.v792-reference[data-page="home"] .v625-business-grid{
+    grid-template-columns:repeat(4,minmax(0,1fr))
+  }
+  body.v792-reference[data-page="home"] .v792-home-main-row.v805-reference-operations{
+    grid-template-columns:repeat(2,minmax(0,1fr))
+  }
+  body.v792-reference[data-page="home"] .v792-home-bottom-row.v805-reference-bottom{
+    grid-template-columns:1fr
+  }
+  body.v792-reference[data-page="home"] .v625-home-validation{
+    grid-template-columns:1fr
+  }
+}
+@media(max-width:650px){
+  body.v792-reference[data-page="home"] .v625-business-grid{
+    grid-template-columns:repeat(2,minmax(0,1fr))
+  }
+  body.v792-reference[data-page="home"] .v792-home-main-row.v805-reference-operations{
+    grid-template-columns:1fr
+  }
+  body.v792-reference[data-page="home"] .v625-signing-panel .v801-timing-summary,
+  body.v792-reference[data-page="home"] .v805-timing-advanced-grid{
+    grid-template-columns:repeat(2,minmax(0,1fr))
+  }
+  body.v792-reference[data-page="home"] .v625-signing-panel .v625-timing-grid{
+    grid-template-columns:1fr
+  }
+}
