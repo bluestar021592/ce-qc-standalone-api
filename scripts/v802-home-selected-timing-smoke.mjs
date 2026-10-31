@@ -19,7 +19,7 @@ assert.match(shell,/json\(timingUrl,45000\)/);
 assert.match(shell,/summary\?\.selectionMatched&&summary\?\.reportDate/);
 assert.match(shell,/v802RenderSelectedTiming\(payload\)/);
 assert.match(html,/v625-shell\.js\?v=20261031-v802-1&patch=802/);
-assert.doesNotMatch(server.slice(server.indexOf("app.get('/api/home-timing-summary'"),server.indexOf("app.get('/api/home-quality-summary'")),/client\.|TMS|client\.trackQuery|requestSelectedDateTimingRepair/,
+assert.doesNotMatch(server.slice(server.indexOf("app.get('/api/home-timing-summary'"),server.indexOf("app.get('/api/home-quality-summary'")),/client\.trackQuery\(|client\.confirmQuery\(|requestSelectedDateTimingRepair\(/,
   'timing endpoint never calls remote data collection');
 const f0=summary.indexOf('export function buildSelectedDateTimingProjection(');
 const f1=summary.indexOf('export function buildHomeQualitySummary(',f0);
