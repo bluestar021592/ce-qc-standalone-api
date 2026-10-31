@@ -105,3 +105,29 @@ body.v792-reference[data-page="home"] .v801-home-shortcuts{display:flex;align-it
 body.v792-reference[data-page="home"] .v801-home-shortcuts>span{font-size:11px;color:#7790a9}
 body.v792-reference[data-page="home"] .v801-signing-jump{display:inline-flex;align-items:center;min-height:31px;border:1px solid #bbd9ff;background:#edf6ff;color:#096ce0;border-radius:7px;text-decoration:none;padding:5px 11px;font-size:12px;font-weight:700}
 body.v792-reference[data-page="home"] .v801-signing-jump:hover{background:#deedff}
+
+/* V803 compact dashboard refinement: seven businesses and four signed-time
+   business cards are shown in one desktop row at wide viewports.
+   At smaller widths original responsive grids remain readable. */
+body.v792-reference[data-page="home"] .v803-open-actions{display:flex;align-items:center;flex-wrap:wrap;gap:9px}
+body.v792-reference[data-page="home"] .v803-open-actions .v625-btn{min-height:35px}
+body.v792-reference[data-page="home"] .v625-signing-panel .v801-timing-summary-tile{
+  min-height:92px;padding:10px 12px
+}
+body.v792-reference[data-page="home"] .v625-signing-panel .v801-timing-summary-tile strong{font-size:24px}
+body.v792-reference[data-page="home"] .v625-signing-panel .v625-timing-body{gap:8px}
+body.v792-reference[data-page="home"] .v625-signing-panel .v625-mini-trend{height:38px;min-height:0}
+@media(min-width:1480px){
+  body.v792-reference[data-page="home"] .v625-business-grid{grid-template-columns:repeat(7,minmax(0,1fr));gap:9px}
+  body.v792-reference[data-page="home"] .v625-business-card{padding:11px 10px;min-height:106px}
+  body.v792-reference[data-page="home"] .v625-business-card>strong{font-size:23px}
+  body.v792-reference[data-page="home"] .v625-timing-grid{grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+  body.v792-reference[data-page="home"] .v625-timing-card .v625-timing-body{display:block}
+  body.v792-reference[data-page="home"] .v625-timing-card .v625-timing-primary{padding:0 0 9px;margin:0 0 9px;border-right:0;border-bottom:1px solid #e3eaf1}
+  body.v792-reference[data-page="home"] .v625-timing-card .v625-timing-regions{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  body.v792-reference[data-page="home"] .v625-timing-card .v625-timing-regions>div{min-width:0;padding:8px}
+}
+@media(max-width:650px){
+  body.v792-reference[data-page="home"] .v803-open-actions{width:100%}
+  body.v792-reference[data-page="home"] .v803-open-actions .v625-btn{flex:1}
+}
