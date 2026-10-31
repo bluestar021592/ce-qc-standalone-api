@@ -10,14 +10,14 @@ assert.match(gate,/from===to/,'single-day scope must be exact');
 assert.match(gate,/V501_LEGACY_WIDE_RANGE_BLOCKED/,'wide-range legacy reconcile must remain blocked');
 assert.match(gate,/无需清空数据/,'legacy scoped refresh must not instruct the user to purge');
 
-assert.match(js,/const reportDate=selectedReportDate\(\)\|\|latest\.reportDate/,'manual POD refresh must bind to the selected report day');
+assert.match(js,/const reportDate=String\(selectedReportDate\(\)\|\|latest\.reportDate\|\|''\)\.slice\(0,10\)/,'manual POD refresh must bind to the selected report day');
 assert.match(js,/const fromDate=reportDate;/,
   'legacy 150k+ gate must receive a true one-day selected report date, never an expanded historical carry range');
 assert.match(js,/v785OpenVerifiedDate!==reportDate/,
   'a prior date source proof cannot authorize another selected-day refresh');
 assert.doesNotMatch(js,/const fromDate=v785OpenEarliestDate&&/,
   'the earliest historical OPEN source cannot silently expand a one-day manual click');
-assert.match(js,/\{businessType:'ALL',fromDate,toDate:reportDate\}/,
+assert.match(js,/\{businessType:'ALL',fromDate:reportDate,toDate:reportDate\}/,
   'manual tracking refresh must end on selected report day, never expand to today');
 assert.doesNotMatch(js,/toDate:cambodiaToday\(/,
   'manual POD refresh may never automatically sweep to today');

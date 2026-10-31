@@ -779,6 +779,12 @@ app.get('/api/home-timing-summary',async(req,res)=>{
       throw Error('HOME_TIMING_WORKER_SCOPE_MISMATCH');
     res.setHeader('Cache-Control','private, no-store');
     res.setHeader('X-CE-QC-Read-Cache',read.cache);
+    console.info('[CE-QC][V809_TIMING_DIAG]',JSON.stringify({
+      reportDate,businessType:businessType||'ALL',cache:read.cache,
+      workerElapsedMs:read.elapsedMs,source:'EXACT_SELECTED_DAY_SAVED_TIMING',
+      podCount:Number(result.timing?.[businessType]?.overall?.totalPodCount||0),
+      validTimeCount:Number(result.timing?.[businessType]?.overall?.podCount||0)
+    }));
     return res.json(result);
   }catch(error){
     console.warn('[CE-QC][V802_TIMING_READ]',String(error?.message||error));

@@ -1,0 +1,42 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import {DatabaseSync} from 'node:sqlite';
+const text=fs.readFileSync('src/homeQualitySummary.js','utf8').replace(/\r\n/g,'\n');
+const tick=String.fromCharCode(96);
+const head='observations=db.prepare('+tick+'SELECT UPPER(TRIM(u.shipmentCode))';
+const i=text.indexOf(head);
+const suffix=tick+')\n        .all(reportDate,reportDate,type,...chunk)';
+const j=text.indexOf(suffix,i);
+assert.ok(i>0&&j>i,'extract actual V809 production observation query');
+const marks=String.fromCharCode(36)+'{marks}';
+const current=text.slice(i+('observations=db.prepare('+tick).length,j).replaceAll(marks,'?,?');
+const previous=current
+  .replace(/-- V809:[^\n]*\n(?:\s*--[^\n]*\n)*/,'')
+  .replace(/u\.snapshotId IN \(\s*SELECT later\.snapshotId FROM unified_import_batches later\s*WHERE later\.status='VALID' AND later\.reportDate>=\?\s*\) AND /,'');
+assert.ok(!previous.includes('later.snapshotId'));
+const db=new DatabaseSync(':memory:');
+db.exec('CREATE TABLE unified_import_batches(batchId TEXT PRIMARY KEY,snapshotId TEXT,reportDate TEXT,status TEXT)');
+db.exec('CREATE TABLE unified_import_rows(batchId TEXT,snapshotId TEXT,reportDate TEXT,businessType TEXT,shipmentCode TEXT,regionCode TEXT,rowJson TEXT,createdAt TEXT)');
+db.exec('CREATE INDEX idx_unified_rows_snapshot ON unified_import_rows(snapshotId,businessType,shipmentCode)');
+const b=db.prepare('INSERT INTO unified_import_batches VALUES(?,?,?,?)');
+const r=db.prepare('INSERT INTO unified_import_rows VALUES(?,?,?,?,?,?,?,?)');
+b.run('B0','S0','2026-07-12','VALID');
+b.run('B1','S1','2026-07-13','VALID');
+b.run('B2','S2','2026-07-14','SUPERSEDED');
+b.run('B3','S3','2026-06-30','VALID');
+r.run('B0','S0','2026-07-12','TBKH','ABC','PP','{"状态标识":"W"}','2026-07-12');
+r.run('B1','S1','2026-07-13','TBKH','ABC','PP','{"状态标识":"Y"}','2026-07-13');
+r.run('B1','S1','2026-07-13','TBKH','bCd','PV','{"状态标识":"Y"}','2026-07-13');
+r.run('B2','S2','2026-07-14','TBKH','ABC','PP','{"状态标识":"Z"}','2026-07-14');
+r.run('B3','S3','2026-06-30','TBKH','ABC','PP','{"状态标识":"W"}','2026-06-30');
+const now=db.prepare(current).all('2026-07-12','2026-07-12','TBKH','ABC','BCD');
+const old=db.prepare(previous).all('2026-07-12','TBKH','ABC','BCD');
+assert.deepEqual(now,old);
+assert.equal(now.length,3);
+assert.equal(now[0].reportDate,'2026-07-13');
+assert.equal(now.find(x=>x.shipmentCode==='BCD').reportDate,'2026-07-13');
+const queryPlan=db.prepare('EXPLAIN QUERY PLAN '+current).all('2026-07-12','2026-07-12','TBKH','ABC','BCD');
+assert.ok(queryPlan.some(x=>String(x.detail||'').includes('idx_unified_rows_snapshot')),
+  'optimized observation lookup should use existing snapshot index');
+db.close();
+console.log('[V809 TIMING SQL] PASS later valid snapshots, original observation set/order, mixed-case exact membership, index-backed query plan, no database writes');

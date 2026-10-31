@@ -15,6 +15,8 @@ assert.ok(begin>0&&end>begin,'production selected-day refresh handler must exist
 const requests=[],notices=[];
 const context={
   runBusy:false,
+  v809TrackingRefreshBusy:false,
+  v809TrackingInspectBusy:false,
   v626LatestImport:{reportDate:'2026-07-12'},
   selectedReportDate:()=> '2026-07-12',
   v785OpenSourceVerified:true,
@@ -25,7 +27,11 @@ const context={
   latestImportContext:async()=>{throw Error('unnecessary latest import lookup');},
   loadOpenPod:async()=>({openSourceCoverage:{complete:true}}),
   pollTrackingJob:async()=>({refreshed:17,failed:0}),
-  post:async(url,args)=>{requests.push({url,args});return{job:{jobId:'test-task'}};},
+  v809ReadSelectedTrackingJob:async()=>null,
+  isTransportLoss:()=>false,
+  v809FollowTrackingJob:async()=>{notices.push({message:'2026-07-12 更新完成，其他历史日期未批量更新。'})},
+
+  post:async(url,args)=>{requests.push({url,args});return{job:{jobId:'test-task',selection:{businessType:'ALL',fromDate:'2026-07-12',toDate:'2026-07-12'}}};},
   page:'home',
   loadHome:async()=>{},
   loadBusiness:async()=>{},

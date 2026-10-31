@@ -1,0 +1,38 @@
+name: V809 tracking job recovery and timing index scope
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'public/v625-shell.js'
+      - 'public/v625-shell.html'
+      - 'src/v246QcTrackingRuntimePatch.js'
+      - 'src/homeQualitySummary.js'
+      - 'server.js'
+      - 'scripts/v809-timing-and-job-recovery-smoke.mjs'
+      - 'scripts/v809-snapshot-timing-sql-smoke.mjs'
+      - 'scripts/v584-local-candidate-gate.mjs'
+      - '.github/workflows/v809-tracking-recovery.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  recover-job-and-timing:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Validate JS syntax, tracking job recovery and selected timing
+        run: |
+          node --check server.js
+          node --check src/homeQualitySummary.js
+          node --check src/v246QcTrackingRuntimePatch.js
+          node --check public/v625-shell.js
+          node --check scripts/v809-timing-and-job-recovery-smoke.mjs
+          node scripts/v809-timing-and-job-recovery-smoke.mjs
+          node scripts/v809-snapshot-timing-sql-smoke.mjs
+          node scripts/v808-selected-day-pod-refresh-smoke.mjs
+          node scripts/v807-home-timing-isolation-smoke.mjs
+          node scripts/v802-home-selected-timing-smoke.mjs
