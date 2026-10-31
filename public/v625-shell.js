@@ -1193,23 +1193,36 @@ async function loadHome(options={}){
     // V802: selected-day timing is a separate worker, not blocked by
     // history trend or 30-day full summary; scope every response to the
     // exact source date and snapshot to block stale multi-day UI updates.
-    const timingUrl='/api/home-timing-summary?reportDate='+encodeURIComponent(proofDate)
-      +'&snapshotId='+encodeURIComponent(proofSnapshot);
-    setTimeout(()=>{
-      if(viewSequence!==v788HomeViewSequence||page!=='home'
-        ||String(selectedReportDate()||proofDate)!==proofDate)return;
-      void json(timingUrl,45000).then(payload=>{
+    // V807: the 13k+ ticket selected day must not let a slow TBKH SQL
+    // scan hide all WHPP/Shopee timing cards. Each exact-snapshot read has
+    // its own worker key and its own bounded failure state; no TMS write.
+    const timingTypes=['WHPP','SHOPEEVN','SHOPEECN','TBKH'];
+    timingTypes.forEach((type,index)=>{
+      const timingUrl='/api/home-timing-summary?reportDate='+encodeURIComponent(proofDate)
+        +'&snapshotId='+encodeURIComponent(proofSnapshot)
+        +'&businessType='+encodeURIComponent(type);
+      setTimeout(()=>{
         if(viewSequence!==v788HomeViewSequence||page!=='home'
-          ||String(selectedReportDate()||proofDate)!==proofDate
-          ||String(payload?.reportDate||'')!==proofDate
-          ||String(payload?.snapshotId||'')!==proofSnapshot)return;
-        v802RenderSelectedTiming(payload);
-      }).catch(()=>{
-        if(viewSequence===v788HomeViewSequence&&page==='home'
-          &&String(selectedReportDate()||proofDate)===proofDate)
-          setText('v801TimingStatus','日报 '+proofDate+' · 签收时效只读统计未完成；分类数据不受影响');
-      });
-    },100);
+          ||String(selectedReportDate()||proofDate)!==proofDate)return;
+        void json(timingUrl,45000).then(payload=>{
+          if(viewSequence!==v788HomeViewSequence||page!=='home'
+            ||String(selectedReportDate()||proofDate)!==proofDate
+            ||String(payload?.reportDate||'')!==proofDate
+            ||String(payload?.snapshotId||'')!==proofSnapshot
+            ||String(payload?.businessType||'')!==type)return;
+          v802RenderSelectedTiming(payload);
+        }).catch(()=>{
+          if(viewSequence!==v788HomeViewSequence||page!=='home'
+            ||String(selectedReportDate()||proofDate)!==proofDate)return;
+          const prior=v803SelectedTimingProof;
+          if(prior?.reportDate===proofDate&&prior?.snapshotId===proofSnapshot&&prior.timing?.[type])return;
+          setText('v625Timing'+type+'Pod','可信POD读取失败；本次无可核验结果');
+          setText('v626Timing'+type+'Missing','待核验');
+          setText('v626Timing'+type+'Valid','待核验');
+          setText('v801TimingStatus','日报 '+proofDate+' · '+type+'签收时效只读读取失败；其他业务可独立展示');
+        });
+      },400+index*250);
+    });
     // Independent short read does not depend on HOME_FULL's 30-day timing.
     const returnsUrl='/api/home-return-summary?reportDate='+encodeURIComponent(proofDate)
       +'&snapshotId='+encodeURIComponent(proofSnapshot);
@@ -3777,6 +3790,17 @@ function v801SetTimingWaiting(date=''){
   setText('v801TimingReturned','—');
   setText('v801TimingReturnRate','—');
   setText('v801TimingReturnScope','等待三业务退回来源核验');
+  // Reset prior-date card values as well as the summary. A placeholder must
+  // express loading, not imply a verified zero-POD or an empty timestamp.
+  for(const type of ['TBKH','WHPP','SHOPEECN','SHOPEEVN']){
+    const prefix='v625Timing'+type;
+    for(const suffix of ['Overall','PP','PV'])setText(prefix+suffix,'—');
+    setText(prefix+'Pod','正在读取该日报可信POD…');
+    setText(prefix+'PPPod','正在核验');
+    setText(prefix+'PVPod','正在核验');
+    setText('v626Timing'+type+'Missing','—');
+    setText('v626Timing'+type+'Valid','—');
+  }
   setText('v801TimingStatus',date?'统计 '+date+' · 正在读取签收时效证据':'等待选择有效日报日期');
 }
 function v801RenderTimingSummary(timing={},date=''){
@@ -3824,15 +3848,23 @@ function v801RenderVerifiedReturns(payload){
 // historical 30-day HOME_FULL worker. Never invent missing timestamps.
 function v802RenderSelectedTiming(payload){
   if(page!=='home'||payload?.ok!==true||payload?.selectionMatched!==true)return false;
-  const timing=payload.timing||{},day=String(payload.reportDate||'');
-  v803SelectedTimingProof={reportDate:day,snapshotId:String(payload.snapshotId||''),timing};
+  const day=String(payload.reportDate||''),snapshotId=String(payload.snapshotId||'');
+  const previous=v803SelectedTimingProof;
+  const base=previous?.reportDate===day&&previous?.snapshotId===snapshotId
+    ?previous.timing||{}:{};
+  const incoming=payload.timing||{};
+  const types=['TBKH','WHPP','SHOPEECN','SHOPEEVN'];
+  const timing={...base};
+  for(const type of types)if(Object.prototype.hasOwnProperty.call(incoming,type))
+    timing[type]=incoming[type];
+  v803SelectedTimingProof={reportDate:day,snapshotId,timing};
   v801RenderTimingSummary(timing,day);
   const asDays=bucket=>{
     const sample=Number(bucket?.podCount||0),days=Number(bucket?.avgDays);
     return sample>0&&Number.isFinite(days)&&days>0
       ?days.toFixed(2).replace(/\.00$/,'')+'天':'—';
   };
-  for(const type of ['TBKH','WHPP','SHOPEECN','SHOPEEVN']){
+  for(const type of types.filter(item=>Object.prototype.hasOwnProperty.call(incoming,item))){
     const d=timing[type]||{},prefix='v625Timing'+type;
     const count=Number(d.overall?.podCount||0),total=Number(d.overall?.totalPodCount||0);
     setText(prefix+'Overall',asDays(d.overall));
@@ -3848,11 +3880,13 @@ function v802RenderSelectedTiming(payload){
     setText('v626Timing'+type+'Missing',d.degraded?'待核验':fmt(missing));
     setText('v626Timing'+type+'Valid',d.degraded?'待核验':fmt(d.evidence?.valid??count));
   }
-  const broken=Array.isArray(payload.degraded)?payload.degraded:[];
-  const counts=['TBKH','WHPP','SHOPEECN','SHOPEEVN'].map(type=>
-    Number(timing[type]?.overall?.podCount||0));
+  const broken=types.filter(type=>timing[type]?.degraded===true);
+  const loaded=types.filter(type=>Object.prototype.hasOwnProperty.call(timing,type));
+  const counts=loaded.map(type=>Number(timing[type]?.overall?.podCount||0));
   if(broken.length){
     setText('v801TimingStatus','日报 '+day+' · '+broken.join(' / ')+'来源计算异常，须核实原始日报与POD时间');
+  }else if(loaded.length<types.length){
+    setText('v801TimingStatus','日报 '+day+' · 签收时效已读取 '+loaded.length+'/'+types.length+' 个业务，其他业务独立读取中');
   }else if(counts.every(count=>count===0)){
     const pods=['TBKH','WHPP','SHOPEECN','SHOPEEVN']
       .reduce((n,type)=>n+Number(timing[type]?.overall?.totalPodCount||0),0);
