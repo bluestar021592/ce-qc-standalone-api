@@ -10,7 +10,7 @@ assert.match(gate,/from===to/,'single-day scope must be exact');
 assert.match(gate,/V501_LEGACY_WIDE_RANGE_BLOCKED/,'wide-range legacy reconcile must remain blocked');
 assert.match(gate,/无需清空数据/,'legacy scoped refresh must not instruct the user to purge');
 
-assert.match(js,/const reportDate=selectedReportDate\(\)\|\|latest\.reportDate/,'manual POD refresh must bind to the selected report day');
+assert.match(js,/const reportDate=String\(selectedReportDate\(\)\|\|latest\.reportDate\|\|''\)\.slice\(0,10\)/,'manual POD refresh must bind to the selected report day');
 assert.match(js,/const fromDate=reportDate;/,
   'legacy 150k+ gate must receive a true one-day selected report date, never an expanded historical carry range');
 assert.match(js,/v785OpenVerifiedDate!==reportDate/,
