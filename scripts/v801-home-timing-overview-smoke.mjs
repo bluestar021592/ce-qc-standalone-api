@@ -21,7 +21,7 @@ assert.match(css,/\.v801-timing-summary\{display:grid;grid-template-columns:repe
 assert.match(css,/max-height:none!important/);
 assert.match(css,/overflow:visible!important/);
 assert.match(html,/v801-home-layout\.css\?v=20261031-v801-1/);
-assert.match(html,/v625-shell\.js\?v=20261031-v801-1&patch=801/);
+assert.match(html,/v625-shell\.js\?v=20261031-v802-1&patch=802/);
 assert.match(js,/v801RenderTimingSummary\(timing,summary\?\.reportDate\|\|requestedDate\|\|''\)/);
 assert.match(js,/v801RenderVerifiedReturns\(payload\)/);
 const start=js.indexOf('function v801TimingAggregate(');
