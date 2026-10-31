@@ -1131,7 +1131,10 @@ function v788RenderVerifiedHomeReturns(payload,reportDate,snapshotId){
 let v788HomeViewSequence=0;
 let v788HomeSourceProof=null;
 async function loadHome(options={}){
-  const viewSequence=++v788HomeViewSequence;
+  // V803: the async full summary is a second paint of the SAME view,
+  // not another navigation; preserve exact-date timing worker ownership.
+  const viewSequence=options.summaryOverride&&options.expectedViewSequence
+    ?options.expectedViewSequence:++v788HomeViewSequence;
   const requestedDate=selectedReportDate();
   if(!options.summaryOverride)v801SetTimingWaiting(requestedDate);
   const summaryUrl='/api/home-quality-summary?fast=1'+(requestedDate?'&reportDate='+encodeURIComponent(requestedDate):'');
@@ -1222,7 +1225,7 @@ async function loadHome(options={}){
         if(!full||viewSequence!==v788HomeViewSequence||String(full.reportDate||'')!==proofDate
           ||String(full.snapshotId||'')!==proofSnapshot
           ||String(selectedReportDate()||proofDate)!==proofDate)return;
-        void loadHome({summaryOverride:full,skipHistory:true,skipAux:true});
+        void loadHome({summaryOverride:full,expectedViewSequence:viewSequence,skipHistory:true,skipAux:true});
       }).catch(()=>{
         if(page==='home'&&String(selectedReportDate()||proofDate)===proofDate)
           (setText('v625HomeStatus','分类概览可用；签收时效明细后台读取暂未完成，可继续切换业务看板。'),setText('v801TimingStatus','签收时效读取暂未完成 · 保留待核验，不能显示为0天'));
@@ -1324,7 +1327,8 @@ async function loadHome(options={}){
   }
 
   if(!summary?.quickOnly){
-  const timing=summary?.timing||{},timingTrend=summary?.timingTrend||{};
+  const timing=v803MergeFullWithExactTiming(summary?.timing||{},summary?.reportDate||requestedDate||'',summary?.snapshotId||'');
+  const timingTrend=summary?.timingTrend||{};
   v801RenderTimingSummary(timing,summary?.reportDate||requestedDate||'');
   const timingRepairTypes=summary?.timingEvidenceRepair?.types||{};
   v741TimingRepairStates=timingRepairTypes;
@@ -3720,12 +3724,36 @@ async function v800LoadWhppTrend(date=''){
 /* V801: only evidence-backed sample averages, never a single guessed number.
    The four business groups are disjoint; their average POD times may be
    aggregated by actual trusted sample counts, not by taking a mean of means. */
+let v803SelectedTimingProof=null;
+function v803MergeFullWithExactTiming(full={},reportDate='',snapshotId=''){
+  const proof=v803SelectedTimingProof;
+  if(!proof||proof.reportDate!==String(reportDate)||proof.snapshotId!==String(snapshotId))return full;
+  const merged={...full};
+  for(const type of ['TBKH','WHPP','SHOPEECN','SHOPEEVN']){
+    const base=full[type]||{},verified=proof.timing?.[type]||{};
+    const result={...base},keys=['overall','pp','pv','attempt1','attempt2','attempt3'];
+    for(const key of keys){
+      const old=base[key],incoming=verified[key];
+      const oldSamples=Number(old?.podCount||0),newSamples=Number(incoming?.podCount||0);
+      if(newSamples>0&&Number.isFinite(Number(incoming?.avgDays))&&Number(incoming?.avgDays)>0
+        &&(newSamples>oldSamples||(newSamples===oldSamples&&!Number.isFinite(Number(old?.avgDays)))))
+        result[key]={...old,...incoming};
+    }
+    if(Number(result.overall?.podCount||0)>Number(base.overall?.podCount||0)){
+      result.evidence=verified.evidence||base.evidence;
+      result.degraded=false;
+    }
+    merged[type]=result;
+  }
+  return merged;
+}
 function v801TimingAggregate(timing={},field='overall'){
   let weighted=0,count=0,totalPod=0,knownTotals=0;
   for(const type of ['TBKH','WHPP','SHOPEECN','SHOPEEVN']){
     const bucket=timing?.[type]?.[field];
     const sample=Number(bucket?.podCount||0),days=Number(bucket?.avgDays);
-    const total=Number(bucket?.totalPodCount);
+    const rawTotal=bucket?.totalPodCount;
+    const total=rawTotal===null||rawTotal===undefined?NaN:Number(rawTotal);
     if(Number.isFinite(total)&&total>=0){totalPod+=total;knownTotals++}
     if(sample>0&&Number.isFinite(days)&&days>0){weighted+=days*sample;count+=sample}
   }
@@ -3733,6 +3761,7 @@ function v801TimingAggregate(timing={},field='overall'){
 }
 function v801SetTimingWaiting(date=''){
   v801VerifiedReturnsProof=null;
+  v803SelectedTimingProof=null;
   for(const key of ['Overall','PP','PV','Attempt1','Attempt2','Attempt3']){
     setText('v801Timing'+key,'—');
     setText('v801Timing'+key+'Sample','等待可信样本');
@@ -3788,6 +3817,7 @@ function v801RenderVerifiedReturns(payload){
 function v802RenderSelectedTiming(payload){
   if(page!=='home'||payload?.ok!==true||payload?.selectionMatched!==true)return false;
   const timing=payload.timing||{},day=String(payload.reportDate||'');
+  v803SelectedTimingProof={reportDate:day,snapshotId:String(payload.snapshotId||''),timing};
   v801RenderTimingSummary(timing,day);
   const asDays=bucket=>{
     const sample=Number(bucket?.podCount||0),days=Number(bucket?.avgDays);
@@ -3809,6 +3839,18 @@ function v802RenderSelectedTiming(payload){
     const missing=Number(d.evidence?.missing||d.overall?.missingEvidenceCount||0);
     setText('v626Timing'+type+'Missing',d.degraded?'待核验':fmt(missing));
     setText('v626Timing'+type+'Valid',d.degraded?'待核验':fmt(d.evidence?.valid??count));
+  }
+  const broken=Array.isArray(payload.degraded)?payload.degraded:[];
+  const counts=['TBKH','WHPP','SHOPEECN','SHOPEEVN'].map(type=>
+    Number(timing[type]?.overall?.podCount||0));
+  if(broken.length){
+    setText('v801TimingStatus','日报 '+day+' · '+broken.join(' / ')+'来源计算异常，须核实原始日报与POD时间');
+  }else if(counts.every(count=>count===0)){
+    const pods=['TBKH','WHPP','SHOPEECN','SHOPEEVN']
+      .reduce((n,type)=>n+Number(timing[type]?.overall?.totalPodCount||0),0);
+    setText('v801TimingStatus','日报 '+day+' · 已读取来源，可信签收样本0票；'
+      +(pods>0?'POD '+fmt(pods)+'票缺少实际时间':'当前尚无可核验POD成员')
+      +'，不能视为0天');
   }
   setText('v625TimingPeriod','统计日报 '+day+' · 已读取指定日期保存的签收时间（未调用TMS）');
   return true;
