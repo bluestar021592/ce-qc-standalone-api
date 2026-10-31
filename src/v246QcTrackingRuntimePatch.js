@@ -178,7 +178,11 @@ async function executeJob(job,reason){
 function startJob(selection,reason='MANUAL'){
   cleanupJobs();if(activeJobId){const active=jobs.get(activeJobId);if(active)return active;}
   const job={jobId:`V246-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`,selection,status:'QUEUED',phase:'QUEUED',progress:0,total:0,completed:0,refreshed:0,failed:0,message:'等待QC追踪核查',createdAt:nowIso(),updatedAt:nowIso()};
-  jobs.set(job.jobId,job);setImmediate(()=>executeJob(job,reason).catch(error=>console.error('[CE-QC][V246_TRACKING_JOB_FAILED]',error?.message||error)));return job;
+  jobs.set(job.jobId,job);
+  // Let the HTTP 202 acceptance and job ID flush before heavy synchronous
+  // reconcile scans the large legacy SQLite on the Express event loop.
+  const kickoff=setTimeout(()=>executeJob(job,reason).catch(error=>console.error('[CE-QC][V246_TRACKING_JOB_FAILED]',error?.message||error)),250);
+  kickoff.unref?.();return job;
 }
 
 function summaryHandler(req,res){try{const selection=selectionOf(req.query);const db=getDb();const repair=String(req.query.repair||'')==='1'?reconcileV246TrackingLedger(selection,{db,reason:'SUMMARY_REPAIR'}):null;return res.json({...v246TrackingSummary(selection,db),repair});}catch(error){return res.status(400).json({ok:false,version:V246_QC_TRACKING_RUNTIME_ID,error:error?.message||String(error)});}}
@@ -199,9 +203,8 @@ function jobStatusHandler(req,res){
     // V809: read-only, authenticated, exact-date task recovery. Never query
     // SQLite, start remote TMS, or mistake a different day's job for this day.
     const selection=selectionOf(req.query||{});
-    return res.json({ok:true,version:V246_QC_TRACKING_RUNTIME_ID,selection,
-      job:jobPublic(scopedJob(selection,{createdAfter:req.query.createdAfter||''})||{})?.jobId
-        ?jobPublic(scopedJob(selection,{createdAfter:req.query.createdAfter||''})):null});
+    const job=scopedJob(selection,{createdAfter:req.query.createdAfter||''});
+    return res.json({ok:true,version:V246_QC_TRACKING_RUNTIME_ID,selection,job:job?jobPublic(job):null});
   }catch(error){return res.status(400).json({ok:false,error:error?.message||String(error)})}
 }
 function startHandler(req,res){
