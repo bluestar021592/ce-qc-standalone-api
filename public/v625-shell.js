@@ -3792,7 +3792,7 @@ function v802RenderSelectedTiming(payload){
   const asDays=bucket=>{
     const sample=Number(bucket?.podCount||0),days=Number(bucket?.avgDays);
     return sample>0&&Number.isFinite(days)&&days>0
-      ?days.toFixed(2).replace(/\\.00$/,'')+'天':'—';
+      ?days.toFixed(2).replace(/\.00$/,'')+'天':'—';
   };
   for(const type of ['TBKH','WHPP','SHOPEECN','SHOPEEVN']){
     const d=timing[type]||{},prefix='v625Timing'+type;
