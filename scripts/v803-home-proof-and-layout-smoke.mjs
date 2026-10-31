@@ -33,7 +33,8 @@ const proof={TBKH:{overall:{podCount:6,avgDays:2,totalPodCount:900}},
  WHPP:{overall:{podCount:3,avgDays:4,totalPodCount:10}},
  SHOPEECN:{overall:{podCount:4,avgDays:9,totalPodCount:8}},
  SHOPEEVN:{overall:{podCount:0,avgDays:null,totalPodCount:20}}};
-ctx.v803SelectedTimingProof={reportDate:resultId,snapshotId:snapshot,timing:proof};
+ctx.testProof={reportDate:resultId,snapshotId:snapshot,timing:proof};
+vm.runInContext('v803SelectedTimingProof=testProof',ctx,{timeout:1000});
 const combined=ctx.v803MergeFullWithExactTiming(full,resultId,snapshot);
 assert.equal(combined.TBKH.overall.avgDays,2,'exact-day proof must survive slow full summary');
 assert.equal(combined.WHPP.overall.avgDays,4,'more verified members win');
