@@ -975,7 +975,7 @@ function renderOpenPodRows(){
       const values=cols===5
         ? [row.shipmentCode,row.businessType,row.currentState||row.category||row.queryStatus||'未完成',row.lastEventTime||row.lastCheckedAt||'—']
         : [row.shipmentCode,row.businessType,row.currentState||row.category||'未完成',row.queryStatus||'需更新',row.lastEventTime||row.lastCheckedAt||'—'];
-      for(const value of values){const td=document.createElement('td');td.textContent=value||'—';tr.appendChild(td)}
+      for(const value of values){const td=document.createElement('td');td.textContent=value||'—';td.title=String(value||'—');tr.appendChild(td)}
       const td=document.createElement('td');
       const code=String(row.shipmentCode||'').trim().toUpperCase();
       const date=String(row.sourceReportDate||row.reportDate||'').slice(0,10);
@@ -1065,7 +1065,12 @@ async function refreshOpenPodNow(){
   try{
     if(!v785OpenSourceVerified)await loadOpenPod();
     if(!v785OpenSourceVerified)throw new Error('未完成来源尚未核验，不能启动批量轨迹处理。');
-    const fromDate=v785OpenEarliestDate&&v785OpenEarliestDate<reportDate?v785OpenEarliestDate:reportDate;
+    // V808: a selected-day button must never silently expand its refresh
+    // into the earliest legacy carry date (150k+ historical-member guard).
+    // Historical OPEN work remains visible but is refreshed only when its
+    // own source day is explicitly selected. Preserve the original safety cap.
+    const fromDate=reportDate;
+    note('v626RefreshPodMessage','仅补查 '+reportDate+' 当日来源运单；其他历史日报请按日期单独选择，不会执行全库扫描。');
     const r=await post('/api/v246/tracking/reconcile',{businessType:'ALL',fromDate,toDate:reportDate},30000);
     const job=await pollTrackingJob(r.job?.jobId||'');
     // V786: a completed HTTP task is NOT a completed business publication.
@@ -1076,9 +1081,10 @@ async function refreshOpenPodNow(){
     await Promise.all([page==='home'?loadHome({skipAux:true}):Promise.resolve(),
       page==='business'?loadBusiness({skipQualityRefresh:true}):Promise.resolve()]);
     const retryCount=Number(job.failed||0);
-    note('v626RefreshPodMessage',reportDate+' 定向补查完成：已复核来源 '+fmt(v785OpenExpectedCount)+
-      '票；当前仍未完结 '+fmt(v785OpenTotal)+'票；成功刷新 '+fmt(job.refreshed||0)+
-      '票，待重试 '+fmt(retryCount)+'票。'+(retryCount?'部分运单仍需继续补查。':'最新状态已保存并重新核对。'),
+    note('v626RefreshPodMessage',reportDate+' 当日定向补查完成：已复核来源 '+fmt(v785OpenExpectedCount)+
+      '票；当前所选范围仍未完结 '+fmt(v785OpenTotal)+'票；本次成功刷新 '+fmt(job.refreshed||0)+
+      '票，待重试 '+fmt(retryCount)+'票。其他历史日期未批量更新。'
+      +(retryCount?'部分运单仍需继续补查。':'最新状态已保存并重新核对。'),
       retryCount?'warning':'success');
   }catch(error){note('v626RefreshPodMessage','更新失败：'+error.message,'error')}
 }
