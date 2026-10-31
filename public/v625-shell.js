@@ -672,7 +672,12 @@ function scheduleHistoricalEvidenceRefresh(target='home'){
   v640EvidenceRefreshTimer=setTimeout(()=>{
     v640EvidenceRefreshTimer=null;
     if(target==='business'&&page==='business')void loadBusiness();
-    else if(page==='home')void loadHome({skipAux:true});
+    else if(page==='home'){
+      // V804: historical evidence progress is auxiliary. Repainting the
+      // whole home every 3s invalidated the independent exact-date timing
+      // worker and could leave its cards forever in the "loading" state.
+      void refreshLiveProgress();
+    }
   },3000);
 }
 function stopHistoricalEvidenceRefresh(){
@@ -1198,17 +1203,26 @@ async function loadHome(options={}){
     setTimeout(()=>{
       if(viewSequence!==v788HomeViewSequence||page!=='home'
         ||String(selectedReportDate()||proofDate)!==proofDate)return;
+      const timingStarted=Date.now();
+      const diagnostic=setTimeout(()=>{
+        if(viewSequence===v788HomeViewSequence&&page==='home'
+          &&String(selectedReportDate()||proofDate)===proofDate)
+          setText('v801TimingStatus','日报 '+proofDate+' · 正在独立核对可信POD时间（已运行10秒）；七业务分类不受影响');
+      },10000);
       void json(timingUrl,45000).then(payload=>{
         if(viewSequence!==v788HomeViewSequence||page!=='home'
           ||String(selectedReportDate()||proofDate)!==proofDate
           ||String(payload?.reportDate||'')!==proofDate
           ||String(payload?.snapshotId||'')!==proofSnapshot)return;
-        v802RenderSelectedTiming(payload);
-      }).catch(()=>{
+        if(!v802RenderSelectedTiming(payload))
+          setText('v801TimingStatus','日报 '+proofDate+' · 签收来源与所选快照不一致，不能显示假签收天数');
+      }).catch(error=>{
         if(viewSequence===v788HomeViewSequence&&page==='home'
           &&String(selectedReportDate()||proofDate)===proofDate)
-          setText('v801TimingStatus','日报 '+proofDate+' · 签收时效只读统计未完成；分类数据不受影响');
-      });
+          setText('v801TimingStatus','日报 '+proofDate+' · 签收时效读取失败（已用时'+Math.round((Date.now()-timingStarted)/1000)
+            +'秒）：'+String(error?.message||'本机数据库只读核验未返回').slice(0,110)
+            +'；分类数据不受影响，不会将缺失显示为0天');
+      }).finally(()=>clearTimeout(diagnostic));
     },100);
     // Independent short read does not depend on HOME_FULL's 30-day timing.
     const returnsUrl='/api/home-return-summary?reportDate='+encodeURIComponent(proofDate)
@@ -1234,8 +1248,11 @@ async function loadHome(options={}){
           ||String(selectedReportDate()||proofDate)!==proofDate)return;
         void loadHome({summaryOverride:full,expectedViewSequence:viewSequence,skipHistory:true,skipAux:true});
       }).catch(()=>{
-        if(page==='home'&&String(selectedReportDate()||proofDate)===proofDate)
-          (setText('v625HomeStatus','分类概览可用；签收时效明细后台读取暂未完成，可继续切换业务看板。'),setText('v801TimingStatus','签收时效读取暂未完成 · 保留待核验，不能显示为0天'));
+        // The slow historical summary is optional: it must never replace a
+        // concurrent independently verified selected-day timing status.
+        if(page==='home'&&viewSequence===v788HomeViewSequence
+          &&String(selectedReportDate()||proofDate)===proofDate)
+          setText('v625HomeStatus','分类概览可用；历史汇总仍待核验。指定日期签收统计由独立任务负责。');
       });
     },1200);
   }
