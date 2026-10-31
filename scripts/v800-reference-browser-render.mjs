@@ -161,6 +161,89 @@ try{
         'all 8 verified timing KPI tiles must be accessible when expanded');
       await page.locator('.v805-timing-advanced summary').click();
       await page.screenshot({path:path.join(out,item.file),fullPage:true});
+      // V806: test real populated text lengths, NOT the default "—" fixture.
+      // Isolated browser only; these counts are synthetic layout inputs and
+      // never sent to CE API or represented as operational facts.
+      await page.evaluate(()=>{
+        document.getElementById('v632GrandTotal').textContent='13,886';
+        document.getElementById('v632GrandTotalCheck').textContent='13,886';
+        const sample={CE:'8,062',CEAF:'24',TBKH:'4,008',ALI1688:'683',
+          WHPP:'103',SHOPEECN:'0',SHOPEEVN:'1,006'};
+        for(const [type,value] of Object.entries(sample)){
+          const card=document.querySelector('[data-card="'+type+'"]');
+          if(!card)continue;
+          card.querySelector(':scope>strong').textContent=value;
+          const ratio=card.querySelector('[data-ratio]');
+          if(ratio)ratio.textContent=type==='CE'?'58.06%':type==='SHOPEEVN'?'7.24%':'0.74%';
+        }
+        for(const type of ['WHPP','SHOPEECN','SHOPEEVN']){
+          const card=document.querySelector('[data-card="'+type+'"]');
+          const fields=[...card.querySelectorAll('.v626-return-mini b')];
+          fields[0].textContent='1,234';
+          fields[1].textContent='12.34%';
+        }
+      });
+      for(const width of [1920,1536,1366,1280,1024,760,420]){
+        await page.setViewportSize({width,height:1024});
+        const result=await page.evaluate(()=>{
+          const box=el=>{const r=el.getBoundingClientRect();
+            return{x:r.x,y:r.y,right:r.right,bottom:r.bottom,width:r.width,height:r.height}};
+          const overlaps=(a,b)=>{
+            const x=Math.min(a.right,b.right)-Math.max(a.x,b.x);
+            const y=Math.min(a.bottom,b.bottom)-Math.max(a.y,b.y);
+            return x>1&&y>1;
+          };
+          const errors=[];
+          const total=document.querySelector('.v632-total-card.v792-total-summary');
+          const footer=total.querySelector('.v632-total-foot');
+          const primary=[total.querySelector('.v625-card-label'),
+            total.querySelector(':scope>strong'),total.querySelector(':scope>small')];
+          const fr=box(footer),tr=box(total);
+          for(const el of primary){
+            if(overlaps(box(el),fr))errors.push('total footer overlaps '+el.tagName);
+          }
+          for(let i=0;i<primary.length;i++)for(let j=i+1;j<primary.length;j++){
+            if(overlaps(box(primary[i]),box(primary[j])))
+              errors.push('total main items overlap '+i+'/'+j);
+          }
+          if(fr.bottom>tr.bottom+2)errors.push('total footer outside card');
+          const bar=footer.querySelector('i'),text=footer.querySelector('span');
+          if(overlaps(box(bar),box(text)))errors.push('total progress bar overlaps conservation number');
+          const cards=[...document.querySelectorAll('.v625-home-business-panel [data-card]')]
+            .filter(el=>el.dataset.card!=='TOTAL');
+          for(const card of cards){
+            const name=card.dataset.card;
+            const items=[card.querySelector(':scope>.v625-card-label'),
+              card.querySelector(':scope>strong'),card.querySelector(':scope>small'),
+              card.querySelector(':scope>.v626-return-mini'),
+              card.querySelector(':scope>.v625-card-foot')].filter(Boolean);
+            const br=box(card);
+            for(let i=0;i<items.length;i++){
+              const a=box(items[i]);
+              if(a.bottom>br.bottom+1||a.y<br.y-1)
+                errors.push(name+' item '+i+' outside card');
+              for(let j=i+1;j<items.length;j++){
+                if(overlaps(a,box(items[j])))
+                  errors.push(name+' body text/return/footer overlap '+i+'/'+j);
+              }
+            }
+            const f=card.querySelector('.v625-card-foot');
+            if(overlaps(box(f.querySelector('span')),box(f.querySelector('i'))))
+              errors.push(name+' share label overlaps progress bar');
+          }
+          const docWidth=document.documentElement.scrollWidth;
+          const viewport=document.documentElement.clientWidth;
+          if(docWidth>viewport+2)errors.push('page horizontal overflow '+docWidth+'/'+viewport);
+          return{errors,cardCount:cards.length,total:box(total),viewport};
+        });
+        assert.equal(result.cardCount,7,'all seven actual home business cards retained');
+        assert.deepEqual(result.errors,[],
+          'V806 '+width+'px: all populated business metrics remain separated');
+        if([1536,1280,420].includes(width)){
+          await page.screenshot({path:path.join(out,'v806-populated-home-'+width+'.png'),
+            fullPage:false});
+        }
+      }
     } else {
       assert.ok(data.analysis?.width>600,'WHPP signing and returns analysis must render');
       assert.ok(data.tables?.width>600,'WHPP anomaly and return tables must render');
