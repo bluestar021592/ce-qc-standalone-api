@@ -1123,6 +1123,7 @@ function v788RenderVerifiedHomeReturns(payload,reportDate,snapshotId){
       setText('v626Timing'+type+'ReturnRate',pct(result.rate));
     }
   }
+  v801RenderVerifiedReturns(payload);
   return true;
 }
 let v788HomeViewSequence=0;
@@ -1130,6 +1131,7 @@ let v788HomeSourceProof=null;
 async function loadHome(options={}){
   const viewSequence=++v788HomeViewSequence;
   const requestedDate=selectedReportDate();
+  if(!options.summaryOverride)v801SetTimingWaiting(requestedDate);
   const summaryUrl='/api/home-quality-summary?fast=1'+(requestedDate?'&reportDate='+encodeURIComponent(requestedDate):'');
   const summaryQuickUrl=summaryUrl+'&quick=1';
   // V765: summary is the first paint authority. History metadata is
@@ -1289,6 +1291,7 @@ async function loadHome(options={}){
 
   if(!summary?.quickOnly){
   const timing=summary?.timing||{},timingTrend=summary?.timingTrend||{};
+  v801RenderTimingSummary(timing,summary?.reportDate||requestedDate||'');
   const timingRepairTypes=summary?.timingEvidenceRepair?.types||{};
   v741TimingRepairStates=timingRepairTypes;
   v700TimingAvailability=Object.fromEntries(Object.entries(timingRepairTypes).map(([type,state])=>[type,String(state?.status||'').toUpperCase()]));
@@ -3559,13 +3562,15 @@ function v800ApplyReferenceLayout(){
     if(total&&heading){total.classList.add('v792-total-summary');heading.after(total)}
     const top=document.createElement('div');top.className='v792-home-main-row';
     overview.after(top);top.append(process,status,quick,logs);
+    // V801: signing is full width; unfinished POD gets its OWN full-width
+    // panel. Preserve the original real-data DOM, controls, and event wiring.
     const bottom=document.createElement('div');bottom.className='v792-home-bottom-row';
-    timing.before(bottom);bottom.append(timing,open);
+    timing.before(bottom);bottom.append(timing);bottom.after(open);
     const optional=document.createElement('details');
     optional.className='v792-optional-trend v625-panel';
     const caption=document.createElement('summary');caption.textContent='近7天总票数趋势（已保存来源）';
-    optional.append(caption,trend);bottom.after(optional);
-    bottom.after(management);
+    optional.append(caption,trend);
+    open.after(management);management.after(optional);
     const integrity=byId('v637HomeIntegrityBar');if(integrity)management.append(integrity);
     // Move all operational panels first; empty old wrappers can then go away.
     if(!live.children.length)live.remove();
@@ -3667,6 +3672,72 @@ async function v800LoadWhppTrend(date=''){
     if(Boolean(business)&&business==='WHPP'&&v628BusinessReportDate===date&&root)
       root.innerHTML='<div class="v792-data-unknown">近7日趋势尚未取得可信来源：'+esc(error.message)+'</div>';
   }
+}
+
+/* V801: only evidence-backed sample averages, never a single guessed number.
+   The four business groups are disjoint; their average POD times may be
+   aggregated by actual trusted sample counts, not by taking a mean of means. */
+function v801TimingAggregate(timing={},field='overall'){
+  let weighted=0,count=0,totalPod=0,knownTotals=0;
+  for(const type of ['TBKH','WHPP','SHOPEECN','SHOPEEVN']){
+    const bucket=timing?.[type]?.[field];
+    const sample=Number(bucket?.podCount||0),days=Number(bucket?.avgDays);
+    const total=Number(bucket?.totalPodCount);
+    if(Number.isFinite(total)&&total>=0){totalPod+=total;knownTotals++}
+    if(sample>0&&Number.isFinite(days)&&days>0){weighted+=days*sample;count+=sample}
+  }
+  return{count,avgDays:count>0?weighted/count:null,totalPod:knownTotals?totalPod:null};
+}
+function v801SetTimingWaiting(date=''){
+  for(const key of ['Overall','PP','PV','Attempt1','Attempt2','Attempt3']){
+    setText('v801Timing'+key,'—');
+    setText('v801Timing'+key+'Sample','等待可信样本');
+  }
+  setText('v801TimingReturned','—');
+  setText('v801TimingReturnRate','—');
+  setText('v801TimingReturnScope','等待三业务退回来源核验');
+  setText('v801TimingStatus',date?'统计 '+date+' · 正在读取签收时效证据':'等待选择有效日报日期');
+}
+function v801RenderTimingSummary(timing={},date=''){
+  if(page!=='home')return;
+  const fields={Overall:'overall',PP:'pp',PV:'pv',Attempt1:'attempt1',Attempt2:'attempt2',Attempt3:'attempt3'};
+  for(const [key,field] of Object.entries(fields)){
+    const aggregate=v801TimingAggregate(timing,field);
+    const ok=aggregate.count>0&&aggregate.avgDays!=null;
+    setText('v801Timing'+key,ok?aggregate.avgDays.toFixed(2).replace(/\.00$/,'')+'天':'—');
+    const completeness=field==='overall'&&aggregate.totalPod!=null
+      ?' / POD '+fmt(aggregate.totalPod)+'票':'';
+    setText('v801Timing'+key+'Sample',ok
+      ?'可信 '+fmt(aggregate.count)+'票'+completeness
+      :'暂无可核验的该项签收时间');
+  }
+  const all=v801TimingAggregate(timing,'overall');
+  if(all.count>0){
+    const missing=all.totalPod==null?'':'; POD样本覆盖 '+fmt(all.count)+'/'+fmt(all.totalPod);
+    setText('v801TimingStatus','日报 '+date+' · 已读取可信时效 '+fmt(all.count)+'票'+missing);
+  }else{
+    setText('v801TimingStatus',date
+      ?'日报 '+date+' · 目前没有可信签收时间，不能把缺失显示为0天'
+      :'该日期签收时效尚未核验');
+  }
+}
+function v801RenderVerifiedReturns(payload){
+  if(page!=='home'||!payload?.selectionMatched||payload.ok!==true)return;
+  const types=['WHPP','SHOPEECN','SHOPEEVN'],results=types.map(type=>payload.returns?.[type]);
+  const allVerified=results.every(result=>result?.verified===true
+    &&Number.isFinite(Number(result.count))&&Number.isFinite(Number(result.total))
+    &&Number(result.count)>=0&&Number(result.total)>=Number(result.count));
+  if(!allVerified){
+    setText('v801TimingReturned','—');
+    setText('v801TimingReturnRate','—');
+    setText('v801TimingReturnScope','三业务退回来源尚未全部核验');
+    return;
+  }
+  const returned=results.reduce((a,r)=>a+Number(r.count),0);
+  const total=results.reduce((a,r)=>a+Number(r.total),0);
+  setText('v801TimingReturned',fmt(returned)+'票');
+  setText('v801TimingReturnRate',total>0?pct(returned/total*100):'—');
+  setText('v801TimingReturnScope','三业务 '+fmt(returned)+'/'+fmt(total)+'票 · 逐票来源已核验');
 }
 function v800SetWhppMetrics(m={},timing=null){
   if(business!=='WHPP')return;
