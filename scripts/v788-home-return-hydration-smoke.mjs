@@ -25,10 +25,11 @@ assert.match(html,/v625-shell\.js\?v=\d{8}-v\d+-1&patch=\d+/,'home return verifi
 const from=shell.indexOf('function v788RenderVerifiedHomeReturns(');
 const end=shell.indexOf('let v788HomeViewSequence=',from);
 assert.ok(from>=0&&end>from,'production UI return renderer must be present');
-const displayed={};
+const displayed={},summaryProofCalls=[];
 const apply=vm.runInNewContext(shell.slice(from,end)+'\n v788RenderVerifiedHomeReturns;',{
   page:'home',selectedReportDate:()=> '2026-07-02',
-  fmt:n=>String(n),pct:n=>String(n)+'%',setText:(id,value)=>{displayed[id]=value}
+  fmt:n=>String(n),pct:n=>String(n)+'%',setText:(id,value)=>{displayed[id]=value},
+  v801RenderVerifiedReturns:payload=>{summaryProofCalls.push(payload)}
 });
 const date='2026-07-02',snapshotId='SNAP-PINNED';
 const ok={ok:true,selectionMatched:true,reportDate:date,snapshotId,
@@ -36,6 +37,7 @@ const ok={ok:true,selectionMatched:true,reportDate:date,snapshotId,
     SHOPEECN:{count:0,rate:0,total:0,verified:true},
     SHOPEEVN:{count:30,rate:7.52,total:399,verified:true}}};
 assert.equal(apply(ok,date,snapshotId),true);
+assert.equal(summaryProofCalls.length,1,'V801 verified return summary must receive the independently scoped evidence');
 assert.equal(displayed.v626ReturnWHPP,'32');
 assert.equal(displayed.v626ReturnRateWHPP,'20.51%');
 assert.equal(displayed.v626ReturnSHOPEEVN,'30');
