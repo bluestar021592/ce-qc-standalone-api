@@ -41,6 +41,9 @@ assert.match(file,/export function loadWhppCanonicalTruth/);
 assert.match(server,/pod:hasEvidence\?Number\(truth\.evidence\?\.podRows\|\|0\):null/);
 assert.match(server,/fullyVerified:covered===total/);
 assert.match(server,/res\.setHeader\('Cache-Control','private, no-store'\)/);
+for(const tab of ['clear','backup','storage'])
+  assert.ok(html.includes('/data-management?auth=v625&tab='+tab),'deep link '+tab);
+assert.match(js,/switchDataTab\(\['clear','backup','storage'\]\.includes\(requestedTab\)\?requestedTab:'clear'\)/);
 assert.match(html,/id="v626OpenPodRows"/);
 assert.match(html,/id="v625BusinessRows"/);
 console.log('[V800_UI] PASS: home/WHPP reference, protected V788 controls, same-day links, real null-gap trend and brand layout');
