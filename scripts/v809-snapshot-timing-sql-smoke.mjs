@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {DatabaseSync} from 'node:sqlite';
-const text=fs.readFileSync('src/homeQualitySummary.js','utf8');
+const text=fs.readFileSync('src/homeQualitySummary.js','utf8').replace(/\r\n/g,'\n');
 const tick=String.fromCharCode(96);
 const head='observations=db.prepare('+tick+'SELECT UPPER(TRIM(u.shipmentCode))';
 const i=text.indexOf(head);
