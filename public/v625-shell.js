@@ -544,6 +544,8 @@ let v785OpenEarliestDate='';
 let v626OpenFilter='all';
 let v626ProgressTimer=null;
 let v626TrackingJobId='';
+let v809TrackingInspectBusy=false;
+let v809TrackingRefreshBusy=false;
 let v752LaunchingFamily='';
 const v752TerminalProgressLogs=new Set();
 const v756ProgressSnapshots=new Map();
@@ -1045,55 +1047,132 @@ async function loadOpenPod(){
     return null;
   }
 }
+// V809: the V246 remote job owns progress. An HTTP wait deadline or a lost
+// POST response must NEVER be presented as a failed business task, nor may
+// the UI silently create another remote scan without knowing the first job.
+async function v809ReadSelectedTrackingJob(reportDate,createdAfter=''){
+  const params=new URLSearchParams({businessType:'ALL',fromDate:reportDate,toDate:reportDate});
+  if(createdAfter)params.set('createdAfter',createdAfter);
+  const payload=await json('/api/v246/tracking/active-job?'+params.toString(),15000);
+  const job=payload?.job||null;
+  if(job&&(job.selection?.businessType!=='ALL'||job.selection?.fromDate!==reportDate
+      ||job.selection?.toDate!==reportDate))
+    throw new Error('追踪任务范围与所选日报不符，已拒绝显示其他日期进度');
+  return job;
+}
 async function pollTrackingJob(jobId){
+  if(!jobId)throw new Error('任务编号尚未确认；不会误认定后台完成');
   v626TrackingJobId=jobId;
   for(let i=0;i<900;i++){
-    const r=await json('/api/v246/tracking/job/'+encodeURIComponent(jobId),12000);
+    let r;
+    try{r=await json('/api/v246/tracking/job/'+encodeURIComponent(jobId),12000)}
+    catch(error){
+      if(!isTransportLoss(error))throw error;
+      note('v626RefreshPodMessage','后台任务 '+jobId+' 仍需核对进度；本次连接超时不等于刷新失败，正在重连…');
+      await sleep(1500);continue;
+    }
     const job=r.job||{};
     const message=job.message||job.phase||'更新未完成POD';
     note('v626RefreshPodMessage',message,job.status==='FAILED'?'error':'');
     appendLiveLog(message,job.updatedAt||new Date().toISOString());
     if(['COMPLETED','FAILED'].includes(String(job.status||''))){
-      if(job.status==='FAILED')throw new Error(job.error||job.message||'未完成POD更新失败');
+      if(job.status==='FAILED')throw new Error(job.error||job.message||'后台明确报告更新失败');
       return job;
     }
-    await new Promise(resolve=>setTimeout(resolve,1200));
+    await sleep(1200);
   }
-  throw new Error('未完成POD更新超时');
+  throw new Error('监控窗口结束，任务最终状态尚未确认；请点击「查看更新进度」，不要重复启动');
+}
+async function v809PublishFinishedJob(job,reportDate){
+  const current=String(selectedReportDate()||'').slice(0,10);
+  if(current!==reportDate){
+    note('v626RefreshPodMessage','后台已完成 '+reportDate+' 的更新；当前选择 '+current+'，请切回原日报再核对。');
+    return;
+  }
+  const verified=await loadOpenPod();
+  if(!verified?.openSourceCoverage?.complete)
+    throw new Error('后台已完成，但原始成员与未完结队列未通过二次核对，不能宣称闭环');
+  await Promise.all([page==='home'?loadHome({skipAux:true}):Promise.resolve(),
+    page==='business'?loadBusiness({skipQualityRefresh:true}):Promise.resolve()]);
+  const retryCount=Number(job.failed||0);
+  note('v626RefreshPodMessage',reportDate+' 当日任务已完成并重新核对：来源 '+fmt(v785OpenExpectedCount)+
+    '票，当前未完结 '+fmt(v785OpenTotal)+'票，本次刷新成功 '+fmt(job.refreshed||0)+
+    '票，失败待重试 '+fmt(retryCount)+'票；其他历史日期未批量更新。',
+    retryCount?'warning':'success');
+}
+async function v809FollowTrackingJob(job,reportDate){
+  if(!job?.jobId)throw new Error('未找到已确认的后台任务编号');
+  if(job.selection?.businessType!=='ALL'||job.selection?.fromDate!==reportDate
+    ||job.selection?.toDate!==reportDate)
+    throw new Error('后台任务日期与所选日报不一致，禁止跨日期同步');
+  if(job.status==='FAILED')throw new Error(job.error||job.message||'后台任务已明确失败');
+  const final=job.status==='COMPLETED'?job:await pollTrackingJob(job.jobId);
+  await v809PublishFinishedJob(final,reportDate);
+  return final;
+}
+async function v809ViewTrackingProgress(){
+  if(v809TrackingInspectBusy||v809TrackingRefreshBusy)return;
+  const reportDate=String(selectedReportDate()||v626LatestImport?.reportDate||'').slice(0,10);
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(reportDate)){
+    note('v626RefreshPodMessage','请先选择有效日报日期，再查看后台任务。','error');return;
+  }
+  v809TrackingInspectBusy=true;
+  try{
+    const job=await v809ReadSelectedTrackingJob(reportDate);
+    if(!job){
+      note('v626RefreshPodMessage',reportDate+' 当前未找到可恢复的后台任务；如果此前断开或重启，请先只读核对来源，不会自动重发轨迹请求。');return;
+    }
+    note('v626RefreshPodMessage','找到 '+reportDate+' 的任务 '+job.jobId+' · '+job.status+'；继续核对后台进度。');
+    await v809FollowTrackingJob(job,reportDate);
+  }catch(error){
+    note('v626RefreshPodMessage','任务进度尚未确认：'+error.message+'；请通过「查看更新进度」重新查询，不要重复提交。','warning');
+  }finally{v809TrackingInspectBusy=false}
 }
 async function refreshOpenPodNow(){
-  if(runBusy)return;
-  const latest=v626LatestImport||await latestImportContext();if(!latest?.reportDate){note('v626RefreshPodMessage','请先上传综合日报。','error');return}
-  const reportDate=selectedReportDate()||latest.reportDate;
-  note('v626RefreshPodMessage','正在补查 '+reportDate+' 当日报表未完成POD与签收轨迹…');
+  if(runBusy||v809TrackingRefreshBusy||v809TrackingInspectBusy)return;
+  const latest=v626LatestImport||await latestImportContext();
+  if(!latest?.reportDate){note('v626RefreshPodMessage','请先上传综合日报。','error');return}
+  const reportDate=String(selectedReportDate()||latest.reportDate||'').slice(0,10);
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(reportDate))return;
+  v809TrackingRefreshBusy=true;
+  note('v626RefreshPodMessage','先核对 '+reportDate+' 是否已有进行中的轨迹更新，避免重复调用TMS…');
   try{
+    const active=await v809ReadSelectedTrackingJob(reportDate);
+    if(active&&['QUEUED','RUNNING'].includes(active.status)){
+      note('v626RefreshPodMessage','已找回同一日报的后台任务 '+active.jobId+'，继续查看，不会重复创建。');
+      await v809FollowTrackingJob(active,reportDate);
+      return;
+    }
     if(!v785OpenSourceVerified||v785OpenVerifiedDate!==reportDate)await loadOpenPod();
     if(!v785OpenSourceVerified||v785OpenVerifiedDate!==reportDate)
       throw new Error('所选日报日期的未完成来源尚未核验，不能跨日期启动批量轨迹处理。');
-    // V808: a selected-day button must never silently expand its refresh
-    // into the earliest legacy carry date (150k+ historical-member guard).
-    // Historical OPEN work remains visible but is refreshed only when its
-    // own source day is explicitly selected. Preserve the original safety cap.
-    const fromDate=reportDate;
-    note('v626RefreshPodMessage','仅补查 '+reportDate+' 当日来源运单；其他历史日报请按日期单独选择，不会执行全库扫描。');
-    const r=await post('/api/v246/tracking/reconcile',{businessType:'ALL',fromDate,toDate:reportDate},30000);
-    const job=await pollTrackingJob(r.job?.jobId||'');
-    // V786: a completed HTTP task is NOT a completed business publication.
-    // Re-read the dated source and current OPEN queue before announcing success.
-    const verified=await loadOpenPod();
-    if(!verified?.openSourceCoverage?.complete)
-      throw new Error('接口刷新结束，但未能重新核对全部原始成员和未完结队列，不能宣称业务闭环');
-    await Promise.all([page==='home'?loadHome({skipAux:true}):Promise.resolve(),
-      page==='business'?loadBusiness({skipQualityRefresh:true}):Promise.resolve()]);
-    const retryCount=Number(job.failed||0);
-    note('v626RefreshPodMessage',reportDate+' 当日定向补查完成：已复核来源 '+fmt(v785OpenExpectedCount)+
-      '票；当前所选范围仍未完结 '+fmt(v785OpenTotal)+'票；本次成功刷新 '+fmt(job.refreshed||0)+
-      '票，待重试 '+fmt(retryCount)+'票。其他历史日期未批量更新。'
-      +(retryCount?'部分运单仍需继续补查。':'最新状态已保存并重新核对。'),
-      retryCount?'warning':'success');
-  }catch(error){note('v626RefreshPodMessage','更新失败：'+error.message,'error')}
+    const startedAt=new Date().toISOString();
+    note('v626RefreshPodMessage','仅补查 '+reportDate+' 当日来源运单；其他历史日报不会进行全库扫描。');
+    let r;
+    try{r=await post('/api/v246/tracking/reconcile',{businessType:'ALL',fromDate:reportDate,toDate:reportDate},30000)}
+    catch(error){
+      if(!isTransportLoss(error))throw error;
+      note('v626RefreshPodMessage','启动请求超时，正在只读找回任务编号；不会自动重复提交…','warning');
+      let recovered=null;
+      try{recovered=await v809ReadSelectedTrackingJob(reportDate,startedAt)}
+      catch{}
+      if(!recovered){
+        note('v626RefreshPodMessage','启动响应丢失且未能确认任务是否已接收；请点「查看更新进度」，不要重复点击批量更新。','warning');
+        return;
+      }
+      r={job:recovered};
+    }
+    const job=r?.job||{};
+    if(!job.jobId||job.selection?.businessType!=='ALL'
+      ||job.selection?.fromDate!==reportDate||job.selection?.toDate!==reportDate)
+      throw new Error('启动返回任务没有匹配日期/业务的有效编号，拒绝盲目刷新');
+    await v809FollowTrackingJob(job,reportDate);
+  }catch(error){
+    note('v626RefreshPodMessage',isTransportLoss(error)
+      ?'后台连接不稳定，任务结果未知；请点「查看更新进度」，不要再次提交。'
+      :'更新操作未确认完成：'+error.message,'warning');
+  }finally{v809TrackingRefreshBusy=false}
 }
-
 async function scanWhppPending(){
   if(runBusy)return;
   const reportDate=selectedReportDate()||v626LatestImport?.reportDate||(await latestImportContext())?.reportDate||'';
@@ -3583,6 +3662,7 @@ function bind(){
   byId('v758ReloadUsers')?.addEventListener('click',()=>void loadSettingsUsers());
   byId('v734TimingRepairNow')?.addEventListener('click',runTimingRepairNow);
   byId('v626RefreshOpenPod')?.addEventListener('click',refreshOpenPodNow);
+  byId('v809TrackJobStatus')?.addEventListener('click',()=>void v809ViewTrackingProgress());
   byId('v803RetryOpenSource')?.addEventListener('click',()=>void loadOpenPod());
   byId('v641WhppScanPending')?.addEventListener('click',scanWhppPending);
   byId('v626ImportRefreshOpen')?.addEventListener('click',refreshOpenPodNow);
