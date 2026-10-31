@@ -97,8 +97,7 @@ body.v792-reference[data-business="WHPP"] #kpiAvgDays{order:8}
 body.v792-reference[data-business="WHPP"] .v625-kpi-row .kpi.gray:not(#kpiOtherCard):not(#kpiUnprocessedCard){order:8}
 body.v792-reference[data-business="WHPP"] #kpiReturnedCard{order:6}
 body.v792-reference[data-business="WHPP"] #kpiReturnRateCard{order:7}
-body.v792-reference[data-business="WHPP"] #kpiOtherCard,
-body.v792-reference[data-business="WHPP"] #kpiUnprocessedCard{display:none!important}
+/* Preserve additional source-accounting cards whenever the current app exposes them. */
 body.v792-reference[data-business="WHPP"] .business-charts{grid-template-columns:1.28fr 1fr;gap:9px}
 body.v792-reference[data-business="WHPP"] .business-charts>.v625-panel{min-height:222px;padding:12px}
 body.v792-reference[data-business="WHPP"] .v625-donut-wrap{height:185px;grid-template-columns:160px minmax(0,1fr)}
