@@ -11,7 +11,7 @@ assert.match(html,/v625-shell\.js\?v=20261031-v804-1&patch=804/);
 assert.match(js,/function v804SelectHomeWorkspace\(/);
 assert.match(js,/function v804ComposeHomeWorkspace\(/);
 assert.match(js,/v800ApplyReferenceLayout\(\);\s*v804ComposeHomeWorkspace\(\);\s*bind\(\);/);
-assert.match(js,/v804SelectHomeWorkspace\('signing'\)/);
+assert.match(js,/v804SelectHomeWorkspace\('signing',\{writeUrl:false\}\)/);
 for(const [key,marker] of [
   ['overview',"panes.get('overview').append(operations,validation)"],
   ['signing',"panes.get('signing').append(signing)"],
