@@ -3966,6 +3966,57 @@ function v804ComposeHomeWorkspace(){
   const hash=String(location.hash||'').replace(/^#/,'');
   v804SelectHomeWorkspace(hash,{writeUrl:false});
 }
+// V805: restore the October 28 V792 reference HOME geometry.
+// The V804 tabbed workbench is kept as historical source but not mounted.
+// No business DOM is cloned, discarded or replaced; every source-backed panel
+// and element ID remains owned by its original read-only/data flow.
+function v805ApplyReferenceHome(){
+  if(page!=='home')return;
+  const home=byId('v625Home');
+  const overview=home?.querySelector('.v625-home-business-panel');
+  const top=home?.querySelector('.v792-home-main-row');
+  const validation=home?.querySelector('.v625-home-validation');
+  const bottom=home?.querySelector('.v792-home-bottom-row');
+  const signing=byId('v801TimingDashboard');
+  const unfinished=home?.querySelector('.v626-open-pod-panel');
+  const management=byId('v792HomeManagement');
+  const trend=home?.querySelector('.v792-optional-trend');
+  if(!home||!overview||!top||!validation||!bottom||!signing||!unfinished
+    ||!management||!trend)return;
+  // Reference order: 7 businesses | four operations | 2 quality sections |
+  // signing + real unfinished POD | data management | optional trend.
+  overview.after(top);
+  top.after(validation);
+  validation.after(bottom);
+  bottom.replaceChildren(signing,unfinished);
+  bottom.after(management);
+  management.after(trend);
+  bottom.classList.add('v805-reference-bottom');
+  top.classList.add('v805-reference-operations');
+  home.classList.add('v805-reference-home');
+  // Eight data-backed metrics stay available. Four priority KPIs are visible
+  // immediately; remaining four are a real expandable details section so the
+  // original signing/POD side-by-side reference composition is not crushed.
+  const metrics=signing.querySelector('.v801-timing-summary');
+  if(metrics&&!signing.querySelector('.v805-timing-advanced')){
+    const priority=new Set([
+      'v801TimingOverall','v801TimingPP','v801TimingPV','v801TimingReturnRate'
+    ]);
+    const more=document.createElement('details');
+    more.className='v805-timing-advanced';
+    const label=document.createElement('summary');
+    label.textContent='查看更多签收指标（1/2/3派、退回件数）';
+    const inner=document.createElement('div');
+    inner.className='v805-timing-advanced-grid';
+    for(const card of [...metrics.children]){
+      if(priority.size&&!priority.has(card.querySelector('strong')?.id))inner.append(card);
+    }
+    more.append(label,inner);
+    metrics.after(more);
+  }
+  const jump=overview.querySelector('a.v801-signing-jump');
+  if(jump)jump.href='#v801TimingDashboard';
+}
 function v800SetWhppMetrics(m={},timing=null){
   if(business!=='WHPP')return;
   const days=bucket=>{
@@ -4033,7 +4084,7 @@ function v800RenderWhppDetails(rows=[],truncated=false){
 }
 async function init(){
   v800ApplyReferenceLayout();
-  v804ComposeHomeWorkspace();
+  v805ApplyReferenceHome();
   bind();void loadSession();
   if(page==='home'){
     await loadHome();
