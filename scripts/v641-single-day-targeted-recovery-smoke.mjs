@@ -17,7 +17,7 @@ assert.match(js,/v785OpenVerifiedDate!==reportDate/,
   'a prior date source proof cannot authorize another selected-day refresh');
 assert.doesNotMatch(js,/const fromDate=v785OpenEarliestDate&&/,
   'the earliest historical OPEN source cannot silently expand a one-day manual click');
-assert.match(js,/\{businessType:'ALL',fromDate,toDate:reportDate\}/,
+assert.match(js,/\{businessType:'ALL',fromDate:reportDate,toDate:reportDate\}/,
   'manual tracking refresh must end on selected report day, never expand to today');
 assert.doesNotMatch(js,/toDate:cambodiaToday\(/,
   'manual POD refresh may never automatically sweep to today');
