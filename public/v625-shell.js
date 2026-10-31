@@ -1107,10 +1107,12 @@ async function scanWhppPending(){
 }
 // V788: independent exact-date returns cannot be held hostage by slow
 // historical timing. An unverified count remains explicitly unknown.
+let v801VerifiedReturnsProof=null;
 function v788RenderVerifiedHomeReturns(payload,reportDate,snapshotId){
   if(page!=='home'||String(selectedReportDate()||reportDate)!==reportDate)return false;
   if(!payload||payload.ok!==true||payload.selectionMatched!==true
     ||String(payload.reportDate)!==reportDate||String(payload.snapshotId)!==snapshotId)return false;
+  v801VerifiedReturnsProof={reportDate,snapshotId,returns:payload.returns||{}};
   for(const type of ['WHPP','SHOPEECN','SHOPEEVN']){
     const result=payload.returns?.[type];
     const verified=result?.verified===true&&Number.isFinite(result?.count)
@@ -1191,7 +1193,7 @@ async function loadHome(options={}){
         void loadHome({summaryOverride:full,skipHistory:true,skipAux:true});
       }).catch(()=>{
         if(page==='home'&&String(selectedReportDate()||proofDate)===proofDate)
-          setText('v625HomeStatus','分类概览可用；签收时效明细后台读取暂未完成，可继续切换业务看板。');
+          (setText('v625HomeStatus','分类概览可用；签收时效明细后台读取暂未完成，可继续切换业务看板。'),setText('v801TimingStatus','签收时效读取暂未完成 · 保留待核验，不能显示为0天'));
       });
     },1200);
   }
@@ -1333,7 +1335,16 @@ async function loadHome(options={}){
       missingButton.insertBefore(document.createTextNode(exhausted?'待后续日报回补 ':'待补轨迹 '),counter||null);
       missingButton.title=exhausted?'POD状态已确认；当前已上传日报还没有最终派件时间，后续日报出现该运单最新Y/POD记录后会自动回补签收天数。':'查看缺失轨迹明细';
     }
-    if(['WHPP','SHOPEECN','SHOPEEVN'].includes(type)){setText('v626Timing'+type+'Return',fmt(returns[type]?.count||0));setText('v626Timing'+type+'ReturnRate',pct(returns[type]?.rate||0))}
+    if(['WHPP','SHOPEECN','SHOPEEVN'].includes(type)){
+      const proof=v801VerifiedReturnsProof;
+      const exact=proof?.reportDate===summary?.reportDate&&proof?.snapshotId===summary?.snapshotId
+        ?proof?.returns?.[type]:null;
+      const verified=exact?.verified===true&&Number.isFinite(Number(exact.count))
+        &&Number.isFinite(Number(exact.total))&&Number(exact.count)>=0
+        &&Number(exact.total)>=Number(exact.count);
+      setText('v626Timing'+type+'Return',verified?fmt(exact.count):'待核验');
+      setText('v626Timing'+type+'ReturnRate',verified&&Number(exact.total)>0?pct(Number(exact.count)/Number(exact.total)*100):'待核验');
+    }
   }
   const timingRepairBtn=byId('v734TimingRepairNow');
   const noMoreRepair=totalMissingCount===0||(exhaustedMissingCount>0&&repairableMissingCount===0);
@@ -3689,6 +3700,7 @@ function v801TimingAggregate(timing={},field='overall'){
   return{count,avgDays:count>0?weighted/count:null,totalPod:knownTotals?totalPod:null};
 }
 function v801SetTimingWaiting(date=''){
+  v801VerifiedReturnsProof=null;
   for(const key of ['Overall','PP','PV','Attempt1','Attempt2','Attempt3']){
     setText('v801Timing'+key,'—');
     setText('v801Timing'+key+'Sample','等待可信样本');
