@@ -11,7 +11,7 @@ const queue=[];
 const MAX_CONCURRENT=2;
 const MAX_QUEUE=20;
 const MAX_RUN_MS=90000;
-function cacheKey(kind,args){return kind+'|'+String(args.reportDate||'')+'|'+String(args.snapshotId||'')}
+function cacheKey(kind,args){return kind+'|'+String(args.reportDate||'')+'|'+String(args.snapshotId||'')+'|'+String(args.businessType||'')}
 function completedFamilyProof(result){
   return ['CCSL','SHOPEE'].every(name=>{
     const item=result?.businesses?.[name];

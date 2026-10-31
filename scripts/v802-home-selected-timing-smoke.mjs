@@ -11,7 +11,7 @@ const html=fs.readFileSync('public/v625-shell.html','utf8');
 assert.match(worker,/message\.kind==='HOME_TIMING'/);
 assert.match(coord,/'HOME_FULL','HOME_RETURNS','HOME_TIMING'/);
 assert.match(server,/app\.get\('\/api\/home-timing-summary'/);
-assert.match(server,/v766ReadJob\('HOME_TIMING',\{reportDate,snapshotId\}\)/);
+assert.match(server,/v766ReadJob\('HOME_TIMING',\{reportDate,snapshotId,businessType\}\)/);
 assert.match(server,/HOME_TIMING_SNAPSHOT_NOT_FOUND/);
 assert.match(server,/Cache-Control','private, no-store'/);
 assert.match(shell,/\/api\/home-timing-summary\?reportDate=/);
@@ -45,18 +45,28 @@ assert.equal(good.reportDate,'2026-07-12');
 assert.equal(good.remoteQueries,0);
 assert.equal(good.timing.TBKH.overall.avgDays,2);
 assert.equal(good.timing.WHPP.overall.avgDays,null,'unknown WHPP time remains absent');
+const scoped=build({reportDate:snap.reportDate,snapshotId:snap.snapshotId,businessType:'WHPP'});
+assert.equal(scoped.businessType,'WHPP');
+assert.equal(Object.keys(scoped.timing).length,1,'slow unrelated business cannot block exact WHPP response');
+assert.equal(scoped.timing.WHPP.overall.avgDays,null);
+assert.equal(build({reportDate:snap.reportDate,snapshotId:snap.snapshotId,businessType:'INVALID'}).ok,false);
 const ui0=shell.indexOf('function v802RenderSelectedTiming(');
 const ui1=shell.indexOf('function v800SetWhppMetrics(',ui0);
 assert.ok(ui0>=0&&ui1>ui0);
 const texts=new Map(),tctx={
   page:'home',setText:(id,val)=>texts.set(id,String(val)),fmt:n=>String(n),
-  v801RenderTimingSummary:()=>{texts.set('_summaryRendered','yes')}
+  v801RenderTimingSummary:()=>{texts.set('_summaryRendered','yes')},
+  v803SelectedTimingProof:null
 };
 vm.createContext(tctx);vm.runInContext(shell.slice(ui0,ui1),tctx,{timeout:1000});
 assert.equal(tctx.v802RenderSelectedTiming({...good,selectionMatched:false}),false);
 assert.equal(texts.size,0);
 assert.equal(tctx.v802RenderSelectedTiming(good),true);
 assert.equal(texts.get('v625TimingTBKHOverall'),'2天');
+// A later partial update cannot erase earlier business truth.
+assert.equal(tctx.v802RenderSelectedTiming({...scoped,selectionMatched:true}),true);
+assert.equal(texts.get('v625TimingTBKHOverall'),'2天');
+assert.equal(tctx.v803SelectedTimingProof.timing.TBKH.overall.avgDays,2);
 assert.equal(texts.get('v625TimingWHPPOverall'),'—');
 assert.match(texts.get('v625TimingWHPPPod'),/无可信签收时间/);
 assert.match(texts.get('v625TimingPeriod'),/2026-07-12/);

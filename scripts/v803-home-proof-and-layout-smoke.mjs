@@ -9,7 +9,7 @@ assert.match(html,/id="v803RetryOpenSource"/);
 assert.match(js,/v803RetryOpenSource'\)\?\.addEventListener\('click',\(\)=>void loadOpenPod\(\)\)/);
 assert.match(js,/const viewSequence=options\.summaryOverride&&options\.expectedViewSequence/);
 assert.match(js,/loadHome\(\{summaryOverride:full,expectedViewSequence:viewSequence,skipHistory:true,skipAux:true\}\)/);
-assert.match(js,/v803SelectedTimingProof=\{reportDate:day,snapshotId:String\(payload\.snapshotId\|\|''\),timing\}/);
+assert.match(js,/v803SelectedTimingProof=\{reportDate:day,snapshotId,timing\}/);
 assert.match(js,/const timing=v803MergeFullWithExactTiming\(summary\?\.timing\|\|\{\},summary\?\.reportDate\|\|requestedDate\|\|'',summary\?\.snapshotId\|\|''\)/);
 assert.match(js,/new URLSearchParams\(\{scope:'open',reportDate,snapshotId\}\)/);
 assert.match(js,/json\('\/api\/tracking-workspace\?'\+params\.toString\(\),30000\)/);

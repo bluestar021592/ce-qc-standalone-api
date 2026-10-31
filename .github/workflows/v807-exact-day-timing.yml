@@ -1,0 +1,34 @@
+name: V807 exact-day timing worker isolation
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'server.js'
+      - 'src/homeQualitySummary.js'
+      - 'src/v766HeavyReadWorker.mjs'
+      - 'src/v766ReadJobCoordinator.js'
+      - 'public/v625-shell.js'
+      - 'scripts/v807-home-timing-isolation-smoke.mjs'
+      - 'scripts/v584-local-candidate-gate.mjs'
+      - '.github/workflows/v807-exact-day-timing.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  exact-day-timing:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Check production JavaScript and selected-day timing contracts
+        run: |
+          node --check server.js
+          node --check src/homeQualitySummary.js
+          node --check src/v766HeavyReadWorker.mjs
+          node --check src/v766ReadJobCoordinator.js
+          node --check public/v625-shell.js
+          node --check scripts/v807-home-timing-isolation-smoke.mjs
+          node scripts/v807-home-timing-isolation-smoke.mjs

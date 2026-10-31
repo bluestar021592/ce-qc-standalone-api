@@ -762,16 +762,20 @@ app.get('/api/home-timing-summary',async(req,res)=>{
   try{
     const reportDate=String(req.query.reportDate||'').trim();
     const snapshotId=String(req.query.snapshotId||'').trim();
+    const businessType=String(req.query.businessType||'').trim().toUpperCase();
     if(!/^\d{4}-\d{2}-\d{2}$/.test(reportDate)||!snapshotId)
       return res.status(400).json({ok:false,code:'HOME_TIMING_EXACT_SCOPE_REQUIRED'});
+    if(businessType&&!['TBKH','WHPP','SHOPEECN','SHOPEEVN'].includes(businessType))
+      return res.status(400).json({ok:false,code:'HOME_TIMING_BUSINESS_TYPE_INVALID'});
     const pinned=fastDashboardBatch(snapshotId,reportDate);
     if(!pinned||String(pinned.snapshotId)!==snapshotId
       ||String(pinned.reportDate)!==reportDate)
       return res.status(404).json({ok:false,code:'HOME_TIMING_SNAPSHOT_NOT_FOUND'});
-    const read=await v766ReadJob('HOME_TIMING',{reportDate,snapshotId});
+    const read=await v766ReadJob('HOME_TIMING',{reportDate,snapshotId,businessType});
     const result=read.result||{};
     if(result.ok!==true||result.selectionMatched!==true
-      ||result.reportDate!==reportDate||result.snapshotId!==snapshotId)
+      ||result.reportDate!==reportDate||result.snapshotId!==snapshotId
+      ||String(result.businessType||'')!==businessType)
       throw Error('HOME_TIMING_WORKER_SCOPE_MISMATCH');
     res.setHeader('Cache-Control','private, no-store');
     res.setHeader('X-CE-QC-Read-Cache',read.cache);

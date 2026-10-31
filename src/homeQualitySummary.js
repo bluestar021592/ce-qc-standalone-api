@@ -16,6 +16,10 @@ import { extractDailyReportSigningEvidence } from './dailyReportSigningTiming.js
 
 const TYPES = Object.freeze(['CE','CEAF','TBKH','ALI1688','WHPP','SHOPEECN','SHOPEEVN']);
 const TIMING_TYPES = Object.freeze(['TBKH','WHPP','SHOPEECN','SHOPEEVN']);
+// V807 performance: legacy SQLite 999-bind compatible, at most 803 binds
+// including snapshot/date/type. Larger read batches avoid repeating historical
+// normalized-row scans 14 times for a 4,002-POD day.
+const TIMING_READ_BATCH=800;
 const RETURN_TYPES = new Set(['WHPP','SHOPEECN','SHOPEEVN']);
 const FAILURE_RE = /\bpending\b|派送失败|投递失败|无法联系|联系不上|无人接听|地址错误|地址异常|改派|拒收|delivery\s*failed|failed\s*delivery|delivery\s*problem|recipient\s*unavailable/i;
 const NEGATIVE_POD_RE = /未签收|未妥投|签收失败|妥投失败|未\s*POD|NOT[\s_-]*DELIVERED|UNDELIVERED|DELIVERY[\s_-]*FAILED/i;
@@ -224,8 +228,8 @@ function dailyReportSigningEvidenceForBills(snapshotId='',reportDate='',business
   // later uploaded reports may turn an old W/P row into Y/POD and provide the
   // final 派件时间. We therefore keep the original July-1 member set/region but
   // read the newest VALID observation for each exact waybill.
-  for(let i=0;i<values.length;i+=300){
-    const chunk=values.slice(i,i+300),marks=chunk.map(()=>'?').join(',');
+  for(let i=0;i<values.length;i+=TIMING_READ_BATCH){
+    const chunk=values.slice(i,i+TIMING_READ_BATCH),marks=chunk.map(()=>'?').join(',');
     let baseRows=[],observations=[];
     try{
       baseRows=db.prepare(`SELECT UPPER(TRIM(shipmentCode)) shipmentCode,regionCode,rowJson,reportDate,createdAt,'UNIFIED' sourceTable
@@ -313,7 +317,7 @@ function eventsForBills(reportDate,businessType,bills=[]) {
   const set=new Set(bills.map(value=>String(value||'').trim().toUpperCase()).filter(Boolean));
   const result=new Map([...set].map(code=>[code,[]]));
   const chunks=[];const values=[...set];
-  for(let i=0;i<values.length;i+=350)chunks.push(values.slice(i,i+350));
+  for(let i=0;i<values.length;i+=TIMING_READ_BATCH)chunks.push(values.slice(i,i+TIMING_READ_BATCH));
   for(const chunk of chunks){
     const marks=chunk.map(()=>'?').join(',');
     try{
@@ -339,8 +343,8 @@ function eventsForBills(reportDate,businessType,bills=[]) {
 function ledgerEvidenceForBills(bills=[]){
   const db=getDb();const result=new Map();if(!bills.length)return result;
   const values=[...new Set(bills.map(value=>String(value||'').trim().toUpperCase()).filter(Boolean))];
-  for(let i=0;i<values.length;i+=350){
-    const chunk=values.slice(i,i+350),marks=chunk.map(()=>'?').join(',');
+  for(let i=0;i<values.length;i+=TIMING_READ_BATCH){
+    const chunk=values.slice(i,i+TIMING_READ_BATCH),marks=chunk.map(()=>'?').join(',');
     try{
       for(const row of db.prepare(`SELECT shipmentCode,businessType,terminalReason,podDate,attemptNo,attemptSource,signingDays,evidenceJson,currentStateJson,lastEventTime,lastCheckedAt
         FROM qc_tracking_ledger WHERE shipmentCode IN (${marks})`).all(...chunk)){
@@ -572,8 +576,8 @@ function timingRows(snapshotId,reportDate,businessType) {
   if(canonicalPodSet.size){
     const db=getDb();
     const missing=[...canonicalPodSet].filter(bill=>!rowMap.has(bill));
-    for(let i=0;i<missing.length;i+=350){
-      const chunk=missing.slice(i,i+350),marks=chunk.map(()=>'?').join(',');
+    for(let i=0;i<missing.length;i+=TIMING_READ_BATCH){
+      const chunk=missing.slice(i,i+TIMING_READ_BATCH),marks=chunk.map(()=>'?').join(',');
       let meta=new Map();
       try{
         const rows=db.prepare(`SELECT UPPER(TRIM(shipmentCode)) shipmentCode,UPPER(TRIM(COALESCE(regionCode,''))) regionCode,businessType
@@ -889,7 +893,7 @@ export function buildHomeReturnVerification({reportDate='',snapshotId=''}={}){
 // V802: selected-day saved timing projection, with no 30-day historical scan,
 // CE API call, cross-date fallback, or 0-day fabrication. Runs in a read-only
 // SQLite worker. The exact saved snapshot is mandatory.
-export function buildSelectedDateTimingProjection({reportDate='',snapshotId=''}={}){
+export function buildSelectedDateTimingProjection({reportDate='',snapshotId='',businessType=''}={}){
   const date=String(reportDate||'').trim(),snapshot=String(snapshotId||'').trim();
   if(!/^\d{4}-\d{2}-\d{2}$/.test(date)||!snapshot)
     return{ok:false,selectionMatched:false,code:'HOME_TIMING_EXACT_SCOPE_REQUIRED',
@@ -898,12 +902,19 @@ export function buildSelectedDateTimingProjection({reportDate='',snapshotId=''}=
   if(!batch||String(batch.reportDate)!==date||String(batch.snapshotId)!==snapshot)
     return{ok:true,selectionMatched:false,code:'HOME_TIMING_SNAPSHOT_NOT_FOUND',
       reportDate:date,snapshotId:snapshot,timing:{}};
-  const timing=Object.fromEntries(TIMING_TYPES.map(type=>[
-    type,safeTimingForBatch(batch,type)
+  // V807: exact-day timing is computed independently for each business so one
+  // slow business cannot delay WHPP/CN/VN/TBKH cards. Unscoped callers retain
+  // the original four-business response; no tracking writes or remote calls.
+  const type=String(businessType||'').trim().toUpperCase();
+  if(type&&!TIMING_TYPES.includes(type))return{ok:false,selectionMatched:false,
+    code:'HOME_TIMING_BUSINESS_TYPE_INVALID',reportDate:date,snapshotId:snapshot,timing:{}};
+  const selectedTypes=type?[type]:TIMING_TYPES;
+  const timing=Object.fromEntries(selectedTypes.map(item=>[
+    item,safeTimingForBatch(batch,item)
   ]));
-  const degraded=TIMING_TYPES.filter(type=>timing[type]?.degraded===true);
+  const degraded=selectedTypes.filter(item=>timing[item]?.degraded===true);
   return{ok:true,selectionMatched:true,reportDate:date,snapshotId:snapshot,
-    timing,degraded,source:'EXACT_SELECTED_DAY_SAVED_TIMING',
+    timing,degraded,businessType:type,source:'EXACT_SELECTED_DAY_SAVED_TIMING',
     readOnly:true,remoteQueries:0};
 }
 
