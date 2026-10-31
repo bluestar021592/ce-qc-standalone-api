@@ -3863,6 +3863,118 @@ function v802RenderSelectedTiming(payload){
   setText('v625TimingPeriod','统计日报 '+day+' · 已读取指定日期保存的签收时间（未调用TMS）');
   return true;
 }
+// V804: actual in-page workspace navigation. All panels keep their original DOM
+// IDs, event handlers, source-evidence ownership and business data flows.
+function v804SelectHomeWorkspace(which,{writeUrl=true,focus=false}={}){
+  if(page!=='home')return;
+  const choices=new Set(['overview','signing','open-pod','management']);
+  const chosen=choices.has(which)?which:'overview';
+  const home=byId('v625Home');
+  if(!home?.querySelector('.v804-workspace-nav'))return;
+  for(const pane of home.querySelectorAll('[data-v804-pane]')){
+    pane.hidden=pane.dataset.v804Pane!==chosen;
+  }
+  for(const button of home.querySelectorAll('[data-v804-tab]')){
+    const selected=button.dataset.v804Tab===chosen;
+    button.classList.toggle('active',selected);
+    button.setAttribute('aria-selected',selected?'true':'false');
+    button.tabIndex=selected?0:-1;
+    if(selected&&focus)button.focus();
+  }
+  if(writeUrl){
+    const url=new URL(location.href);
+    url.hash=chosen==='overview'?'':'#'+chosen;
+    history.replaceState(history.state,'',url.pathname+url.search+url.hash);
+  }
+}
+function v804ComposeHomeWorkspace(){
+  if(page!=='home')return;
+  const home=byId('v625Home');
+  const overview=home?.querySelector('.v625-home-business-panel');
+  const operations=home?.querySelector('.v792-home-main-row');
+  const validation=home?.querySelector('.v625-home-validation');
+  const signing=byId('v801TimingDashboard');
+  const unfinished=home?.querySelector('.v626-open-pod-panel');
+  const management=byId('v792HomeManagement');
+  const trend=home?.querySelector('.v792-optional-trend');
+  const missing=byId('v631TimingMissingPanel');
+  if(!home||!overview||!operations||!validation||!signing||!unfinished||!management
+    ||home.querySelector('.v804-workspace-nav'))return;
+  const tabs=[
+    {id:'overview',name:'运营总览',hint:'处理进度 · 分类 · 系统状态'},
+    {id:'signing',name:'签收与退回',hint:'时效总览 · 四业务 · 真实证据'},
+    {id:'open-pod',name:'未完成POD',hint:'按日报日期核对 · 逐票追踪'},
+    {id:'management',name:'数据与管理',hint:'存储 · 备份 · 安全操作'}
+  ];
+  const nav=document.createElement('nav');
+  nav.className='v804-workspace-nav';
+  nav.setAttribute('aria-label','首页工作台视图');
+  nav.setAttribute('role','tablist');
+  nav.setAttribute('aria-orientation','horizontal');
+  const panes=new Map();
+  const titleBar=document.createElement('div');
+  titleBar.className='v804-workspace-topline';
+  const heading=document.createElement('div');
+  heading.className='v804-workspace-heading';
+  heading.textContent='质控工作台';
+  const subtitle=document.createElement('span');
+  subtitle.className='v804-workspace-subtitle';
+  subtitle.textContent='按工作内容切换 · 不离开当前日报 · 不重新处理数据';
+  titleBar.append(heading,subtitle);
+  const tabBar=document.createElement('div');
+  tabBar.className='v804-workspace-tab-buttons';
+  nav.append(titleBar,tabBar);
+  for(const item of tabs){
+    const button=document.createElement('button');
+    button.type='button';
+    button.className='v804-workspace-tab';
+    button.dataset.v804Tab=item.id;
+    button.id='v804-tab-'+item.id;
+    button.setAttribute('role','tab');
+    button.setAttribute('aria-controls','v804-pane-'+item.id);
+    const name=document.createElement('strong');name.textContent=item.name;
+    const hint=document.createElement('small');hint.textContent=item.hint;
+    button.append(name,hint);
+    button.addEventListener('click',()=>v804SelectHomeWorkspace(item.id));
+    button.addEventListener('keydown',event=>{
+      if(!['ArrowRight','ArrowLeft','Home','End'].includes(event.key))return;
+      event.preventDefault();
+      const current=tabs.findIndex(tab=>tab.id===item.id);
+      const idx=event.key==='Home'?0:event.key==='End'?tabs.length-1
+        :(current+(event.key==='ArrowRight'?1:-1)+tabs.length)%tabs.length;
+      v804SelectHomeWorkspace(tabs[idx].id,{focus:true});
+    });
+    tabBar.append(button);
+    const pane=document.createElement('section');
+    pane.className='v804-workspace-pane';
+    pane.dataset.v804Pane=item.id;
+    pane.id='v804-pane-'+item.id;
+    pane.setAttribute('role','tabpanel');
+    pane.setAttribute('aria-labelledby','v804-tab-'+item.id);
+    panes.set(item.id,pane);
+  }
+  // Move the actual owner nodes, never copy metric cards or fabricate numbers.
+  panes.get('overview').append(operations,validation);
+  panes.get('signing').append(signing);
+  if(missing)panes.get('signing').append(missing);
+  if(trend)panes.get('signing').append(trend);
+  panes.get('open-pod').append(unfinished);
+  panes.get('management').append(management);
+  overview.after(nav,...panes.values());
+  const oldBottom=home.querySelector('.v792-home-bottom-row');
+  if(oldBottom&&!oldBottom.children.length)oldBottom.remove();
+  const jump=overview.querySelector('a.v801-signing-jump');
+  if(jump){
+    jump.href='#signing';
+    jump.addEventListener('click',event=>{
+      event.preventDefault();
+      v804SelectHomeWorkspace('signing');
+      nav.scrollIntoView({block:'start',behavior:'smooth'});
+    });
+  }
+  const hash=String(location.hash||'').replace(/^#/,'');
+  v804SelectHomeWorkspace(hash,{writeUrl:false});
+}
 function v800SetWhppMetrics(m={},timing=null){
   if(business!=='WHPP')return;
   const days=bucket=>{
@@ -3930,6 +4042,7 @@ function v800RenderWhppDetails(rows=[],truncated=false){
 }
 async function init(){
   v800ApplyReferenceLayout();
+  v804ComposeHomeWorkspace();
   bind();void loadSession();
   if(page==='home'){
     await loadHome();
