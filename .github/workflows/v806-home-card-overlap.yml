@@ -1,0 +1,28 @@
+name: V806 home metric cards overlap guard
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'public/v625-shell.html'
+      - 'public/v806-home-card-clearance.css'
+      - 'scripts/v800-reference-browser-render.mjs'
+      - 'scripts/v806-home-card-overlap-smoke.mjs'
+      - '.github/workflows/v806-home-card-overlap.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  metric-card-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Validate original seven-business metric bindings and CSS
+        run: |
+          node --check scripts/v806-home-card-overlap-smoke.mjs
+          node --check scripts/v800-reference-browser-render.mjs
+          node scripts/v806-home-card-overlap-smoke.mjs
+          node scripts/v800-reference-ui-integration-smoke.mjs
