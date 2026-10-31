@@ -1,0 +1,28 @@
+name: V800 reference UI integration
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'public/**'
+      - 'server.js'
+      - 'scripts/v800-reference-ui-integration-smoke.mjs'
+      - '.github/workflows/v800-reference-ui.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  reference-ui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Syntax validation
+        run: |
+          node --check public/v625-shell.js
+          node --check server.js
+          node --check scripts/v800-reference-ui-integration-smoke.mjs
+      - name: Source and layout integration checks
+        run: node scripts/v800-reference-ui-integration-smoke.mjs
