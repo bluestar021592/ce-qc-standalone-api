@@ -15,7 +15,7 @@ assert.match(server,/v766ReadJob\('HOME_TIMING',\{reportDate,snapshotId,business
 assert.match(server,/HOME_TIMING_SNAPSHOT_NOT_FOUND/);
 assert.match(server,/Cache-Control','private, no-store'/);
 assert.match(shell,/\/api\/home-timing-summary\?reportDate=/);
-assert.match(shell,/json\(timingUrl,45000\)/);
+assert.match(shell,/json\(timingUrl,85000\)/);
 assert.match(shell,/summary\?\.selectionMatched&&summary\?\.reportDate/);
 assert.match(shell,/v802RenderSelectedTiming\(payload\)/);
 assert.match(html,/v625-shell\.js\?v=20261031-v805-1&patch=805/);
