@@ -886,6 +886,27 @@ export function buildHomeReturnVerification({reportDate='',snapshotId=''}={}){
   return{ok:true,selectionMatched:true,reportDate:batch.reportDate,
     snapshotId:batch.snapshotId,returns,source:'EXACT_DATED_READ_ONLY_RETURNS'};
 }
+// V802: selected-day saved timing projection, with no 30-day historical scan,
+// CE API call, cross-date fallback, or 0-day fabrication. Runs in a read-only
+// SQLite worker. The exact saved snapshot is mandatory.
+export function buildSelectedDateTimingProjection({reportDate='',snapshotId=''}={}){
+  const date=String(reportDate||'').trim(),snapshot=String(snapshotId||'').trim();
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(date)||!snapshot)
+    return{ok:false,selectionMatched:false,code:'HOME_TIMING_EXACT_SCOPE_REQUIRED',
+      reportDate:date,snapshotId:snapshot,timing:{}};
+  const batch=selectUnifiedBatch({reportDate:date,snapshotId:snapshot});
+  if(!batch||String(batch.reportDate)!==date||String(batch.snapshotId)!==snapshot)
+    return{ok:true,selectionMatched:false,code:'HOME_TIMING_SNAPSHOT_NOT_FOUND',
+      reportDate:date,snapshotId:snapshot,timing:{}};
+  const timing=Object.fromEntries(TIMING_TYPES.map(type=>[
+    type,safeTimingForBatch(batch,type)
+  ]));
+  const degraded=TIMING_TYPES.filter(type=>timing[type]?.degraded===true);
+  return{ok:true,selectionMatched:true,reportDate:date,snapshotId:snapshot,
+    timing,degraded,source:'EXACT_SELECTED_DAY_SAVED_TIMING',
+    readOnly:true,remoteQueries:0};
+}
+
 export function buildHomeQualitySummary(options={}) {
   const latest=selectUnifiedBatch(options);
   const history=listUnifiedImportHistory(30);
