@@ -31,8 +31,10 @@ try{
   assert.equal(t.v785WhppProofFor(d).total,156);
   assert.match(ui,/const zeroWhpp=Boolean\(independentWhpp\)&&independentWhpp\.total===0/,
     'a WHPP independent 156 file can never become ZERO_TICKET');
-  assert.match(ui,/const params=new URLSearchParams\(\{scope:'open'\}\)/,
-    'unfinished POD lists must not use QC actionable-only filtering');
+  assert.match(ui,/const params=new URLSearchParams\\(\\{scope:'open',reportDate,snapshotId\\}\\)/,
+    'unfinished POD lists must preserve OPEN scope plus the exact selected date/snapshot');
+  assert.doesNotMatch(ui.slice(ui.indexOf('async function loadOpenPod()'),ui.indexOf('async function pollTrackingJob(')),
+    /qcAction:'1'|scope:'actionable'/,'never substitute QC-actionable for unfinished POD');
   assert.match(server,/const whppState=dateWhppState\(\)/,'selected-day WHPP must use exact canonical members');
   assert.match(server,/historicalCarryRows/,'prior days still-open carry members remain in unfinished queue');
   assert.match(server,/EXACT_7BUSINESS_WAYBILL_AND_DATED_WHPP_PLUS_HISTORICAL_OPEN_LEDGER/,
