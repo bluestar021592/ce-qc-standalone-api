@@ -10,8 +10,9 @@ assert.match(js,/qa\('\[data-kpi-detail\]'\)\.forEach\(card=>/,
   'rate card must share existing click/keyboard drilldown wiring');
 assert.match(js,/v788BusinessAbnormalRow\(row,reportDate,targetBusiness\)/,
   'business anomaly rows must be traceable rather than ending in plain text');
-assert.match(html,/v625-shell\.js\?v=20261019-v788-1&patch=794/,
-  'changed interaction JS must not remain in old browser cache');
+const revision=html.match(/v625-shell\.js\?v=(\d{8})-v(\d+)-1&patch=(\d+)/);
+assert.ok(revision&&revision[1]>='20261019'&&Number(revision[2])>=788&&Number(revision[3])>=794,
+  'return-rate and waybill actions require a current versioned browser asset');
 
 const start=js.indexOf('function rowTr(values){');
 const end=js.indexOf('\nlet runBusy=false;',start);
