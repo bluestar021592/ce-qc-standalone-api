@@ -537,6 +537,7 @@ let v700TimingAvailability={};
 let v741TimingRepairStates={};
 let v626OpenRows=[];
 let v785OpenSourceVerified=false;
+let v785OpenVerifiedDate='';
 let v785OpenExpectedCount=0;
 let v785OpenTotal=0;
 let v785OpenEarliestDate='';
@@ -996,6 +997,7 @@ async function loadOpenPod(){
   if(v788EmptySelectedDates.has(selectedReportDate())){
     // Keep source-unverified status; neutral placeholder, not a falsely verified 0.
     v785OpenSourceVerified=false;
+    v785OpenVerifiedDate='';
     v785OpenExpectedCount=0;
     v785OpenTotal=0;
     v785OpenEarliestDate='';
@@ -1024,6 +1026,7 @@ async function loadOpenPod(){
         +(gap.error?'；'+gap.error:''));
     }
     v785OpenSourceVerified=true;
+    v785OpenVerifiedDate=reportDate;
     v785OpenExpectedCount=Number(r.openSourceCoverage.expected||0);
     v785OpenTotal=Number(r.openRowCount||0);
     v785OpenEarliestDate=String(r.openSourceCoverage.earliestCarryDate||r.reportDate||'').slice(0,10);
@@ -1034,6 +1037,7 @@ async function loadOpenPod(){
     return r;
   }catch(error){
     v785OpenSourceVerified=false;
+    v785OpenVerifiedDate='';
     v785OpenEarliestDate='';
     v626OpenRows=[];
     renderOpenPodRows();
@@ -1063,8 +1067,9 @@ async function refreshOpenPodNow(){
   const reportDate=selectedReportDate()||latest.reportDate;
   note('v626RefreshPodMessage','正在补查 '+reportDate+' 当日报表未完成POD与签收轨迹…');
   try{
-    if(!v785OpenSourceVerified)await loadOpenPod();
-    if(!v785OpenSourceVerified)throw new Error('未完成来源尚未核验，不能启动批量轨迹处理。');
+    if(!v785OpenSourceVerified||v785OpenVerifiedDate!==reportDate)await loadOpenPod();
+    if(!v785OpenSourceVerified||v785OpenVerifiedDate!==reportDate)
+      throw new Error('所选日报日期的未完成来源尚未核验，不能跨日期启动批量轨迹处理。');
     // V808: a selected-day button must never silently expand its refresh
     // into the earliest legacy carry date (150k+ historical-member guard).
     // Historical OPEN work remains visible but is refreshed only when its
