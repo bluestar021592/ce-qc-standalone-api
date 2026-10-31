@@ -3529,6 +3529,8 @@ function bind(){
 // V800: integrate the existing V792 reference layout without replacing the
 // V788 business truth, administrative audit, pagination or purge safeguards.
 function v800ApplyReferenceLayout(){
+  // Shared CE visual refresh applies to every route; specialized layout only on home/WHPP.
+  document.body.classList.add('v792-reference');
   if(page==='home'){
     const home=byId('v625Home');
     const overview=home?.querySelector('.v625-home-business-panel');
