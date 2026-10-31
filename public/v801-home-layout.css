@@ -98,3 +98,10 @@ body.v792-reference[data-page="home"] .v792-optional-trend{margin-top:0}
   body.v792-reference[data-page="home"] .v625-timing-grid .v625-timing-primary{border-right:0;padding-right:0}
   body.v792-reference[data-page="home"] .v792-management-grid{grid-template-columns:1fr}
 }
+
+/* Direct, real anchor to the complete signing module below the first viewport. */
+body.v792-reference[data-page="home"] #v801TimingDashboard{scroll-margin-top:85px}
+body.v792-reference[data-page="home"] .v801-home-shortcuts{display:flex;align-items:center;justify-content:flex-end;gap:14px;flex-wrap:wrap}
+body.v792-reference[data-page="home"] .v801-home-shortcuts>span{font-size:11px;color:#7790a9}
+body.v792-reference[data-page="home"] .v801-signing-jump{display:inline-flex;align-items:center;min-height:31px;border:1px solid #bbd9ff;background:#edf6ff;color:#096ce0;border-radius:7px;text-decoration:none;padding:5px 11px;font-size:12px;font-weight:700}
+body.v792-reference[data-page="home"] .v801-signing-jump:hover{background:#deedff}
