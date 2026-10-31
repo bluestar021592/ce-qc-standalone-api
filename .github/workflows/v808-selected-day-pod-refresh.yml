@@ -1,0 +1,31 @@
+name: V808 selected-day timing and OPEN POD safety
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'public/v625-shell.js'
+      - 'public/v806-home-card-clearance.css'
+      - 'scripts/v802-home-selected-timing-smoke.mjs'
+      - 'scripts/v808-selected-day-pod-refresh-smoke.mjs'
+      - 'scripts/v584-local-candidate-gate.mjs'
+      - '.github/workflows/v808-selected-day-pod-refresh.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  selected-day-priority:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Validate exact-day refresh and 30-day read isolation
+        run: |
+          node --check public/v625-shell.js
+          node --check scripts/v808-selected-day-pod-refresh-smoke.mjs
+          node scripts/v808-selected-day-pod-refresh-smoke.mjs
+          node scripts/v802-home-selected-timing-smoke.mjs
+          node scripts/v807-home-timing-isolation-smoke.mjs
+          node scripts/v803-home-proof-and-layout-smoke.mjs

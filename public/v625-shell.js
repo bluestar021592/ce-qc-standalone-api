@@ -537,6 +537,7 @@ let v700TimingAvailability={};
 let v741TimingRepairStates={};
 let v626OpenRows=[];
 let v785OpenSourceVerified=false;
+let v785OpenVerifiedDate='';
 let v785OpenExpectedCount=0;
 let v785OpenTotal=0;
 let v785OpenEarliestDate='';
@@ -975,7 +976,7 @@ function renderOpenPodRows(){
       const values=cols===5
         ? [row.shipmentCode,row.businessType,row.currentState||row.category||row.queryStatus||'未完成',row.lastEventTime||row.lastCheckedAt||'—']
         : [row.shipmentCode,row.businessType,row.currentState||row.category||'未完成',row.queryStatus||'需更新',row.lastEventTime||row.lastCheckedAt||'—'];
-      for(const value of values){const td=document.createElement('td');td.textContent=value||'—';tr.appendChild(td)}
+      for(const value of values){const td=document.createElement('td');td.textContent=value||'—';td.title=String(value||'—');tr.appendChild(td)}
       const td=document.createElement('td');
       const code=String(row.shipmentCode||'').trim().toUpperCase();
       const date=String(row.sourceReportDate||row.reportDate||'').slice(0,10);
@@ -996,6 +997,7 @@ async function loadOpenPod(){
   if(v788EmptySelectedDates.has(selectedReportDate())){
     // Keep source-unverified status; neutral placeholder, not a falsely verified 0.
     v785OpenSourceVerified=false;
+    v785OpenVerifiedDate='';
     v785OpenExpectedCount=0;
     v785OpenTotal=0;
     v785OpenEarliestDate='';
@@ -1024,6 +1026,7 @@ async function loadOpenPod(){
         +(gap.error?'；'+gap.error:''));
     }
     v785OpenSourceVerified=true;
+    v785OpenVerifiedDate=reportDate;
     v785OpenExpectedCount=Number(r.openSourceCoverage.expected||0);
     v785OpenTotal=Number(r.openRowCount||0);
     v785OpenEarliestDate=String(r.openSourceCoverage.earliestCarryDate||r.reportDate||'').slice(0,10);
@@ -1034,6 +1037,7 @@ async function loadOpenPod(){
     return r;
   }catch(error){
     v785OpenSourceVerified=false;
+    v785OpenVerifiedDate='';
     v785OpenEarliestDate='';
     v626OpenRows=[];
     renderOpenPodRows();
@@ -1063,9 +1067,15 @@ async function refreshOpenPodNow(){
   const reportDate=selectedReportDate()||latest.reportDate;
   note('v626RefreshPodMessage','正在补查 '+reportDate+' 当日报表未完成POD与签收轨迹…');
   try{
-    if(!v785OpenSourceVerified)await loadOpenPod();
-    if(!v785OpenSourceVerified)throw new Error('未完成来源尚未核验，不能启动批量轨迹处理。');
-    const fromDate=v785OpenEarliestDate&&v785OpenEarliestDate<reportDate?v785OpenEarliestDate:reportDate;
+    if(!v785OpenSourceVerified||v785OpenVerifiedDate!==reportDate)await loadOpenPod();
+    if(!v785OpenSourceVerified||v785OpenVerifiedDate!==reportDate)
+      throw new Error('所选日报日期的未完成来源尚未核验，不能跨日期启动批量轨迹处理。');
+    // V808: a selected-day button must never silently expand its refresh
+    // into the earliest legacy carry date (150k+ historical-member guard).
+    // Historical OPEN work remains visible but is refreshed only when its
+    // own source day is explicitly selected. Preserve the original safety cap.
+    const fromDate=reportDate;
+    note('v626RefreshPodMessage','仅补查 '+reportDate+' 当日来源运单；其他历史日报请按日期单独选择，不会执行全库扫描。');
     const r=await post('/api/v246/tracking/reconcile',{businessType:'ALL',fromDate,toDate:reportDate},30000);
     const job=await pollTrackingJob(r.job?.jobId||'');
     // V786: a completed HTTP task is NOT a completed business publication.
@@ -1076,9 +1086,10 @@ async function refreshOpenPodNow(){
     await Promise.all([page==='home'?loadHome({skipAux:true}):Promise.resolve(),
       page==='business'?loadBusiness({skipQualityRefresh:true}):Promise.resolve()]);
     const retryCount=Number(job.failed||0);
-    note('v626RefreshPodMessage',reportDate+' 定向补查完成：已复核来源 '+fmt(v785OpenExpectedCount)+
-      '票；当前仍未完结 '+fmt(v785OpenTotal)+'票；成功刷新 '+fmt(job.refreshed||0)+
-      '票，待重试 '+fmt(retryCount)+'票。'+(retryCount?'部分运单仍需继续补查。':'最新状态已保存并重新核对。'),
+    note('v626RefreshPodMessage',reportDate+' 当日定向补查完成：已复核来源 '+fmt(v785OpenExpectedCount)+
+      '票；当前所选范围仍未完结 '+fmt(v785OpenTotal)+'票；本次成功刷新 '+fmt(job.refreshed||0)+
+      '票，待重试 '+fmt(retryCount)+'票。其他历史日期未批量更新。'
+      +(retryCount?'部分运单仍需继续补查。':'最新状态已保存并重新核对。'),
       retryCount?'warning':'success');
   }catch(error){note('v626RefreshPodMessage','更新失败：'+error.message,'error')}
 }
@@ -1197,32 +1208,50 @@ async function loadHome(options={}){
     // scan hide all WHPP/Shopee timing cards. Each exact-snapshot read has
     // its own worker key and its own bounded failure state; no TMS write.
     const timingTypes=['WHPP','SHOPEEVN','SHOPEECN','TBKH'];
-    timingTypes.forEach((type,index)=>{
+    // V808: finish exact-day evidence before starting the expensive 30-day
+    // HOME_FULL query. Both share only two read-only worker slots. Previously
+    // the long history scan could occupy a slot and cause a false client-side
+    // timeout for the displayed TBKH/VN cards. A verified source-zero
+    // business never needs to enter the heavy read queue at all.
+    const timingJobs=timingTypes.map((type,index)=>new Promise(resolve=>{
+      const count=Number(summary.classification?.counts?.[type]??-1);
+      if(count===0){
+        const empty={overall:{podCount:0,totalPodCount:0,avgDays:null},
+          pp:{podCount:0,totalPodCount:0,avgDays:null},
+          pv:{podCount:0,totalPodCount:0,avgDays:null},
+          evidence:{valid:0,missing:0}};
+        v802RenderSelectedTiming({ok:true,selectionMatched:true,reportDate:proofDate,
+          snapshotId:proofSnapshot,businessType:type,timing:{[type]:empty}});
+        setText('v625Timing'+type+'Pod','本日报0票，无签收时效可计算');
+        resolve();return;
+      }
       const timingUrl='/api/home-timing-summary?reportDate='+encodeURIComponent(proofDate)
         +'&snapshotId='+encodeURIComponent(proofSnapshot)
         +'&businessType='+encodeURIComponent(type);
       setTimeout(()=>{
         if(viewSequence!==v788HomeViewSequence||page!=='home'
-          ||String(selectedReportDate()||proofDate)!==proofDate)return;
-        void json(timingUrl,45000).then(payload=>{
+          ||String(selectedReportDate()||proofDate)!==proofDate){resolve();return;}
+        void json(timingUrl,85000).then(payload=>{
           if(viewSequence!==v788HomeViewSequence||page!=='home'
             ||String(selectedReportDate()||proofDate)!==proofDate
             ||String(payload?.reportDate||'')!==proofDate
             ||String(payload?.snapshotId||'')!==proofSnapshot
             ||String(payload?.businessType||'')!==type)return;
           v802RenderSelectedTiming(payload);
-        }).catch(()=>{
+        }).catch(error=>{
           if(viewSequence!==v788HomeViewSequence||page!=='home'
             ||String(selectedReportDate()||proofDate)!==proofDate)return;
           const prior=v803SelectedTimingProof;
           if(prior?.reportDate===proofDate&&prior?.snapshotId===proofSnapshot&&prior.timing?.[type])return;
-          setText('v625Timing'+type+'Pod','可信POD读取失败；本次无可核验结果');
+          const isTimeout=/timeout|超时|WAIT_TIMEOUT|aborted/i.test(String(error?.message||error));
+          setText('v625Timing'+type+'Pod',isTimeout
+            ?'可信POD统计超时；请切换回本页重试':'可信POD读取失败；本次无可核验结果');
           setText('v626Timing'+type+'Missing','待核验');
           setText('v626Timing'+type+'Valid','待核验');
-          setText('v801TimingStatus','日报 '+proofDate+' · '+type+'签收时效只读读取失败；其他业务可独立展示');
-        });
-      },400+index*250);
-    });
+          setText('v801TimingStatus','日报 '+proofDate+' · '+type+'签收时效读取未完成，其他业务已读取结果保持不变');
+        }).finally(resolve);
+      },400+index*180);
+    }));
     // Independent short read does not depend on HOME_FULL's 30-day timing.
     const returnsUrl='/api/home-return-summary?reportDate='+encodeURIComponent(proofDate)
       +'&snapshotId='+encodeURIComponent(proofSnapshot);
@@ -1239,7 +1268,10 @@ async function loadHome(options={}){
     },250);
     const url='/api/home-quality-summary?fast=1&reportDate='+encodeURIComponent(proofDate)+
       '&snapshotId='+encodeURIComponent(proofSnapshot);
-    setTimeout(()=>{
+    // Run the historical 30-day/complete dashboard only after all visible
+    // exact-day cards have resolved, including failures. Never reserve a
+    // scarce read worker ahead of the user's current-date metrics.
+    void Promise.allSettled(timingJobs).then(()=>setTimeout(()=>{
       if(viewSequence!==v788HomeViewSequence||page!=='home'||String(selectedReportDate()||proofDate)!==proofDate)return;
       void json(url,70000).then(full=>{
         if(!full||viewSequence!==v788HomeViewSequence||String(full.reportDate||'')!==proofDate
@@ -1250,7 +1282,7 @@ async function loadHome(options={}){
         if(page==='home'&&String(selectedReportDate()||proofDate)===proofDate)
           (setText('v625HomeStatus','分类概览可用；签收时效明细后台读取暂未完成，可继续切换业务看板。'),setText('v801TimingStatus','签收时效读取暂未完成 · 保留待核验，不能显示为0天'));
       });
-    },1200);
+    },150));
   }
   const historyRows=[];
   void historyPromise.then(history=>{

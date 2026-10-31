@@ -137,6 +137,7 @@ const TASKS=[
   ['node',['scripts/v787-july02-whpp-first-start-recovery-smoke.mjs']],
   ['node',['scripts/v788-board-status-donut-smoke.mjs']],
   ['node',['scripts/v807-home-timing-isolation-smoke.mjs']],
+  ['node',['scripts/v808-selected-day-pod-refresh-smoke.mjs']],
   ['node',['scripts/v788-kpi-detail-paging-smoke.mjs']],
   ['node',['scripts/v788-return-rate-abnormal-action-smoke.mjs']],
   ['node',['scripts/v788-open-pod-special-state-smoke.mjs']],
