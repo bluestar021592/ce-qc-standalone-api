@@ -1878,7 +1878,14 @@ async function loadBusiness(options={}){
       ? state.accounting
       : {total:m.total,accounted:state.snapshotStatus==='COMPLETED'?m.total:0,difference:state.snapshotStatus==='COMPLETED'?0:m.total,rowsByKind:{total:[],pod:[],returned:[],pending:[],abnormal:[],otherNormal:[],delivery:[],unprocessed:[]}};
     v628BusinessMetricState=m;v628BusinessReportDate=reportDate;
-    if(targetBusiness==='WHPP'&&reportDate)void v800LoadWhppTrend(reportDate);
+    if(targetBusiness==='WHPP'&&reportDate){
+      // Start history after the KPI paint; seven read-only canonical dates
+      // must not compete with the selected-date first response.
+      setTimeout(()=>{
+        if(stillSelected()&&String(v628BusinessReportDate||'')===String(reportDate))
+          void v800LoadWhppTrend(reportDate);
+      },1200);
+    }
     if(reportDate&&!selectedReportDate())applyDashboardDate(reportDate);
     if(reportDate){byId('v625FromDate')&&(byId('v625FromDate').value=reportDate);byId('v625ToDate')&&(byId('v625ToDate').value=reportDate)}
 
