@@ -3538,6 +3538,7 @@ function bind(){
   byId('v758ReloadUsers')?.addEventListener('click',()=>void loadSettingsUsers());
   byId('v734TimingRepairNow')?.addEventListener('click',runTimingRepairNow);
   byId('v626RefreshOpenPod')?.addEventListener('click',refreshOpenPodNow);
+  byId('v803RetryOpenSource')?.addEventListener('click',()=>void loadOpenPod());
   byId('v641WhppScanPending')?.addEventListener('click',scanWhppPending);
   byId('v626ImportRefreshOpen')?.addEventListener('click',refreshOpenPodNow);
   qa('[data-open-filter]').forEach(btn=>btn.addEventListener('click',()=>{v626OpenFilter=btn.dataset.openFilter;qa('[data-open-filter]').forEach(x=>x.classList.toggle('active',x===btn));renderOpenPodRows()}));
