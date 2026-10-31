@@ -1,0 +1,33 @@
+name: V802 independent selected-day timing
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/homeQualitySummary.js'
+      - 'src/v766HeavyReadWorker.mjs'
+      - 'src/v766ReadJobCoordinator.js'
+      - 'server.js'
+      - 'public/v625-shell.js'
+      - 'public/v625-shell.html'
+      - 'scripts/v802-home-selected-timing-smoke.mjs'
+      - '.github/workflows/v802-home-timing.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  exact-day-timing:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Syntax and exact-snapshot read-only smoke
+        run: |
+          node --check src/homeQualitySummary.js
+          node --check src/v766HeavyReadWorker.mjs
+          node --check src/v766ReadJobCoordinator.js
+          node --check server.js
+          node --check public/v625-shell.js
+          node scripts/v802-home-selected-timing-smoke.mjs

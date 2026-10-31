@@ -1147,6 +1147,18 @@ async function loadHome(options={}){
     :new Promise(resolve=>setTimeout(resolve,1200))
       .then(()=>json('/api/unified-history?limit=7',7000).catch(()=>null));
   const summary=await summaryPromise;
+  // Display the actual saved selected date as soon as the lightweight
+  // classification response arrives. URL may contain only ?auth=v625.
+  if(viewSequence===v788HomeViewSequence&&page==='home'){
+    if(summary?.selectionMatched&&summary?.reportDate)
+      setText('v801TimingStatus','日报 '+summary.reportDate+' · 正在读取当天可信签收时间');
+    else if(!summary)
+      setText('v801TimingStatus','首页日报来源读取失败，签收时效无法核验，请检查后台状态');
+    else
+      setText('v801TimingStatus',requestedDate
+        ?'所选日期 '+requestedDate+' 尚无有效日报，请选择已导入日期'
+        :'暂无已导入的有效日报，不能计算签收时效');
+  }
   // V788: explicit absent-day response only. A visible 0 is not a purge proof.
   if(requestedDate&&summary?.selectionMatched===false
     &&!summary?.snapshotId&&Number(summary?.classification?.total||0)===0){
@@ -1168,6 +1180,26 @@ async function loadHome(options={}){
   // report-date and snapshot are still selected.
   if(summary?.quickOnly&&summary.selectionMatched&&summary.snapshotId){
     const proofDate=String(summary.reportDate||''),proofSnapshot=String(summary.snapshotId||'');
+    // V802: selected-day timing is a separate worker, not blocked by
+    // history trend or 30-day full summary; scope every response to the
+    // exact source date and snapshot to block stale multi-day UI updates.
+    const timingUrl='/api/home-timing-summary?reportDate='+encodeURIComponent(proofDate)
+      +'&snapshotId='+encodeURIComponent(proofSnapshot);
+    setTimeout(()=>{
+      if(viewSequence!==v788HomeViewSequence||page!=='home'
+        ||String(selectedReportDate()||proofDate)!==proofDate)return;
+      void json(timingUrl,45000).then(payload=>{
+        if(viewSequence!==v788HomeViewSequence||page!=='home'
+          ||String(selectedReportDate()||proofDate)!==proofDate
+          ||String(payload?.reportDate||'')!==proofDate
+          ||String(payload?.snapshotId||'')!==proofSnapshot)return;
+        v802RenderSelectedTiming(payload);
+      }).catch(()=>{
+        if(viewSequence===v788HomeViewSequence&&page==='home'
+          &&String(selectedReportDate()||proofDate)===proofDate)
+          setText('v801TimingStatus','日报 '+proofDate+' · 签收时效只读统计未完成；分类数据不受影响');
+      });
+    },100);
     // Independent short read does not depend on HOME_FULL's 30-day timing.
     const returnsUrl='/api/home-return-summary?reportDate='+encodeURIComponent(proofDate)
       +'&snapshotId='+encodeURIComponent(proofSnapshot);
@@ -3750,6 +3782,36 @@ function v801RenderVerifiedReturns(payload){
   setText('v801TimingReturned',fmt(returned)+'票');
   setText('v801TimingReturnRate',total>0?pct(returned/total*100):'—');
   setText('v801TimingReturnScope','三业务 '+fmt(returned)+'/'+fmt(total)+'票 · 逐票来源已核验');
+}
+// V802: render exact-day saved POD time separately from the expensive
+// historical 30-day HOME_FULL worker. Never invent missing timestamps.
+function v802RenderSelectedTiming(payload){
+  if(page!=='home'||payload?.ok!==true||payload?.selectionMatched!==true)return false;
+  const timing=payload.timing||{},day=String(payload.reportDate||'');
+  v801RenderTimingSummary(timing,day);
+  const asDays=bucket=>{
+    const sample=Number(bucket?.podCount||0),days=Number(bucket?.avgDays);
+    return sample>0&&Number.isFinite(days)&&days>0
+      ?days.toFixed(2).replace(/\.00$/,'')+'天':'—';
+  };
+  for(const type of ['TBKH','WHPP','SHOPEECN','SHOPEEVN']){
+    const d=timing[type]||{},prefix='v625Timing'+type;
+    const count=Number(d.overall?.podCount||0),total=Number(d.overall?.totalPodCount||0);
+    setText(prefix+'Overall',asDays(d.overall));
+    setText(prefix+'Pod',count>0
+      ?'可信时间 '+fmt(count)+' / POD '+fmt(total)+'票'
+      :total>0?'POD '+fmt(total)+'票，签收时间尚未核验':'无可信签收时间');
+    for(const region of ['PP','PV']){
+      const bucket=d[region.toLowerCase()]||{};
+      setText(prefix+region,asDays(bucket));
+      setText(prefix+region+'Pod',fmt(bucket.podCount||0)+' / '+fmt(bucket.totalPodCount||0)+'票');
+    }
+    const missing=Number(d.evidence?.missing||d.overall?.missingEvidenceCount||0);
+    setText('v626Timing'+type+'Missing',d.degraded?'待核验':fmt(missing));
+    setText('v626Timing'+type+'Valid',d.degraded?'待核验':fmt(d.evidence?.valid??count));
+  }
+  setText('v625TimingPeriod','统计日报 '+day+' · 已读取指定日期保存的签收时间（未调用TMS）');
+  return true;
 }
 function v800SetWhppMetrics(m={},timing=null){
   if(business!=='WHPP')return;
