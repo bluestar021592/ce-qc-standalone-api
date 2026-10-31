@@ -10,6 +10,8 @@ for(const name of ['Overall','PP','PV','Attempt1','Attempt2','Attempt3','Returne
   assert.equal(home.split('id="v801Timing'+name+'"').length-1,1,'summary metric unique '+name);
 }
 assert.match(home,/签收时效总览/);
+assert.match(home,/href="#v801TimingDashboard" class="v801-signing-jump"/);
+assert.match(home,/id="v801TimingDashboard" class="v625-panel v625-signing-panel"/);
 for(const type of ['TBKH','WHPP','SHOPEECN','SHOPEEVN'])
   assert.equal(home.split('data-timing="'+type+'"').length-1,1,'visible timing card '+type);
 assert.match(js,/bottom\.append\(timing\);bottom\.after\(open\)/);
