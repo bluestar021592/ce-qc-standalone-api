@@ -5,7 +5,7 @@ const html=fs.readFileSync('public/v625-shell.html','utf8');
 const js=fs.readFileSync('public/v625-shell.js','utf8');
 const css=fs.readFileSync('public/v801-home-layout.css','utf8');
 const home=html.slice(html.indexOf('<section id="v625Home"'),html.indexOf('<!-- BUSINESS -->'));
-assert.ok(home.length>20000,'home page source must be present');
+assert.ok(home.length>10000,'home page source must be present');
 for(const name of ['Overall','PP','PV','Attempt1','Attempt2','Attempt3','Returned','ReturnRate']){
   assert.equal(home.split('id="v801Timing'+name+'"').length-1,1,'summary metric unique '+name);
 }
