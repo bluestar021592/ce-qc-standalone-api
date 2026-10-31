@@ -17,7 +17,10 @@ assert.match(server,/if\(String\(req\.query\.fast\|\|''\)==='1'\)return res\.sta
 assert.match(server,/const batch=fastDashboardBatch\('',date\)/,'finished proof must be pinned to existing selected-day snapshot');
 assert.match(shell,/summaryQuickUrl=summaryUrl\+'&quick=1'/,'home must show counters first');
 assert.match(shell,/summary\?\.quickOnly&&summary\.selectionMatched/,'full signing must hydrate after first paint, not start for missing report days');
-assert.match(shell,/void loadHome\(\{summaryOverride:full,skipHistory:true,skipAux:true\}\)/,'full signing must not reload old first-paint counters/progress');
+assert.ok(shell.includes('void loadHome({summaryOverride:full,expectedViewSequence:viewSequence,skipHistory:true,skipAux:true});'),
+  'same-view full signing must not restart first paint or refresh progress');
+assert.match(shell,/const viewSequence=options\.summaryOverride&&options\.expectedViewSequence/,
+  'second-paint result must preserve selected-date worker ownership');
 assert.match(shell,/if\(!summary\?\.quickOnly\)for\(const type of \['WHPP','SHOPEECN','SHOPEEVN'\]/,'unverified return status must stay blank, not become zero');
 assert.match(shell,/selected&&selected!==String\(newest\.reportDate/,'latest import must not overwrite selected historical completion snapshot');
 assert.match(shell,/\/api\/family-recovery-proof\?reportDate='\+encodeURIComponent\(date\)\+'&snapshotId='/,'proof must preserve reportDate and immutable snapshot');
