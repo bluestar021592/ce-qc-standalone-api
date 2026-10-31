@@ -103,6 +103,7 @@ body.v792-reference[data-page="home"] .v805-timing-advanced-grid{
   display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px;
   margin:7px 0 0
 }
+body.v792-reference[data-page="home"] details.v805-timing-advanced:not([open])>.v805-timing-advanced-grid{display:none!important}
 body.v792-reference[data-page="home"] .v625-signing-panel .v801-timing-business-title{
   padding-bottom:5px;margin:0 0 8px
 }
