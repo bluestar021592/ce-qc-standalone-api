@@ -756,6 +756,32 @@ app.get('/api/home-return-summary',async(req,res)=>{
       error:'退回率只读核验暂不可用，不显示未核实的0票或百分比。'});
   }
 });
+// V802 independent exact-day timing: no 30-day HOME_FULL dependency and no
+// CE/TMS requests. The HTTP event loop never runs the large SQLite scan.
+app.get('/api/home-timing-summary',async(req,res)=>{
+  try{
+    const reportDate=String(req.query.reportDate||'').trim();
+    const snapshotId=String(req.query.snapshotId||'').trim();
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(reportDate)||!snapshotId)
+      return res.status(400).json({ok:false,code:'HOME_TIMING_EXACT_SCOPE_REQUIRED'});
+    const pinned=fastDashboardBatch(snapshotId,reportDate);
+    if(!pinned||String(pinned.snapshotId)!==snapshotId
+      ||String(pinned.reportDate)!==reportDate)
+      return res.status(404).json({ok:false,code:'HOME_TIMING_SNAPSHOT_NOT_FOUND'});
+    const read=await v766ReadJob('HOME_TIMING',{reportDate,snapshotId});
+    const result=read.result||{};
+    if(result.ok!==true||result.selectionMatched!==true
+      ||result.reportDate!==reportDate||result.snapshotId!==snapshotId)
+      throw Error('HOME_TIMING_WORKER_SCOPE_MISMATCH');
+    res.setHeader('Cache-Control','private, no-store');
+    res.setHeader('X-CE-QC-Read-Cache',read.cache);
+    return res.json(result);
+  }catch(error){
+    console.warn('[CE-QC][V802_TIMING_READ]',String(error?.message||error));
+    return res.status(503).json({ok:false,code:'HOME_TIMING_READ_UNAVAILABLE',
+      error:'该日报的可信签收时间暂时无法读取，请查看后台证据；不会显示虚假的0天。'});
+  }
+});
 app.get('/api/home-quality-summary', async (req, res) => {
   try {
     const reportDate=String(req.query.reportDate||'');
