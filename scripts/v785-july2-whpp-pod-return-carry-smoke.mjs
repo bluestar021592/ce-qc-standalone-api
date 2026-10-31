@@ -31,8 +31,8 @@ try{
   assert.equal(t.v785WhppProofFor(d).total,156);
   assert.match(ui,/const zeroWhpp=Boolean\(independentWhpp\)&&independentWhpp\.total===0/,
     'a WHPP independent 156 file can never become ZERO_TICKET');
-  assert.match(ui,/const params=new URLSearchParams\\(\\{scope:'open',reportDate,snapshotId\\}\\)/,
-    'unfinished POD lists must preserve OPEN scope plus the exact selected date/snapshot');
+  assert.ok(ui.includes("const params=new URLSearchParams({scope:'open',reportDate,snapshotId});"),
+    'unfinished POD must use OPEN scope and the exact selected date/snapshot');
   assert.doesNotMatch(ui.slice(ui.indexOf('async function loadOpenPod()'),ui.indexOf('async function pollTrackingJob(')),
     /qcAction:'1'|scope:'actionable'/,'never substitute QC-actionable for unfinished POD');
   assert.match(server,/const whppState=dateWhppState\(\)/,'selected-day WHPP must use exact canonical members');
