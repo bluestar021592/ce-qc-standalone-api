@@ -18,6 +18,7 @@ const context={
   v626LatestImport:{reportDate:'2026-07-12'},
   selectedReportDate:()=> '2026-07-12',
   v785OpenSourceVerified:true,
+  v785OpenVerifiedDate:'2026-07-12',
   v785OpenEarliestDate:'2026-07-01',
   v785OpenExpectedCount:13886,
   v785OpenTotal:1079,
@@ -35,6 +36,7 @@ const context={
 vm.createContext(context);
 vm.runInContext(js.slice(begin,end),context,{timeout:1000});
 await context.refreshOpenPodNow();
+assert.match(js,/if\(!v785OpenSourceVerified\|\|v785OpenVerifiedDate!==reportDate\)await loadOpenPod\(\)/);
 assert.equal(requests.length,1);
 assert.equal(requests[0].url,'/api/v246/tracking/reconcile');
 assert.equal(requests[0].args.businessType,'ALL');
