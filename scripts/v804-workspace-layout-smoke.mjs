@@ -24,8 +24,9 @@ for(const key of ['overview','signing','open-pod','management']){
 assert.match(js,/button\.addEventListener\('click',\(\)=>v804SelectHomeWorkspace\(item\.id\)\)/);
 assert.match(js,/pane\.hidden=pane\.dataset\.v804Pane!==chosen/);
 assert.match(js,/button\.setAttribute\('aria-selected',selected\?'true':'false'\)/);
+assert.doesNotMatch(js,/preventDefault\(/,'native navigation must remain enabled');
 assert.match(js,/history\.replaceState\(history\.state,'',url\.pathname\+url\.search\+url\.hash\)/);
-assert.match(js,/event\.preventDefault\(\);\s*v804SelectHomeWorkspace\('signing'\)/);
+assert.match(js,/jump\.addEventListener\('click',\(\)=>\{\s*v804SelectHomeWorkspace\('signing',\{writeUrl:false\}\)/);
 assert.match(css,/\.v804-workspace-pane\[hidden\]\{display:none!important\}/);
 assert.match(css,/\.v804-workspace-tab-buttons\{[\s\S]*grid-template-columns:repeat\(4,minmax\(0,1fr\)\)/);
 assert.match(css,/@media\(max-width:1100px\)/);
