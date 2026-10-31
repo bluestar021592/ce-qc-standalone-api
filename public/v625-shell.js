@@ -3878,7 +3878,7 @@ function v804SelectHomeWorkspace(which,{writeUrl=true,focus=false}={}){
     const selected=button.dataset.v804Tab===chosen;
     button.classList.toggle('active',selected);
     button.setAttribute('aria-selected',selected?'true':'false');
-    button.tabIndex=selected?0:-1;
+    // All four native buttons remain keyboard reachable with Tab/Enter/Space.
     if(selected&&focus)button.focus();
   }
   if(writeUrl){
@@ -3936,14 +3936,6 @@ function v804ComposeHomeWorkspace(){
     const hint=document.createElement('small');hint.textContent=item.hint;
     button.append(name,hint);
     button.addEventListener('click',()=>v804SelectHomeWorkspace(item.id));
-    button.addEventListener('keydown',event=>{
-      if(!['ArrowRight','ArrowLeft','Home','End'].includes(event.key))return;
-      event.preventDefault();
-      const current=tabs.findIndex(tab=>tab.id===item.id);
-      const idx=event.key==='Home'?0:event.key==='End'?tabs.length-1
-        :(current+(event.key==='ArrowRight'?1:-1)+tabs.length)%tabs.length;
-      v804SelectHomeWorkspace(tabs[idx].id,{focus:true});
-    });
     tabBar.append(button);
     const pane=document.createElement('section');
     pane.className='v804-workspace-pane';
@@ -3966,9 +3958,8 @@ function v804ComposeHomeWorkspace(){
   const jump=overview.querySelector('a.v801-signing-jump');
   if(jump){
     jump.href='#signing';
-    jump.addEventListener('click',event=>{
-      event.preventDefault();
-      v804SelectHomeWorkspace('signing');
+    jump.addEventListener('click',()=>{
+      v804SelectHomeWorkspace('signing',{writeUrl:false});
       nav.scrollIntoView({block:'start',behavior:'smooth'});
     });
   }
