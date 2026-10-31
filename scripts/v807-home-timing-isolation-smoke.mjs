@@ -23,7 +23,7 @@ assert.match(summary,/businessType:type,source:'EXACT_SELECTED_DAY_SAVED_TIMING'
 // chunks (at most 803 SQLite bound parameters), not repeatedly rescanned in
 // ~14 older 300-member batches. Keep normalized per-waybill source matching.
 assert.match(summary,/const TIMING_READ_BATCH=800;/);
-assert.match(summary,/WHERE u\.reportDate>=\? AND UPPER\(TRIM\(u\.businessType\)\)=\?/);
+assert.match(summary,/AND u\.reportDate>=\? AND UPPER\(TRIM\(u\.businessType\)\)=\?/);
 assert.match(summary,/for\(let i=0;i<values\.length;i\+=TIMING_READ_BATCH\)/);
 assert.match(summary,/const chunk=values\.slice\(i,i\+TIMING_READ_BATCH\)/);
 assert.match(summary,/const chunk=missing\.slice\(i,i\+TIMING_READ_BATCH\)/);
