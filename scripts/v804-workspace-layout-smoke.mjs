@@ -39,6 +39,6 @@ for(const id of ['v625ClassTotal','v625ClassAuto','v625ClassUnknown',
 assert.match(js,/const timing=v803MergeFullWithExactTiming/);
 assert.match(js,/v803SelectedTimingProof=/);
 assert.match(js,/new URLSearchParams\(\{scope:'open',reportDate,snapshotId\}\)/);
-assert.doesNotMatch(js.slice(js.indexOf('function v804ComposeHomeWorkspace'),js.indexOf('function v801TimingAggregate')),
+assert.doesNotMatch(js.slice(js.indexOf('function v804ComposeHomeWorkspace'),js.indexOf('function v800SetWhppMetrics')),
  /fetch\(|post\(|\/api\/|deleteBusiness|clearDatabase|purge/,'workspace UI may never execute API or mutation');
 console.log('[V804 HOMEPAGE] PASS 4 real accessible tabs, preserved source ownership, real signing/OPEN components and no data actions');
