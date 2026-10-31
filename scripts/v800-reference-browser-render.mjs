@@ -84,20 +84,73 @@ try{
         overflow:document.documentElement.scrollWidth>document.documentElement.clientWidth+2};
     },item.key);
     if(item.key==='home'){
-      assert.equal(data.topChildren,4,'home top row must contain progress/status/quick/log');
-      assert.ok(data.topRow?.width>600,'home top row must be rendered');
-      assert.ok(data.bottomRow?.width>600,'home signing/open POD row must exist');
-      assert.ok(data.unfinished?.top>=data.bottomRow.bottom-3,
-        'unfinished POD must be a separate full-width panel after signing');
-      assert.ok(data.management?.top>=data.unfinished.bottom-3
-        &&data.management?.top<data.optionalTrend?.top,
-        'home data management must follow unfinished POD and precede optional trend');
-      assert.ok(data.timingPanel?.width>850,'signing board must use full available content width');
-      assert.equal(data.timingCards,4,'all four signing business cards must be visible');
-      assert.equal(data.timingMetrics,8,'all eight evidence-only signing summary metrics must be visible');
-      assert.equal(data.timingPanelOverflow,false,'signing board may not become an internal scroll-box');
-      assert.equal(data.totalCard,1,'grand-total card must not be discarded to mimic 7-card screenshot');
-      assert.equal(data.homeCards,7,'home must render 7 business tiles');
+      assert.equal(data.topChildren,4,'overview must preserve progress/status/quick/log');
+      assert.ok(data.topRow?.width>600,'overview operational row must exist');
+      assert.equal(data.totalCard,1,'grand total retained');
+      assert.equal(data.homeCards,7,'all 7 business cards available');
+      const intro=await page.evaluate(()=>{
+        const all=[...document.querySelectorAll('[data-v804-tab]')];
+        const panes=[...document.querySelectorAll('[data-v804-pane]')];
+        return {tabs:all.length,panes:panes.length,
+          active:all.filter(x=>x.getAttribute('aria-selected')==='true').map(x=>x.dataset.v804Tab),
+          visible:panes.filter(x=>!x.hidden).map(x=>x.dataset.v804Pane)};
+      });
+      assert.equal(intro.tabs,4,'four real home workspaces');
+      assert.equal(intro.panes,4);
+      assert.deepEqual(intro.active,['overview']);
+      assert.deepEqual(intro.visible,['overview']);
+      await page.screenshot({path:path.join(out,item.file),fullPage:true});
+      await page.locator('[data-v804-tab="signing"]').click();
+      const timing=await page.evaluate(()=>{
+        const panel=document.querySelector('#v801TimingDashboard');
+        const cards=[...panel.querySelectorAll('.v625-timing-card')];
+        const metrics=[...panel.querySelectorAll('.v801-timing-summary-tile')];
+        const within=element=>{const r=element.getBoundingClientRect();return r.width>0&&r.height>0}
+        const nav=document.querySelector('.v804-workspace-nav');
+        return {active:document.querySelector('.v804-workspace-tab.active')?.dataset.v804Tab,
+          cards:cards.filter(within).length,metrics:metrics.filter(within).length,
+          panelWidth:panel.getBoundingClientRect().width,
+          noInternalScroll:panel.scrollHeight<=panel.clientHeight+4
+            ||getComputedStyle(panel).overflowY==='visible',
+          pageOverflow:document.documentElement.scrollWidth>document.documentElement.clientWidth+2,
+          scrollTarget:document.location.hash,
+          navWidth:nav.getBoundingClientRect().width};
+      });
+      assert.equal(timing.active,'signing');
+      assert.equal(timing.cards,4,'all four business signing cards visible on signing tab');
+      assert.equal(timing.metrics,8,'all eight data-backed signing indicators visible');
+      assert.ok(timing.panelWidth>750,'signing panel should fill workspace width');
+      assert.equal(timing.noInternalScroll,true,'no hidden scroll-box for signing');
+      assert.equal(timing.pageOverflow,false,'signing view must not clip horizontally');
+      assert.equal(timing.scrollTarget,'#signing','tab updates actual URL view');
+      await page.screenshot({path:path.join(out,'home-signing-1536x1024.png'),fullPage:true});
+      await page.locator('[data-v804-tab="open-pod"]').click();
+      const pod=await page.evaluate(()=>({
+        active:document.querySelector('.v804-workspace-tab.active')?.dataset.v804Tab,
+        podVisible:document.querySelector('.v626-open-pod-panel')?.getBoundingClientRect().height>0,
+        readOnlyButton:document.getElementById('v803RetryOpenSource')?.getBoundingClientRect().height>0,
+        trackingButton:document.getElementById('v626RefreshOpenPod')?.getBoundingClientRect().height>0,
+        signingHidden:document.querySelector('[data-v804-pane="signing"]')?.hidden
+      }));
+      assert.equal(pod.active,'open-pod');
+      assert.equal(pod.podVisible,true);
+      assert.equal(pod.readOnlyButton,true);
+      assert.equal(pod.trackingButton,true);
+      assert.equal(pod.signingHidden,true,'inactive signing panel is not stacked below POD');
+      await page.screenshot({path:path.join(out,'home-open-pod-1536x1024.png'),fullPage:true});
+      await page.locator('[data-v804-tab="management"]').click();
+      const management=await page.evaluate(()=>({
+        active:document.querySelector('.v804-workspace-tab.active')?.dataset.v804Tab,
+        links:[...document.querySelectorAll('[data-v804-pane="management"] .v792-management-tile a')]
+          .map(x=>x.getAttribute('href'))
+      }));
+      assert.equal(management.active,'management');
+      assert.equal(management.links.length,3,'three distinct safe operations');
+      for(const tab of ['clear','backup','storage'])
+        assert.ok(management.links.some(x=>x.includes('tab='+tab)),tab+' link');
+      await page.locator('[data-v804-tab="overview"]').click();
+      assert.equal(await page.locator('[data-v804-pane]:not([hidden])').count(),1,
+        'only selected home pane is visible');
     } else {
       assert.ok(data.analysis?.width>600,'WHPP signing and returns analysis must render');
       assert.ok(data.tables?.width>600,'WHPP anomaly and return tables must render');
