@@ -2,7 +2,7 @@ import {parentPort,workerData} from 'node:worker_threads';
 import {getDb,getRuntimeConfig} from './db.js';
 import {getCurrentReportDate} from './store.js';
 import {SHOPEE,getBusinessCurrentReportDate} from './businessStore.js';
-import {buildHomeQualitySummary,buildHomeReturnVerification} from './homeQualitySummary.js';
+import {buildHomeQualitySummary,buildHomeReturnVerification,buildSelectedDateTimingProjection} from './homeQualitySummary.js';
 
 // V766 worker: isolated main-thread CPU/SQLite computations. The launcher
 // sets CE_QC_DASHBOARD_READ_WORKER=1 before module import. DB is strictly
@@ -88,6 +88,9 @@ parentPort.on('message',async message=>{
     }
     else if(message.kind==='FAMILY_PROOF')result=familyProof(message.reportDate);
     else if(message.kind==='HOME_FULL')result=buildHomeQualitySummary({
+      reportDate:message.reportDate||'',snapshotId:message.snapshotId||''
+    });
+    else if(message.kind==='HOME_TIMING')result=buildSelectedDateTimingProjection({
       reportDate:message.reportDate||'',snapshotId:message.snapshotId||''
     });
     else if(message.kind==='HOME_RETURNS')result=buildHomeReturnVerification({
