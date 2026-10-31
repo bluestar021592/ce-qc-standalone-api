@@ -91,7 +91,8 @@ parentPort.on('message',async message=>{
       reportDate:message.reportDate||'',snapshotId:message.snapshotId||''
     });
     else if(message.kind==='HOME_TIMING')result=buildSelectedDateTimingProjection({
-      reportDate:message.reportDate||'',snapshotId:message.snapshotId||''
+      reportDate:message.reportDate||'',snapshotId:message.snapshotId||'',
+      businessType:message.businessType||''
     });
     else if(message.kind==='HOME_RETURNS')result=buildHomeReturnVerification({
       reportDate:message.reportDate||'',snapshotId:message.snapshotId||''
