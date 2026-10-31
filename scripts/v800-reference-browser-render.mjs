@@ -84,73 +84,83 @@ try{
         overflow:document.documentElement.scrollWidth>document.documentElement.clientWidth+2};
     },item.key);
     if(item.key==='home'){
-      assert.equal(data.topChildren,4,'overview must preserve progress/status/quick/log');
-      assert.ok(data.topRow?.width>600,'overview operational row must exist');
-      assert.equal(data.totalCard,1,'grand total retained');
-      assert.equal(data.homeCards,7,'all 7 business cards available');
-      const intro=await page.evaluate(()=>{
-        const all=[...document.querySelectorAll('[data-v804-tab]')];
-        const panes=[...document.querySelectorAll('[data-v804-pane]')];
-        return {tabs:all.length,panes:panes.length,
-          active:all.filter(x=>x.getAttribute('aria-selected')==='true').map(x=>x.dataset.v804Tab),
-          visible:panes.filter(x=>!x.hidden).map(x=>x.dataset.v804Pane)};
-      });
-      assert.equal(intro.tabs,4,'four real home workspaces');
-      assert.equal(intro.panes,4);
-      assert.deepEqual(intro.active,['overview']);
-      assert.deepEqual(intro.visible,['overview']);
-      await page.screenshot({path:path.join(out,item.file),fullPage:true});
-      await page.locator('[data-v804-tab="signing"]').click();
-      const timing=await page.evaluate(()=>{
+      assert.equal(data.totalCard,1,'real top total remains visible');
+      assert.equal(data.homeCards,7,'all seven business tiles are visible');
+      assert.equal(data.topChildren,4,'progress/status/quick/log four-column reference row');
+      assert.ok(data.topRow&&data.bottomRow&&data.timingPanel&&data.unfinished,'all reference rows exist');
+      assert.equal(data.overflow,false,'no horizontal page overflow');
+      const reference=await page.evaluate(()=>{
+        const box=selector=>{const n=document.querySelector(selector);
+          if(!n)return null;const r=n.getBoundingClientRect();
+          return {x:r.x,y:r.y,width:r.width,height:r.height,right:r.right,bottom:r.bottom};};
+        const show=e=>{if(!e)return false;const r=e.getBoundingClientRect();
+          return r.width>0&&r.height>0};
         const panel=document.querySelector('#v801TimingDashboard');
-        const cards=[...panel.querySelectorAll('.v625-timing-card')];
         const metrics=[...panel.querySelectorAll('.v801-timing-summary-tile')];
-        const within=element=>{const r=element.getBoundingClientRect();return r.width>0&&r.height>0}
-        const nav=document.querySelector('.v804-workspace-nav');
-        return {active:document.querySelector('.v804-workspace-tab.active')?.dataset.v804Tab,
-          cards:cards.filter(within).length,metrics:metrics.filter(within).length,
-          panelWidth:panel.getBoundingClientRect().width,
-          noInternalScroll:panel.scrollHeight<=panel.clientHeight+4
-            ||getComputedStyle(panel).overflowY==='visible',
-          pageOverflow:document.documentElement.scrollWidth>document.documentElement.clientWidth+2,
-          scrollTarget:document.location.hash,
-          navWidth:nav.getBoundingClientRect().width};
+        const cards=[...panel.querySelectorAll('.v625-timing-card')];
+        const operationCards=[...document.querySelectorAll('.v792-home-main-row>.v625-panel')].map(e=>{
+          const r=e.getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,bottom:r.bottom}});
+        const managementLinks=[...document.querySelectorAll('#v792HomeManagement .v792-management-tile a')]
+          .map(e=>e.getAttribute('href'));
+        return {business:box('.v625-home-business-panel'),
+          operations:box('.v792-home-main-row'),
+          operationCards,
+          validation:box('.v625-home-validation'),
+          validationCards:[...document.querySelectorAll('.v625-home-validation>.v625-panel')].map(e=>{
+            const r=e.getBoundingClientRect();return{x:r.x,y:r.y,width:r.width}}),
+          bottom:box('.v805-reference-bottom'),
+          signing:box('#v801TimingDashboard'),
+          pod:box('.v626-open-pod-panel'),
+          management:box('#v792HomeManagement'),
+          trend:box('.v792-optional-trend'),
+          visibleCards:cards.filter(show).length,
+          visibleMetrics:metrics.filter(show).length,
+          totalMetrics:metrics.length,
+          details:box('.v805-timing-advanced'),
+          readOnlyButton:show(document.getElementById('v803RetryOpenSource')),
+          trackingButton:show(document.getElementById('v626RefreshOpenPod')),
+          managementLinks,
+          fakeTabs:document.querySelectorAll('.v804-workspace-nav').length,
+          appOverflow:document.documentElement.scrollWidth>document.documentElement.clientWidth+2
+        };
       });
-      assert.equal(timing.active,'signing');
-      assert.equal(timing.cards,4,'all four business signing cards visible on signing tab');
-      assert.equal(timing.metrics,8,'all eight data-backed signing indicators visible');
-      assert.ok(timing.panelWidth>750,'signing panel should fill workspace width');
-      assert.equal(timing.noInternalScroll,true,'no hidden scroll-box for signing');
-      assert.equal(timing.pageOverflow,false,'signing view must not clip horizontally');
-      assert.equal(timing.scrollTarget,'#signing','tab updates actual URL view');
-      await page.screenshot({path:path.join(out,'home-signing-1536x1024.png'),fullPage:true});
-      await page.locator('[data-v804-tab="open-pod"]').click();
-      const pod=await page.evaluate(()=>({
-        active:document.querySelector('.v804-workspace-tab.active')?.dataset.v804Tab,
-        podVisible:document.querySelector('.v626-open-pod-panel')?.getBoundingClientRect().height>0,
-        readOnlyButton:document.getElementById('v803RetryOpenSource')?.getBoundingClientRect().height>0,
-        trackingButton:document.getElementById('v626RefreshOpenPod')?.getBoundingClientRect().height>0,
-        signingHidden:document.querySelector('[data-v804-pane="signing"]')?.hidden
-      }));
-      assert.equal(pod.active,'open-pod');
-      assert.equal(pod.podVisible,true);
-      assert.equal(pod.readOnlyButton,true);
-      assert.equal(pod.trackingButton,true);
-      assert.equal(pod.signingHidden,true,'inactive signing panel is not stacked below POD');
-      await page.screenshot({path:path.join(out,'home-open-pod-1536x1024.png'),fullPage:true});
-      await page.locator('[data-v804-tab="management"]').click();
-      const management=await page.evaluate(()=>({
-        active:document.querySelector('.v804-workspace-tab.active')?.dataset.v804Tab,
-        links:[...document.querySelectorAll('[data-v804-pane="management"] .v792-management-tile a')]
-          .map(x=>x.getAttribute('href'))
-      }));
-      assert.equal(management.active,'management');
-      assert.equal(management.links.length,3,'three distinct safe operations');
+      assert.equal(reference.fakeTabs,0,'V804 tabbed workbench must not be mounted');
+      assert.equal(reference.appOverflow,false);
+      assert.ok(reference.operationCards.length===4);
+      assert.ok(reference.operationCards.every(x=>Math.abs(x.y-reference.operationCards[0].y)<4),
+        'four reference work panels must be on SAME horizontal row');
+      assert.ok(reference.validation?.y>=reference.operations.bottom-4,
+        'classification and recognition follow 4 operational panels');
+      assert.equal(reference.validationCards.length,2);
+      assert.ok(reference.validationCards.every(x=>
+        Math.abs(x.y-reference.validationCards[0].y)<4),'two quality panels side by side');
+      assert.ok(reference.bottom?.y>=reference.validation.bottom-4);
+      assert.ok(Math.abs(reference.signing.y-reference.pod.y)<4,
+        'signing and unfinished POD must be SIDE-BY-SIDE');
+      assert.ok(reference.signing.right<reference.pod.x+6,
+        'POD should be to the RIGHT of signing, not stacked below');
+      assert.ok(reference.signing.width>reference.pod.width*1.8,
+        'signing section should be wider than POD section');
+      assert.equal(reference.visibleCards,4,'four actual saved-source signing business cards visible');
+      assert.equal(reference.visibleMetrics,4,'four priority signing indicators visible');
+      assert.equal(reference.totalMetrics,8,'all original eight verified metrics retained');
+      assert.equal(reference.readOnlyButton,true,'POD source verification available');
+      assert.equal(reference.trackingButton,true,'separate guarded trajectory update available');
+      assert.ok(reference.management.y>=reference.bottom.bottom-4,
+        'data management follows signing and POD in original reference');
+      assert.ok(reference.trend.y>=reference.management.bottom-4,
+        'saved-source trend stays optional at bottom');
+      assert.equal(reference.managementLinks.length,3);
       for(const tab of ['clear','backup','storage'])
-        assert.ok(management.links.some(x=>x.includes('tab='+tab)),tab+' link');
-      await page.locator('[data-v804-tab="overview"]').click();
-      assert.equal(await page.locator('[data-v804-pane]:not([hidden])').count(),1,
-        'only selected home pane is visible');
+        assert.ok(reference.managementLinks.some(x=>x.includes('tab='+tab)),
+          'safe data-management deep link '+tab);
+      await page.locator('.v805-timing-advanced summary').click();
+      const expanded=await page.locator('.v805-timing-advanced').evaluate(e=>e.open);
+      assert.equal(expanded,true,'remaining four KPIs are expandable without changing source');
+      assert.equal(await page.locator('.v801-timing-summary-tile:visible').count(),8,
+        'all 8 verified timing KPI tiles must be accessible when expanded');
+      await page.locator('.v805-timing-advanced summary').click();
+      await page.screenshot({path:path.join(out,item.file),fullPage:true});
     } else {
       assert.ok(data.analysis?.width>600,'WHPP signing and returns analysis must render');
       assert.ok(data.tables?.width>600,'WHPP anomaly and return tables must render');
