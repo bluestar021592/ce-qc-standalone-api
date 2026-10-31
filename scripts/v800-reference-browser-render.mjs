@@ -71,6 +71,12 @@ try{
         totalCard:visible('.v625-home-business-panel .v632-total-card.v792-total-summary'),
         bottomRow:box('.v792-home-bottom-row'),
         management:box('#v792HomeManagement'),optionalTrend:box('.v792-optional-trend'),
+        unfinished:box('.v626-open-pod-panel'),
+        timingPanel:box('.v625-signing-panel'),
+        timingCards:visible('.v625-signing-panel .v625-timing-card'),
+        timingMetrics:visible('.v801-timing-summary .v801-timing-summary-tile'),
+        timingPanelOverflow:(()=>{const e=document.querySelector('.v625-signing-panel');
+          return Boolean(e&&e.scrollHeight>e.clientHeight+4&&getComputedStyle(e).overflowY!=='visible')})(),
         analysis:box('#v792WhppAnalysis'),tables:box('#v792WhppTables'),
         kpis:visible('#v625Business .v625-kpi-row>article:not([hidden])'),
         kpiIcons:visible('#v625Business .v625-kpi-row>article .v792-kpi-symbol'),
@@ -81,11 +87,15 @@ try{
       assert.equal(data.topChildren,4,'home top row must contain progress/status/quick/log');
       assert.ok(data.topRow?.width>600,'home top row must be rendered');
       assert.ok(data.bottomRow?.width>600,'home signing/open POD row must exist');
-      assert.ok(data.management?.top>data.bottomRow.bottom-3
+      assert.ok(data.unfinished?.top>=data.bottomRow.bottom-3,
+        'unfinished POD must be a separate full-width panel after signing');
+      assert.ok(data.management?.top>=data.unfinished.bottom-3
         &&data.management?.top<data.optionalTrend?.top,
-        'home data management must follow signing and precede optional trend');
-      assert.ok(data.management.top<1500,
-        'home management entry should remain near the top of the page even with the retained grand total');
+        'home data management must follow unfinished POD and precede optional trend');
+      assert.ok(data.timingPanel?.width>850,'signing board must use full available content width');
+      assert.equal(data.timingCards,4,'all four signing business cards must be visible');
+      assert.equal(data.timingMetrics,8,'all eight evidence-only signing summary metrics must be visible');
+      assert.equal(data.timingPanelOverflow,false,'signing board may not become an internal scroll-box');
       assert.equal(data.totalCard,1,'grand-total card must not be discarded to mimic 7-card screenshot');
       assert.equal(data.homeCards,7,'home must render 7 business tiles');
     } else {
