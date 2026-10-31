@@ -1,0 +1,26 @@
+name: V804 home workspace navigation
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'public/v625-shell.html'
+      - 'public/v625-shell.js'
+      - 'public/v804-home-workspace.css'
+      - 'scripts/v804-workspace-layout-smoke.mjs'
+      - '.github/workflows/v804-home-workspace.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  v804-workspace:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: |
+          node --check public/v625-shell.js
+          node --check scripts/v804-workspace-layout-smoke.mjs
+          node scripts/v804-workspace-layout-smoke.mjs
