@@ -36,6 +36,7 @@ assert.doesNotMatch(css,/#kpiOtherCard,\s*\n[^{]*#kpiUnprocessedCard\{display:no
 assert.doesNotMatch(css,/\.v632-total-card\{display:none\}/);
 assert.match(server,/app\.get\('\/api\/v800\/whpp\/trend'/);
 assert.match(server,/loadWhppCanonicalTruth\(d,'',db\)/);
+assert.match(server,/returnReason:String\(row\.returnReason \|\| row\.退回原因 \|\| row\.退件原因 \|\| ''\)\.trim\(\)/);
 assert.match(file,/export function loadWhppCanonicalTruth/);
 assert.match(server,/pod:hasEvidence\?Number\(truth\.evidence\?\.podRows\|\|0\):null/);
 assert.match(server,/fullyVerified:covered===total/);
