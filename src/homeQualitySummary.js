@@ -889,7 +889,7 @@ export function buildHomeReturnVerification({reportDate='',snapshotId=''}={}){
 // V802: selected-day saved timing projection, with no 30-day historical scan,
 // CE API call, cross-date fallback, or 0-day fabrication. Runs in a read-only
 // SQLite worker. The exact saved snapshot is mandatory.
-export function buildSelectedDateTimingProjection({reportDate='',snapshotId=''}={}){
+export function buildSelectedDateTimingProjection({reportDate='',snapshotId='',businessType=''}={}){
   const date=String(reportDate||'').trim(),snapshot=String(snapshotId||'').trim();
   if(!/^\d{4}-\d{2}-\d{2}$/.test(date)||!snapshot)
     return{ok:false,selectionMatched:false,code:'HOME_TIMING_EXACT_SCOPE_REQUIRED',
@@ -898,12 +898,19 @@ export function buildSelectedDateTimingProjection({reportDate='',snapshotId=''}=
   if(!batch||String(batch.reportDate)!==date||String(batch.snapshotId)!==snapshot)
     return{ok:true,selectionMatched:false,code:'HOME_TIMING_SNAPSHOT_NOT_FOUND',
       reportDate:date,snapshotId:snapshot,timing:{}};
-  const timing=Object.fromEntries(TIMING_TYPES.map(type=>[
-    type,safeTimingForBatch(batch,type)
+  // V807: exact-day timing is computed independently for each business so one
+  // slow business cannot delay WHPP/CN/VN/TBKH cards. Unscoped callers retain
+  // the original four-business response; no tracking writes or remote calls.
+  const type=String(businessType||'').trim().toUpperCase();
+  if(type&&!TIMING_TYPES.includes(type))return{ok:false,selectionMatched:false,
+    code:'HOME_TIMING_BUSINESS_TYPE_INVALID',reportDate:date,snapshotId:snapshot,timing:{}};
+  const selectedTypes=type?[type]:TIMING_TYPES;
+  const timing=Object.fromEntries(selectedTypes.map(item=>[
+    item,safeTimingForBatch(batch,item)
   ]));
-  const degraded=TIMING_TYPES.filter(type=>timing[type]?.degraded===true);
+  const degraded=selectedTypes.filter(item=>timing[item]?.degraded===true);
   return{ok:true,selectionMatched:true,reportDate:date,snapshotId:snapshot,
-    timing,degraded,source:'EXACT_SELECTED_DAY_SAVED_TIMING',
+    timing,degraded,businessType:type,source:'EXACT_SELECTED_DAY_SAVED_TIMING',
     readOnly:true,remoteQueries:0};
 }
 
