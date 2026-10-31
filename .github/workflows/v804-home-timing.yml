@@ -1,0 +1,25 @@
+name: V804 home timing refresh race
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'public/v625-shell.js'
+      - 'public/v625-shell.html'
+      - 'scripts/v804-home-timing-refresh-race-smoke.mjs'
+      - '.github/workflows/v804-home-timing.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  timing-lifecycle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: node --check public/v625-shell.js
+      - run: node scripts/v804-home-timing-refresh-race-smoke.mjs
+      - run: node scripts/v803-home-proof-and-layout-smoke.mjs
+      - run: node scripts/v802-home-selected-timing-smoke.mjs
