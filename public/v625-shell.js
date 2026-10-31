@@ -1784,6 +1784,7 @@ async function v765LoadBusinessDetailLane({reportDate,snapshotId,m,options,gener
 
     const wr=workspaceR.status==='fulfilled'?workspaceR.value:{rows:[]};
     v628BusinessWorkspaceRows=(wr.rows||[]).filter(businessTypeMatches);
+    if(targetBusiness==='WHPP')v800RenderWhppDetails(v628BusinessWorkspaceRows,Number(wr.allRowCount||0)>v628BusinessWorkspaceRows.length);
     applyV748QualitySignals(wr);
     const workspaceAllCount=Number(wr.allRowCount||v628BusinessWorkspaceRows.length);
     const workspaceTruncated=workspaceAllCount>v628BusinessWorkspaceRows.length;
@@ -1897,6 +1898,7 @@ async function loadBusiness(options={}){
     setText('kpiTotal',fmt(m.total||a.total));setText('kpiDelivery',fmt(counts.delivery??m.delivery));setText('kpiPod',fmt(counts.pod??m.pod));
     setText('kpiPodRate',Number(m.total)>0?pct(Number(m.pod||0)*100/Number(m.total)):'—');
     setText('kpiPending',fmt(counts.pending??m.pending));setText('kpiOpen',fmt(m.unresolved));setText('kpiOc',fmt(m.oc));
+    if(targetBusiness==='WHPP')v800SetWhppMetrics(m);
     setText('v631AccountingMeta',state.snapshotStatus==='COMPLETED'
       ?('当前日报 '+fmt(m.total)+' 票 · 快速看板已就绪')
       :'正式结果仍在处理中');
@@ -1937,6 +1939,7 @@ async function loadBusiness(options={}){
       if(evidenceState==='RUNNING'||timingRepairRunning)scheduleHistoricalEvidenceRefresh('business');
       else if(evidenceState==='COMPLETED'||summary?.timingEvidenceRepair)stopHistoricalEvidenceRefresh();
       const timing=summary?.reportDate===reportDate?summary?.timing?.[business]:null;
+      if(targetBusiness==='WHPP'&&timing)v800SetWhppMetrics(m,timing);
       if(timing?.overall?.avgDays!=null&&Number.isFinite(Number(timing.overall.avgDays))){
         setText('kpiAvgDays',Number(timing.overall.avgDays).toFixed(2).replace(/\.00$/,''));
       }else if(m.pod>0&&['TBKH','WHPP','SHOPEECN','SHOPEEVN'].includes(business)){
@@ -1949,6 +1952,8 @@ async function loadBusiness(options={}){
           const sameDate=full?.reportDate===reportDate;
           const currentDate=String(byId('v625FromDate')?.value||'').slice(0,10)===reportDate;
           const days=sameDate?full?.timing?.[targetBusiness]?.overall?.avgDays:null;
+          if(targetBusiness==='WHPP'&&sameDate&&stillSelected()&&String(v628BusinessReportDate||'')===reportDate)
+            v800SetWhppMetrics(m,full?.timing?.[targetBusiness]||null);
           if(stillSelected()&&currentDate&&
              String(v628BusinessReportDate||'').slice(0,10)===String(reportDate).slice(0,10)&&
              days!=null&&Number.isFinite(Number(days)))
@@ -3519,7 +3524,144 @@ function bind(){
   byId('v626ClearAllData')?.addEventListener('click',clearAllBusinessData);
   qa('#v626DataTabs [data-data-tab]').forEach(btn=>btn.addEventListener('click',()=>switchDataTab(btn.dataset.dataTab)));
 }
+
+// V800: integrate the existing V792 reference layout without replacing the
+// V788 business truth, administrative audit, pagination or purge safeguards.
+function v800ApplyReferenceLayout(){
+  if(page==='home'){
+    const home=byId('v625Home');
+    const overview=home?.querySelector('.v625-home-business-panel');
+    const live=home?.querySelector('.v626-live-grid');
+    const three=home?.querySelector('.v625-home-three');
+    const process=home?.querySelector('.v626-processing-panel');
+    const open=home?.querySelector('.v626-open-pod-panel');
+    const status=home?.querySelector('.v625-home-status-panel');
+    const quick=home?.querySelector('.v625-home-quick-panel');
+    const logs=home?.querySelector('.v626-log-panel');
+    const timing=home?.querySelector('.v625-signing-panel');
+    const trend=home?.querySelector('.v625-home-trend-panel');
+    const management=byId('v792HomeManagement');
+    if(!home||!overview||!live||!three||!process||!open||!status
+      ||!quick||!logs||!timing||!trend||!management)return;
+    document.body.classList.add('v792-reference');
+    const total=overview.querySelector('.v632-total-card');
+    const heading=overview.querySelector('.v625-section-head');
+    if(total&&heading){total.classList.add('v792-total-summary');heading.after(total)}
+    const top=document.createElement('div');top.className='v792-home-main-row';
+    overview.after(top);top.append(process,status,quick,logs);
+    const bottom=document.createElement('div');bottom.className='v792-home-bottom-row';
+    timing.before(bottom);bottom.append(timing,open);
+    const optional=document.createElement('details');
+    optional.className='v792-optional-trend v625-panel';
+    const caption=document.createElement('summary');caption.textContent='近7天总票数趋势（已保存来源）';
+    optional.append(caption,trend);bottom.after(optional);
+    bottom.after(management);
+    const integrity=byId('v637HomeIntegrityBar');if(integrity)management.append(integrity);
+    // Move all operational panels first; empty old wrappers can then go away.
+    if(!live.children.length)live.remove();
+    if(!three.children.length)three.remove();
+    if(byId('v625BoardJump'))byId('v625BoardJump').value='/?auth=v625';
+  }else if(business==='WHPP'){
+    document.body.classList.add('v792-reference');
+    const board=byId('v625Business'),analysis=byId('v792WhppAnalysis'),tables=byId('v792WhppTables');
+    if(!board||!analysis||!tables)return;
+    analysis.hidden=false;tables.hidden=false;
+    const icons=['icon-package','icon-route','icon-check','icon-clipboard','icon-alert','icon-clock','icon-archive','icon-refresh'];
+    [...board.querySelectorAll('.v625-kpi-row>article')].slice(0,8).forEach((tile,i)=>{
+      if(tile.querySelector('.v792-kpi-symbol'))return;
+      const symbol=document.createElement('i');symbol.className='v792-kpi-symbol';
+      symbol.setAttribute('aria-hidden','true');
+      symbol.innerHTML='<svg><use href="/assets/ui-icons-v625.svg#'+icons[i]+'"/></svg>';
+      tile.prepend(symbol);
+    });
+    const original=[...board.querySelectorAll('section.v625-panel')].find(node=>
+      node.querySelector('.v625-section-head h2')?.textContent?.trim()==='最新异常明细');
+    if(original)original.classList.add('v792-whpp-original-exceptions');
+    // Preserve all completeness and trajectory controls in an expandable area.
+    const quality=board.querySelector('.v748-quality-signals');
+    const accounting=board.querySelector('.v631-accounting-bar');
+    const integrity=board.querySelector('.v637-integrity-bar');
+    if(quality||accounting||integrity){
+      const technical=document.createElement('details');
+      technical.className='v792-whpp-technical v625-panel';
+      const heading=document.createElement('summary');heading.textContent='来源完整性及轨迹质量核查';
+      technical.append(heading);
+      for(const node of [quality,accounting,integrity])if(node)technical.append(node);
+      tables.after(technical);
+    }
+    const range=byId('v625BusinessTrendRange');if(range)range.innerHTML='<option value="7">近7天</option>';
+    const title=byId('v625BusinessTrend')?.closest('.v625-panel')?.querySelector('.v625-section-head h2');
+    if(title)title.textContent='业务趋势（近7天）';
+    if(byId('v625BoardJump'))byId('v625BoardJump').value='/whpp?auth=v625';
+  }
+}
+function v800SetWhppMetrics(m={},timing=null){
+  if(business!=='WHPP')return;
+  const days=bucket=>{
+    if(!bucket||Number(bucket.podCount||0)<=0||!Number.isFinite(Number(bucket.avgDays)))return null;
+    return Number(bucket.avgDays);
+  };
+  const show=value=>value==null?'—':value.toFixed(2).replace(/\.00$/,'')+'天';
+  const compact=Number(m.pod||0)>0&&Number(m.avgDays)>0&&Number.isFinite(Number(m.avgDays))?Number(m.avgDays):null;
+  const overall=timing?days(timing.overall):compact;
+  setText('v792WhppOverall',show(overall));
+  for(const [id,key] of [['v792WhppPP','pp'],['v792WhppPV','pv'],['v792WhppFirst','attempt1'],['v792WhppSecond','attempt2'],['v792WhppThird','attempt3']])
+    setText(id,show(days(timing?.[key])));
+  setText('v792WhppReturnCount',Number.isFinite(Number(m.returned))?fmt(m.returned):'—');
+  setText('v792WhppReturnRate',Number(m.total)>0?pct(Number(m.returned||0)*100/Number(m.total)):'—');
+  setText('v792WhppTimingSource',overall==null
+    ?'没有可核验的实际POD日期，暂不推算平均签收天数；PP/PV与派次仅以真实证据展示。'
+    :'签收时效来自真实可核验日期；缺少PP/PV或派次证据时对应指标显示“—”。');
+}
+function v800RenderWhppDetails(rows=[],truncated=false){
+  if(business!=='WHPP')return;
+  const isReturned=row=>row.isReturned===true
+    ||String(row.currentState||'').toUpperCase()==='RETURN_COMPLETED';
+  const fill=(id,items,values)=>{
+    const root=byId(id);if(!root)return;
+    root.replaceChildren();
+    if(!items.length){
+      const tr=document.createElement('tr'),td=document.createElement('td');td.colSpan=4;
+      td.textContent=truncated?'当前为部分运单预览，请通过指标卡查看完整明细':'已读取范围暂无该类运单';
+      tr.append(td);root.append(tr);return;
+    }
+    for(const row of items.slice(0,8)){
+      const tr=document.createElement('tr');
+      for(const value of values(row)){const td=document.createElement('td');td.textContent=String(value??'—');tr.append(td)}
+      const td=document.createElement('td'),code=String(row.shipmentCode||'').trim();
+      if(code&&/^\d{4}-\d{2}-\d{2}$/.test(v628BusinessReportDate||'')){
+        const a=document.createElement('a');a.textContent='查看该票';
+        a.href='/tracking?auth=v625&code='+encodeURIComponent(code)
+          +'&businessType=WHPP&reportDate='+encodeURIComponent(v628BusinessReportDate);
+        td.append(a);
+      }else td.textContent='缺少单号/日期';
+      tr.append(td);root.append(tr);
+    }
+  };
+  fill('v792WhppAnomalyRows',rows.filter(row=>row.isActionable===true),row=>
+    [row.shipmentCode,row.category||row.queryStatus||'待核验',row.currentState||'—']);
+  const returns=rows.filter(isReturned);
+  fill('v792WhppReturnedRows',returns,row=>
+    [row.shipmentCode,row.currentState||'已退回',row.latestTime||row.lastEventTime||'—']);
+  const reasons=returns.map(row=>String(row.returnReason||row.退回原因||'').trim()).filter(Boolean);
+  const root=byId('v792WhppReturnReasons');if(!root)return;
+  root.replaceChildren();
+  if(!reasons.length){
+    root.textContent='已读取运单中尚无可信退回原因；不生成虚假TOP5比例。';
+    return;
+  }
+  const counted=new Map();for(const reason of reasons)counted.set(reason,(counted.get(reason)||0)+1);
+  const label=document.createElement('p');
+  label.textContent='有真实原因记录 '+fmt(reasons.length)+' 票'+(truncated?'（当前为部分预览）':'');
+  root.append(label);
+  for(const [reason,count] of [...counted].sort((a,b)=>b[1]-a[1]).slice(0,5)){
+    const line=document.createElement('p');
+    line.textContent=reason+'：'+fmt(count)+'票（有效原因中 '+pct(count/reasons.length*100)+'）';
+    root.append(line);
+  }
+}
 async function init(){
+  v800ApplyReferenceLayout();
   bind();void loadSession();
   if(page==='home'){
     await loadHome();
