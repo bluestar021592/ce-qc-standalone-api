@@ -50,6 +50,9 @@ async function scenario({recover=true,priorRunning=false}={}){
   };
   vm.createContext(ctx);
   vm.runInContext(shell.slice(begin,end),ctx,{timeout:1000});
+  // Override the full production poll function with a deterministic completed job.
+  // This isolates the POST-timeout recovery path from network polling tests.
+  ctx.pollTrackingJob=async()=>{polls++;return{...job,status:'COMPLETED',failed:0,refreshed:17}};
   await ctx.refreshOpenPodNow();
   return{posts,reads,polls,notices};
 }
