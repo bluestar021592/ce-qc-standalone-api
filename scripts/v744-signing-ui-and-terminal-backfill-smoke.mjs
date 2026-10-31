@@ -9,7 +9,12 @@ const diag=fs.readFileSync('src/v745WhppTimingSourceDiagnostics.js','utf8');
 const launcher=fs.readFileSync('tools/CE_QC_Managed_Launcher.ps1','utf8');
 
 
-assert.doesNotMatch(html,/1派平均签收|2派平均签收|3派平均签收/,'home signing overview must not render 1/2/3 attempt cards');
+const homeOnly=html.slice(html.indexOf('<section id="v625Home"'),html.indexOf('<!-- BUSINESS -->'));
+assert.ok(homeOnly.length>0,'home page region must exist');
+assert.doesNotMatch(homeOnly,/1派平均签收|2派平均签收|3派平均签收/,
+  'home signing overview must not render 1/2/3 attempt cards');
+assert.match(html,/id="v792WhppAnalysis"[\\s\\S]*1派平均签收[\\s\\S]*2派平均签收[\\s\\S]*3派平均签收/,
+  'WHPP-specific verified attempt days are allowed outside the home overview');
 assert.doesNotMatch(html,/v625-attempt-grid/,'obsolete attempt-signing grid must be removed from the home shell');
 assert.doesNotMatch(shell,/prefix\+'A1'|prefix\+'A2'|prefix\+'A3'/,'home renderer must not update removed 1/2/3 attempt cards');
 
