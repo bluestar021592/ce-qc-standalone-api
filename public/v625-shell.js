@@ -1006,10 +1006,17 @@ async function loadOpenPod(){
   }
   try{
     const latest=v626LatestImport||await latestImportContext();
-    const params=new URLSearchParams({scope:'open'});
-    if(latest?.snapshotId)params.set('snapshotId',latest.snapshotId);
-    if(latest?.reportDate)params.set('reportDate',latest.reportDate);
-    const r=await json('/api/tracking-workspace?'+params.toString(),12000);
+    const selected=String(selectedReportDate()||'').slice(0,10);
+    const proof=v788HomeSourceProof?.reportDate===selected?v788HomeSourceProof:null;
+    const reportDate=selected||String(latest?.reportDate||'').slice(0,10);
+    const snapshotId=String(proof?.snapshotId||(
+      String(latest?.reportDate||'').slice(0,10)===reportDate?latest?.snapshotId:'')||'');
+    if(!reportDate||!snapshotId)throw new Error('当前日报日期与来源快照未匹配，不能使用其他日期的未完成POD清单');
+    const params=new URLSearchParams({scope:'open',reportDate,snapshotId});
+    note('v626RefreshPodMessage','正在只读核对 '+reportDate+' 的未完成POD来源；不会调用TMS…');
+    const r=await json('/api/tracking-workspace?'+params.toString(),30000);
+    if(String(r.reportDate||'').slice(0,10)!==reportDate)
+      throw new Error('未完成POD返回的日报日期与选择日期不一致');
     if(!r.openSourceCoverage?.complete){
       const gap=r.openSourceCoverage||{};
       throw new Error('来源核验不完整：应有'+fmt(gap.expected||0)+'票，已读'+fmt(gap.observed||0)
@@ -3736,7 +3743,7 @@ function v803MergeFullWithExactTiming(full={},reportDate='',snapshotId=''){
       const old=base[key],incoming=verified[key];
       const oldSamples=Number(old?.podCount||0),newSamples=Number(incoming?.podCount||0);
       if(newSamples>0&&Number.isFinite(Number(incoming?.avgDays))&&Number(incoming?.avgDays)>0
-        &&(newSamples>oldSamples||(newSamples===oldSamples&&!Number.isFinite(Number(old?.avgDays)))))
+        &&(newSamples>oldSamples||(newSamples===oldSamples&&(old?.avgDays==null||Number(old.avgDays)<=0||!Number.isFinite(Number(old.avgDays))))))
         result[key]={...old,...incoming};
     }
     if(Number(result.overall?.podCount||0)>Number(base.overall?.podCount||0)){
