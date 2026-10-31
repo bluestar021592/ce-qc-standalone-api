@@ -19,6 +19,16 @@ assert.match(coordinator,/cacheKey\(kind,args\).*String\(args\.businessType\|\|'
 assert.match(summary,/buildSelectedDateTimingProjection\(\{reportDate='',snapshotId='',businessType=''\}/);
 assert.match(summary,/selectedTypes=type\?\[type\]:TIMING_TYPES/);
 assert.match(summary,/businessType:type,source:'EXACT_SELECTED_DAY_SAVED_TIMING'/);
+// 4,002 POD members should be fetched in a bounded set of read-only 800-member
+// chunks (at most 803 SQLite bound parameters), not repeatedly rescanned in
+// ~14 older 300-member batches. Keep normalized per-waybill source matching.
+assert.match(summary,/const TIMING_READ_BATCH=800;/);
+assert.match(summary,/WHERE u\.reportDate>=\? AND UPPER\(TRIM\(u\.businessType\)\)=\?/);
+assert.match(summary,/for\(let i=0;i<values\.length;i\+=TIMING_READ_BATCH\)/);
+assert.match(summary,/const chunk=values\.slice\(i,i\+TIMING_READ_BATCH\)/);
+assert.match(summary,/const chunk=missing\.slice\(i,i\+TIMING_READ_BATCH\)/);
+assert.match(summary,/u\.snapshotId=\? AND u\.reportDate=\?/);
+assert.ok(Math.ceil(4002/800)<Math.ceil(4002/300),'historical observation read should need fewer SQL scans');
 assert.match(summary,/if\(type&&!TIMING_TYPES\.includes\(type\)\)/);
 assert.match(shell,/const timingTypes=\['WHPP','SHOPEEVN','SHOPEECN','TBKH'\]/);
 assert.match(shell,/businessType='\+encodeURIComponent\(type\)/);
