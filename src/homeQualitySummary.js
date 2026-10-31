@@ -255,9 +255,17 @@ function dailyReportSigningEvidenceForBills(snapshotId='',reportDate='',business
       observations=db.prepare(`SELECT UPPER(TRIM(u.shipmentCode)) shipmentCode,u.regionCode,u.rowJson,u.reportDate,u.createdAt,'UNIFIED' sourceTable
         FROM unified_import_rows u
         JOIN unified_import_batches b ON b.batchId=u.batchId AND b.status='VALID'
-        WHERE u.reportDate>=? AND UPPER(TRIM(u.businessType))=? AND UPPER(TRIM(u.shipmentCode)) IN (${marks})
+        -- V809: without a snapshot constraint SQLite can scan every historical
+        -- unified_import_rows member for each 800-bill group. Bind later VALID
+        -- snapshots first to enable idx_unified_rows_snapshot; retain the
+        -- original upper/trim bill and business predicates and newest-observation
+        -- order so legacy mixed-case rows are not silently omitted.
+        WHERE u.snapshotId IN (
+          SELECT later.snapshotId FROM unified_import_batches later
+          WHERE later.status='VALID' AND later.reportDate>=?
+        ) AND u.reportDate>=? AND UPPER(TRIM(u.businessType))=? AND UPPER(TRIM(u.shipmentCode)) IN (${marks})
         ORDER BY UPPER(TRIM(u.shipmentCode)),u.reportDate DESC,u.createdAt DESC,u.rowid DESC`)
-        .all(reportDate,type,...chunk);
+        .all(reportDate,reportDate,type,...chunk);
     }catch{}
     if(type==='WHPP'){
       try{
