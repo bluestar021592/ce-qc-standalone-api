@@ -209,3 +209,25 @@ body.v792-reference[data-page="home"] .v632-total-card.v792-total-summary>.v632-
     min-height:174px!important;
   }
 }
+
+
+/* V808: preserve all five OPEN POD columns on the narrow workspace pane.
+   Fixed layout prevents status or date from pushing the action column off
+   screen, while title tooltips retain the full value on hover. */
+body.v792-reference[data-page="home"] .v626-open-pod-panel .v626-open-table .v625-table{
+  width:100%!important;min-width:0!important;table-layout:fixed!important;font-size:10px
+}
+body.v792-reference[data-page="home"] .v626-open-pod-panel .v626-open-table th,
+body.v792-reference[data-page="home"] .v626-open-pod-panel .v626-open-table td{
+  max-width:0!important;padding:7px 4px!important;white-space:nowrap!important;
+  overflow:hidden!important;text-overflow:ellipsis!important
+}
+body.v792-reference[data-page="home"] .v626-open-pod-panel .v626-open-table th:nth-child(1){width:31%}
+body.v792-reference[data-page="home"] .v626-open-pod-panel .v626-open-table th:nth-child(2){width:12%}
+body.v792-reference[data-page="home"] .v626-open-pod-panel .v626-open-table th:nth-child(3){width:22%}
+body.v792-reference[data-page="home"] .v626-open-pod-panel .v626-open-table th:nth-child(4){width:18%}
+body.v792-reference[data-page="home"] .v626-open-pod-panel .v626-open-table th:nth-child(5){width:17%}
+body.v792-reference[data-page="home"] .v626-open-pod-panel .v626-open-table td a{
+  display:inline-block;max-width:100%;overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap;text-decoration:underline
+}
